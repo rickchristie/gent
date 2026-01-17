@@ -1,6 +1,10 @@
 package termination
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tmc/langchaingo/llms"
+)
 
 func TestText_Name(t *testing.T) {
 	term := NewText()
@@ -87,5 +91,59 @@ Line 3`
 	str := result.(string)
 	if str != content {
 		t.Errorf("multiline content not preserved: '%s'", str)
+	}
+}
+
+func TestText_ShouldTerminate_WithContent(t *testing.T) {
+	term := NewText()
+
+	result := term.ShouldTerminate("The final answer.")
+	if result == nil {
+		t.Fatal("expected non-nil result for non-empty content")
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 content part, got %d", len(result))
+	}
+
+	tc, ok := result[0].(llms.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result[0])
+	}
+
+	if tc.Text != "The final answer." {
+		t.Errorf("unexpected text: %s", tc.Text)
+	}
+}
+
+func TestText_ShouldTerminate_EmptyContent(t *testing.T) {
+	term := NewText()
+
+	result := term.ShouldTerminate("")
+	if result != nil {
+		t.Error("expected nil result for empty content")
+	}
+}
+
+func TestText_ShouldTerminate_WhitespaceOnly(t *testing.T) {
+	term := NewText()
+
+	result := term.ShouldTerminate("   ")
+	if result != nil {
+		t.Error("expected nil result for whitespace-only content")
+	}
+}
+
+func TestText_ShouldTerminate_TrimsWhitespace(t *testing.T) {
+	term := NewText()
+
+	result := term.ShouldTerminate("  trimmed content  ")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	tc := result[0].(llms.TextContent)
+	if tc.Text != "trimmed content" {
+		t.Errorf("expected trimmed content, got: '%s'", tc.Text)
 	}
 }

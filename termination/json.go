@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/tmc/langchaingo/llms"
 )
 
 // JSON parses JSON content into type T.
@@ -92,6 +93,29 @@ func (t *JSON[T]) ParseSection(content string) (any, error) {
 	}
 
 	return result, nil
+}
+
+// ShouldTerminate checks if the content indicates termination.
+// For JSON termination, valid JSON that parses into T triggers termination.
+// The result is returned as a TextContent containing the re-serialized JSON.
+func (t *JSON[T]) ShouldTerminate(content string) []gent.ContentPart {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+
+	var result T
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil
+	}
+
+	// Re-serialize to ensure consistent formatting
+	formatted, err := json.Marshal(result)
+	if err != nil {
+		return nil
+	}
+
+	return []gent.ContentPart{llms.TextContent{Text: string(formatted)}}
 }
 
 // generateJSONSchema creates a JSON Schema from a Go type using reflection.

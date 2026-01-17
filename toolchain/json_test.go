@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rickchristie/gent"
+	"github.com/tmc/langchaingo/llms"
 )
 
 func TestJSON_Name(t *testing.T) {
@@ -23,22 +24,37 @@ func TestJSON_Name(t *testing.T) {
 
 func TestJSON_RegisterTool(t *testing.T) {
 	tc := NewJSON()
-	tool := gent.NewToolFunc("test", "A test tool", nil, nil)
+	tool := gent.NewToolFunc[map[string]any, string](
+		"test",
+		"A test tool",
+		nil,
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "result", nil
+		},
+		textFormatter,
+	)
 
 	tc.RegisterTool(tool)
 
-	if len(tc.Tools()) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(tc.Tools()))
+	// Verify registration by executing the tool
+	content := `{"tool": "test", "args": {}}`
+	result, err := tc.Execute(context.Background(), content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if tc.Tools()[0].Name() != "test" {
-		t.Errorf("expected tool name 'test', got '%s'", tc.Tools()[0].Name())
+	if len(result.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(result.Calls))
+	}
+
+	if result.Calls[0].Name != "test" {
+		t.Errorf("expected tool name 'test', got '%s'", result.Calls[0].Name)
 	}
 }
 
 func TestJSON_Prompt(t *testing.T) {
 	tc := NewJSON()
-	tool := gent.NewToolFunc(
+	tool := gent.NewToolFunc[map[string]any, string](
 		"search",
 		"Search the web",
 		map[string]any{
@@ -46,6 +62,9 @@ func TestJSON_Prompt(t *testing.T) {
 			"properties": map[string]any{
 				"query": map[string]any{"type": "string"},
 			},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "", nil
 		},
 		nil,
 	)
@@ -73,7 +92,7 @@ func TestJSON_ParseSection_SingleCall(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	calls := result.([]gent.ToolCall)
+	calls := result.([]*gent.ToolCall)
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(calls))
 	}
@@ -100,7 +119,7 @@ func TestJSON_ParseSection_MultipleCall(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	calls := result.([]gent.ToolCall)
+	calls := result.([]*gent.ToolCall)
 	if len(calls) != 2 {
 		t.Fatalf("expected 2 calls, got %d", len(calls))
 	}
@@ -122,7 +141,7 @@ func TestJSON_ParseSection_EmptyContent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	calls := result.([]gent.ToolCall)
+	calls := result.([]*gent.ToolCall)
 	if len(calls) != 0 {
 		t.Errorf("expected 0 calls for empty content, got %d", len(calls))
 	}
@@ -160,7 +179,7 @@ func TestJSON_ParseSection_MissingToolNameInArray(t *testing.T) {
 
 func TestJSON_Execute_Success(t *testing.T) {
 	tc := NewJSON()
-	tool := gent.NewToolFunc(
+	tool := gent.NewToolFunc[map[string]any, string](
 		"search",
 		"Search the web",
 		nil,
@@ -168,6 +187,7 @@ func TestJSON_Execute_Success(t *testing.T) {
 			query := args["query"].(string)
 			return fmt.Sprintf("Results for: %s", query), nil
 		},
+		textFormatter,
 	)
 	tc.RegisterTool(tool)
 
@@ -181,8 +201,12 @@ func TestJSON_Execute_Success(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", len(result.Calls))
 	}
 
-	if result.Results[0] != "Results for: weather" {
-		t.Errorf("unexpected result: %s", result.Results[0])
+	if result.Results[0] == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if getTextContent(result.Results[0].Result) != "Results for: weather" {
+		t.Errorf("unexpected result: %v", result.Results[0].Result)
 	}
 
 	if result.Errors[0] != nil {
@@ -206,13 +230,14 @@ func TestJSON_Execute_UnknownTool(t *testing.T) {
 
 func TestJSON_Execute_ToolError(t *testing.T) {
 	tc := NewJSON()
-	tool := gent.NewToolFunc(
+	tool := gent.NewToolFunc[map[string]any, string](
 		"failing",
 		"A failing tool",
 		nil,
 		func(ctx context.Context, args map[string]any) (string, error) {
 			return "", errors.New("tool execution failed")
 		},
+		nil,
 	)
 	tc.RegisterTool(tool)
 
@@ -234,22 +259,24 @@ func TestJSON_Execute_ToolError(t *testing.T) {
 func TestJSON_Execute_MultipleTools(t *testing.T) {
 	tc := NewJSON()
 
-	searchTool := gent.NewToolFunc(
+	searchTool := gent.NewToolFunc[map[string]any, string](
 		"search",
 		"Search",
 		nil,
 		func(ctx context.Context, args map[string]any) (string, error) {
 			return "search result", nil
 		},
+		textFormatter,
 	)
 
-	calendarTool := gent.NewToolFunc(
+	calendarTool := gent.NewToolFunc[map[string]any, string](
 		"calendar",
 		"Calendar",
 		nil,
 		func(ctx context.Context, args map[string]any) (string, error) {
 			return "calendar result", nil
 		},
+		textFormatter,
 	)
 
 	tc.RegisterTool(searchTool)
@@ -269,12 +296,12 @@ func TestJSON_Execute_MultipleTools(t *testing.T) {
 		t.Fatalf("expected 2 results, got %d", len(result.Results))
 	}
 
-	if result.Results[0] != "search result" {
-		t.Errorf("unexpected first result: %s", result.Results[0])
+	if getTextContent(result.Results[0].Result) != "search result" {
+		t.Errorf("unexpected first result: %v", result.Results[0].Result)
 	}
 
-	if result.Results[1] != "calendar result" {
-		t.Errorf("unexpected second result: %s", result.Results[1])
+	if getTextContent(result.Results[1].Result) != "calendar result" {
+		t.Errorf("unexpected second result: %v", result.Results[1].Result)
 	}
 }
 
@@ -285,4 +312,20 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// textFormatter converts a string to []gent.ContentPart.
+func textFormatter(s string) []gent.ContentPart {
+	return []gent.ContentPart{llms.TextContent{Text: s}}
+}
+
+// getTextContent extracts the text from a []gent.ContentPart (assumes single TextContent).
+func getTextContent(parts []gent.ContentPart) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	if tc, ok := parts[0].(llms.TextContent); ok {
+		return tc.Text
+	}
+	return ""
 }

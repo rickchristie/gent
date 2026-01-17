@@ -28,6 +28,33 @@ type AgentLoop[Data LoopData] interface {
 type LoopData interface {
 	// GetOriginalInput returns the original input provided by the user that started the agent loop.
 	GetOriginalInput() []ContentPart
+
+	// GetIterationHistory returns all [IterationInfo] recorded, including those that may be
+	// compacted away from GetIterations.
+	GetIterationHistory() [][]*IterationInfo
+
+	// AddIterationHistory adds a new [IterationInfo] to the full history only.
+	AddIterationHistory(info *IterationInfo)
+
+	// GetIterations returns all [IterationInfo] recorded, that will be used in next iteration.
+	// When compaction happens, some earlier iterations may be removed from this slice, but they
+	// are preserved in GetIterationHistory.
+	GetIterations() [][]*IterationInfo
+
+	// SetIterations sets the iterations to be used in next iteration.
+	// [AgentLoop] implementations are free to call [GetIterations] and modify it how they want,
+	// then call this method to set the modified iterations to be used in the next iteration.
+	SetIterations([][]*IterationInfo)
+}
+
+type IterationInfo struct {
+	Messages [][]MessageContent
+}
+
+// MessageContent is wrapper around [llms.MessageContent] used in AgentLoop.
+type MessageContent struct {
+	Role  llms.ChatMessageType
+	Parts []ContentPart
 }
 
 // ContentPart is just a wrapper interface around [llms.ContentPart], just in case we want to add
@@ -52,5 +79,6 @@ type AgentLoopResult struct {
 	NextPrompt string
 
 	// Result is only set when Action is [LATerminate].
-	Result string
+	// This is a slice of ContentPart to support multimodal outputs.
+	Result []ContentPart
 }

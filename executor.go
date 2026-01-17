@@ -68,7 +68,8 @@ func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 // ExecutionResult contains the final result of an execution run.
 type ExecutionResult struct {
 	// Result is the final output from the AgentLoop (set when terminated successfully).
-	Result string
+	// This is a slice of ContentPart to support multimodal outputs.
+	Result []ContentPart
 
 	// Trace contains detailed execution trace data.
 	Trace *ExecutionTrace

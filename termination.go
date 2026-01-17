@@ -4,4 +4,9 @@ package gent
 // The parsed result represents the final output of the agent.
 type Termination interface {
 	TextOutputSection
+
+	// ShouldTerminate checks if the given content indicates termination.
+	// If it returns a non-empty slice, the agent should terminate with that content as the result.
+	// If it returns nil or empty slice, the agent should continue.
+	ShouldTerminate(content string) []ContentPart
 }

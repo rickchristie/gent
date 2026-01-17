@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/tmc/langchaingo/llms"
 )
 
 func TestJSON_Name(t *testing.T) {
@@ -352,4 +353,55 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestJSON_ShouldTerminate_ValidJSON(t *testing.T) {
+	term := NewJSON[SimpleStruct]()
+
+	result := term.ShouldTerminate(`{"name": "test", "value": 42}`)
+	if result == nil {
+		t.Fatal("expected non-nil result for valid JSON")
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 content part, got %d", len(result))
+	}
+
+	tc, ok := result[0].(llms.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result[0])
+	}
+
+	// Should contain the re-serialized JSON
+	if !contains(tc.Text, "test") || !contains(tc.Text, "42") {
+		t.Errorf("unexpected text: %s", tc.Text)
+	}
+}
+
+func TestJSON_ShouldTerminate_EmptyContent(t *testing.T) {
+	term := NewJSON[string]()
+
+	result := term.ShouldTerminate("")
+	if result != nil {
+		t.Error("expected nil result for empty content")
+	}
+}
+
+func TestJSON_ShouldTerminate_InvalidJSON(t *testing.T) {
+	term := NewJSON[SimpleStruct]()
+
+	result := term.ShouldTerminate(`{invalid json}`)
+	if result != nil {
+		t.Error("expected nil result for invalid JSON")
+	}
+}
+
+func TestJSON_ShouldTerminate_TypeMismatch(t *testing.T) {
+	term := NewJSON[SimpleStruct]()
+
+	// Valid JSON but wrong type
+	result := term.ShouldTerminate(`"just a string"`)
+	if result != nil {
+		t.Error("expected nil result for type mismatch")
+	}
 }

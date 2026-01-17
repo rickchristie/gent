@@ -1,6 +1,11 @@
 package termination
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/rickchristie/gent"
+	"github.com/tmc/langchaingo/llms"
+)
 
 // Text simply returns the raw text content as the final answer.
 type Text struct {
@@ -41,4 +46,14 @@ func (t *Text) Prompt() string {
 // ParseSection returns the trimmed content as a string.
 func (t *Text) ParseSection(content string) (any, error) {
 	return strings.TrimSpace(content), nil
+}
+
+// ShouldTerminate checks if the content indicates termination.
+// For Text termination, any non-empty content triggers termination.
+func (t *Text) ShouldTerminate(content string) []gent.ContentPart {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return nil
+	}
+	return []gent.ContentPart{llms.TextContent{Text: trimmed}}
 }
