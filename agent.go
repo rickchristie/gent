@@ -7,11 +7,13 @@ import (
 )
 
 // AgentLoop is responsible for:
-//  1. Constructing the prompt to be sent to the LLM model.
+//  1. Constructing the entire prompt to be sent to the LLM model.
 //  2. Calling the LLM model with the constructed prompt.
-//  3. Decide whether to continue the loop or terminate with results.
-//  4. Freely use [ToolChain], [Limiter], [Compaction], and your own custom logic to determine
-//     to continue the loop or to terminate with results.
+//  3. Parsing LLM output and processes it (e.g., tool calls, termination, saving data, etc).
+//  4. Decide whether to continue the loop or terminate with results.
+//
+// Implementations may reuse [ToolChain], [Termination], [TextOutputFormat] or create their own
+// custom logic to handle all of the above.
 //
 // The executor will call [AgentLoop.Iterate] repeatedly until it returns [LATerminate] result.
 type AgentLoop[Data LoopData] interface {

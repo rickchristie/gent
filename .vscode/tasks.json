@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Test: gowt All Packages",
+      "type": "shell",
+      "command": "set -a && source .env && set +a && go clean -testcache && gowt ./...",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": ["$go"]
+    }
+  ]
+}
