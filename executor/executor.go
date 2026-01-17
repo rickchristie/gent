@@ -1,4 +1,4 @@
-package gent
+package executor
 
 import (
 	"context"
@@ -6,21 +6,24 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/hooks"
 )
 
 // ErrMaxIterationsExceeded is returned when the executor exceeds the configured maximum iterations.
 var ErrMaxIterationsExceeded = errors.New("gent: maximum iterations exceeded")
 
-// ExecutorConfig holds configuration options for the Executor.
-type ExecutorConfig struct {
+// Config holds configuration options for the Executor.
+type Config struct {
 	// MaxIterations is the maximum number of loop iterations before termination with error.
 	// Set to 0 for unlimited iterations.
 	MaxIterations int
 }
 
-// DefaultExecutorConfig returns a config with sensible defaults.
-func DefaultExecutorConfig() ExecutorConfig {
-	return ExecutorConfig{
+// DefaultConfig returns a config with sensible defaults.
+func DefaultConfig() Config {
+	return Config{
 		MaxIterations: 100,
 	}
 }
@@ -29,31 +32,31 @@ func DefaultExecutorConfig() ExecutorConfig {
 // hooks, and trace collection.
 //
 // The Executor is responsible for:
-//   - Running the AgentLoop repeatedly until it returns [LATerminate]
+//   - Running the AgentLoop repeatedly until it returns [gent.LATerminate]
 //   - Invoking lifecycle hooks at appropriate points
 //   - Collecting execution trace data for debugging and observability
 //   - Enforcing configuration limits (e.g., max iterations)
-type Executor[Data LoopData] struct {
-	loop   AgentLoop[Data]
-	config ExecutorConfig
-	hooks  *HookRegistry[Data]
+type Executor[Data gent.LoopData] struct {
+	loop   gent.AgentLoop[Data]
+	config Config
+	hooks  *hooks.Registry[Data]
 
 	mu    sync.RWMutex
-	trace *ExecutionTrace
+	trace *gent.ExecutionTrace
 }
 
-// NewExecutor creates a new Executor with the given AgentLoop and configuration.
-func NewExecutor[Data LoopData](loop AgentLoop[Data], config ExecutorConfig) *Executor[Data] {
+// New creates a new Executor with the given AgentLoop and configuration.
+func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor[Data] {
 	return &Executor[Data]{
 		loop:   loop,
 		config: config,
-		hooks:  NewHookRegistry[Data](),
+		hooks:  hooks.NewRegistry[Data](),
 	}
 }
 
 // WithHooks sets the executor hook registry. Returns the executor for chaining.
-func (e *Executor[Data]) WithHooks(hooks *HookRegistry[Data]) *Executor[Data] {
-	e.hooks = hooks
+func (e *Executor[Data]) WithHooks(h *hooks.Registry[Data]) *Executor[Data] {
+	e.hooks = h
 	return e
 }
 
@@ -63,19 +66,6 @@ func (e *Executor[Data]) WithHooks(hooks *HookRegistry[Data]) *Executor[Data] {
 func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 	e.hooks.Register(hook)
 	return e
-}
-
-// ExecutionResult contains the final result of an execution run.
-type ExecutionResult struct {
-	// Result is the final output from the AgentLoop (set when terminated successfully).
-	// This is a slice of ContentPart to support multimodal outputs.
-	Result []ContentPart
-
-	// Trace contains detailed execution trace data.
-	Trace *ExecutionTrace
-
-	// Error is any error that occurred (nil if successful).
-	Error error
 }
 
 // Execute runs the AgentLoop until termination.
@@ -92,15 +82,15 @@ type ExecutionResult struct {
 // Execute is safe to call concurrently (each call is independent), but the same
 // Executor instance should not be used for concurrent executions if you want
 // accurate trace data.
-func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResult {
+func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.ExecutionResult {
 	e.mu.Lock()
-	e.trace = &ExecutionTrace{
+	e.trace = &gent.ExecutionTrace{
 		StartTime:  time.Now(),
-		Iterations: make([]IterationTrace, 0),
+		Iterations: make([]gent.IterationTrace, 0),
 	}
 	e.mu.Unlock()
 
-	result := &ExecutionResult{
+	result := &gent.ExecutionResult{
 		Trace: e.trace,
 	}
 
@@ -111,17 +101,17 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 		e.trace.EndTime = time.Now()
 		e.trace.TotalDuration = e.trace.EndTime.Sub(e.trace.StartTime)
 		result.Trace = e.trace
-		iterations := make([]IterationTrace, len(e.trace.Iterations))
+		iterations := make([]gent.IterationTrace, len(e.trace.Iterations))
 		copy(iterations, e.trace.Iterations)
 		e.mu.Unlock()
 
 		if beforeExecutionCalled && e.hooks != nil {
 			// AfterExecution errors are logged but don't change the result
-			event := AfterExecutionEvent{Result: result, Iterations: iterations}
+			event := gent.AfterExecutionEvent{Result: result, Iterations: iterations}
 			if hookErr := e.hooks.FireAfterExecution(ctx, event); hookErr != nil {
 				// The AfterExecution error doesn't override existing errors
 				// but should be available for logging
-				e.hooks.FireError(ctx, ErrorEvent{
+				e.hooks.FireError(ctx, gent.ErrorEvent{
 					Iteration: e.trace.FinalIteration,
 					Err:       fmt.Errorf("AfterExecution hook: %w", hookErr),
 				})
@@ -131,10 +121,10 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 
 	// BeforeExecution hook
 	if e.hooks != nil {
-		event := BeforeExecutionEvent[Data]{Data: data}
+		event := gent.BeforeExecutionEvent[Data]{Data: data}
 		if err := e.hooks.FireBeforeExecution(ctx, event); err != nil {
 			result.Error = fmt.Errorf("BeforeExecution hook: %w", err)
-			e.trace.TerminationReason = TerminationHookAbort
+			e.trace.TerminationReason = gent.TerminationHookAbort
 			return result
 		}
 	}
@@ -148,21 +138,25 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 		// Check context cancellation
 		if ctx.Err() != nil {
 			result.Error = ctx.Err()
-			e.trace.TerminationReason = TerminationContextCanceled
+			e.trace.TerminationReason = gent.TerminationContextCanceled
 			e.trace.FinalIteration = iteration - 1
 			return result
 		}
 
 		// Check max iterations
 		if e.config.MaxIterations > 0 && iteration > e.config.MaxIterations {
-			result.Error = fmt.Errorf("%w: exceeded %d iterations", ErrMaxIterationsExceeded, e.config.MaxIterations)
-			e.trace.TerminationReason = TerminationMaxIterations
+			result.Error = fmt.Errorf(
+				"%w: exceeded %d iterations",
+				ErrMaxIterationsExceeded,
+				e.config.MaxIterations,
+			)
+			e.trace.TerminationReason = gent.TerminationMaxIterations
 			e.trace.FinalIteration = iteration - 1
 			return result
 		}
 
 		// Create iteration trace
-		iterTrace := IterationTrace{
+		iterTrace := gent.IterationTrace{
 			Iteration: iteration,
 			StartTime: time.Now(),
 			Metadata:  make(map[string]any),
@@ -170,15 +164,19 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 
 		// BeforeIteration hook
 		if e.hooks != nil {
-			event := BeforeIterationEvent[Data]{Iteration: iteration, Data: data}
+			event := gent.BeforeIterationEvent[Data]{Iteration: iteration, Data: data}
 			if err := e.hooks.FireBeforeIteration(ctx, event); err != nil {
 				iterTrace.EndTime = time.Now()
 				iterTrace.Duration = iterTrace.EndTime.Sub(iterTrace.StartTime)
 				iterTrace.Error = err
 				e.appendIterationTrace(iterTrace)
 
-				result.Error = fmt.Errorf("BeforeIteration hook (iteration %d): %w", iteration, err)
-				e.trace.TerminationReason = TerminationHookAbort
+				result.Error = fmt.Errorf(
+					"BeforeIteration hook (iteration %d): %w",
+					iteration,
+					err,
+				)
+				e.trace.TerminationReason = gent.TerminationHookAbort
 				e.trace.FinalIteration = iteration
 				return result
 			}
@@ -192,13 +190,21 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 
 		// AfterIteration hook
 		if e.hooks != nil {
-			event := AfterIterationEvent[Data]{Iteration: iteration, Result: loopResult, Data: data}
+			event := gent.AfterIterationEvent[Data]{
+				Iteration: iteration,
+				Result:    loopResult,
+				Data:      data,
+			}
 			if err := e.hooks.FireAfterIteration(ctx, event); err != nil {
 				iterTrace.Error = err
 				e.appendIterationTrace(iterTrace)
 
-				result.Error = fmt.Errorf("AfterIteration hook (iteration %d): %w", iteration, err)
-				e.trace.TerminationReason = TerminationHookAbort
+				result.Error = fmt.Errorf(
+					"AfterIteration hook (iteration %d): %w",
+					iteration,
+					err,
+				)
+				e.trace.TerminationReason = gent.TerminationHookAbort
 				e.trace.FinalIteration = iteration
 				return result
 			}
@@ -207,9 +213,9 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 		e.appendIterationTrace(iterTrace)
 
 		// Check for termination
-		if loopResult.Action == LATerminate {
+		if loopResult.Action == gent.LATerminate {
 			result.Result = loopResult.Result
-			e.trace.TerminationReason = TerminationSuccess
+			e.trace.TerminationReason = gent.TerminationSuccess
 			e.trace.FinalIteration = iteration
 			return result
 		}
@@ -220,7 +226,7 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *ExecutionResul
 }
 
 // appendIterationTrace safely appends an iteration trace.
-func (e *Executor[Data]) appendIterationTrace(trace IterationTrace) {
+func (e *Executor[Data]) appendIterationTrace(trace gent.IterationTrace) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.trace.Iterations = append(e.trace.Iterations, trace)
@@ -228,7 +234,7 @@ func (e *Executor[Data]) appendIterationTrace(trace IterationTrace) {
 
 // GetTrace returns a copy of the current execution trace.
 // This can be called during execution to get partial trace data.
-func (e *Executor[Data]) GetTrace() *ExecutionTrace {
+func (e *Executor[Data]) GetTrace() *gent.ExecutionTrace {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -238,7 +244,7 @@ func (e *Executor[Data]) GetTrace() *ExecutionTrace {
 
 	// Return a shallow copy
 	traceCopy := *e.trace
-	traceCopy.Iterations = make([]IterationTrace, len(e.trace.Iterations))
+	traceCopy.Iterations = make([]gent.IterationTrace, len(e.trace.Iterations))
 	copy(traceCopy.Iterations, e.trace.Iterations)
 	return &traceCopy
 }

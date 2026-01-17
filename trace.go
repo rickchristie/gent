@@ -235,3 +235,20 @@ func (tc *TraceCollector) ToMetadata() map[string]any {
 		"total_tokens": tc.TotalTokens(),
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Execution Result
+// -----------------------------------------------------------------------------
+
+// ExecutionResult contains the final result of an execution run.
+type ExecutionResult struct {
+	// Result is the final output from the AgentLoop (set when terminated successfully).
+	// This is a slice of ContentPart to support multimodal outputs.
+	Result []ContentPart
+
+	// Trace contains detailed execution trace data.
+	Trace *ExecutionTrace
+
+	// Error is any error that occurred (nil if successful).
+	Error error
+}

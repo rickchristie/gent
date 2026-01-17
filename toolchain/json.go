@@ -57,7 +57,7 @@ func (c *JSON) Prompt() string {
 	sb.WriteString("\n\nAvailable tools:\n")
 
 	for _, tool := range c.tools {
-		meta, err := gent.GetToolMeta(tool)
+		meta, err := GetToolMeta(tool)
 		if err != nil {
 			continue
 		}
@@ -119,7 +119,7 @@ func (c *JSON) ParseSection(content string) (any, error) {
 
 // RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
 func (c *JSON) RegisterTool(tool any) gent.ToolChain {
-	meta, err := gent.GetToolMeta(tool)
+	meta, err := GetToolMeta(tool)
 	if err != nil {
 		// Invalid tool, silently ignore (could log in the future)
 		return c
@@ -150,7 +150,7 @@ func (c *JSON) Execute(ctx context.Context, content string) (*gent.ToolChainResu
 			continue
 		}
 
-		output, err := gent.CallToolReflect(ctx, tool, call.Args)
+		output, err := CallToolReflect(ctx, tool, call.Args)
 		if err != nil {
 			result.Errors[i] = err
 		} else {

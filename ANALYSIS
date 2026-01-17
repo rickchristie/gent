@@ -1,0 +1,36 @@
+Analysis                                                                                                                                       
+                                                                                                                                                 
+  The separation is fundamentally sound. You have a clear distinction between:                                                                   
+  - LoopData = Active state for execution (mutable, drives the loop)                                                                             
+  - ExecutionTrace/IterationTrace = Observability data (collected after the fact)                                                                
+                                                                                                                                                 
+  Recommendations                                                                                                                                
+                                                                                                                                                 
+  1. Naming: IterationInfo vs IterationTrace is confusing                                                                                        
+                                                                                                                                                 
+  Both describe "something about an iteration" but serve different purposes. Consider renaming IterationInfo to something like IterationContext  
+  or IterationMessages to make it clearer that it holds the message content for prompt construction, not trace/metrics data.                     
+                                                                                                                                                 
+  2. Minor data duplication in IterationTrace.Result                                                                                             
+                                                                                                                                                 
+  IterationTrace.Result stores the full *AgentLoopResult, which includes NextPrompt. But that prompt content will also flow into                 
+  IterationInfo.Messages for the next iteration. This means the same data exists in two places:                                                  
+  - Once in trace (for observability)                                                                                                            
+  - Once in LoopData (for execution)                                                                                                             
+                                                                                                                                                 
+  This is probably fine since the purposes are different, but worth being aware of.                                                              
+                                                                                                                                                 
+  3. Consider whether TraceCollector should be integrated with LoopData                                                                          
+                                                                                                                                                 
+  Currently TraceCollector is standalone. If tracing is common, you might add an optional GetTraceCollector() method to LoopData so hooks and the
+   executor can automatically capture trace data without the AgentLoop implementation manually managing it.                                      
+                                                                                                                                                 
+  4. The [][]*IterationInfo type is hard to read                                                                                                 
+                                                                                                                                                 
+  The double slice [][]*IterationInfo suggests grouping iterations, but the purpose isn't immediately clear from the type. A named type like type
+   IterationGroup []*IterationInfo might help readability.                                                                                       
+                                                                                                                                                 
+  Summary                                                                                                                                        
+                                                                                                                                                 
+  No major overlap or redundancy - the design makes sense. The main improvement opportunity is naming clarity between IterationInfo (content for 
+  prompts) and IterationTrace (metrics/observability). 

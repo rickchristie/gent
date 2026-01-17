@@ -1,4 +1,4 @@
-package gent
+package models
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func TestHelloGrok(t *testing.T) {
 		t.Fatalf("failed to create xAI LLM: %v", err)
 	}
 
-	model := NewLCGModelWrapper(llm)
+	model := NewLCGWrapper(llm)
 
 	response, err := model.GenerateContent(ctx, []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeHuman, "Hello Grok! Nice to meet you!"),
