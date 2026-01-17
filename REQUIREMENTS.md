@@ -5,8 +5,10 @@ The interface needs to provide:
    * Long loops might be summarized, but these stays.
 * A way for user to define tool functions.
    * There are Tool, and Toolchain abstraction.
-   * Both Tool and Toolchain has a .Describe() function that lets the user control how the Tools are described in the prompt. ToolChain describe template can loop through Tool.Describe().
-   * If the Tool failed to parse the input, Tool may provide a response text. This response prompt will be added as the result, and the loop continues.
+   * Both Tool and Toolchain has a .Describe() function that lets the user control how the Tools are
+     described in the prompt. ToolChain describe template can loop through Tool.Describe().
+   * If the Tool failed to parse the input, Tool may provide a response text. This response prompt 
+     will be added as the result, and the loop continues.
    * ToolChain.Evaluate(..) is always called, and it has responsibility to:
      * Parse the LLM output - determine whether there is a tool call or not.
      * Determines which tool were called.
@@ -15,8 +17,10 @@ The interface needs to provide:
    * Tool has the responsiblity for:
      * Describe itself (to be used in the ToolChain).
      * Execute the tool logic.
-   * This means we can create default implementation of ToolChain that uses JSON, uses text, YAML, or other formats.
-   * ToolChain might also be implemented to trigger ANOTHER AgentLoop specifically to call tools and provide outputs to the AgentLoop.
+   * This means we can create default implementation of ToolChain that uses JSON, uses text, YAML, 
+     or other formats.
+   * ToolChain might also be implemented to trigger ANOTHER AgentLoop specifically to call tools and
+     provide outputs to the AgentLoop.
 * A way to define the termination strategy.
    * TerminationStrategy has Describe() function that lets user control how to describe to the agent how to terminate in the prompt.
    * These can be:
@@ -36,14 +40,17 @@ The interface needs to provide:
 * A way to determine compaction/summarization strategy and when to trigger.
    * The {LoopText} is going to be compacted.
    * A strategy can be used, an interface that can be implemented.
-   * CMIIW, but the compaction will 99.9% be done by AI, so we can just determine another Agent loop to do the compaction.
-   * The CompactionStrategy.ShouldCompact(...) is called with parameters that the strategy can inspect, so users can implement, based on tokens, cost, length, iterations, etc.
+   * CMIIW, but the compaction will 99.9% be done by AI, so we can just determine another Agent loop
+     to do the compaction.
+   * The CompactionStrategy.ShouldCompact(...) is called with parameters that the strategy can
+     inspect, so users can implement, based on tokens, cost, length, iterations, etc.
 * A way to define the AgentLoop:
   * AgentLoop's responsibilities are:
     * Construct the prompt to be sent to the LLM.
     * Call the LLM.
     * Use ToolChain, TerminationStrategy, CompactionStrategy to execute the loop.
-  * This library is not opinionated on how AgentLoop should be defined. AgentLoop might call other AgentLoop in the middle of execution, etc.
+  * This library is not opinionated on how AgentLoop should be defined. AgentLoop might call other
+    AgentLoop in the middle of execution, etc.
   * This allows users to experiment with different patterns.
   * There is default implementation of ReActAgentLoop that implements ReAct pattern:
     * First call LLM for thought the action.
@@ -51,15 +58,25 @@ The interface needs to provide:
     * Process with ToolChain in case there's an action.
     * Call LLM again with observation.
     * Either return final output, or continue the loop with the next prompt.
-* There's also hooks for before start, after termination, before/after each generation, before/after each tool call, before/after each llm model call, so users can implement logging, metrics, and additional processes etc.
-  * Example additional processing: After termination, user may want to run another AgentLoop do a final polish of the output, to run fact checking AgentLoop, check against company terms & conditions, etc.
-  * What I'm very interested in, is implementing another AgentLoop that inspects entire loop generation and writes important thing to remember in next iteration.
+* There's also hooks for before start, after termination, before/after each generation, before/after
+  each tool call, before/after each llm model call, so users can implement logging, metrics, and 
+  additional processes etc.
+  * Example additional processing: After termination, user may want to run another AgentLoop do a 
+    final polish of the output, to run fact checking AgentLoop, check against company terms & 
+    conditions, etc.
+  * What I'm very interested in, is implementing another AgentLoop that inspects entire loop 
+    generation and writes important thing to remember in next iteration.
 * A way to define configuration:
    * Maximum loop before it's terminated with errors - can be set to zero.
-* A way of saving all the loop debug/trace information, so each generation can be inspected and troubleshooted, also saving the cost of each Node in detail, logging all llm calls on each node execution.
+* A way of saving all the loop debug/trace information, so each generation can be inspected and 
+  troubleshooted, also saving the cost of each Node in detail, logging all llm calls on each node
+  execution.
 
 The executor executes everything.
 
-The idea is this tool allows people to fully experiment everything, I don't want to impose on a specific way for termination, tool call, etc. The entire agent loop prompt should just be a blank canvas that the user can customize and experiment to the fullest extent. We just want a skeleton that makes it easy for people to try things out.
+The idea is this tool allows people to fully experiment everything, I don't want to impose on a 
+specific way for termination, tool call, etc. The entire agent loop prompt should just be a blank 
+canvas that the user can customize and experiment to the fullest extent. We just want a skeleton 
+that makes it easy for people to try things out.
 
 Is my thinking correct? Would there be issues or patterns that wouldn't be supported with this?
