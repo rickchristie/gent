@@ -4,14 +4,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
 func TestHelloWorld(t *testing.T) {
+	t.Skip()
+
 	ctx := context.Background()
 
 	// Pass your API key programmatically
 	apiKey := "your-api-key-here"
+
+	llms.Model
 
 	llm, err := openai.New(openai.WithToken(apiKey))
 	if err != nil {

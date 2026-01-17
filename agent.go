@@ -12,9 +12,9 @@ import (
 //  3. Freely use [ToolChain], [Termination], [Compaction], and your own custom logic to determine
 //     to continue the loop or to terminate with results.
 //
-// The executor will call [AgentLoop.Execute] repeatedly until it returns [LATerminate] result.
+// The executor will call [AgentLoop.Iterate] repeatedly until it returns [LATerminate] result.
 type AgentLoop[Data LoopData] interface {
-	Execute(ctx context.Context, data LoopData) *AgentLoopResult
+	Iterate(ctx context.Context, data LoopData) *AgentLoopResult
 }
 
 // LoopData is the data that is being passed through each AgentLoop execution. Each AgentLoop
@@ -24,7 +24,7 @@ type AgentLoop[Data LoopData] interface {
 // provided hooks, for logging, metrics, etc.
 type LoopData interface {
 	// GetOriginalInput returns the original input provided by the user that started the agent loop.
-	GetOriginalInput(input []ContentPart)
+	GetOriginalInput() []ContentPart
 }
 
 // ContentPart is just a wrapper interface around [llms.ContentPart], just in case we want to add
