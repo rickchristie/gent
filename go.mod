@@ -2,7 +2,10 @@ module github.com/rickchristie/gent
 
 go 1.24.10
 
-require github.com/tmc/langchaingo v0.1.14
+require (
+	github.com/tmc/langchaingo v0.1.14
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/dlclark/regexp2 v1.10.0 // indirect

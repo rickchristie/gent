@@ -48,7 +48,67 @@ The interface needs to provide:
   * What if ToolChain cannot describe itself, because the formatting is defined by the AgentLoop?
   * We eliminate TerminationStrategy, as this is part of AgentLoop's responsibility to define how
     to terminate.
-  * We create OutputFormat interface that accepts Tools, and provide 
+  * We create OutputFormat interface that accepts Tools slice, and the Termination criteria changed
+    to be part of Executor configuration, where the user can define when to terminate based on
+    limitation rules on total/per-model-key input and output tokens spent.
+
+  * Formatter can be an optional tool that users can utilize in their AgentLoop prompt. It makes
+    giving instructions on outputs and parsing outputs easier.
+  * I'm thinking.. really what we want to do is to provide instruction for the agent to format their output into sections. What     
+  if each section have their own instructions and parser? The Formatter is responsible for the overall structure and how to       
+  separate the sections, but ToolChain abstraction can still work, because ToolChain implements FormattedSection (interface:      
+  Prompt() and ParseSection()) - what do you think? This way we don't have to force everything into one big json output
+
+
+
+  1. Section ordering - Does the LLM need instructions like "always thinking first, then tool_call or answer"? Who owns           
+  that—Formatter or AgentLoop?                                                                                                    
+  2. Optional vs required sections - Some outputs have tool_call, others have answer. How do you express "one of these, not both"?
+  3. Multiple instances - Can there be multiple tool_calls in one response? The []string in Parse handles this, but does Prompt   
+  need to explain it?                                                                                                             
+  4. Parsing flow - I assume AgentLoop does:                                                                                      
+  rawSections, _ := formatter.Parse(output)                                                                                       
+  for name, contents := range rawSections {                                                                                       
+      section := sectionsByName[name]                                                                                             
+      for _, content := range contents {                                                                                          
+          parsed, _ := section.ParseSection(content)                                                                              
+          // handle parsed result                                                                                                 
+      }                                                                                                                           
+  }     
+
+AgentLoop owns the overall prompt - so this means AgentLoop and the Formatter is tightly coupled (ReActJsonLoop with pure json  
+  formatter cannot be swapped out with ReActSectionLoop), however the Formatter itself can be reused across multiple AgentLoop,   
+  so we don't have to recode everything when we need to create new AgentLoop, we can focus on the fun part, experimenting with    
+  the loop.                                                                                                                       
+                                                                                                                                  
+  What do you think?                                                                                                              
+  1. AgentLoop owns this, Formatter must be able to separate sections in whatever order that comes. It then passes the separated  
+  string to each FormattedSection (maybe each has Load() method?)                                                                 
+  2. For optional ones, the FormattedSection raw string would just not exist at all in the output map.                            
+  3. That is up to the ToolChain to explain, whatever goes into each section is up to each FormattedSection implementer. The      
+  ToolChain implementation might support multiple tool calls, parallel tool calls, Formatter just passes the raw response to the  
+  ToolChain.                                                                                                                      
+  4. Yes, sort of like that.
+
+
+Yep, I think we can name it to TextOutputFormat interface instead of Formatter, and also have TextOutputSection interface instead of FormattedSection.                                                                                                    
+                                                                                                                                  
+  Can you implement it for me?                                                                                                    
+  - Create two implementations of the formatter:                                                                                  
+  - One utilizing markdown style header, e.g. "# Thinking", "# Action", "# Observation"                                           
+  - One utilizing xml style sectioning, e.g. "<thinking>...</thinking>, "<action>{could be json}</action>,                        
+  "<observation></observation>"                                                                                                   
+  - Create ToolChain implementations (both can receive multi actions at the same time):                                           
+  - One utilizing JSON                                                                                                            
+  - One utilizing YAML with block scalars                                                                                         
+  - Create Termination implementations:                                                                                           
+  - One accepts just a text.                                                                                                      
+  - One accepts valid JSON and generic struct, uses reflection to create the struct and fill everything to that struct            
+  (supports all types that might be useful, like pointers to struct, time.Time, etc)                                              
+                                                                                                                                  
+  Think hard about code architecture, maintainability, testability.                                                               
+  DON'T code first, create a comprehensive, detailed /PLAN.md first so we don't lose context.
+
 
 * Example of custom AgentLoops that we want to create:
   * ReActAgentLoop - simple and to the point.
