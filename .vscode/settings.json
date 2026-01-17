@@ -1,3 +1,12 @@
 {
-  "editor.rulers": [100]
+  "editor.rulers": [100],
+  "go.testEnvFile": "${workspaceFolder}/.env",
+  "go.testFlags": ["-v"],
+  "terminal.integrated.profiles.linux": {
+    "bash-env": {
+      "path": "bash",
+      "args": ["--rcfile", "${workspaceFolder}/.vscode/bashrc"]
+    }
+  },
+  "terminal.integrated.defaultProfile.linux": "bash-env"
 }

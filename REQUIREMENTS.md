@@ -3,6 +3,10 @@ The interface needs to provide:
 * A way for user to define system prompt.
    * System prompt and the original input is never going to be summarized, ever.
    * Long loops might be summarized, but these stays.
+
+
+
+
 * A way for user to define tool functions.
    * There are Tool, and Toolchain abstraction.
    * Both Tool and Toolchain has a .Describe() function that lets the user control how the Tools are
@@ -12,7 +16,8 @@ The interface needs to provide:
    * ToolChain.Evaluate(..) is always called, and it has responsibility to:
      * Parse the LLM output - determine whether there is a tool call or not.
      * Determines which tool were called.
-     * If there's a tool call, prepare the input for the tool, call the tool, and return the tool output as the result.
+     * If there's a tool call, prepare the input for the tool, call the tool, and return the tool 
+       output as the result.
      * Construct the prompt that explains tools to the LLM.
    * Tool has the responsiblity for:
      * Describe itself (to be used in the ToolChain).
@@ -22,16 +27,47 @@ The interface needs to provide:
    * ToolChain might also be implemented to trigger ANOTHER AgentLoop specifically to call tools and
      provide outputs to the AgentLoop.
 * A way to define the termination strategy.
-   * TerminationStrategy has Describe() function that lets user control how to describe to the agent how to terminate in the prompt.
+   * TerminationStrategy has Describe() function that lets user control how to describe to the agent
+     how to terminate in the prompt.
    * These can be:
      * Specific tool call.
      * Specific text in the output.
    * TerminationStrategy.ShouldTerminate(...) is evaluated after each generation.
-   * Responsibility of the Termination strategy is also to extract the final output from the generation.
+   * Responsibility of the Termination strategy is also to extract the final output from the 
+     generation.
+* A way to define how the Agent should format its output.
+  * How would the Agent say which tool to call, format the arguments to that tool call?
+  * How would the Agent say it's terminating, and provide the final output?
+  * How would the Agent say what it's thinking?
+  * This can be done by simply parsing, or through JSON, YAML, etc.
+  * The AgentLoop is the one responsible to provide the prompt, so it has the responsibility to
+    define how the output should be formatted.
+  * The question is whether the formatting rule and parsing can be separated with the actual loop?
+  * Separating ToolChain, Termination, FinalOutput formatting from one another makes it difficult
+    to coordinate the formatting output of the Agent.
+  * What if ToolChain cannot describe itself, because the formatting is defined by the AgentLoop?
+  * We eliminate TerminationStrategy, as this is part of AgentLoop's responsibility to define how
+    to terminate.
+  * We create OutputFormat interface that accepts Tools, and provide 
+
+* Example of custom AgentLoops that we want to create:
+  * ReActAgentLoop - simple and to the point.
+  * SceneBuilderLoop - generates image, but then critiques the image, and regenerates until it
+    fulfills all the criteria.
+  * CustomerServiceLoop - ReAct pattern, but with additional loop at the end to ensure final output
+    does not misrepresent company policies, etc.
+  * A loop where each concern is handled by separate smaller LLMCalls, each constructing the final
+    prompt for the main LLM call
+  * StoryTellerLoop - specific thinking patterns where the agent considers the setting, character
+    traits/agenda, plot points, environment, relative location of characters and objects, and
+    then validates the response against character development arcs, plot consistency, and
+    thematic elements.
+
 * A way to define the complete input structure.
    * User can customize the input structure, and add prefixes/suffixes.
    * Default is:
-      * {AgentLoop.SystemPrompt()} --> AgentLoop's system prompt is also a template that may include user input.
+      * {AgentLoop.SystemPrompt()} --> AgentLoop's system prompt is also a template that may include
+        user input.
       * {UserInput}
       * {Toolchain.Describe()}
       * {TerminationStrategy.Describe()}
