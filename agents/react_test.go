@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/tmc/langchaingo/llms"
@@ -167,6 +168,10 @@ func (m *mockFormat) Describe(sections []gent.TextOutputSection) string {
 	return "mock format description"
 }
 
+func (m *mockFormat) DescribeStructure(sections []gent.TextOutputSection) string {
+	return "mock format structure"
+}
+
 func (m *mockFormat) Parse(_ string) (map[string][]string, error) {
 	if m.parseErr != nil {
 		return nil, m.parseErr
@@ -291,7 +296,7 @@ func TestReactLoop_BuildMessages(t *testing.T) {
 
 	data := NewReactLoopData(llms.TextContent{Text: "Hello"})
 
-	messages := loop.buildMessages(data, "output prompt")
+	messages := loop.buildMessages(data, "output prompt", "tools prompt")
 
 	// Should have system message + user message
 	if len(messages) < 2 {
@@ -615,6 +620,9 @@ func TestNewReactLoop_Defaults(t *testing.T) {
 	if loop.termination == nil {
 		t.Error("expected default termination to be set")
 	}
+	if loop.timeProvider == nil {
+		t.Error("expected default timeProvider to be set")
+	}
 	if loop.observationPrefix != "Observation:\n" {
 		t.Errorf("expected default observationPrefix, got %q", loop.observationPrefix)
 	}
@@ -623,5 +631,25 @@ func TestNewReactLoop_Defaults(t *testing.T) {
 	}
 	if loop.systemTemplate == nil {
 		t.Error("expected default systemTemplate to be set")
+	}
+}
+
+func TestReactLoop_WithTimeProvider(t *testing.T) {
+	model := newMockModel()
+	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
+
+	loop := NewReactLoop(model).WithTimeProvider(mockTime)
+
+	if loop.TimeProvider() != mockTime {
+		t.Error("expected custom time provider to be set")
+	}
+
+	// Verify the mock time is used
+	tp := loop.TimeProvider()
+	if tp.Today() != "2025-06-15" {
+		t.Errorf("TimeProvider().Today() = %q, want %q", tp.Today(), "2025-06-15")
+	}
+	if tp.Weekday() != "Sunday" {
+		t.Errorf("TimeProvider().Weekday() = %q, want %q", tp.Weekday(), "Sunday")
 	}
 }

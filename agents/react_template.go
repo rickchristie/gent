@@ -4,6 +4,8 @@ import (
 	"bytes"
 	_ "embed"
 	"text/template"
+
+	"github.com/rickchristie/gent"
 )
 
 //go:embed react.tmpl
@@ -15,9 +17,14 @@ type ReactTemplateData struct {
 	UserSystemPrompt string
 
 	// OutputPrompt explains how to format output sections (from Formatter).
+	// This describes only the format structure (e.g., XML tags) without tool details.
 	OutputPrompt string
 
+	// ToolsPrompt describes available tools and how to call them (from ToolChain).
+	ToolsPrompt string
+
 	// AvailableTools describes available tools (from ToolChain).
+	// Deprecated: Use ToolsPrompt instead.
 	AvailableTools string
 
 	// Termination describes how to terminate (from Termination).
@@ -28,6 +35,10 @@ type ReactTemplateData struct {
 
 	// LoopText contains previous ReAct iterations and observations.
 	LoopText string
+
+	// Time provides access to time-related functions in templates.
+	// Use {{.Time.Today}}, {{.Time.Weekday}}, {{.Time.Format "2006-01-02"}}, etc.
+	Time gent.TimeProvider
 }
 
 // DefaultReactSystemTemplate is the default template for the ReAct system prompt.

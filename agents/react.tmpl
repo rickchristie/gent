@@ -18,9 +18,13 @@ Repeat this cycle until you have enough information to provide a final answer.
 - Be concise but thorough in your reasoning.
 {{if .UserSystemPrompt}}
 
-## Additional Context
-
 {{.UserSystemPrompt}}
+{{end}}
+{{if .ToolsPrompt}}
+
+## Available Tools
+
+{{.ToolsPrompt}}
 {{end}}
 
 ## Output Format

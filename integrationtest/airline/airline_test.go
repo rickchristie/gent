@@ -50,7 +50,9 @@ func TestRescheduleScenario(t *testing.T) {
 	// Create the ReAct loop with airline customer service context
 	loop := agents.NewReactLoop(model).
 		WithToolChain(tc).
-		WithSystemPrompt(`You are a helpful airline customer service agent for SkyWings Airlines.
+		WithSystemPrompt(`## Task Description
+
+You are a helpful airline customer service agent for SkyWings Airlines.
 Your role is to assist customers with their flight bookings, including checking flight information,
 rescheduling flights, and answering policy questions.
 

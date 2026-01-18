@@ -99,6 +99,7 @@ type ReactLoop struct {
 	toolChain         gent.ToolChain
 	termination       gent.Termination
 	thinkingSection   gent.TextOutputSection
+	timeProvider      gent.TimeProvider
 	observationPrefix string
 	errorPrefix       string
 }
@@ -108,6 +109,7 @@ type ReactLoop struct {
 //   - Format: format.NewXML()
 //   - ToolChain: toolchain.NewYAML()
 //   - Termination: termination.NewText()
+//   - TimeProvider: gent.NewDefaultTimeProvider()
 //   - SystemTemplate: DefaultReactSystemTemplate
 func NewReactLoop(model gent.Model) *ReactLoop {
 	return &ReactLoop{
@@ -115,6 +117,7 @@ func NewReactLoop(model gent.Model) *ReactLoop {
 		format:            format.NewXML(),
 		toolChain:         toolchain.NewYAML(),
 		termination:       termination.NewText(),
+		timeProvider:      gent.NewDefaultTimeProvider(),
 		systemTemplate:    DefaultReactSystemTemplate,
 		observationPrefix: "Observation:\n",
 		errorPrefix:       "Error:\n",
@@ -176,6 +179,18 @@ func (r *ReactLoop) WithTermination(t gent.Termination) *ReactLoop {
 	return r
 }
 
+// WithTimeProvider sets the time provider.
+// Use this to inject a mock time provider for testing.
+func (r *ReactLoop) WithTimeProvider(tp gent.TimeProvider) *ReactLoop {
+	r.timeProvider = tp
+	return r
+}
+
+// TimeProvider returns the current time provider.
+func (r *ReactLoop) TimeProvider() gent.TimeProvider {
+	return r.timeProvider
+}
+
 // WithThinking enables the thinking section with the given prompt.
 func (r *ReactLoop) WithThinking(prompt string) *ReactLoop {
 	r.thinkingSection = &simpleSection{
@@ -201,12 +216,13 @@ func (r *ReactLoop) RegisterTool(tool any) *ReactLoop {
 func (r *ReactLoop) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.AgentLoopResult {
 	data := execCtx.Data()
 
-	// Build output sections and generate output prompt
+	// Build output sections and generate prompts
 	sections := r.buildOutputSections()
-	outputPrompt := r.format.Describe(sections)
+	outputPrompt := r.format.DescribeStructure(sections)
+	toolsPrompt := r.toolChain.Prompt()
 
 	// Build messages for model call
-	messages := r.buildMessages(data, outputPrompt)
+	messages := r.buildMessages(data, outputPrompt, toolsPrompt)
 
 	// Call model (automatically traced via execCtx)
 	response, err := r.model.GenerateContent(ctx, execCtx, messages)
@@ -302,13 +318,19 @@ func (r *ReactLoop) buildOutputSections() []gent.TextOutputSection {
 }
 
 // buildMessages constructs the message list for the model call.
-func (r *ReactLoop) buildMessages(data gent.LoopData, outputPrompt string) []llms.MessageContent {
+func (r *ReactLoop) buildMessages(
+	data gent.LoopData,
+	outputPrompt string,
+	toolsPrompt string,
+) []llms.MessageContent {
 	var messages []llms.MessageContent
 
 	// Build system message using template
 	templateData := ReactTemplateData{
 		UserSystemPrompt: r.userSystemPrompt,
 		OutputPrompt:     outputPrompt,
+		ToolsPrompt:      toolsPrompt,
+		Time:             r.timeProvider,
 	}
 
 	systemContent, err := ExecuteTemplate(r.systemTemplate, templateData)
