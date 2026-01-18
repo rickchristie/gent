@@ -5,46 +5,39 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/rickchristie/gent/hooks"
 	"github.com/tmc/langchaingo/llms"
 )
 
 // LCGWrapper wraps an llms.Model and implements gent's Model interface.
-// It normalizes token usage across providers and fires hooks before/after calls.
+// It normalizes token usage across providers and automatically traces model calls
+// when an ExecutionContext is provided.
 //
 // Example usage:
 //
 //	llm, _ := openai.New(openai.WithToken(apiKey))
-//	model := models.NewLCGWrapper(llm).
-//	    RegisterHook(&MyLoggingHook{}).
-//	    RegisterHook(&MyMetricsHook{})
+//	model := models.NewLCGWrapper(llm).WithModelName("gpt-4")
 //
-//	response, err := model.GenerateContent(ctx, messages)
-//	fmt.Printf("Used %d input tokens, %d output tokens\n",
-//	    response.Info.InputTokens, response.Info.OutputTokens)
+//	// With ExecutionContext (automatic tracing)
+//	response, err := model.GenerateContent(ctx, execCtx, messages)
+//
+//	// Without ExecutionContext (no tracing)
+//	response, err := model.GenerateContent(ctx, nil, messages)
 type LCGWrapper struct {
-	model llms.Model
-	hooks *hooks.ModelRegistry
+	model     llms.Model
+	modelName string // Optional model name for tracing
 }
 
 // NewLCGWrapper creates a new LCGWrapper wrapping the given llms.Model.
 func NewLCGWrapper(model llms.Model) *LCGWrapper {
 	return &LCGWrapper{
 		model: model,
-		hooks: hooks.NewModelRegistry(),
 	}
 }
 
-// WithHooks sets the model hook registry. Returns the model for chaining.
-func (m *LCGWrapper) WithHooks(h *hooks.ModelRegistry) *LCGWrapper {
-	m.hooks = h
-	return m
-}
-
-// RegisterHook adds a hook to the model's hook registry.
+// WithModelName sets the model name used in trace events.
 // Returns the model for chaining.
-func (m *LCGWrapper) RegisterHook(hook any) *LCGWrapper {
-	m.hooks.Register(hook)
+func (m *LCGWrapper) WithModelName(name string) *LCGWrapper {
+	m.modelName = name
 	return m
 }
 
@@ -54,25 +47,14 @@ func (m *LCGWrapper) Unwrap() llms.Model {
 }
 
 // GenerateContent implements gent.Model.GenerateContent.
-// It fires BeforeGenerateContent hooks before the call and AfterGenerateContent hooks after.
+// When execCtx is provided, the call is automatically traced with token counts and duration.
 // Token usage is automatically normalized across providers.
 func (m *LCGWrapper) GenerateContent(
 	ctx context.Context,
+	execCtx *gent.ExecutionContext,
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
-	// Resolve options to get CallOptions struct
-	opts := resolveCallOptions(options)
-
-	// Fire before hooks
-	beforeEvent := gent.BeforeGenerateContentEvent{
-		Messages: messages,
-		Options:  opts,
-	}
-	if err := m.hooks.FireBeforeGenerateContent(ctx, beforeEvent); err != nil {
-		return nil, err
-	}
-
 	// Call the underlying model
 	startTime := time.Now()
 	lcgResponse, err := m.model.GenerateContent(ctx, messages, options...)
@@ -84,14 +66,20 @@ func (m *LCGWrapper) GenerateContent(
 		response = convertLCGResponse(lcgResponse, duration)
 	}
 
-	// Fire after hooks
-	afterEvent := gent.AfterGenerateContentEvent{
-		Messages: messages,
-		Options:  opts,
-		Response: response,
-		Error:    err,
+	// Automatic tracing if ExecutionContext is provided
+	if execCtx != nil {
+		trace := gent.ModelCallTrace{
+			Model:    m.modelName,
+			Duration: duration,
+			Error:    err,
+		}
+		if response != nil && response.Info != nil {
+			trace.InputTokens = response.Info.InputTokens
+			trace.OutputTokens = response.Info.OutputTokens
+			// Cost calculation can be added here based on model pricing
+		}
+		execCtx.Trace(trace)
 	}
-	m.hooks.FireAfterGenerateContent(ctx, afterEvent)
 
 	return response, err
 }
@@ -238,15 +226,6 @@ func getIntFromMap(m map[string]any, key string) int {
 	default:
 		return 0
 	}
-}
-
-// resolveCallOptions applies all CallOption functions to get the resolved CallOptions.
-func resolveCallOptions(options []llms.CallOption) *llms.CallOptions {
-	opts := &llms.CallOptions{}
-	for _, opt := range options {
-		opt(opts)
-	}
-	return opts
 }
 
 // Compile-time check that LCGWrapper implements gent.Model.

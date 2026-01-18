@@ -15,16 +15,16 @@ import (
 // ReactLoopData implements gent.LoopData for the ReAct agent loop.
 type ReactLoopData struct {
 	originalInput    []gent.ContentPart
-	iterationHistory [][]*gent.IterationInfo
-	iterations       [][]*gent.IterationInfo
+	iterationHistory []*gent.Iteration
+	iterations       []*gent.Iteration
 }
 
 // NewReactLoopData creates a new ReactLoopData with the given input.
 func NewReactLoopData(input ...gent.ContentPart) *ReactLoopData {
 	return &ReactLoopData{
 		originalInput:    input,
-		iterationHistory: make([][]*gent.IterationInfo, 0),
-		iterations:       make([][]*gent.IterationInfo, 0),
+		iterationHistory: make([]*gent.Iteration, 0),
+		iterations:       make([]*gent.Iteration, 0),
 	}
 }
 
@@ -33,23 +33,23 @@ func (d *ReactLoopData) GetOriginalInput() []gent.ContentPart {
 	return d.originalInput
 }
 
-// GetIterationHistory returns all IterationInfo recorded, including compacted ones.
-func (d *ReactLoopData) GetIterationHistory() [][]*gent.IterationInfo {
+// GetIterationHistory returns all Iteration recorded, including compacted ones.
+func (d *ReactLoopData) GetIterationHistory() []*gent.Iteration {
 	return d.iterationHistory
 }
 
-// AddIterationHistory adds a new IterationInfo to the full history.
-func (d *ReactLoopData) AddIterationHistory(info *gent.IterationInfo) {
-	d.iterationHistory = append(d.iterationHistory, []*gent.IterationInfo{info})
+// AddIterationHistory adds a new Iteration to the full history.
+func (d *ReactLoopData) AddIterationHistory(iter *gent.Iteration) {
+	d.iterationHistory = append(d.iterationHistory, iter)
 }
 
-// GetIterations returns all IterationInfo that will be used in next iteration.
-func (d *ReactLoopData) GetIterations() [][]*gent.IterationInfo {
+// GetIterations returns all Iteration that will be used in next iteration.
+func (d *ReactLoopData) GetIterations() []*gent.Iteration {
 	return d.iterations
 }
 
 // SetIterations sets the iterations to be used in next iteration.
-func (d *ReactLoopData) SetIterations(iterations [][]*gent.IterationInfo) {
+func (d *ReactLoopData) SetIterations(iterations []*gent.Iteration) {
 	d.iterations = iterations
 }
 
@@ -155,8 +155,10 @@ func (r *ReactLoop) RegisterTool(tool any) *ReactLoop {
 	return r
 }
 
-// Iterate executes one iteration of the ReAct loop.
-func (r *ReactLoop) Iterate(ctx context.Context, data gent.LoopData) *gent.AgentLoopResult {
+// Next executes one iteration of the ReAct loop.
+func (r *ReactLoop) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.AgentLoopResult {
+	data := execCtx.Data()
+
 	// Build output sections and generate output prompt
 	sections := r.buildOutputSections()
 	outputPrompt := r.format.Describe(sections)
@@ -164,8 +166,8 @@ func (r *ReactLoop) Iterate(ctx context.Context, data gent.LoopData) *gent.Agent
 	// Build messages for model call
 	messages := r.buildMessages(data, outputPrompt)
 
-	// Call model
-	response, err := r.model.GenerateContent(ctx, messages)
+	// Call model (automatically traced via execCtx)
+	response, err := r.model.GenerateContent(ctx, execCtx, messages)
 	if err != nil {
 		return &gent.AgentLoopResult{
 			Action: gent.LATerminate,
@@ -188,8 +190,8 @@ func (r *ReactLoop) Iterate(ctx context.Context, data gent.LoopData) *gent.Agent
 		for _, content := range terminationContents {
 			if result := r.termination.ShouldTerminate(content); len(result) > 0 {
 				// Add final iteration to history
-				info := r.buildIterationInfo(responseContent, "")
-				data.AddIterationHistory(info)
+				iter := r.buildIteration(responseContent, "")
+				data.AddIterationHistory(iter)
 				return &gent.AgentLoopResult{
 					Action: gent.LATerminate,
 					Result: result,
@@ -202,8 +204,8 @@ func (r *ReactLoop) Iterate(ctx context.Context, data gent.LoopData) *gent.Agent
 	if parseErr != nil {
 		// Try treating raw content as termination
 		if result := r.termination.ShouldTerminate(responseContent); len(result) > 0 {
-			info := r.buildIterationInfo(responseContent, "")
-			data.AddIterationHistory(info)
+			iter := r.buildIteration(responseContent, "")
+			data.AddIterationHistory(iter)
 			return &gent.AgentLoopResult{
 				Action: gent.LATerminate,
 				Result: result,
@@ -217,20 +219,20 @@ func (r *ReactLoop) Iterate(ctx context.Context, data gent.LoopData) *gent.Agent
 		}
 	}
 
-	// Execute tool calls if action section is present
+	// Execute tool calls if action section is present (automatically traced via execCtx)
 	actionName := r.toolChain.Name()
 	observation := ""
 	if actionContents, ok := parsed[actionName]; ok && len(actionContents) > 0 {
-		observation = r.executeToolCalls(ctx, actionContents)
+		observation = r.executeToolCalls(ctx, execCtx, actionContents)
 	}
 
-	// Build iteration info and update data
-	info := r.buildIterationInfo(responseContent, observation)
-	data.AddIterationHistory(info)
+	// Build iteration and update data
+	iter := r.buildIteration(responseContent, observation)
+	data.AddIterationHistory(iter)
 
 	// Add to iterations for next call
 	iterations := data.GetIterations()
-	iterations = append(iterations, []*gent.IterationInfo{info})
+	iterations = append(iterations, iter)
 	data.SetIterations(iterations)
 
 	return &gent.AgentLoopResult{
@@ -290,20 +292,16 @@ func (r *ReactLoop) buildMessages(data gent.LoopData, outputPrompt string) []llm
 	}
 
 	// Previous iterations
-	for _, iterGroup := range data.GetIterations() {
-		for _, iter := range iterGroup {
-			for _, msgGroup := range iter.Messages {
-				for _, msg := range msgGroup {
-					parts := make([]llms.ContentPart, len(msg.Parts))
-					for i, part := range msg.Parts {
-						parts[i] = part
-					}
-					messages = append(messages, llms.MessageContent{
-						Role:  msg.Role,
-						Parts: parts,
-					})
-				}
+	for _, iter := range data.GetIterations() {
+		for _, msg := range iter.Messages {
+			parts := make([]llms.ContentPart, len(msg.Parts))
+			for i, part := range msg.Parts {
+				parts[i] = part
 			}
+			messages = append(messages, llms.MessageContent{
+				Role:  msg.Role,
+				Parts: parts,
+			})
 		}
 	}
 
@@ -311,11 +309,15 @@ func (r *ReactLoop) buildMessages(data gent.LoopData, outputPrompt string) []llm
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.
-func (r *ReactLoop) executeToolCalls(ctx context.Context, contents []string) string {
+func (r *ReactLoop) executeToolCalls(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	contents []string,
+) string {
 	var observations []string
 
 	for _, content := range contents {
-		result, err := r.toolChain.Execute(ctx, content)
+		result, err := r.toolChain.Execute(ctx, execCtx, content)
 		if err != nil {
 			observations = append(observations,
 				fmt.Sprintf("%s%v", r.errorPrefix, err))
@@ -347,16 +349,16 @@ func (r *ReactLoop) executeToolCalls(ctx context.Context, contents []string) str
 	return strings.Join(observations, "\n\n")
 }
 
-// buildIterationInfo creates an IterationInfo from response and observation.
-func (r *ReactLoop) buildIterationInfo(response, observation string) *gent.IterationInfo {
-	var messages [][]gent.MessageContent
+// buildIteration creates an Iteration from response and observation.
+func (r *ReactLoop) buildIteration(response, observation string) *gent.Iteration {
+	var messages []gent.MessageContent
 
 	// Assistant message (response)
 	assistantMsg := gent.MessageContent{
 		Role:  llms.ChatMessageTypeAI,
 		Parts: []gent.ContentPart{llms.TextContent{Text: response}},
 	}
-	messages = append(messages, []gent.MessageContent{assistantMsg})
+	messages = append(messages, assistantMsg)
 
 	// User message (observation) - only if there's an observation
 	if observation != "" {
@@ -364,10 +366,10 @@ func (r *ReactLoop) buildIterationInfo(response, observation string) *gent.Itera
 			Role:  llms.ChatMessageTypeHuman,
 			Parts: []gent.ContentPart{llms.TextContent{Text: observation}},
 		}
-		messages = append(messages, []gent.MessageContent{userMsg})
+		messages = append(messages, userMsg)
 	}
 
-	return &gent.IterationInfo{
+	return &gent.Iteration{
 		Messages: messages,
 	}
 }

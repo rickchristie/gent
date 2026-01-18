@@ -8,13 +8,19 @@ import (
 )
 
 // Model is gent's model interface. It wraps LangChainGo's llms.Model but provides
-// a cleaner interface with normalized token usage information.
+// a cleaner interface with normalized token usage information and automatic tracing.
+//
+// When an ExecutionContext is provided, the model will automatically trace the call.
+// If execCtx is nil, tracing is skipped.
 type Model interface {
 	// GenerateContent generates content from a sequence of messages.
 	// Unlike llms.Model, this returns a GenerationInfo struct with normalized
 	// token counts that work across all providers.
+	//
+	// The execCtx parameter enables automatic tracing. Pass nil to skip tracing.
 	GenerateContent(
 		ctx context.Context,
+		execCtx *ExecutionContext,
 		messages []llms.MessageContent,
 		options ...llms.CallOption,
 	) (

@@ -10,25 +10,29 @@ import (
 // Hooks can implement any combination of hook interfaces - they will only
 // receive events for the interfaces they implement.
 //
+// ExecutionContext is passed separately from events, making it clear that
+// the context is always available. Hooks can access LoopData via execCtx.Data()
+// and can spawn child contexts if needed.
+//
 // Example usage:
 //
 //	type MyHook struct{}
 //	func (h *MyHook) OnBeforeExecution(
-//	    ctx context.Context, e gent.BeforeExecutionEvent[MyData],
+//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.BeforeExecutionEvent,
 //	) error {
+//	    data := execCtx.Data().(MyLoopData)
 //	    ...
 //	}
-//	func (h *MyHook) OnAfterExecution(ctx context.Context, e gent.AfterExecutionEvent) error { ... }
 //
-//	registry := hooks.NewRegistry[MyData]()
+//	registry := hooks.NewRegistry()
 //	registry.Register(&MyHook{})
-type Registry[Data gent.LoopData] struct {
+type Registry struct {
 	hooks []any
 }
 
 // NewRegistry creates a new empty Registry.
-func NewRegistry[Data gent.LoopData]() *Registry[Data] {
-	return &Registry[Data]{
+func NewRegistry() *Registry {
+	return &Registry{
 		hooks: make([]any, 0),
 	}
 }
@@ -37,7 +41,7 @@ func NewRegistry[Data gent.LoopData]() *Registry[Data] {
 // of hook interfaces (BeforeExecutionHook, AfterExecutionHook, etc.).
 //
 // Hooks are called in the order they are registered.
-func (r *Registry[Data]) Register(hook any) *Registry[Data] {
+func (r *Registry) Register(hook any) *Registry {
 	r.hooks = append(r.hooks, hook)
 	return r
 }
@@ -45,13 +49,14 @@ func (r *Registry[Data]) Register(hook any) *Registry[Data] {
 // FireBeforeExecution dispatches a BeforeExecutionEvent to all registered
 // BeforeExecutionHook implementations.
 // Returns the first error encountered, or nil if all hooks succeed.
-func (r *Registry[Data]) FireBeforeExecution(
+func (r *Registry) FireBeforeExecution(
 	ctx context.Context,
-	event gent.BeforeExecutionEvent[Data],
+	execCtx *gent.ExecutionContext,
+	event gent.BeforeExecutionEvent,
 ) error {
 	for _, h := range r.hooks {
-		if hook, ok := h.(gent.BeforeExecutionHook[Data]); ok {
-			if err := hook.OnBeforeExecution(ctx, event); err != nil {
+		if hook, ok := h.(gent.BeforeExecutionHook); ok {
+			if err := hook.OnBeforeExecution(ctx, execCtx, event); err != nil {
 				return err
 			}
 		}
@@ -62,14 +67,15 @@ func (r *Registry[Data]) FireBeforeExecution(
 // FireAfterExecution dispatches an AfterExecutionEvent to all registered
 // AfterExecutionHook implementations.
 // All hooks are called even if some return errors. Returns the first error encountered.
-func (r *Registry[Data]) FireAfterExecution(
+func (r *Registry) FireAfterExecution(
 	ctx context.Context,
+	execCtx *gent.ExecutionContext,
 	event gent.AfterExecutionEvent,
 ) error {
 	var firstErr error
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterExecutionHook); ok {
-			if err := hook.OnAfterExecution(ctx, event); err != nil && firstErr == nil {
+			if err := hook.OnAfterExecution(ctx, execCtx, event); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
@@ -80,13 +86,14 @@ func (r *Registry[Data]) FireAfterExecution(
 // FireBeforeIteration dispatches a BeforeIterationEvent to all registered
 // BeforeIterationHook implementations.
 // Returns the first error encountered, or nil if all hooks succeed.
-func (r *Registry[Data]) FireBeforeIteration(
+func (r *Registry) FireBeforeIteration(
 	ctx context.Context,
-	event gent.BeforeIterationEvent[Data],
+	execCtx *gent.ExecutionContext,
+	event gent.BeforeIterationEvent,
 ) error {
 	for _, h := range r.hooks {
-		if hook, ok := h.(gent.BeforeIterationHook[Data]); ok {
-			if err := hook.OnBeforeIteration(ctx, event); err != nil {
+		if hook, ok := h.(gent.BeforeIterationHook); ok {
+			if err := hook.OnBeforeIteration(ctx, execCtx, event); err != nil {
 				return err
 			}
 		}
@@ -97,13 +104,14 @@ func (r *Registry[Data]) FireBeforeIteration(
 // FireAfterIteration dispatches an AfterIterationEvent to all registered
 // AfterIterationHook implementations.
 // Returns the first error encountered, or nil if all hooks succeed.
-func (r *Registry[Data]) FireAfterIteration(
+func (r *Registry) FireAfterIteration(
 	ctx context.Context,
-	event gent.AfterIterationEvent[Data],
+	execCtx *gent.ExecutionContext,
+	event gent.AfterIterationEvent,
 ) error {
 	for _, h := range r.hooks {
-		if hook, ok := h.(gent.AfterIterationHook[Data]); ok {
-			if err := hook.OnAfterIteration(ctx, event); err != nil {
+		if hook, ok := h.(gent.AfterIterationHook); ok {
+			if err := hook.OnAfterIteration(ctx, execCtx, event); err != nil {
 				return err
 			}
 		}
@@ -113,82 +121,20 @@ func (r *Registry[Data]) FireAfterIteration(
 
 // FireError dispatches an ErrorEvent to all registered ErrorHook implementations.
 // This is informational only; errors from hooks are not propagated.
-func (r *Registry[Data]) FireError(ctx context.Context, event gent.ErrorEvent) {
+func (r *Registry) FireError(ctx context.Context, execCtx *gent.ExecutionContext, event gent.ErrorEvent) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.ErrorHook); ok {
-			hook.OnError(ctx, event)
+			hook.OnError(ctx, execCtx, event)
 		}
 	}
 }
 
 // Len returns the number of registered hooks.
-func (r *Registry[Data]) Len() int {
+func (r *Registry) Len() int {
 	return len(r.hooks)
 }
 
 // Clear removes all registered hooks.
-func (r *Registry[Data]) Clear() {
-	r.hooks = make([]any, 0)
-}
-
-// ----------------------------------------------------------------------------
-// Model Hook Registry
-// ----------------------------------------------------------------------------
-
-// ModelRegistry manages hooks for Model calls.
-type ModelRegistry struct {
-	hooks []any
-}
-
-// NewModelRegistry creates a new empty ModelRegistry.
-func NewModelRegistry() *ModelRegistry {
-	return &ModelRegistry{
-		hooks: make([]any, 0),
-	}
-}
-
-// Register adds a hook to the registry. The hook can implement any combination
-// of model hook interfaces.
-func (r *ModelRegistry) Register(hook any) *ModelRegistry {
-	r.hooks = append(r.hooks, hook)
-	return r
-}
-
-// FireBeforeGenerateContent dispatches a BeforeGenerateContentEvent to all
-// registered BeforeGenerateContentHook implementations.
-func (r *ModelRegistry) FireBeforeGenerateContent(
-	ctx context.Context,
-	event gent.BeforeGenerateContentEvent,
-) error {
-	for _, h := range r.hooks {
-		if hook, ok := h.(gent.BeforeGenerateContentHook); ok {
-			if err := hook.OnBeforeGenerateContent(ctx, event); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// FireAfterGenerateContent dispatches an AfterGenerateContentEvent to all
-// registered AfterGenerateContentHook implementations.
-func (r *ModelRegistry) FireAfterGenerateContent(
-	ctx context.Context,
-	event gent.AfterGenerateContentEvent,
-) {
-	for _, h := range r.hooks {
-		if hook, ok := h.(gent.AfterGenerateContentHook); ok {
-			hook.OnAfterGenerateContent(ctx, event)
-		}
-	}
-}
-
-// Len returns the number of registered hooks.
-func (r *ModelRegistry) Len() int {
-	return len(r.hooks)
-}
-
-// Clear removes all registered hooks.
-func (r *ModelRegistry) Clear() {
+func (r *Registry) Clear() {
 	r.hooks = make([]any, 0)
 }

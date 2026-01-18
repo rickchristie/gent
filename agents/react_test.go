@@ -30,6 +30,7 @@ func (m *mockModel) WithErrors(errs ...error) *mockModel {
 
 func (m *mockModel) GenerateContent(
 	_ context.Context,
+	_ *gent.ExecutionContext,
 	_ []llms.MessageContent,
 	_ ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
@@ -86,6 +87,7 @@ func (m *mockToolChain) RegisterTool(_ any) gent.ToolChain {
 
 func (m *mockToolChain) Execute(
 	_ context.Context,
+	_ *gent.ExecutionContext,
 	_ string,
 ) (*gent.ToolChainResult, error) {
 	idx := m.callCount
@@ -173,6 +175,14 @@ func (m *mockFormat) Parse(_ string) (map[string][]string, error) {
 }
 
 // ----------------------------------------------------------------------------
+// Helper to create ExecutionContext for tests
+// ----------------------------------------------------------------------------
+
+func newTestExecCtx(data gent.LoopData) *gent.ExecutionContext {
+	return gent.NewExecutionContext("test", data)
+}
+
+// ----------------------------------------------------------------------------
 // ReactLoopData Tests
 // ----------------------------------------------------------------------------
 
@@ -203,19 +213,19 @@ func TestReactLoopData_IterationHistory(t *testing.T) {
 	}
 
 	// Add iteration
-	info := &gent.IterationInfo{
-		Messages: [][]gent.MessageContent{
-			{{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}}},
+	iter := &gent.Iteration{
+		Messages: []gent.MessageContent{
+			{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}},
 		},
 	}
-	data.AddIterationHistory(info)
+	data.AddIterationHistory(iter)
 
 	history := data.GetIterationHistory()
 	if len(history) != 1 {
-		t.Fatalf("expected 1 history group, got %d", len(history))
+		t.Fatalf("expected 1 history entry, got %d", len(history))
 	}
-	if len(history[0]) != 1 {
-		t.Fatalf("expected 1 info in group, got %d", len(history[0]))
+	if len(history[0].Messages) != 1 {
+		t.Fatalf("expected 1 message in iteration, got %d", len(history[0].Messages))
 	}
 }
 
@@ -228,16 +238,16 @@ func TestReactLoopData_Iterations(t *testing.T) {
 	}
 
 	// Set iterations
-	info := &gent.IterationInfo{
-		Messages: [][]gent.MessageContent{
-			{{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}}},
+	iter := &gent.Iteration{
+		Messages: []gent.MessageContent{
+			{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}},
 		},
 	}
-	data.SetIterations([][]*gent.IterationInfo{{info}})
+	data.SetIterations([]*gent.Iteration{iter})
 
 	iterations := data.GetIterations()
 	if len(iterations) != 1 {
-		t.Fatalf("expected 1 iteration group, got %d", len(iterations))
+		t.Fatalf("expected 1 iteration, got %d", len(iterations))
 	}
 }
 
@@ -299,7 +309,7 @@ func TestReactLoop_BuildMessages(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_Termination(t *testing.T) {
+func TestReactLoop_Next_Termination(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<answer>The answer is 42</answer>"}},
 	}
@@ -317,7 +327,8 @@ func TestReactLoop_Iterate_Termination(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "What is 6*7?"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	if result.Action != gent.LATerminate {
 		t.Errorf("expected LATerminate, got %v", result.Action)
@@ -336,7 +347,7 @@ func TestReactLoop_Iterate_Termination(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_ToolExecution(t *testing.T) {
+func TestReactLoop_Next_ToolExecution(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<action>tool: search\nargs:\n  q: test</action>"}},
 	}
@@ -361,7 +372,8 @@ func TestReactLoop_Iterate_ToolExecution(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "Search for test"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	if result.Action != gent.LAContinue {
 		t.Errorf("expected LAContinue, got %v", result.Action)
@@ -377,7 +389,7 @@ func TestReactLoop_Iterate_ToolExecution(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_ToolError(t *testing.T) {
+func TestReactLoop_Next_ToolError(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<action>tool: broken</action>"}},
 	}
@@ -399,7 +411,8 @@ func TestReactLoop_Iterate_ToolError(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "Use broken tool"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	if result.Action != gent.LAContinue {
 		t.Errorf("expected LAContinue, got %v", result.Action)
@@ -410,7 +423,7 @@ func TestReactLoop_Iterate_ToolError(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_ModelError(t *testing.T) {
+func TestReactLoop_Next_ModelError(t *testing.T) {
 	model := newMockModel().WithErrors(errors.New("model failed"))
 	format := newMockFormat()
 	tc := newMockToolChain()
@@ -422,7 +435,8 @@ func TestReactLoop_Iterate_ModelError(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "Hello"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	if result.Action != gent.LATerminate {
 		t.Errorf("expected LATerminate, got %v", result.Action)
@@ -441,7 +455,7 @@ func TestReactLoop_Iterate_ModelError(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_ParseError(t *testing.T) {
+func TestReactLoop_Next_ParseError(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "invalid response"}},
 	}
@@ -458,7 +472,8 @@ func TestReactLoop_Iterate_ParseError(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "Hello"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	// Should terminate with error since parse failed and raw content isn't valid termination
 	if result.Action != gent.LATerminate {
@@ -466,7 +481,7 @@ func TestReactLoop_Iterate_ParseError(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_ParseError_FallbackToTermination(t *testing.T) {
+func TestReactLoop_Next_ParseError_FallbackToTermination(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "The answer is 42"}},
 	}
@@ -483,7 +498,8 @@ func TestReactLoop_Iterate_ParseError_FallbackToTermination(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "What is 6*7?"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	// Should terminate successfully since raw content is valid termination
 	if result.Action != gent.LATerminate {
@@ -503,7 +519,7 @@ func TestReactLoop_Iterate_ParseError_FallbackToTermination(t *testing.T) {
 	}
 }
 
-func TestReactLoop_Iterate_MultipleTools(t *testing.T) {
+func TestReactLoop_Next_MultipleTools(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<action>tool: a</action><action>tool: b</action>"}},
 	}
@@ -539,7 +555,8 @@ func TestReactLoop_Iterate_MultipleTools(t *testing.T) {
 		WithTermination(term)
 
 	data := NewReactLoopData(llms.TextContent{Text: "Use tools a and b"})
-	result := loop.Iterate(context.Background(), data)
+	execCtx := newTestExecCtx(data)
+	result := loop.Next(context.Background(), execCtx)
 
 	if result.Action != gent.LAContinue {
 		t.Errorf("expected LAContinue, got %v", result.Action)

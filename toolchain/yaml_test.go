@@ -39,7 +39,7 @@ func TestYAML_RegisterTool(t *testing.T) {
 	// Verify registration by executing the tool
 	content := `tool: test
 args: {}`
-	result, err := tc.Execute(context.Background(), content)
+	result, err := tc.Execute(context.Background(), nil, content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestYAML_Execute_Success(t *testing.T) {
 args:
   query: weather`
 
-	result, err := tc.Execute(context.Background(), content)
+	result, err := tc.Execute(context.Background(), nil, content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestYAML_Execute_UnknownTool(t *testing.T) {
 	content := `tool: unknown
 args: {}`
 
-	result, err := tc.Execute(context.Background(), content)
+	result, err := tc.Execute(context.Background(), nil, content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestYAML_Execute_ToolError(t *testing.T) {
 	content := `tool: failing
 args: {}`
 
-	result, err := tc.Execute(context.Background(), content)
+	result, err := tc.Execute(context.Background(), nil, content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestYAML_Execute_MultipleTools(t *testing.T) {
 - tool: calendar
   args: {}`
 
-	result, err := tc.Execute(context.Background(), content)
+	result, err := tc.Execute(context.Background(), nil, content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

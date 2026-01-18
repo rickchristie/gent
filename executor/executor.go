@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -29,20 +28,17 @@ func DefaultConfig() Config {
 }
 
 // Executor orchestrates the execution of an AgentLoop, managing the lifecycle,
-// hooks, and trace collection.
+// hooks, and trace collection via ExecutionContext.
 //
 // The Executor is responsible for:
+//   - Creating and managing the ExecutionContext
 //   - Running the AgentLoop repeatedly until it returns [gent.LATerminate]
 //   - Invoking lifecycle hooks at appropriate points
-//   - Collecting execution trace data for debugging and observability
 //   - Enforcing configuration limits (e.g., max iterations)
 type Executor[Data gent.LoopData] struct {
 	loop   gent.AgentLoop[Data]
 	config Config
-	hooks  *hooks.Registry[Data]
-
-	mu    sync.RWMutex
-	trace *gent.ExecutionTrace
+	hooks  *hooks.Registry
 }
 
 // New creates a new Executor with the given AgentLoop and configuration.
@@ -50,12 +46,12 @@ func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor
 	return &Executor[Data]{
 		loop:   loop,
 		config: config,
-		hooks:  hooks.NewRegistry[Data](),
+		hooks:  hooks.NewRegistry(),
 	}
 }
 
 // WithHooks sets the executor hook registry. Returns the executor for chaining.
-func (e *Executor[Data]) WithHooks(h *hooks.Registry[Data]) *Executor[Data] {
+func (e *Executor[Data]) WithHooks(h *hooks.Registry) *Executor[Data] {
 	e.hooks = h
 	return e
 }
@@ -71,48 +67,38 @@ func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 // Execute runs the AgentLoop until termination.
 //
 // The execution flow:
-//  1. Call BeforeExecution hook (if set)
-//  2. Repeatedly call AgentLoop.Iterate until:
+//  1. Create ExecutionContext with the provided data
+//  2. Call BeforeExecution hook (if set)
+//  3. Repeatedly call AgentLoop.Next until:
 //     - It returns LATerminate
 //     - MaxIterations is exceeded (if configured)
 //     - Context is canceled
 //     - An error occurs
-//  3. Call AfterExecution hook (if set)
+//  4. Call AfterExecution hook (if set)
 //
-// Execute is safe to call concurrently (each call is independent), but the same
-// Executor instance should not be used for concurrent executions if you want
-// accurate trace data.
+// The ExecutionContext flows through all components (Model, ToolChain, Hooks),
+// enabling automatic tracing without manual wiring.
 func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.ExecutionResult {
-	e.mu.Lock()
-	e.trace = &gent.ExecutionTrace{
-		StartTime:  time.Now(),
-		Iterations: make([]gent.IterationTrace, 0),
-	}
-	e.mu.Unlock()
+	execCtx := gent.NewExecutionContext("main", data)
 
 	result := &gent.ExecutionResult{
-		Trace: e.trace,
+		Context: execCtx,
 	}
 
 	// Ensure AfterExecution is always called if BeforeExecution succeeded
 	beforeExecutionCalled := false
 	defer func() {
-		e.mu.Lock()
-		e.trace.EndTime = time.Now()
-		e.trace.TotalDuration = e.trace.EndTime.Sub(e.trace.StartTime)
-		result.Trace = e.trace
-		iterations := make([]gent.IterationTrace, len(e.trace.Iterations))
-		copy(iterations, e.trace.Iterations)
-		e.mu.Unlock()
-
 		if beforeExecutionCalled && e.hooks != nil {
 			// AfterExecution errors are logged but don't change the result
-			event := gent.AfterExecutionEvent{Result: result, Iterations: iterations}
-			if hookErr := e.hooks.FireAfterExecution(ctx, event); hookErr != nil {
+			event := gent.AfterExecutionEvent{
+				TerminationReason: execCtx.TerminationReason(),
+				Error:             execCtx.Error(),
+			}
+			if hookErr := e.hooks.FireAfterExecution(ctx, execCtx, event); hookErr != nil {
 				// The AfterExecution error doesn't override existing errors
 				// but should be available for logging
-				e.hooks.FireError(ctx, gent.ErrorEvent{
-					Iteration: e.trace.FinalIteration,
+				e.hooks.FireError(ctx, execCtx, gent.ErrorEvent{
+					Iteration: execCtx.Iteration(),
 					Err:       fmt.Errorf("AfterExecution hook: %w", hookErr),
 				})
 			}
@@ -121,102 +107,83 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 
 	// BeforeExecution hook
 	if e.hooks != nil {
-		event := gent.BeforeExecutionEvent[Data]{Data: data}
-		if err := e.hooks.FireBeforeExecution(ctx, event); err != nil {
+		event := gent.BeforeExecutionEvent{}
+		if err := e.hooks.FireBeforeExecution(ctx, execCtx, event); err != nil {
 			result.Error = fmt.Errorf("BeforeExecution hook: %w", err)
-			e.trace.TerminationReason = gent.TerminationHookAbort
+			execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
 			return result
 		}
 	}
 	beforeExecutionCalled = true
 
 	// Main execution loop
-	iteration := 0
 	for {
-		iteration++
-
 		// Check context cancellation
 		if ctx.Err() != nil {
 			result.Error = ctx.Err()
-			e.trace.TerminationReason = gent.TerminationContextCanceled
-			e.trace.FinalIteration = iteration - 1
+			execCtx.SetTermination(gent.TerminationContextCanceled, nil, result.Error)
 			return result
 		}
 
 		// Check max iterations
-		if e.config.MaxIterations > 0 && iteration > e.config.MaxIterations {
+		if e.config.MaxIterations > 0 && execCtx.Iteration() >= e.config.MaxIterations {
 			result.Error = fmt.Errorf(
 				"%w: exceeded %d iterations",
 				ErrMaxIterationsExceeded,
 				e.config.MaxIterations,
 			)
-			e.trace.TerminationReason = gent.TerminationMaxIterations
-			e.trace.FinalIteration = iteration - 1
+			execCtx.SetTermination(gent.TerminationMaxIterations, nil, result.Error)
 			return result
 		}
 
-		// Create iteration trace
-		iterTrace := gent.IterationTrace{
-			Iteration: iteration,
-			StartTime: time.Now(),
-			Metadata:  make(map[string]any),
-		}
+		// Start iteration (increments counter and records IterationStartTrace)
+		execCtx.StartIteration()
+		iterStart := time.Now()
 
 		// BeforeIteration hook
 		if e.hooks != nil {
-			event := gent.BeforeIterationEvent[Data]{Iteration: iteration, Data: data}
-			if err := e.hooks.FireBeforeIteration(ctx, event); err != nil {
-				iterTrace.EndTime = time.Now()
-				iterTrace.Duration = iterTrace.EndTime.Sub(iterTrace.StartTime)
-				iterTrace.Error = err
-				e.appendIterationTrace(iterTrace)
-
+			event := gent.BeforeIterationEvent{Iteration: execCtx.Iteration()}
+			if err := e.hooks.FireBeforeIteration(ctx, execCtx, event); err != nil {
+				execCtx.EndIteration(gent.LATerminate, time.Since(iterStart))
 				result.Error = fmt.Errorf(
 					"BeforeIteration hook (iteration %d): %w",
-					iteration,
+					execCtx.Iteration(),
 					err,
 				)
-				e.trace.TerminationReason = gent.TerminationHookAbort
-				e.trace.FinalIteration = iteration
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
 				return result
 			}
 		}
 
-		// Iterate the AgentLoop
-		loopResult := e.loop.Iterate(ctx, data)
-		iterTrace.Result = loopResult
-		iterTrace.EndTime = time.Now()
-		iterTrace.Duration = iterTrace.EndTime.Sub(iterTrace.StartTime)
+		// Execute the AgentLoop iteration
+		loopResult := e.loop.Next(ctx, execCtx)
+		iterDuration := time.Since(iterStart)
+
+		// End iteration (records IterationEndTrace)
+		execCtx.EndIteration(loopResult.Action, iterDuration)
 
 		// AfterIteration hook
 		if e.hooks != nil {
-			event := gent.AfterIterationEvent[Data]{
-				Iteration: iteration,
+			event := gent.AfterIterationEvent{
+				Iteration: execCtx.Iteration(),
 				Result:    loopResult,
-				Data:      data,
+				Duration:  iterDuration,
 			}
-			if err := e.hooks.FireAfterIteration(ctx, event); err != nil {
-				iterTrace.Error = err
-				e.appendIterationTrace(iterTrace)
-
+			if err := e.hooks.FireAfterIteration(ctx, execCtx, event); err != nil {
 				result.Error = fmt.Errorf(
 					"AfterIteration hook (iteration %d): %w",
-					iteration,
+					execCtx.Iteration(),
 					err,
 				)
-				e.trace.TerminationReason = gent.TerminationHookAbort
-				e.trace.FinalIteration = iteration
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
 				return result
 			}
 		}
-
-		e.appendIterationTrace(iterTrace)
 
 		// Check for termination
 		if loopResult.Action == gent.LATerminate {
 			result.Result = loopResult.Result
-			e.trace.TerminationReason = gent.TerminationSuccess
-			e.trace.FinalIteration = iteration
+			execCtx.SetTermination(gent.TerminationSuccess, loopResult.Result, nil)
 			return result
 		}
 
@@ -225,26 +192,104 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 	}
 }
 
-// appendIterationTrace safely appends an iteration trace.
-func (e *Executor[Data]) appendIterationTrace(trace gent.IterationTrace) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.trace.Iterations = append(e.trace.Iterations, trace)
-}
-
-// GetTrace returns a copy of the current execution trace.
-// This can be called during execution to get partial trace data.
-func (e *Executor[Data]) GetTrace() *gent.ExecutionTrace {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	if e.trace == nil {
-		return nil
+// ExecuteWithContext runs the AgentLoop with an existing ExecutionContext.
+// This is useful for nested agent loops where you want to use a child context.
+func (e *Executor[Data]) ExecuteWithContext(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+) *gent.ExecutionResult {
+	result := &gent.ExecutionResult{
+		Context: execCtx,
 	}
 
-	// Return a shallow copy
-	traceCopy := *e.trace
-	traceCopy.Iterations = make([]gent.IterationTrace, len(e.trace.Iterations))
-	copy(traceCopy.Iterations, e.trace.Iterations)
-	return &traceCopy
+	// Ensure AfterExecution is always called if BeforeExecution succeeded
+	beforeExecutionCalled := false
+	defer func() {
+		if beforeExecutionCalled && e.hooks != nil {
+			event := gent.AfterExecutionEvent{
+				TerminationReason: execCtx.TerminationReason(),
+				Error:             execCtx.Error(),
+			}
+			if hookErr := e.hooks.FireAfterExecution(ctx, execCtx, event); hookErr != nil {
+				e.hooks.FireError(ctx, execCtx, gent.ErrorEvent{
+					Iteration: execCtx.Iteration(),
+					Err:       fmt.Errorf("AfterExecution hook: %w", hookErr),
+				})
+			}
+		}
+	}()
+
+	// BeforeExecution hook
+	if e.hooks != nil {
+		event := gent.BeforeExecutionEvent{}
+		if err := e.hooks.FireBeforeExecution(ctx, execCtx, event); err != nil {
+			result.Error = fmt.Errorf("BeforeExecution hook: %w", err)
+			execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
+			return result
+		}
+	}
+	beforeExecutionCalled = true
+
+	// Main execution loop
+	for {
+		if ctx.Err() != nil {
+			result.Error = ctx.Err()
+			execCtx.SetTermination(gent.TerminationContextCanceled, nil, result.Error)
+			return result
+		}
+
+		if e.config.MaxIterations > 0 && execCtx.Iteration() >= e.config.MaxIterations {
+			result.Error = fmt.Errorf(
+				"%w: exceeded %d iterations",
+				ErrMaxIterationsExceeded,
+				e.config.MaxIterations,
+			)
+			execCtx.SetTermination(gent.TerminationMaxIterations, nil, result.Error)
+			return result
+		}
+
+		execCtx.StartIteration()
+		iterStart := time.Now()
+
+		if e.hooks != nil {
+			event := gent.BeforeIterationEvent{Iteration: execCtx.Iteration()}
+			if err := e.hooks.FireBeforeIteration(ctx, execCtx, event); err != nil {
+				execCtx.EndIteration(gent.LATerminate, time.Since(iterStart))
+				result.Error = fmt.Errorf(
+					"BeforeIteration hook (iteration %d): %w",
+					execCtx.Iteration(),
+					err,
+				)
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
+				return result
+			}
+		}
+
+		loopResult := e.loop.Next(ctx, execCtx)
+		iterDuration := time.Since(iterStart)
+		execCtx.EndIteration(loopResult.Action, iterDuration)
+
+		if e.hooks != nil {
+			event := gent.AfterIterationEvent{
+				Iteration: execCtx.Iteration(),
+				Result:    loopResult,
+				Duration:  iterDuration,
+			}
+			if err := e.hooks.FireAfterIteration(ctx, execCtx, event); err != nil {
+				result.Error = fmt.Errorf(
+					"AfterIteration hook (iteration %d): %w",
+					execCtx.Iteration(),
+					err,
+				)
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
+				return result
+			}
+		}
+
+		if loopResult.Action == gent.LATerminate {
+			result.Result = loopResult.Result
+			execCtx.SetTermination(gent.TerminationSuccess, loopResult.Result, nil)
+			return result
+		}
+	}
 }

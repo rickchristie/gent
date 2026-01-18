@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rickchristie/gent"
 )
@@ -130,7 +131,12 @@ func (c *JSON) RegisterTool(tool any) gent.ToolChain {
 }
 
 // Execute parses tool calls from content and executes them.
-func (c *JSON) Execute(ctx context.Context, content string) (*gent.ToolChainResult, error) {
+// When execCtx is provided, each tool call is automatically traced.
+func (c *JSON) Execute(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	content string,
+) (*gent.ToolChainResult, error) {
 	parsed, err := c.ParseSection(content)
 	if err != nil {
 		return nil, err
@@ -147,16 +153,45 @@ func (c *JSON) Execute(ctx context.Context, content string) (*gent.ToolChainResu
 		tool, ok := c.toolMap[call.Name]
 		if !ok {
 			result.Errors[i] = fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
+			// Trace the failed call if execCtx is provided
+			if execCtx != nil {
+				execCtx.Trace(gent.ToolCallTrace{
+					ToolName: call.Name,
+					Input:    call.Args,
+					Error:    result.Errors[i],
+				})
+			}
 			continue
 		}
 
+		startTime := time.Now()
 		output, err := CallToolReflect(ctx, tool, call.Args)
+		duration := time.Since(startTime)
+
 		if err != nil {
 			result.Errors[i] = err
 		} else {
 			result.Results[i] = output
 		}
+
+		// Automatic tracing if ExecutionContext is provided
+		if execCtx != nil {
+			var outputVal any
+			if output != nil {
+				outputVal = output.Output
+			}
+			execCtx.Trace(gent.ToolCallTrace{
+				ToolName: call.Name,
+				Input:    call.Args,
+				Output:   outputVal,
+				Duration: duration,
+				Error:    err,
+			})
+		}
 	}
 
 	return result, nil
 }
+
+// Compile-time check that JSON implements gent.ToolChain.
+var _ gent.ToolChain = (*JSON)(nil)

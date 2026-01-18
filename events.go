@@ -1,71 +1,65 @@
 package gent
 
-import "github.com/tmc/langchaingo/llms"
+import "time"
+
+// -----------------------------------------------------------------------------
+// Hook Event Interface
+// -----------------------------------------------------------------------------
+
+// HookEvent is a marker interface for all hook events.
+type HookEvent interface {
+	hookEvent()
+}
 
 // -----------------------------------------------------------------------------
 // Executor Events
 // -----------------------------------------------------------------------------
 
 // BeforeExecutionEvent is emitted once before the first iteration begins.
-type BeforeExecutionEvent[Data LoopData] struct {
-	// Data is the initial LoopData provided to Execute.
-	Data Data
-}
+type BeforeExecutionEvent struct{}
+
+func (BeforeExecutionEvent) hookEvent() {}
 
 // AfterExecutionEvent is emitted once after execution terminates.
 type AfterExecutionEvent struct {
-	// Result contains the final execution result.
-	Result *ExecutionResult
-	// Iterations contains trace data for all iterations that were executed.
-	Iterations []IterationTrace
+	// TerminationReason indicates why execution ended.
+	TerminationReason TerminationReason
+
+	// Error is the error if execution failed (nil on success).
+	Error error
 }
 
-// BeforeIterationEvent is emitted before each AgentLoop.Iterate call.
-type BeforeIterationEvent[Data LoopData] struct {
+func (AfterExecutionEvent) hookEvent() {}
+
+// BeforeIterationEvent is emitted before each AgentLoop.Next call.
+type BeforeIterationEvent struct {
 	// Iteration is the current iteration number (1-indexed).
 	Iteration int
-	// Data is the current LoopData.
-	Data Data
 }
 
-// AfterIterationEvent is emitted after each AgentLoop.Iterate call.
-type AfterIterationEvent[Data LoopData] struct {
+func (BeforeIterationEvent) hookEvent() {}
+
+// AfterIterationEvent is emitted after each AgentLoop.Next call.
+type AfterIterationEvent struct {
 	// Iteration is the current iteration number (1-indexed).
 	Iteration int
+
 	// Result is the AgentLoopResult from this iteration.
 	Result *AgentLoopResult
-	// Data is the current LoopData.
-	Data Data
+
+	// Duration is how long this iteration took.
+	Duration time.Duration
 }
+
+func (AfterIterationEvent) hookEvent() {}
 
 // ErrorEvent is emitted when an error occurs during execution.
 type ErrorEvent struct {
 	// Iteration is the iteration where the error occurred (0 if before first iteration).
 	Iteration int
+
 	// Err is the error that occurred.
 	Err error
 }
 
-// -----------------------------------------------------------------------------
-// Model Events
-// -----------------------------------------------------------------------------
-
-// BeforeGenerateContentEvent is emitted before calling Model.GenerateContent.
-type BeforeGenerateContentEvent struct {
-	// Messages is the input messages to be sent to the model.
-	Messages []llms.MessageContent
-	// Options is the resolved call options.
-	Options *llms.CallOptions
-}
-
-// AfterGenerateContentEvent is emitted after Model.GenerateContent returns.
-type AfterGenerateContentEvent struct {
-	// Messages is the input messages that were sent to the model.
-	Messages []llms.MessageContent
-	// Options is the resolved call options.
-	Options *llms.CallOptions
-	// Response is the response from the model (nil if error occurred).
-	Response *ContentResponse
-	// Error is the error returned by the model (nil if successful).
-	Error error
-}
+func (ErrorEvent) hookEvent() {}

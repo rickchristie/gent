@@ -15,9 +15,13 @@ import (
 // Implementations may reuse [ToolChain], [Termination], [TextOutputFormat] or create their own
 // custom logic to handle all of the above.
 //
-// The executor will call [AgentLoop.Iterate] repeatedly until it returns [LATerminate] result.
+// The executor will call [AgentLoop.Next] repeatedly until it returns [LATerminate] result.
 type AgentLoop[Data LoopData] interface {
-	Iterate(ctx context.Context, data LoopData) *AgentLoopResult
+	// Next performs one iteration of the agent loop.
+	// The ExecutionContext provides access to LoopData via execCtx.Data() and enables automatic
+	// tracing. All framework components (Model, ToolChain) will trace automatically when given
+	// the ExecutionContext.
+	Next(ctx context.Context, execCtx *ExecutionContext) *AgentLoopResult
 }
 
 // LoopData is the data that is being passed through each AgentLoop execution. Each AgentLoop
@@ -29,26 +33,27 @@ type LoopData interface {
 	// GetOriginalInput returns the original input provided by the user that started the agent loop.
 	GetOriginalInput() []ContentPart
 
-	// GetIterationHistory returns all [IterationInfo] recorded, including those that may be
+	// GetIterationHistory returns all [Iteration] recorded, including those that may be
 	// compacted away from GetIterations.
-	GetIterationHistory() [][]*IterationInfo
+	GetIterationHistory() []*Iteration
 
-	// AddIterationHistory adds a new [IterationInfo] to the full history only.
-	AddIterationHistory(info *IterationInfo)
+	// AddIterationHistory adds a new [Iteration] to the full history only.
+	AddIterationHistory(iter *Iteration)
 
-	// GetIterations returns all [IterationInfo] recorded, that will be used in next iteration.
+	// GetIterations returns all [Iteration] recorded, that will be used in next iteration.
 	// When compaction happens, some earlier iterations may be removed from this slice, but they
 	// are preserved in GetIterationHistory.
-	GetIterations() [][]*IterationInfo
+	GetIterations() []*Iteration
 
 	// SetIterations sets the iterations to be used in next iteration.
 	// [AgentLoop] implementations are free to call [GetIterations] and modify it how they want,
 	// then call this method to set the modified iterations to be used in the next iteration.
-	SetIterations([][]*IterationInfo)
+	SetIterations([]*Iteration)
 }
 
-type IterationInfo struct {
-	Messages [][]MessageContent
+// Iteration represents a single iteration's message content.
+type Iteration struct {
+	Messages []MessageContent
 }
 
 // MessageContent is wrapper around [llms.MessageContent] used in AgentLoop.

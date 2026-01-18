@@ -1,34 +1,12 @@
 package gent
 
 import (
-	"sync"
 	"time"
 )
 
 // -----------------------------------------------------------------------------
-// Execution Trace
+// Termination Reason
 // -----------------------------------------------------------------------------
-
-// ExecutionTrace stores detailed debug and trace information for an execution run.
-type ExecutionTrace struct {
-	// Iterations contains trace data for each loop iteration.
-	Iterations []IterationTrace
-
-	// StartTime is when execution began.
-	StartTime time.Time
-
-	// EndTime is when execution completed.
-	EndTime time.Time
-
-	// TotalDuration is the total execution time.
-	TotalDuration time.Duration
-
-	// TerminationReason describes why execution ended.
-	TerminationReason TerminationReason
-
-	// FinalIteration is the last iteration number (1-indexed).
-	FinalIteration int
-}
 
 // TerminationReason indicates why execution terminated.
 type TerminationReason string
@@ -50,191 +28,140 @@ const (
 	TerminationHookAbort TerminationReason = "hook_abort"
 )
 
-// IterationTrace stores trace data for a single loop iteration.
-type IterationTrace struct {
-	// Iteration is the iteration number (1-indexed).
+// -----------------------------------------------------------------------------
+// Trace Events
+// -----------------------------------------------------------------------------
+
+// TraceEvent is the marker interface for all trace events.
+type TraceEvent interface {
+	traceEvent() // marker method
+}
+
+// BaseTrace contains common fields auto-populated by ExecutionContext.Trace().
+type BaseTrace struct {
+	// Timestamp is when this event occurred.
+	Timestamp time.Time
+
+	// Iteration is the iteration number when this event occurred (1-indexed).
 	Iteration int
 
-	// StartTime is when this iteration began.
-	StartTime time.Time
-
-	// EndTime is when this iteration completed.
-	EndTime time.Time
-
-	// Duration is how long this iteration took.
-	Duration time.Duration
-
-	// Result is the AgentLoopResult from this iteration.
-	Result *AgentLoopResult
-
-	// Error is any error that occurred during this iteration (nil if successful).
-	Error error
-
-	// Metadata allows AgentLoop implementations to attach custom trace data.
-	// For example, LLM call details, tool call traces, token counts, costs, etc.
-	Metadata map[string]any
+	// Depth is the nesting depth when this event occurred (0 for root).
+	Depth int
 }
+
+func (BaseTrace) traceEvent() {}
 
 // -----------------------------------------------------------------------------
-// Trace Collector
+// Well-Known Trace Types
 // -----------------------------------------------------------------------------
 
-// TraceCollector is a helper that can be attached to LoopData to collect
-// detailed trace information from within the AgentLoop.
-//
-// AgentLoop implementations can use this to record LLM calls, tool calls,
-// token counts, costs, and other detailed information.
-type TraceCollector struct {
-	mu        sync.Mutex
-	llmCalls  []LLMCallTrace
-	toolCalls []ToolCallTrace
-}
-
-// NewTraceCollector creates a new TraceCollector.
-func NewTraceCollector() *TraceCollector {
-	return &TraceCollector{
-		llmCalls:  make([]LLMCallTrace, 0),
-		toolCalls: make([]ToolCallTrace, 0),
-	}
-}
-
-// LLMCallTrace stores trace information for a single LLM API call.
-type LLMCallTrace struct {
-	// StartTime is when the call began.
-	StartTime time.Time
-
-	// EndTime is when the call completed.
-	EndTime time.Time
-
-	// Duration is how long the call took.
-	Duration time.Duration
+// ModelCallTrace records an LLM API call.
+// When traced, auto-updates: TotalInputTokens, TotalOutputTokens, TotalCost, *ByModel maps.
+type ModelCallTrace struct {
+	BaseTrace
 
 	// Model is the model identifier used.
 	Model string
 
-	// PromptTokens is the number of input tokens (if available).
-	PromptTokens int
+	// InputTokens is the number of input/prompt tokens used.
+	InputTokens int
 
-	// CompletionTokens is the number of output tokens (if available).
-	CompletionTokens int
-
-	// TotalTokens is the total token count (if available).
-	TotalTokens int
+	// OutputTokens is the number of output/completion tokens generated.
+	OutputTokens int
 
 	// Cost is the estimated cost in USD (if available).
 	Cost float64
 
-	// Prompt is the input prompt (may be truncated for large prompts).
-	Prompt string
-
-	// Response is the model response (may be truncated for large responses).
-	Response string
+	// Duration is how long the call took.
+	Duration time.Duration
 
 	// Error is any error that occurred (nil if successful).
 	Error error
-
-	// Metadata allows storing additional provider-specific data.
-	Metadata map[string]any
 }
 
-// ToolCallTrace stores trace information for a single tool call.
+func (ModelCallTrace) traceEvent() {}
+
+// ToolCallTrace records a tool execution.
+// When traced, auto-updates: ToolCallCount, ToolCallsByName.
 type ToolCallTrace struct {
-	// StartTime is when the call began.
-	StartTime time.Time
-
-	// EndTime is when the call completed.
-	EndTime time.Time
-
-	// Duration is how long the call took.
-	Duration time.Duration
+	BaseTrace
 
 	// ToolName is the name of the tool that was called.
 	ToolName string
 
 	// Input is the input provided to the tool.
-	Input string
+	Input any
 
 	// Output is the output from the tool.
-	Output string
+	Output any
+
+	// Duration is how long the call took.
+	Duration time.Duration
 
 	// Error is any error that occurred (nil if successful).
 	Error error
-
-	// Metadata allows storing additional tool-specific data.
-	Metadata map[string]any
 }
 
-// RecordLLMCall records an LLM call trace.
-func (tc *TraceCollector) RecordLLMCall(trace LLMCallTrace) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	tc.llmCalls = append(tc.llmCalls, trace)
+func (ToolCallTrace) traceEvent() {}
+
+// IterationStartTrace marks the beginning of an iteration.
+type IterationStartTrace struct {
+	BaseTrace
 }
 
-// RecordToolCall records a tool call trace.
-func (tc *TraceCollector) RecordToolCall(trace ToolCallTrace) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	tc.toolCalls = append(tc.toolCalls, trace)
+func (IterationStartTrace) traceEvent() {}
+
+// IterationEndTrace marks the end of an iteration.
+type IterationEndTrace struct {
+	BaseTrace
+
+	// Duration is how long this iteration took.
+	Duration time.Duration
+
+	// Action is the loop action returned by the AgentLoop.
+	Action LoopAction
 }
 
-// GetLLMCalls returns all recorded LLM call traces.
-func (tc *TraceCollector) GetLLMCalls() []LLMCallTrace {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	result := make([]LLMCallTrace, len(tc.llmCalls))
-	copy(result, tc.llmCalls)
-	return result
+func (IterationEndTrace) traceEvent() {}
+
+// ChildSpawnTrace records when a child ExecutionContext is created.
+type ChildSpawnTrace struct {
+	BaseTrace
+
+	// ChildName is the name of the spawned child context.
+	ChildName string
 }
 
-// GetToolCalls returns all recorded tool call traces.
-func (tc *TraceCollector) GetToolCalls() []ToolCallTrace {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	result := make([]ToolCallTrace, len(tc.toolCalls))
-	copy(result, tc.toolCalls)
-	return result
+func (ChildSpawnTrace) traceEvent() {}
+
+// ChildCompleteTrace records when a child ExecutionContext completes.
+type ChildCompleteTrace struct {
+	BaseTrace
+
+	// ChildName is the name of the completed child context.
+	ChildName string
+
+	// TerminationReason is why the child execution ended.
+	TerminationReason TerminationReason
+
+	// Duration is how long the child execution took.
+	Duration time.Duration
 }
 
-// Clear resets the trace collector for reuse.
-func (tc *TraceCollector) Clear() {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	tc.llmCalls = make([]LLMCallTrace, 0)
-	tc.toolCalls = make([]ToolCallTrace, 0)
+func (ChildCompleteTrace) traceEvent() {}
+
+// CustomTrace allows recording arbitrary trace data for custom AgentLoop implementations.
+type CustomTrace struct {
+	BaseTrace
+
+	// Name identifies this custom trace type.
+	Name string
+
+	// Data contains arbitrary trace data.
+	Data map[string]any
 }
 
-// TotalCost returns the sum of costs from all LLM calls.
-func (tc *TraceCollector) TotalCost() float64 {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	var total float64
-	for _, call := range tc.llmCalls {
-		total += call.Cost
-	}
-	return total
-}
-
-// TotalTokens returns the sum of tokens from all LLM calls.
-func (tc *TraceCollector) TotalTokens() int {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	var total int
-	for _, call := range tc.llmCalls {
-		total += call.TotalTokens
-	}
-	return total
-}
-
-// ToMetadata converts the collector's data to a metadata map suitable for IterationTrace.
-func (tc *TraceCollector) ToMetadata() map[string]any {
-	return map[string]any{
-		"llm_calls":    tc.GetLLMCalls(),
-		"tool_calls":   tc.GetToolCalls(),
-		"total_cost":   tc.TotalCost(),
-		"total_tokens": tc.TotalTokens(),
-	}
-}
+func (CustomTrace) traceEvent() {}
 
 // -----------------------------------------------------------------------------
 // Execution Result
@@ -246,8 +173,8 @@ type ExecutionResult struct {
 	// This is a slice of ContentPart to support multimodal outputs.
 	Result []ContentPart
 
-	// Trace contains detailed execution trace data.
-	Trace *ExecutionTrace
+	// Context is the ExecutionContext with full trace data.
+	Context *ExecutionContext
 
 	// Error is any error that occurred (nil if successful).
 	Error error
