@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -896,6 +897,377 @@ args:
 		})
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Comprehensive Prompt() Tests
+// -----------------------------------------------------------------------------
+
+func TestYAML_Prompt_SchemaWithDescriptions(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"search_flights",
+		"Search for available flights",
+		schema.Object(map[string]*schema.Property{
+			"origin":      schema.String("Origin airport code (IATA)"),
+			"destination": schema.String("Destination airport code (IATA)"),
+			"date":        schema.String("Departure date in YYYY-MM-DD format"),
+		}, "origin", "destination", "date"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify tool name and description
+	if !containsYAML(prompt, "search_flights") {
+		t.Error("expected tool name 'search_flights' in prompt")
+	}
+	if !containsYAML(prompt, "Search for available flights") {
+		t.Error("expected tool description in prompt")
+	}
+
+	// Verify field descriptions are present
+	if !containsYAML(prompt, "Origin airport code (IATA)") {
+		t.Error("expected 'origin' field description in prompt")
+	}
+	if !containsYAML(prompt, "Destination airport code (IATA)") {
+		t.Error("expected 'destination' field description in prompt")
+	}
+	if !containsYAML(prompt, "Departure date in YYYY-MM-DD format") {
+		t.Error("expected 'date' field description in prompt")
+	}
+
+	// Verify type information
+	if !containsYAML(prompt, "type: string") {
+		t.Error("expected type information in prompt")
+	}
+}
+
+func TestYAML_Prompt_SchemaWithRequiredFields(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"create_user",
+		"Create a new user",
+		schema.Object(map[string]*schema.Property{
+			"name":  schema.String("User's full name"),
+			"email": schema.String("User's email address"),
+			"phone": schema.String("User's phone number"),
+		}, "name", "email"), // name and email are required
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify required fields are listed
+	if !containsYAML(prompt, "required:") {
+		t.Error("expected 'required' section in prompt")
+	}
+	if !containsYAML(prompt, "- name") {
+		t.Error("expected 'name' in required list")
+	}
+	if !containsYAML(prompt, "- email") {
+		t.Error("expected 'email' in required list")
+	}
+}
+
+func TestYAML_Prompt_SchemaWithEnumValues(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"book_flight",
+		"Book a flight",
+		schema.Object(map[string]*schema.Property{
+			"class": schema.String("Travel class").Enum("economy", "business", "first"),
+		}),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify enum values are listed
+	if !containsYAML(prompt, "enum:") {
+		t.Error("expected 'enum' section in prompt")
+	}
+	if !containsYAML(prompt, "- economy") {
+		t.Error("expected 'economy' in enum list")
+	}
+	if !containsYAML(prompt, "- business") {
+		t.Error("expected 'business' in enum list")
+	}
+	if !containsYAML(prompt, "- first") {
+		t.Error("expected 'first' in enum list")
+	}
+}
+
+func TestYAML_Prompt_SchemaWithMinMax(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"set_quantity",
+		"Set item quantity",
+		schema.Object(map[string]*schema.Property{
+			"quantity": schema.Integer("Number of items").Min(1).Max(100),
+		}, "quantity"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify min/max constraints
+	if !containsYAML(prompt, "minimum: 1") {
+		t.Error("expected 'minimum: 1' in prompt")
+	}
+	if !containsYAML(prompt, "maximum: 100") {
+		t.Error("expected 'maximum: 100' in prompt")
+	}
+	if !containsYAML(prompt, "type: integer") {
+		t.Error("expected 'type: integer' in prompt")
+	}
+}
+
+func TestYAML_Prompt_SchemaWithDefaultValues(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"search",
+		"Search for items",
+		schema.Object(map[string]*schema.Property{
+			"query": schema.String("Search query"),
+			"limit": schema.Integer("Maximum results").Default(10),
+		}, "query"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify default value
+	if !containsYAML(prompt, "default: 10") {
+		t.Error("expected 'default: 10' in prompt")
+	}
+}
+
+func TestYAML_Prompt_SchemaWithMultipleTypes(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"complex_tool",
+		"A tool with multiple types",
+		schema.Object(map[string]*schema.Property{
+			"name":     schema.String("Name of the item"),
+			"count":    schema.Integer("Number of items"),
+			"price":    schema.Number("Price in dollars"),
+			"active":   schema.Boolean("Whether the item is active"),
+			"tags":     schema.Array("List of tags", map[string]any{"type": "string"}),
+		}, "name"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify all type information
+	if !containsYAML(prompt, "type: string") {
+		t.Error("expected 'type: string' in prompt")
+	}
+	if !containsYAML(prompt, "type: integer") {
+		t.Error("expected 'type: integer' in prompt")
+	}
+	if !containsYAML(prompt, "type: number") {
+		t.Error("expected 'type: number' in prompt")
+	}
+	if !containsYAML(prompt, "type: boolean") {
+		t.Error("expected 'type: boolean' in prompt")
+	}
+	if !containsYAML(prompt, "type: array") {
+		t.Error("expected 'type: array' in prompt")
+	}
+
+	// Verify descriptions
+	if !containsYAML(prompt, "Name of the item") {
+		t.Error("expected string description in prompt")
+	}
+	if !containsYAML(prompt, "Number of items") {
+		t.Error("expected integer description in prompt")
+	}
+	if !containsYAML(prompt, "Price in dollars") {
+		t.Error("expected number description in prompt")
+	}
+	if !containsYAML(prompt, "Whether the item is active") {
+		t.Error("expected boolean description in prompt")
+	}
+	if !containsYAML(prompt, "List of tags") {
+		t.Error("expected array description in prompt")
+	}
+}
+
+func TestYAML_Prompt_MultipleTools(t *testing.T) {
+	tc := NewYAML()
+
+	tool1 := gent.NewToolFunc(
+		"search",
+		"Search for information",
+		schema.Object(map[string]*schema.Property{
+			"query": schema.String("Search query"),
+		}, "query"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+
+	tool2 := gent.NewToolFunc(
+		"calculate",
+		"Perform calculations",
+		schema.Object(map[string]*schema.Property{
+			"expression": schema.String("Mathematical expression"),
+		}, "expression"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+
+	tc.RegisterTool(tool1)
+	tc.RegisterTool(tool2)
+
+	prompt := tc.Prompt()
+
+	// Verify both tools are present
+	if !containsYAML(prompt, "- search:") {
+		t.Error("expected 'search' tool in prompt")
+	}
+	if !containsYAML(prompt, "- calculate:") {
+		t.Error("expected 'calculate' tool in prompt")
+	}
+	if !containsYAML(prompt, "Search for information") {
+		t.Error("expected 'search' tool description in prompt")
+	}
+	if !containsYAML(prompt, "Perform calculations") {
+		t.Error("expected 'calculate' tool description in prompt")
+	}
+	if !containsYAML(prompt, "Search query") {
+		t.Error("expected 'query' field description in prompt")
+	}
+	if !containsYAML(prompt, "Mathematical expression") {
+		t.Error("expected 'expression' field description in prompt")
+	}
+}
+
+func TestYAML_Prompt_ToolWithNoSchema(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"simple_tool",
+		"A simple tool without schema",
+		nil, // No schema
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify tool name and description are present
+	if !containsYAML(prompt, "simple_tool") {
+		t.Error("expected tool name 'simple_tool' in prompt")
+	}
+	if !containsYAML(prompt, "A simple tool without schema") {
+		t.Error("expected tool description in prompt")
+	}
+
+	// Should not have Parameters section since no schema
+	// Note: We only check that it doesn't error; the exact format may vary
+}
+
+func TestYAML_Prompt_SchemaWithStringConstraints(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"validate_input",
+		"Validate user input",
+		schema.Object(map[string]*schema.Property{
+			"username": schema.String("Username").MinLength(3).MaxLength(20),
+			"email":    schema.String("Email address").Format("email"),
+			"code":     schema.String("Verification code").Pattern(`^[A-Z]{2}[0-9]{4}$`),
+		}, "username", "email"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify string constraints
+	if !containsYAML(prompt, "minLength: 3") {
+		t.Error("expected 'minLength: 3' in prompt")
+	}
+	if !containsYAML(prompt, "maxLength: 20") {
+		t.Error("expected 'maxLength: 20' in prompt")
+	}
+	if !containsYAML(prompt, "format: email") {
+		t.Error("expected 'format: email' in prompt")
+	}
+	if !containsYAML(prompt, "pattern:") {
+		t.Error("expected 'pattern' in prompt")
+	}
+}
+
+func TestYAML_Prompt_FormatInstructions(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"test",
+		"Test tool",
+		nil,
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify YAML format instructions
+	if !containsYAML(prompt, "tool: tool_name") {
+		t.Error("expected single tool format instruction")
+	}
+	if !containsYAML(prompt, "args:") {
+		t.Error("expected 'args:' in format instruction")
+	}
+	if !containsYAML(prompt, "param: value") {
+		t.Error("expected 'param: value' in format instruction")
+	}
+	if !containsYAML(prompt, "- tool: tool1") {
+		t.Error("expected array format instruction for parallel calls")
+	}
+	if !containsYAML(prompt, "Available tools:") {
+		t.Error("expected 'Available tools:' header")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Helper functions
+// -----------------------------------------------------------------------------
 
 func containsYAML(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {

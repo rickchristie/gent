@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -777,6 +778,368 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 		})
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Comprehensive Prompt() Tests
+// -----------------------------------------------------------------------------
+
+func TestJSON_Prompt_SchemaWithDescriptions(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"search_flights",
+		"Search for available flights",
+		schema.Object(map[string]*schema.Property{
+			"origin":      schema.String("Origin airport code (IATA)"),
+			"destination": schema.String("Destination airport code (IATA)"),
+			"date":        schema.String("Departure date in YYYY-MM-DD format"),
+		}, "origin", "destination", "date"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify tool name and description
+	if !contains(prompt, "search_flights") {
+		t.Error("expected tool name 'search_flights' in prompt")
+	}
+	if !contains(prompt, "Search for available flights") {
+		t.Error("expected tool description in prompt")
+	}
+
+	// Verify field descriptions are present
+	if !contains(prompt, "Origin airport code (IATA)") {
+		t.Error("expected 'origin' field description in prompt")
+	}
+	if !contains(prompt, "Destination airport code (IATA)") {
+		t.Error("expected 'destination' field description in prompt")
+	}
+	if !contains(prompt, "Departure date in YYYY-MM-DD format") {
+		t.Error("expected 'date' field description in prompt")
+	}
+
+	// Verify type information (JSON format)
+	if !contains(prompt, `"type": "string"`) {
+		t.Error("expected type information in prompt")
+	}
+}
+
+func TestJSON_Prompt_SchemaWithRequiredFields(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"create_user",
+		"Create a new user",
+		schema.Object(map[string]*schema.Property{
+			"name":  schema.String("User's full name"),
+			"email": schema.String("User's email address"),
+			"phone": schema.String("User's phone number"),
+		}, "name", "email"), // name and email are required
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify required fields are listed (JSON format)
+	if !contains(prompt, `"required"`) {
+		t.Error("expected 'required' section in prompt")
+	}
+	if !contains(prompt, `"name"`) {
+		t.Error("expected 'name' in required list")
+	}
+	if !contains(prompt, `"email"`) {
+		t.Error("expected 'email' in required list")
+	}
+}
+
+func TestJSON_Prompt_SchemaWithEnumValues(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"book_flight",
+		"Book a flight",
+		schema.Object(map[string]*schema.Property{
+			"class": schema.String("Travel class").Enum("economy", "business", "first"),
+		}),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify enum values are listed (JSON format)
+	if !contains(prompt, `"enum"`) {
+		t.Error("expected 'enum' section in prompt")
+	}
+	if !contains(prompt, `"economy"`) {
+		t.Error("expected 'economy' in enum list")
+	}
+	if !contains(prompt, `"business"`) {
+		t.Error("expected 'business' in enum list")
+	}
+	if !contains(prompt, `"first"`) {
+		t.Error("expected 'first' in enum list")
+	}
+}
+
+func TestJSON_Prompt_SchemaWithMinMax(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"set_quantity",
+		"Set item quantity",
+		schema.Object(map[string]*schema.Property{
+			"quantity": schema.Integer("Number of items").Min(1).Max(100),
+		}, "quantity"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify min/max constraints (JSON format)
+	if !contains(prompt, `"minimum": 1`) {
+		t.Error("expected '\"minimum\": 1' in prompt")
+	}
+	if !contains(prompt, `"maximum": 100`) {
+		t.Error("expected '\"maximum\": 100' in prompt")
+	}
+	if !contains(prompt, `"type": "integer"`) {
+		t.Error("expected '\"type\": \"integer\"' in prompt")
+	}
+}
+
+func TestJSON_Prompt_SchemaWithDefaultValues(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"search",
+		"Search for items",
+		schema.Object(map[string]*schema.Property{
+			"query": schema.String("Search query"),
+			"limit": schema.Integer("Maximum results").Default(10),
+		}, "query"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify default value (JSON format)
+	if !contains(prompt, `"default": 10`) {
+		t.Error("expected '\"default\": 10' in prompt")
+	}
+}
+
+func TestJSON_Prompt_SchemaWithMultipleTypes(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"complex_tool",
+		"A tool with multiple types",
+		schema.Object(map[string]*schema.Property{
+			"name":   schema.String("Name of the item"),
+			"count":  schema.Integer("Number of items"),
+			"price":  schema.Number("Price in dollars"),
+			"active": schema.Boolean("Whether the item is active"),
+			"tags":   schema.Array("List of tags", map[string]any{"type": "string"}),
+		}, "name"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify all type information (JSON format)
+	if !contains(prompt, `"type": "string"`) {
+		t.Error("expected '\"type\": \"string\"' in prompt")
+	}
+	if !contains(prompt, `"type": "integer"`) {
+		t.Error("expected '\"type\": \"integer\"' in prompt")
+	}
+	if !contains(prompt, `"type": "number"`) {
+		t.Error("expected '\"type\": \"number\"' in prompt")
+	}
+	if !contains(prompt, `"type": "boolean"`) {
+		t.Error("expected '\"type\": \"boolean\"' in prompt")
+	}
+	if !contains(prompt, `"type": "array"`) {
+		t.Error("expected '\"type\": \"array\"' in prompt")
+	}
+
+	// Verify descriptions
+	if !contains(prompt, "Name of the item") {
+		t.Error("expected string description in prompt")
+	}
+	if !contains(prompt, "Number of items") {
+		t.Error("expected integer description in prompt")
+	}
+	if !contains(prompt, "Price in dollars") {
+		t.Error("expected number description in prompt")
+	}
+	if !contains(prompt, "Whether the item is active") {
+		t.Error("expected boolean description in prompt")
+	}
+	if !contains(prompt, "List of tags") {
+		t.Error("expected array description in prompt")
+	}
+}
+
+func TestJSON_Prompt_MultipleTools(t *testing.T) {
+	tc := NewJSON()
+
+	tool1 := gent.NewToolFunc(
+		"search",
+		"Search for information",
+		schema.Object(map[string]*schema.Property{
+			"query": schema.String("Search query"),
+		}, "query"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+
+	tool2 := gent.NewToolFunc(
+		"calculate",
+		"Perform calculations",
+		schema.Object(map[string]*schema.Property{
+			"expression": schema.String("Mathematical expression"),
+		}, "expression"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+
+	tc.RegisterTool(tool1)
+	tc.RegisterTool(tool2)
+
+	prompt := tc.Prompt()
+
+	// Verify both tools are present
+	if !contains(prompt, "- search:") {
+		t.Error("expected 'search' tool in prompt")
+	}
+	if !contains(prompt, "- calculate:") {
+		t.Error("expected 'calculate' tool in prompt")
+	}
+	if !contains(prompt, "Search for information") {
+		t.Error("expected 'search' tool description in prompt")
+	}
+	if !contains(prompt, "Perform calculations") {
+		t.Error("expected 'calculate' tool description in prompt")
+	}
+	if !contains(prompt, "Search query") {
+		t.Error("expected 'query' field description in prompt")
+	}
+	if !contains(prompt, "Mathematical expression") {
+		t.Error("expected 'expression' field description in prompt")
+	}
+}
+
+func TestJSON_Prompt_ToolWithNoSchema(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"simple_tool",
+		"A simple tool without schema",
+		nil, // No schema
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify tool name and description are present
+	if !contains(prompt, "simple_tool") {
+		t.Error("expected tool name 'simple_tool' in prompt")
+	}
+	if !contains(prompt, "A simple tool without schema") {
+		t.Error("expected tool description in prompt")
+	}
+}
+
+func TestJSON_Prompt_SchemaWithStringConstraints(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"validate_input",
+		"Validate user input",
+		schema.Object(map[string]*schema.Property{
+			"username": schema.String("Username").MinLength(3).MaxLength(20),
+			"email":    schema.String("Email address").Format("email"),
+			"code":     schema.String("Verification code").Pattern(`^[A-Z]{2}[0-9]{4}$`),
+		}, "username", "email"),
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify string constraints (JSON format)
+	if !contains(prompt, `"minLength": 3`) {
+		t.Error("expected '\"minLength\": 3' in prompt")
+	}
+	if !contains(prompt, `"maxLength": 20`) {
+		t.Error("expected '\"maxLength\": 20' in prompt")
+	}
+	if !contains(prompt, `"format": "email"`) {
+		t.Error("expected '\"format\": \"email\"' in prompt")
+	}
+	if !contains(prompt, `"pattern"`) {
+		t.Error("expected 'pattern' in prompt")
+	}
+}
+
+func TestJSON_Prompt_FormatInstructions(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"test",
+		"Test tool",
+		nil,
+		func(ctx context.Context, input map[string]any) (string, error) {
+			return "ok", nil
+		},
+		nil,
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	// Verify JSON format instructions
+	if !contains(prompt, `{"tool": "tool_name", "args": {...}}`) {
+		t.Error("expected single tool format instruction")
+	}
+	if !contains(prompt, `[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]`) {
+		t.Error("expected array format instruction for parallel calls")
+	}
+	if !contains(prompt, "Available tools:") {
+		t.Error("expected 'Available tools:' header")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Helper functions
+// -----------------------------------------------------------------------------
 
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
