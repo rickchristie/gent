@@ -43,18 +43,25 @@ func TestRescheduleScenario(t *testing.T) {
 	}
 	model := models.NewLCGWrapper(llm).WithModelName("grok-4-1-fast")
 
-	// Create toolchain and register all airline tools
+	// Create the airline fixture with dynamic dates
+	fixture := NewAirlineFixture(nil) // Uses DefaultTimeProvider
+
+	// Create toolchain and register all airline tools from the fixture
 	tc := toolchain.NewYAML()
-	RegisterAllTools(tc)
+	fixture.RegisterAllTools(tc)
 
 	// Create the ReAct loop with airline customer service context
+	// Include today's date so the LLM has consistent date context
 	loop := agents.NewReactLoop(model).
 		WithToolChain(tc).
+		WithTimeProvider(fixture.TimeProvider()).
 		WithSystemPrompt(`## Task Description
 
 You are a helpful airline customer service agent for SkyWings Airlines.
 Your role is to assist customers with their flight bookings, including checking flight information,
 rescheduling flights, and answering policy questions.
+
+Today is {{.Time.Today}} ({{.Time.Weekday}}).
 
 Always be polite and professional. When rescheduling, make sure to:
 1. Verify the customer's identity and booking

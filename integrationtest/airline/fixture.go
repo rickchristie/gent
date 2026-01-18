@@ -10,7 +10,7 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// Mock Data Types
+// Data Types
 // -----------------------------------------------------------------------------
 
 type Customer struct {
@@ -114,184 +114,297 @@ type SendNotificationInput struct {
 }
 
 // -----------------------------------------------------------------------------
-// Mock Data Store
+// Tool Result Types
 // -----------------------------------------------------------------------------
 
-var mockCustomers = map[string]*Customer{
-	"C001": {
-		ID:            "C001",
-		Name:          "John Smith",
-		Email:         "john.smith@email.com",
-		Phone:         "+1-555-0123",
-		FrequentFlyer: "gold",
-		BookingIDs:    []string{"BK001", "BK002"},
-	},
-	"C002": {
-		ID:            "C002",
-		Name:          "Sarah Johnson",
-		Email:         "sarah.j@email.com",
-		Phone:         "+1-555-0456",
-		FrequentFlyer: "platinum",
-		BookingIDs:    []string{"BK003"},
-	},
+// RescheduleBookingResult is the result of rescheduling a booking.
+type RescheduleBookingResult struct {
+	Success        bool    `json:"success"`
+	OldFlightNum   string  `json:"old_flight_number"`
+	NewFlightNum   string  `json:"new_flight_number"`
+	NewSeatNumber  string  `json:"new_seat_number"`
+	ChangeFee      float64 `json:"change_fee"`
+	FareDifference float64 `json:"fare_difference"`
+	TotalCharge    float64 `json:"total_charge"`
+	Message        string  `json:"message"`
 }
 
-var mockFlights = map[string]*Flight{
-	"AA100": {
-		FlightNumber:    "AA100",
-		Origin:          "JFK",
-		Destination:     "LAX",
-		DepartureTime:   time.Date(2025, 2, 15, 8, 0, 0, 0, time.UTC),
-		ArrivalTime:     time.Date(2025, 2, 15, 11, 30, 0, 0, time.UTC),
-		Aircraft:        "Boeing 777",
-		Status:          "scheduled",
-		AvailableSeats:  45,
-		EconomyPrice:    299.00,
-		BusinessPrice:   899.00,
-		FirstClassPrice: 1599.00,
-	},
-	"AA101": {
-		FlightNumber:    "AA101",
-		Origin:          "JFK",
-		Destination:     "LAX",
-		DepartureTime:   time.Date(2025, 2, 15, 14, 0, 0, 0, time.UTC),
-		ArrivalTime:     time.Date(2025, 2, 15, 17, 30, 0, 0, time.UTC),
-		Aircraft:        "Airbus A320",
-		Status:          "scheduled",
-		AvailableSeats:  23,
-		EconomyPrice:    329.00,
-		BusinessPrice:   949.00,
-		FirstClassPrice: 1699.00,
-	},
-	"AA102": {
-		FlightNumber:    "AA102",
-		Origin:          "JFK",
-		Destination:     "LAX",
-		DepartureTime:   time.Date(2025, 2, 15, 20, 0, 0, 0, time.UTC),
-		ArrivalTime:     time.Date(2025, 2, 15, 23, 30, 0, 0, time.UTC),
-		Aircraft:        "Boeing 787",
-		Status:          "scheduled",
-		AvailableSeats:  67,
-		EconomyPrice:    279.00,
-		BusinessPrice:   849.00,
-		FirstClassPrice: 1499.00,
-	},
-	"AA200": {
-		FlightNumber:    "AA200",
-		Origin:          "JFK",
-		Destination:     "LAX",
-		DepartureTime:   time.Date(2025, 2, 16, 9, 0, 0, 0, time.UTC),
-		ArrivalTime:     time.Date(2025, 2, 16, 12, 30, 0, 0, time.UTC),
-		Aircraft:        "Boeing 777",
-		Status:          "scheduled",
-		AvailableSeats:  89,
-		EconomyPrice:    269.00,
-		BusinessPrice:   799.00,
-		FirstClassPrice: 1399.00,
-	},
+// CancelBookingResult is the result of cancelling a booking.
+type CancelBookingResult struct {
+	Success      bool    `json:"success"`
+	BookingID    string  `json:"booking_id"`
+	RefundAmount float64 `json:"refund_amount"`
+	RefundType   string  `json:"refund_type"` // cash, credit
+	Message      string  `json:"message"`
 }
 
-var mockBookings = map[string]*Booking{
-	"BK001": {
-		BookingID:      "BK001",
-		CustomerID:     "C001",
-		FlightNumber:   "AA100",
-		SeatNumber:     "12A",
-		Class:          "economy",
-		Status:         "confirmed",
-		BookingDate:    time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC),
-		TotalPrice:     299.00,
-		MealPreference: "vegetarian",
-	},
-	"BK002": {
-		BookingID:      "BK002",
-		CustomerID:     "C001",
-		FlightNumber:   "AA200",
-		SeatNumber:     "3C",
-		Class:          "business",
-		Status:         "confirmed",
-		BookingDate:    time.Date(2025, 1, 12, 0, 0, 0, 0, time.UTC),
-		TotalPrice:     799.00,
-		MealPreference: "regular",
-	},
-	"BK003": {
-		BookingID:      "BK003",
-		CustomerID:     "C002",
-		FlightNumber:   "AA101",
-		SeatNumber:     "1A",
-		Class:          "first",
-		Status:         "confirmed",
-		BookingDate:    time.Date(2025, 1, 8, 0, 0, 0, 0, time.UTC),
-		TotalPrice:     1699.00,
-		MealPreference: "kosher",
-	},
+// SendNotificationResult is the result of sending a notification.
+type SendNotificationResult struct {
+	Success bool   `json:"success"`
+	Method  string `json:"method"`
+	Message string `json:"message"`
 }
 
-var mockSeats = map[string][]Seat{
-	"AA100": {
-		{SeatNumber: "1A", Class: "first", IsAvailable: false, IsWindow: true, IsAisle: false, HasExtraLeg: true},
-		{SeatNumber: "1B", Class: "first", IsAvailable: true, IsWindow: false, IsAisle: true, HasExtraLeg: true},
-		{SeatNumber: "2A", Class: "first", IsAvailable: true, IsWindow: true, IsAisle: false, HasExtraLeg: true},
-		{SeatNumber: "3A", Class: "business", IsAvailable: true, IsWindow: true, IsAisle: false, HasExtraLeg: true},
-		{SeatNumber: "3C", Class: "business", IsAvailable: false, IsWindow: false, IsAisle: true, HasExtraLeg: true},
-		{SeatNumber: "10A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false, HasExtraLeg: false},
-		{SeatNumber: "10B", Class: "economy", IsAvailable: true, IsWindow: false, IsAisle: false, HasExtraLeg: false},
-		{SeatNumber: "10C", Class: "economy", IsAvailable: false, IsWindow: false, IsAisle: true, HasExtraLeg: false},
-		{SeatNumber: "12A", Class: "economy", IsAvailable: false, IsWindow: true, IsAisle: false, HasExtraLeg: false},
-		{SeatNumber: "15A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false, HasExtraLeg: true},
-		{SeatNumber: "15C", Class: "economy", IsAvailable: true, IsWindow: false, IsAisle: true, HasExtraLeg: true},
-	},
-	"AA101": {
-		{SeatNumber: "1A", Class: "first", IsAvailable: false, IsWindow: true, IsAisle: false, HasExtraLeg: true},
-		{SeatNumber: "1B", Class: "first", IsAvailable: true, IsWindow: false, IsAisle: true, HasExtraLeg: true},
-		{SeatNumber: "5A", Class: "business", IsAvailable: true, IsWindow: true, IsAisle: false, HasExtraLeg: true},
-		{SeatNumber: "5C", Class: "business", IsAvailable: true, IsWindow: false, IsAisle: true, HasExtraLeg: true},
-		{SeatNumber: "20A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false, HasExtraLeg: false},
-	},
+// -----------------------------------------------------------------------------
+// AirlineFixture
+// -----------------------------------------------------------------------------
+
+// AirlineFixture provides a complete airline mock environment with dynamic dates.
+// All dates in the mock data are calculated relative to "today" from the TimeProvider,
+// ensuring consistent behavior in LLM integration tests regardless of when they run.
+type AirlineFixture struct {
+	timeProvider gent.TimeProvider
+
+	// Instance data - not shared across fixtures
+	customers map[string]*Customer
+	flights   map[string]*Flight
+	bookings  map[string]*Booking
+	seats     map[string][]Seat
+	policies  []Policy
 }
 
-var mockPolicies = []Policy{
-	{
-		Title: "Flight Change and Rescheduling Policy",
-		Content: `Customers may change or reschedule their flights subject to the following:
+// NewAirlineFixture creates a new AirlineFixture with dynamic dates.
+// If tp is nil, uses gent.DefaultTimeProvider.
+func NewAirlineFixture(tp gent.TimeProvider) *AirlineFixture {
+	if tp == nil {
+		tp = gent.NewDefaultTimeProvider()
+	}
+
+	f := &AirlineFixture{
+		timeProvider: tp,
+		customers:    make(map[string]*Customer),
+		flights:      make(map[string]*Flight),
+		bookings:     make(map[string]*Booking),
+		seats:        make(map[string][]Seat),
+	}
+
+	f.initializeData()
+	return f
+}
+
+// TimeProvider returns the fixture's time provider.
+func (f *AirlineFixture) TimeProvider() gent.TimeProvider {
+	return f.timeProvider
+}
+
+// Today returns the fixture's current date for reference.
+func (f *AirlineFixture) Today() time.Time {
+	return f.timeProvider.Now()
+}
+
+// initializeData populates all mock data with dynamic dates.
+func (f *AirlineFixture) initializeData() {
+	now := f.timeProvider.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Tomorrow's flights
+	tomorrow := today.AddDate(0, 0, 1)
+	// Day after tomorrow's flights
+	dayAfterTomorrow := today.AddDate(0, 0, 2)
+
+	// Booking dates (in the past)
+	fiveDaysAgo := today.AddDate(0, 0, -5)
+	threeDaysAgo := today.AddDate(0, 0, -3)
+	sevenDaysAgo := today.AddDate(0, 0, -7)
+
+	// Initialize customers
+	f.customers = map[string]*Customer{
+		"C001": {
+			ID:            "C001",
+			Name:          "John Smith",
+			Email:         "john.smith@email.com",
+			Phone:         "+1-555-0123",
+			FrequentFlyer: "gold",
+			BookingIDs:    []string{"BK001", "BK002"},
+		},
+		"C002": {
+			ID:            "C002",
+			Name:          "Sarah Johnson",
+			Email:         "sarah.j@email.com",
+			Phone:         "+1-555-0456",
+			FrequentFlyer: "platinum",
+			BookingIDs:    []string{"BK003"},
+		},
+	}
+
+	// Initialize flights with dynamic dates
+	// Tomorrow's flights: AA100 (morning), AA101 (afternoon), AA102 (evening)
+	f.flights = map[string]*Flight{
+		"AA100": {
+			FlightNumber:    "AA100",
+			Origin:          "JFK",
+			Destination:     "LAX",
+			DepartureTime:   tomorrow.Add(8 * time.Hour),  // 8:00 AM
+			ArrivalTime:     tomorrow.Add(11*time.Hour + 30*time.Minute),
+			Aircraft:        "Boeing 777",
+			Status:          "scheduled",
+			AvailableSeats:  45,
+			EconomyPrice:    299.00,
+			BusinessPrice:   899.00,
+			FirstClassPrice: 1599.00,
+		},
+		"AA101": {
+			FlightNumber:    "AA101",
+			Origin:          "JFK",
+			Destination:     "LAX",
+			DepartureTime:   tomorrow.Add(14 * time.Hour), // 2:00 PM
+			ArrivalTime:     tomorrow.Add(17*time.Hour + 30*time.Minute),
+			Aircraft:        "Airbus A320",
+			Status:          "scheduled",
+			AvailableSeats:  23,
+			EconomyPrice:    329.00,
+			BusinessPrice:   949.00,
+			FirstClassPrice: 1699.00,
+		},
+		"AA102": {
+			FlightNumber:    "AA102",
+			Origin:          "JFK",
+			Destination:     "LAX",
+			DepartureTime:   tomorrow.Add(20 * time.Hour), // 8:00 PM
+			ArrivalTime:     tomorrow.Add(23*time.Hour + 30*time.Minute),
+			Aircraft:        "Boeing 787",
+			Status:          "scheduled",
+			AvailableSeats:  67,
+			EconomyPrice:    279.00,
+			BusinessPrice:   849.00,
+			FirstClassPrice: 1499.00,
+		},
+		"AA200": {
+			FlightNumber:    "AA200",
+			Origin:          "JFK",
+			Destination:     "LAX",
+			DepartureTime:   dayAfterTomorrow.Add(9 * time.Hour), // 9:00 AM
+			ArrivalTime:     dayAfterTomorrow.Add(12*time.Hour + 30*time.Minute),
+			Aircraft:        "Boeing 777",
+			Status:          "scheduled",
+			AvailableSeats:  89,
+			EconomyPrice:    269.00,
+			BusinessPrice:   799.00,
+			FirstClassPrice: 1399.00,
+		},
+	}
+
+	// Initialize bookings with dynamic dates
+	f.bookings = map[string]*Booking{
+		"BK001": {
+			BookingID:      "BK001",
+			CustomerID:     "C001",
+			FlightNumber:   "AA100",
+			SeatNumber:     "12A",
+			Class:          "economy",
+			Status:         "confirmed",
+			BookingDate:    fiveDaysAgo,
+			TotalPrice:     299.00,
+			MealPreference: "vegetarian",
+		},
+		"BK002": {
+			BookingID:      "BK002",
+			CustomerID:     "C001",
+			FlightNumber:   "AA200",
+			SeatNumber:     "3C",
+			Class:          "business",
+			Status:         "confirmed",
+			BookingDate:    threeDaysAgo,
+			TotalPrice:     799.00,
+			MealPreference: "regular",
+		},
+		"BK003": {
+			BookingID:      "BK003",
+			CustomerID:     "C002",
+			FlightNumber:   "AA101",
+			SeatNumber:     "1A",
+			Class:          "first",
+			Status:         "confirmed",
+			BookingDate:    sevenDaysAgo,
+			TotalPrice:     1699.00,
+			MealPreference: "kosher",
+		},
+	}
+
+	// Initialize seats (static, not date-dependent)
+	f.seats = map[string][]Seat{
+		"AA100": {
+			{SeatNumber: "1A", Class: "first", IsAvailable: false, IsWindow: true, IsAisle: false,
+				HasExtraLeg: true},
+			{SeatNumber: "1B", Class: "first", IsAvailable: true, IsWindow: false, IsAisle: true,
+				HasExtraLeg: true},
+			{SeatNumber: "2A", Class: "first", IsAvailable: true, IsWindow: true, IsAisle: false,
+				HasExtraLeg: true},
+			{SeatNumber: "3A", Class: "business", IsAvailable: true, IsWindow: true, IsAisle: false,
+				HasExtraLeg: true},
+			{SeatNumber: "3C", Class: "business", IsAvailable: false, IsWindow: false, IsAisle: true,
+				HasExtraLeg: true},
+			{SeatNumber: "10A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false,
+				HasExtraLeg: false},
+			{SeatNumber: "10B", Class: "economy", IsAvailable: true, IsWindow: false, IsAisle: false,
+				HasExtraLeg: false},
+			{SeatNumber: "10C", Class: "economy", IsAvailable: false, IsWindow: false, IsAisle: true,
+				HasExtraLeg: false},
+			{SeatNumber: "12A", Class: "economy", IsAvailable: false, IsWindow: true, IsAisle: false,
+				HasExtraLeg: false},
+			{SeatNumber: "15A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false,
+				HasExtraLeg: true},
+			{SeatNumber: "15C", Class: "economy", IsAvailable: true, IsWindow: false, IsAisle: true,
+				HasExtraLeg: true},
+		},
+		"AA101": {
+			{SeatNumber: "1A", Class: "first", IsAvailable: false, IsWindow: true, IsAisle: false,
+				HasExtraLeg: true},
+			{SeatNumber: "1B", Class: "first", IsAvailable: true, IsWindow: false, IsAisle: true,
+				HasExtraLeg: true},
+			{SeatNumber: "5A", Class: "business", IsAvailable: true, IsWindow: true, IsAisle: false,
+				HasExtraLeg: true},
+			{SeatNumber: "5C", Class: "business", IsAvailable: true, IsWindow: false, IsAisle: true,
+				HasExtraLeg: true},
+			{SeatNumber: "20A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false,
+				HasExtraLeg: false},
+		},
+	}
+
+	// Initialize policies (static, not date-dependent)
+	f.policies = []Policy{
+		{
+			Title: "Flight Change and Rescheduling Policy",
+			Content: `Customers may change or reschedule their flights subject to the following:
 - Changes made 24+ hours before departure: $50 change fee for economy, free for business/first class
 - Changes made within 24 hours: $150 change fee for economy, $75 for business, free for first class
 - Gold and Platinum frequent flyers receive one free change per booking
 - Fare difference applies if new flight is more expensive
 - If new flight is cheaper, difference is provided as travel credit`,
-	},
-	{
-		Title: "Cancellation and Refund Policy",
-		Content: `Cancellation terms vary by ticket type:
+		},
+		{
+			Title: "Cancellation and Refund Policy",
+			Content: `Cancellation terms vary by ticket type:
 - Refundable tickets: Full refund minus $25 processing fee
 - Non-refundable tickets: Travel credit minus $100 fee
 - Within 24 hours of booking: Full refund regardless of ticket type
 - Cancellations due to airline: Full refund plus compensation`,
-	},
-	{
-		Title: "Baggage Policy",
-		Content: `Baggage allowance by class:
+		},
+		{
+			Title: "Baggage Policy",
+			Content: `Baggage allowance by class:
 - Economy: 1 carry-on (22x14x9 in), 1 checked bag (50 lbs) - $35 for 2nd bag
 - Business: 2 carry-ons, 2 checked bags (70 lbs each) included
 - First Class: 2 carry-ons, 3 checked bags (70 lbs each) included
 - Overweight bags: $75 per bag over limit`,
-	},
-	{
-		Title: "Frequent Flyer Benefits",
-		Content: `Tier benefits:
+		},
+		{
+			Title: "Frequent Flyer Benefits",
+			Content: `Tier benefits:
 - Bronze: Priority boarding, 10% bonus miles
 - Silver: Priority boarding, lounge access on international, 25% bonus miles
 - Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
 - Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles`,
-	},
+		},
+	}
 }
 
 // -----------------------------------------------------------------------------
-// Tool Implementations
+// Tool Methods
 // -----------------------------------------------------------------------------
 
-// GetCustomerInfoTool returns a tool that retrieves customer information by ID or email.
-func GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInput, *Customer] {
+// GetCustomerInfoTool returns a tool that retrieves customer information.
+func (f *AirlineFixture) GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInput, *Customer] {
 	return gent.NewToolFunc(
 		"get_customer_info",
 		"Retrieve customer information by customer ID or email address",
@@ -301,13 +414,13 @@ func GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInput, *Customer] {
 		}),
 		func(ctx context.Context, input GetCustomerInfoInput) (*Customer, error) {
 			if input.CustomerID != "" {
-				if customer, exists := mockCustomers[input.CustomerID]; exists {
+				if customer, exists := f.customers[input.CustomerID]; exists {
 					return customer, nil
 				}
 				return nil, fmt.Errorf("customer not found with ID: %s", input.CustomerID)
 			}
 			if input.Email != "" {
-				for _, customer := range mockCustomers {
+				for _, customer := range f.customers {
 					if customer.Email == input.Email {
 						return customer, nil
 					}
@@ -321,7 +434,7 @@ func GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInput, *Customer] {
 }
 
 // GetBookingInfoTool returns a tool that retrieves booking details.
-func GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput, *Booking] {
+func (f *AirlineFixture) GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput, *Booking] {
 	return gent.NewToolFunc(
 		"get_booking_info",
 		"Retrieve booking details by booking ID",
@@ -332,7 +445,7 @@ func GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput, *Booking] {
 			if input.BookingID == "" {
 				return nil, fmt.Errorf("booking_id is required")
 			}
-			if booking, exists := mockBookings[input.BookingID]; exists {
+			if booking, exists := f.bookings[input.BookingID]; exists {
 				return booking, nil
 			}
 			return nil, fmt.Errorf("booking not found: %s", input.BookingID)
@@ -342,7 +455,7 @@ func GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput, *Booking] {
 }
 
 // GetFlightInfoTool returns a tool that retrieves flight information.
-func GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, *Flight] {
+func (f *AirlineFixture) GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, *Flight] {
 	return gent.NewToolFunc(
 		"get_flight_info",
 		"Retrieve flight information by flight number",
@@ -353,7 +466,7 @@ func GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, *Flight] {
 			if input.FlightNumber == "" {
 				return nil, fmt.Errorf("flight_number is required")
 			}
-			if flight, exists := mockFlights[input.FlightNumber]; exists {
+			if flight, exists := f.flights[input.FlightNumber]; exists {
 				return flight, nil
 			}
 			return nil, fmt.Errorf("flight not found: %s", input.FlightNumber)
@@ -363,7 +476,7 @@ func GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, *Flight] {
 }
 
 // GetFlightSeatsInfoTool returns a tool that retrieves seat availability for a flight.
-func GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsInfoInput, []Seat] {
+func (f *AirlineFixture) GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsInfoInput, []Seat] {
 	return gent.NewToolFunc(
 		"get_flight_seats_info",
 		"Retrieve seat availability and details for a specific flight",
@@ -376,7 +489,7 @@ func GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsInfoInput, []Seat] {
 			if input.FlightNumber == "" {
 				return nil, fmt.Errorf("flight_number is required")
 			}
-			seats, exists := mockSeats[input.FlightNumber]
+			seats, exists := f.seats[input.FlightNumber]
 			if !exists {
 				return nil, fmt.Errorf("no seat data for flight: %s", input.FlightNumber)
 			}
@@ -398,7 +511,7 @@ func GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsInfoInput, []Seat] {
 }
 
 // SearchAirlinePolicyTool returns a tool that searches airline policies.
-func SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlinePolicyInput, []Policy] {
+func (f *AirlineFixture) SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlinePolicyInput, []Policy] {
 	return gent.NewToolFunc(
 		"search_airline_policy",
 		"Search airline policies by keyword (e.g., 'cancellation', 'baggage', 'change')",
@@ -411,7 +524,7 @@ func SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlinePolicyInput, []Policy
 			}
 
 			var results []Policy
-			for _, policy := range mockPolicies {
+			for _, policy := range f.policies {
 				if containsIgnoreCase(policy.Title, input.Keyword) ||
 					containsIgnoreCase(policy.Content, input.Keyword) {
 					results = append(results, policy)
@@ -427,7 +540,7 @@ func SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlinePolicyInput, []Policy
 }
 
 // SearchFlightScheduleTool returns a tool that searches for available flights.
-func SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Flight] {
+func (f *AirlineFixture) SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Flight] {
 	return gent.NewToolFunc(
 		"search_flight_schedule",
 		"Search for available flights between two airports on a specific date",
@@ -447,7 +560,7 @@ func SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Fli
 			}
 
 			var results []*Flight
-			for _, flight := range mockFlights {
+			for _, flight := range f.flights {
 				if flight.Origin == input.Origin && flight.Destination == input.Destination {
 					flightDate := flight.DepartureTime.Truncate(24 * time.Hour)
 					searchDate := date.Truncate(24 * time.Hour)
@@ -466,20 +579,9 @@ func SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Fli
 	)
 }
 
-// RescheduleBookingResult is the result of rescheduling a booking.
-type RescheduleBookingResult struct {
-	Success        bool    `json:"success"`
-	OldFlightNum   string  `json:"old_flight_number"`
-	NewFlightNum   string  `json:"new_flight_number"`
-	NewSeatNumber  string  `json:"new_seat_number"`
-	ChangeFee      float64 `json:"change_fee"`
-	FareDifference float64 `json:"fare_difference"`
-	TotalCharge    float64 `json:"total_charge"`
-	Message        string  `json:"message"`
-}
-
 // RescheduleBookingTool returns a tool that reschedules a booking to a new flight.
-func RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput, *RescheduleBookingResult] {
+func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput,
+	*RescheduleBookingResult] {
 	return gent.NewToolFunc(
 		"reschedule_booking",
 		"Reschedule an existing booking to a different flight",
@@ -489,12 +591,12 @@ func RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput, *RescheduleB
 			"new_seat_number":   schema.String("The desired seat on the new flight (optional)"),
 		}, "booking_id", "new_flight_number"),
 		func(ctx context.Context, input RescheduleBookingInput) (*RescheduleBookingResult, error) {
-			booking, exists := mockBookings[input.BookingID]
+			booking, exists := f.bookings[input.BookingID]
 			if !exists {
 				return nil, fmt.Errorf("booking not found: %s", input.BookingID)
 			}
 
-			newFlight, exists := mockFlights[input.NewFlightNumber]
+			newFlight, exists := f.flights[input.NewFlightNumber]
 			if !exists {
 				return nil, fmt.Errorf("flight not found: %s", input.NewFlightNumber)
 			}
@@ -504,7 +606,7 @@ func RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput, *RescheduleB
 			}
 
 			// Calculate fees based on class and frequent flyer status
-			customer := mockCustomers[booking.CustomerID]
+			customer := f.customers[booking.CustomerID]
 			changeFee := 50.0
 			if booking.Class == "business" {
 				changeFee = 0
@@ -518,7 +620,7 @@ func RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput, *RescheduleB
 
 			// Calculate fare difference
 			var oldPrice, newPrice float64
-			oldFlight := mockFlights[booking.FlightNumber]
+			oldFlight := f.flights[booking.FlightNumber]
 			switch booking.Class {
 			case "economy":
 				oldPrice = oldFlight.EconomyPrice
@@ -564,17 +666,8 @@ func RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput, *RescheduleB
 	)
 }
 
-// CancelBookingResult is the result of cancelling a booking.
-type CancelBookingResult struct {
-	Success      bool    `json:"success"`
-	BookingID    string  `json:"booking_id"`
-	RefundAmount float64 `json:"refund_amount"`
-	RefundType   string  `json:"refund_type"` // cash, credit
-	Message      string  `json:"message"`
-}
-
 // CancelBookingTool returns a tool that cancels a booking.
-func CancelBookingTool() *gent.ToolFunc[CancelBookingInput, *CancelBookingResult] {
+func (f *AirlineFixture) CancelBookingTool() *gent.ToolFunc[CancelBookingInput, *CancelBookingResult] {
 	return gent.NewToolFunc(
 		"cancel_booking",
 		"Cancel an existing booking and process refund",
@@ -583,7 +676,7 @@ func CancelBookingTool() *gent.ToolFunc[CancelBookingInput, *CancelBookingResult
 			"reason":     schema.String("Reason for cancellation"),
 		}, "booking_id"),
 		func(ctx context.Context, input CancelBookingInput) (*CancelBookingResult, error) {
-			booking, exists := mockBookings[input.BookingID]
+			booking, exists := f.bookings[input.BookingID]
 			if !exists {
 				return nil, fmt.Errorf("booking not found: %s", input.BookingID)
 			}
@@ -613,15 +706,9 @@ func CancelBookingTool() *gent.ToolFunc[CancelBookingInput, *CancelBookingResult
 	)
 }
 
-// SendNotificationResult is the result of sending a notification.
-type SendNotificationResult struct {
-	Success bool   `json:"success"`
-	Method  string `json:"method"`
-	Message string `json:"message"`
-}
-
 // SendNotificationTool returns a tool that sends notifications to customers.
-func SendNotificationTool() *gent.ToolFunc[SendNotificationInput, *SendNotificationResult] {
+func (f *AirlineFixture) SendNotificationTool() *gent.ToolFunc[SendNotificationInput,
+	*SendNotificationResult] {
 	return gent.NewToolFunc(
 		"send_notification",
 		"Send email or SMS notification to customer about booking changes",
@@ -632,7 +719,7 @@ func SendNotificationTool() *gent.ToolFunc[SendNotificationInput, *SendNotificat
 			"message":     schema.String("The notification message content"),
 		}, "customer_id", "method", "message"),
 		func(ctx context.Context, input SendNotificationInput) (*SendNotificationResult, error) {
-			customer, exists := mockCustomers[input.CustomerID]
+			customer, exists := f.customers[input.CustomerID]
 			if !exists {
 				return nil, fmt.Errorf("customer not found: %s", input.CustomerID)
 			}
@@ -657,6 +744,34 @@ func SendNotificationTool() *gent.ToolFunc[SendNotificationInput, *SendNotificat
 	)
 }
 
+// RegisterAllTools registers all airline tools from this fixture to a toolchain.
+func (f *AirlineFixture) RegisterAllTools(tc gent.ToolChain) {
+	tc.RegisterTool(f.GetCustomerInfoTool())
+	tc.RegisterTool(f.GetBookingInfoTool())
+	tc.RegisterTool(f.GetFlightInfoTool())
+	tc.RegisterTool(f.GetFlightSeatsInfoTool())
+	tc.RegisterTool(f.SearchAirlinePolicyTool())
+	tc.RegisterTool(f.SearchFlightScheduleTool())
+	tc.RegisterTool(f.RescheduleBookingTool())
+	tc.RegisterTool(f.CancelBookingTool())
+	tc.RegisterTool(f.SendNotificationTool())
+}
+
+// TomorrowDate returns tomorrow's date in YYYY-MM-DD format.
+// Useful for tests that need to search for flights.
+func (f *AirlineFixture) TomorrowDate() string {
+	now := f.timeProvider.Now()
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	return tomorrow.Format("2006-01-02")
+}
+
+// DayAfterTomorrowDate returns the day after tomorrow's date in YYYY-MM-DD format.
+func (f *AirlineFixture) DayAfterTomorrowDate() string {
+	now := f.timeProvider.Now()
+	dat := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 2)
+	return dat.Format("2006-01-02")
+}
+
 // -----------------------------------------------------------------------------
 // Helper Functions
 // -----------------------------------------------------------------------------
@@ -664,14 +779,14 @@ func SendNotificationTool() *gent.ToolFunc[SendNotificationInput, *SendNotificat
 func containsIgnoreCase(s, substr string) bool {
 	sLower := make([]byte, len(s))
 	substrLower := make([]byte, len(substr))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] >= 'A' && s[i] <= 'Z' {
 			sLower[i] = s[i] + 32
 		} else {
 			sLower[i] = s[i]
 		}
 	}
-	for i := 0; i < len(substr); i++ {
+	for i := range len(substr) {
 		if substr[i] >= 'A' && substr[i] <= 'Z' {
 			substrLower[i] = substr[i] + 32
 		} else {
@@ -681,7 +796,7 @@ func containsIgnoreCase(s, substr string) bool {
 
 	for i := 0; i <= len(sLower)-len(substrLower); i++ {
 		match := true
-		for j := 0; j < len(substrLower); j++ {
+		for j := range len(substrLower) {
 			if sLower[i+j] != substrLower[j] {
 				match = false
 				break
@@ -692,17 +807,4 @@ func containsIgnoreCase(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-// RegisterAllTools registers all airline tools to a toolchain.
-func RegisterAllTools(tc gent.ToolChain) {
-	tc.RegisterTool(GetCustomerInfoTool())
-	tc.RegisterTool(GetBookingInfoTool())
-	tc.RegisterTool(GetFlightInfoTool())
-	tc.RegisterTool(GetFlightSeatsInfoTool())
-	tc.RegisterTool(SearchAirlinePolicyTool())
-	tc.RegisterTool(SearchFlightScheduleTool())
-	tc.RegisterTool(RescheduleBookingTool())
-	tc.RegisterTool(CancelBookingTool())
-	tc.RegisterTool(SendNotificationTool())
 }
