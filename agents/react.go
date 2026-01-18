@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"text/template"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
@@ -83,8 +84,16 @@ func (s *simpleSection) ParseSection(content string) (any, error) {
 
 // ReactLoop implements the ReAct (Reasoning and Acting) agent loop.
 // Flow: Think -> Act -> Observe -> Repeat until termination.
+//
+// The prompt construction follows this structure:
+//   - System message: ReAct explanation + output format + user's additional context
+//   - User message: Original input/task
+//   - Previous iterations: Assistant responses + observations (tool results)
+//
+// Templates can be customized via WithSystemTemplate() for full control over prompting.
 type ReactLoop struct {
-	systemPrompt      string
+	userSystemPrompt  string
+	systemTemplate    *template.Template
 	model             gent.Model
 	format            gent.TextOutputFormat
 	toolChain         gent.ToolChain
@@ -99,21 +108,54 @@ type ReactLoop struct {
 //   - Format: format.NewXML()
 //   - ToolChain: toolchain.NewYAML()
 //   - Termination: termination.NewText()
+//   - SystemTemplate: DefaultReactSystemTemplate
 func NewReactLoop(model gent.Model) *ReactLoop {
 	return &ReactLoop{
 		model:             model,
 		format:            format.NewXML(),
 		toolChain:         toolchain.NewYAML(),
 		termination:       termination.NewText(),
-		observationPrefix: "Tool results:\n",
-		errorPrefix:       "Tool error:\n",
+		systemTemplate:    DefaultReactSystemTemplate,
+		observationPrefix: "Observation:\n",
+		errorPrefix:       "Error:\n",
 	}
 }
 
-// WithSystemPrompt sets the system prompt.
+// WithSystemPrompt sets additional context to include in the system prompt.
+// This is appended to the default ReAct instructions, not a replacement.
+// Use WithSystemTemplate() to completely replace the system prompt template.
 func (r *ReactLoop) WithSystemPrompt(prompt string) *ReactLoop {
-	r.systemPrompt = prompt
+	r.userSystemPrompt = prompt
 	return r
+}
+
+// WithSystemTemplate sets a custom system prompt template.
+// Use this for full control over the ReAct prompting.
+// See DefaultReactSystemTemplate for the expected template structure.
+func (r *ReactLoop) WithSystemTemplate(tmpl *template.Template) *ReactLoop {
+	r.systemTemplate = tmpl
+	return r
+}
+
+// WithSystemTemplateString sets a custom system prompt template from a string.
+// The string is parsed as a Go text/template with access to ReactTemplateData fields:
+//   - {{.UserSystemPrompt}} - additional context from WithSystemPrompt()
+//   - {{.OutputPrompt}} - output format instructions (tools, termination, etc.)
+//
+// Example:
+//
+//	loop.WithSystemTemplateString(`You are a coding assistant.
+//	{{if .UserSystemPrompt}}{{.UserSystemPrompt}}{{end}}
+//	{{.OutputPrompt}}`)
+//
+// Returns error if the template string is invalid.
+func (r *ReactLoop) WithSystemTemplateString(tmplStr string) (*ReactLoop, error) {
+	tmpl, err := template.New("react_system").Parse(tmplStr)
+	if err != nil {
+		return r, fmt.Errorf("failed to parse template: %w", err)
+	}
+	r.systemTemplate = tmpl
+	return r, nil
 }
 
 // WithFormat sets the text output format.
@@ -263,14 +305,18 @@ func (r *ReactLoop) buildOutputSections() []gent.TextOutputSection {
 func (r *ReactLoop) buildMessages(data gent.LoopData, outputPrompt string) []llms.MessageContent {
 	var messages []llms.MessageContent
 
-	// System message: system prompt + output prompt
-	systemContent := r.systemPrompt
-	if outputPrompt != "" {
-		if systemContent != "" {
-			systemContent += "\n\n"
-		}
-		systemContent += outputPrompt
+	// Build system message using template
+	templateData := ReactTemplateData{
+		UserSystemPrompt: r.userSystemPrompt,
+		OutputPrompt:     outputPrompt,
 	}
+
+	systemContent, err := ExecuteTemplate(r.systemTemplate, templateData)
+	if err != nil {
+		// Fallback to basic prompt if template fails
+		systemContent = outputPrompt
+	}
+
 	if systemContent != "" {
 		messages = append(messages, llms.MessageContent{
 			Role:  llms.ChatMessageTypeSystem,

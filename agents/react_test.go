@@ -615,10 +615,13 @@ func TestNewReactLoop_Defaults(t *testing.T) {
 	if loop.termination == nil {
 		t.Error("expected default termination to be set")
 	}
-	if loop.observationPrefix != "Tool results:\n" {
+	if loop.observationPrefix != "Observation:\n" {
 		t.Errorf("expected default observationPrefix, got %q", loop.observationPrefix)
 	}
-	if loop.errorPrefix != "Tool error:\n" {
+	if loop.errorPrefix != "Error:\n" {
 		t.Errorf("expected default errorPrefix, got %q", loop.errorPrefix)
+	}
+	if loop.systemTemplate == nil {
+		t.Error("expected default systemTemplate to be set")
 	}
 }
