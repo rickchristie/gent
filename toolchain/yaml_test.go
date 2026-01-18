@@ -359,6 +359,222 @@ args:
 	}
 }
 
+func TestYAML_Execute_SchemaValidation_Success(t *testing.T) {
+	tc := NewYAML()
+
+	// Tool with a schema requiring "query" string field
+	tool := gent.NewToolFunc[map[string]any, string](
+		"search",
+		"Search the web",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []any{"query"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return fmt.Sprintf("Results for: %s", args["query"]), nil
+		},
+		yamlTextFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	content := `tool: search
+args:
+  query: weather`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Errorf("expected no error, got: %v", result.Errors[0])
+	}
+
+	if result.Results[0] == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if yamlGetTextContent(result.Results[0].Result) != "Results for: weather" {
+		t.Errorf("unexpected result: %v", result.Results[0].Result)
+	}
+}
+
+func TestYAML_Execute_SchemaValidation_MissingRequired(t *testing.T) {
+	tc := NewYAML()
+
+	// Tool with a schema requiring "query" string field
+	tool := gent.NewToolFunc[map[string]any, string](
+		"search",
+		"Search the web",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []any{"query"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "should not reach here", nil
+		},
+		yamlTextFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Missing required "query" field
+	content := `tool: search
+args: {}`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] == nil {
+		t.Fatal("expected validation error")
+	}
+
+	if !containsYAML(result.Errors[0].Error(), "schema validation failed") {
+		t.Errorf("expected schema validation error, got: %v", result.Errors[0])
+	}
+
+	// Tool should not have been called
+	if result.Results[0] != nil {
+		t.Errorf("expected nil result when validation fails, got: %v", result.Results[0])
+	}
+}
+
+func TestYAML_Execute_SchemaValidation_WrongType(t *testing.T) {
+	tc := NewYAML()
+
+	// Tool with a schema requiring "count" integer field
+	tool := gent.NewToolFunc[map[string]any, string](
+		"counter",
+		"Count things",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"count": map[string]any{"type": "integer"},
+			},
+			"required": []any{"count"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "should not reach here", nil
+		},
+		yamlTextFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Wrong type: "count" should be integer but we pass string
+	content := `tool: counter
+args:
+  count: not a number`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] == nil {
+		t.Fatal("expected validation error for wrong type")
+	}
+
+	if !containsYAML(result.Errors[0].Error(), "schema validation failed") {
+		t.Errorf("expected schema validation error, got: %v", result.Errors[0])
+	}
+
+	// Tool should not have been called
+	if result.Results[0] != nil {
+		t.Errorf("expected nil result when validation fails, got: %v", result.Results[0])
+	}
+}
+
+func TestYAML_Execute_NoSchema_NoValidation(t *testing.T) {
+	tc := NewYAML()
+
+	// Tool without schema - should accept any args
+	tool := gent.NewToolFunc[map[string]any, string](
+		"flexible",
+		"A flexible tool",
+		nil, // No schema
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "success", nil
+		},
+		yamlTextFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Any args should work
+	content := `tool: flexible
+args:
+  anything: works
+  numbers: 123`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Errorf("expected no error for tool without schema, got: %v", result.Errors[0])
+	}
+
+	if yamlGetTextContent(result.Results[0].Result) != "success" {
+		t.Errorf("unexpected result: %v", result.Results[0].Result)
+	}
+}
+
+func TestYAML_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
+	tc := NewYAML()
+
+	// Tool with multiple required properties
+	tool := gent.NewToolFunc[map[string]any, string](
+		"booking",
+		"Book a flight",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"origin":      map[string]any{"type": "string"},
+				"destination": map[string]any{"type": "string"},
+				"passengers":  map[string]any{"type": "integer"},
+			},
+			"required": []any{"origin", "destination", "passengers"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "booked", nil
+		},
+		yamlTextFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Valid args
+	content := `tool: booking
+args:
+  origin: NYC
+  destination: LAX
+  passengers: 2`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Errorf("expected no error, got: %v", result.Errors[0])
+	}
+
+	// Missing one required field
+	content = `tool: booking
+args:
+  origin: NYC
+  destination: LAX`
+	result, err = tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] == nil {
+		t.Fatal("expected validation error for missing required field")
+	}
+}
+
 func containsYAML(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 )
 
 // -----------------------------------------------------------------------------
@@ -294,19 +295,10 @@ func GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInput, *Customer] {
 	return gent.NewToolFunc(
 		"get_customer_info",
 		"Retrieve customer information by customer ID or email address",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"customer_id": map[string]any{
-					"type":        "string",
-					"description": "The customer's unique ID (e.g., C001)",
-				},
-				"email": map[string]any{
-					"type":        "string",
-					"description": "The customer's email address",
-				},
-			},
-		},
+		schema.Object(map[string]*schema.Property{
+			"customer_id": schema.String("The customer's unique ID (e.g., C001)"),
+			"email":       schema.String("The customer's email address"),
+		}),
 		func(ctx context.Context, input GetCustomerInfoInput) (*Customer, error) {
 			if input.CustomerID != "" {
 				if customer, exists := mockCustomers[input.CustomerID]; exists {
@@ -333,16 +325,9 @@ func GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput, *Booking] {
 	return gent.NewToolFunc(
 		"get_booking_info",
 		"Retrieve booking details by booking ID",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"booking_id": map[string]any{
-					"type":        "string",
-					"description": "The booking reference ID (e.g., BK001)",
-				},
-			},
-			"required": []string{"booking_id"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"booking_id": schema.String("The booking reference ID (e.g., BK001)"),
+		}, "booking_id"),
 		func(ctx context.Context, input GetBookingInfoInput) (*Booking, error) {
 			if input.BookingID == "" {
 				return nil, fmt.Errorf("booking_id is required")
@@ -361,16 +346,9 @@ func GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, *Flight] {
 	return gent.NewToolFunc(
 		"get_flight_info",
 		"Retrieve flight information by flight number",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"flight_number": map[string]any{
-					"type":        "string",
-					"description": "The flight number (e.g., AA100)",
-				},
-			},
-			"required": []string{"flight_number"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"flight_number": schema.String("The flight number (e.g., AA100)"),
+		}, "flight_number"),
 		func(ctx context.Context, input GetFlightInfoInput) (*Flight, error) {
 			if input.FlightNumber == "" {
 				return nil, fmt.Errorf("flight_number is required")
@@ -389,24 +367,11 @@ func GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsInfoInput, []Seat] {
 	return gent.NewToolFunc(
 		"get_flight_seats_info",
 		"Retrieve seat availability and details for a specific flight",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"flight_number": map[string]any{
-					"type":        "string",
-					"description": "The flight number (e.g., AA100)",
-				},
-				"class": map[string]any{
-					"type":        "string",
-					"description": "Filter by class: economy, business, or first (optional)",
-				},
-				"available_only": map[string]any{
-					"type":        "boolean",
-					"description": "If true, only return available seats",
-				},
-			},
-			"required": []string{"flight_number"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"flight_number":  schema.String("The flight number (e.g., AA100)"),
+			"class":          schema.String("Filter by class: economy, business, or first (optional)"),
+			"available_only": schema.Boolean("If true, only return available seats"),
+		}, "flight_number"),
 		func(ctx context.Context, input GetFlightSeatsInfoInput) ([]Seat, error) {
 			if input.FlightNumber == "" {
 				return nil, fmt.Errorf("flight_number is required")
@@ -437,16 +402,9 @@ func SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlinePolicyInput, []Policy
 	return gent.NewToolFunc(
 		"search_airline_policy",
 		"Search airline policies by keyword (e.g., 'cancellation', 'baggage', 'change')",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"keyword": map[string]any{
-					"type":        "string",
-					"description": "Keyword to search for in policy titles and content",
-				},
-			},
-			"required": []string{"keyword"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"keyword": schema.String("Keyword to search for in policy titles and content"),
+		}, "keyword"),
 		func(ctx context.Context, input SearchAirlinePolicyInput) ([]Policy, error) {
 			if input.Keyword == "" {
 				return nil, fmt.Errorf("keyword is required")
@@ -473,24 +431,11 @@ func SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Fli
 	return gent.NewToolFunc(
 		"search_flight_schedule",
 		"Search for available flights between two airports on a specific date",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"origin": map[string]any{
-					"type":        "string",
-					"description": "Origin airport code (e.g., JFK)",
-				},
-				"destination": map[string]any{
-					"type":        "string",
-					"description": "Destination airport code (e.g., LAX)",
-				},
-				"date": map[string]any{
-					"type":        "string",
-					"description": "Travel date in YYYY-MM-DD format",
-				},
-			},
-			"required": []string{"origin", "destination", "date"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"origin":      schema.String("Origin airport code (e.g., JFK)"),
+			"destination": schema.String("Destination airport code (e.g., LAX)"),
+			"date":        schema.String("Travel date in YYYY-MM-DD format"),
+		}, "origin", "destination", "date"),
 		func(ctx context.Context, input SearchFlightScheduleInput) ([]*Flight, error) {
 			if input.Origin == "" || input.Destination == "" || input.Date == "" {
 				return nil, fmt.Errorf("origin, destination, and date are required")
@@ -538,24 +483,11 @@ func RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput, *RescheduleB
 	return gent.NewToolFunc(
 		"reschedule_booking",
 		"Reschedule an existing booking to a different flight",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"booking_id": map[string]any{
-					"type":        "string",
-					"description": "The booking ID to reschedule",
-				},
-				"new_flight_number": map[string]any{
-					"type":        "string",
-					"description": "The new flight number to reschedule to",
-				},
-				"new_seat_number": map[string]any{
-					"type":        "string",
-					"description": "The desired seat on the new flight (optional)",
-				},
-			},
-			"required": []string{"booking_id", "new_flight_number"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"booking_id":        schema.String("The booking ID to reschedule"),
+			"new_flight_number": schema.String("The new flight number to reschedule to"),
+			"new_seat_number":   schema.String("The desired seat on the new flight (optional)"),
+		}, "booking_id", "new_flight_number"),
 		func(ctx context.Context, input RescheduleBookingInput) (*RescheduleBookingResult, error) {
 			booking, exists := mockBookings[input.BookingID]
 			if !exists {
@@ -646,20 +578,10 @@ func CancelBookingTool() *gent.ToolFunc[CancelBookingInput, *CancelBookingResult
 	return gent.NewToolFunc(
 		"cancel_booking",
 		"Cancel an existing booking and process refund",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"booking_id": map[string]any{
-					"type":        "string",
-					"description": "The booking ID to cancel",
-				},
-				"reason": map[string]any{
-					"type":        "string",
-					"description": "Reason for cancellation",
-				},
-			},
-			"required": []string{"booking_id"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"booking_id": schema.String("The booking ID to cancel"),
+			"reason":     schema.String("Reason for cancellation"),
+		}, "booking_id"),
 		func(ctx context.Context, input CancelBookingInput) (*CancelBookingResult, error) {
 			booking, exists := mockBookings[input.BookingID]
 			if !exists {
@@ -703,28 +625,12 @@ func SendNotificationTool() *gent.ToolFunc[SendNotificationInput, *SendNotificat
 	return gent.NewToolFunc(
 		"send_notification",
 		"Send email or SMS notification to customer about booking changes",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"customer_id": map[string]any{
-					"type":        "string",
-					"description": "Customer ID to notify",
-				},
-				"method": map[string]any{
-					"type":        "string",
-					"description": "Notification method: email or sms",
-				},
-				"subject": map[string]any{
-					"type":        "string",
-					"description": "Subject of the notification",
-				},
-				"message": map[string]any{
-					"type":        "string",
-					"description": "The notification message content",
-				},
-			},
-			"required": []string{"customer_id", "method", "message"},
-		},
+		schema.Object(map[string]*schema.Property{
+			"customer_id": schema.String("Customer ID to notify"),
+			"method":      schema.String("Notification method: email or sms").Enum("email", "sms"),
+			"subject":     schema.String("Subject of the notification"),
+			"message":     schema.String("The notification message content"),
+		}, "customer_id", "method", "message"),
 		func(ctx context.Context, input SendNotificationInput) (*SendNotificationResult, error) {
 			customer, exists := mockCustomers[input.CustomerID]
 			if !exists {

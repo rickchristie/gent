@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 )
 
 // JSON expects tool calls in JSON format.
@@ -25,6 +26,7 @@ import (
 type JSON struct {
 	tools       []any
 	toolMap     map[string]any
+	schemaMap   map[string]*schema.Schema // compiled schemas for validation
 	sectionName string
 }
 
@@ -33,6 +35,7 @@ func NewJSON() *JSON {
 	return &JSON{
 		tools:       make([]any, 0),
 		toolMap:     make(map[string]any),
+		schemaMap:   make(map[string]*schema.Schema),
 		sectionName: "action",
 	}
 }
@@ -119,6 +122,7 @@ func (c *JSON) ParseSection(content string) (any, error) {
 }
 
 // RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
+// The tool's schema is compiled for validation when arguments are provided.
 func (c *JSON) RegisterTool(tool any) gent.ToolChain {
 	meta, err := GetToolMeta(tool)
 	if err != nil {
@@ -127,6 +131,15 @@ func (c *JSON) RegisterTool(tool any) gent.ToolChain {
 	}
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
+
+	// Compile schema for validation
+	if rawSchema := meta.Schema(); rawSchema != nil {
+		compiled, err := schema.Compile(rawSchema)
+		if err == nil && compiled != nil {
+			c.schemaMap[meta.Name()] = compiled
+		}
+	}
+
 	return c
 }
 
@@ -191,6 +204,30 @@ func (c *JSON) Execute(
 			}
 			// Use potentially modified args
 			call.Args = beforeEvent.Args
+		}
+
+		// Validate args against schema
+		if compiledSchema, hasSchema := c.schemaMap[call.Name]; hasSchema {
+			if validationErr := compiledSchema.Validate(call.Args); validationErr != nil {
+				result.Errors[i] = validationErr
+
+				if execCtx != nil {
+					// Fire AfterToolCall with validation error
+					execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+						ToolName: call.Name,
+						Args:     call.Args,
+						Error:    validationErr,
+					})
+
+					// Trace the validation failure
+					execCtx.Trace(gent.ToolCallTrace{
+						ToolName: call.Name,
+						Input:    call.Args,
+						Error:    validationErr,
+					})
+				}
+				continue
+			}
 		}
 
 		startTime := time.Now()

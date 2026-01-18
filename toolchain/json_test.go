@@ -305,6 +305,207 @@ func TestJSON_Execute_MultipleTools(t *testing.T) {
 	}
 }
 
+func TestJSON_Execute_SchemaValidation_Success(t *testing.T) {
+	tc := NewJSON()
+
+	// Tool with a schema requiring "query" string field
+	tool := gent.NewToolFunc[map[string]any, string](
+		"search",
+		"Search the web",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []any{"query"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return fmt.Sprintf("Results for: %s", args["query"]), nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	content := `{"tool": "search", "args": {"query": "weather"}}`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Errorf("expected no error, got: %v", result.Errors[0])
+	}
+
+	if result.Results[0] == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if getTextContent(result.Results[0].Result) != "Results for: weather" {
+		t.Errorf("unexpected result: %v", result.Results[0].Result)
+	}
+}
+
+func TestJSON_Execute_SchemaValidation_MissingRequired(t *testing.T) {
+	tc := NewJSON()
+
+	// Tool with a schema requiring "query" string field
+	tool := gent.NewToolFunc[map[string]any, string](
+		"search",
+		"Search the web",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []any{"query"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "should not reach here", nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Missing required "query" field
+	content := `{"tool": "search", "args": {}}`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] == nil {
+		t.Fatal("expected validation error")
+	}
+
+	if !contains(result.Errors[0].Error(), "schema validation failed") {
+		t.Errorf("expected schema validation error, got: %v", result.Errors[0])
+	}
+
+	// Tool should not have been called
+	if result.Results[0] != nil {
+		t.Errorf("expected nil result when validation fails, got: %v", result.Results[0])
+	}
+}
+
+func TestJSON_Execute_SchemaValidation_WrongType(t *testing.T) {
+	tc := NewJSON()
+
+	// Tool with a schema requiring "count" integer field
+	tool := gent.NewToolFunc[map[string]any, string](
+		"counter",
+		"Count things",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"count": map[string]any{"type": "integer"},
+			},
+			"required": []any{"count"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "should not reach here", nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Wrong type: "count" should be integer but we pass string
+	content := `{"tool": "counter", "args": {"count": "not a number"}}`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] == nil {
+		t.Fatal("expected validation error for wrong type")
+	}
+
+	if !contains(result.Errors[0].Error(), "schema validation failed") {
+		t.Errorf("expected schema validation error, got: %v", result.Errors[0])
+	}
+
+	// Tool should not have been called
+	if result.Results[0] != nil {
+		t.Errorf("expected nil result when validation fails, got: %v", result.Results[0])
+	}
+}
+
+func TestJSON_Execute_NoSchema_NoValidation(t *testing.T) {
+	tc := NewJSON()
+
+	// Tool without schema - should accept any args
+	tool := gent.NewToolFunc[map[string]any, string](
+		"flexible",
+		"A flexible tool",
+		nil, // No schema
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "success", nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Any args should work
+	content := `{"tool": "flexible", "args": {"anything": "works", "numbers": 123}}`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Errorf("expected no error for tool without schema, got: %v", result.Errors[0])
+	}
+
+	if getTextContent(result.Results[0].Result) != "success" {
+		t.Errorf("unexpected result: %v", result.Results[0].Result)
+	}
+}
+
+func TestJSON_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
+	tc := NewJSON()
+
+	// Tool with multiple required properties
+	tool := gent.NewToolFunc[map[string]any, string](
+		"booking",
+		"Book a flight",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"origin":      map[string]any{"type": "string"},
+				"destination": map[string]any{"type": "string"},
+				"passengers":  map[string]any{"type": "integer"},
+			},
+			"required": []any{"origin", "destination", "passengers"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "booked", nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Valid args
+	content := `{"tool": "booking", "args": {"origin": "NYC", "destination": "LAX", "passengers": 2}}`
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Errorf("expected no error, got: %v", result.Errors[0])
+	}
+
+	// Missing one required field
+	content = `{"tool": "booking", "args": {"origin": "NYC", "destination": "LAX"}}`
+	result, err = tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] == nil {
+		t.Fatal("expected validation error for missing required field")
+	}
+}
+
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
