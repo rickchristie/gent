@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/tmc/langchaingo/llms"
@@ -503,6 +504,277 @@ func TestJSON_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
 
 	if result.Errors[0] == nil {
 		t.Fatal("expected validation error for missing required field")
+	}
+}
+
+// TestJSON_ParseSection_TimeFormatsAsString tests that JSON always parses
+// time-related values as strings (JSON doesn't have native date types).
+func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
+	tests := []struct {
+		name     string
+		jsonVal  string
+		expected string
+	}{
+		{
+			name:     "date only",
+			jsonVal:  `"2026-01-20"`,
+			expected: "2026-01-20",
+		},
+		{
+			name:     "datetime ISO",
+			jsonVal:  `"2026-01-20T10:30:00Z"`,
+			expected: "2026-01-20T10:30:00Z",
+		},
+		{
+			name:     "datetime with timezone",
+			jsonVal:  `"2026-01-20T10:30:00+05:00"`,
+			expected: "2026-01-20T10:30:00+05:00",
+		},
+		{
+			name:     "time only",
+			jsonVal:  `"10:30:00"`,
+			expected: "10:30:00",
+		},
+		{
+			name:     "duration string",
+			jsonVal:  `"1h30m"`,
+			expected: "1h30m",
+		},
+		{
+			name:     "duration with seconds",
+			jsonVal:  `"2h45m30s"`,
+			expected: "2h45m30s",
+		},
+		{
+			name:     "ISO 8601 duration",
+			jsonVal:  `"PT1H30M"`,
+			expected: "PT1H30M",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+
+			tool := gent.NewToolFunc[map[string]any, string](
+				"test_tool",
+				"Test tool",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"value": map[string]any{"type": "string"},
+					},
+					"required": []any{"value"},
+				},
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return args["value"].(string), nil
+				},
+				textFormatter,
+			)
+			tc.RegisterTool(tool)
+
+			content := fmt.Sprintf(`{"tool": "test_tool", "args": {"value": %s}}`, tt.jsonVal)
+
+			result, err := tc.ParseSection(content)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			calls := result.([]*gent.ToolCall)
+			val := calls[0].Args["value"]
+			strVal, ok := val.(string)
+			if !ok {
+				t.Fatalf("expected string, got %T: %v", val, val)
+			}
+
+			if strVal != tt.expected {
+				t.Errorf("expected '%s', got '%s'", tt.expected, strVal)
+			}
+
+			// Verify schema validation passes
+			execResult, err := tc.Execute(context.Background(), nil, content)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if execResult.Errors[0] != nil {
+				t.Errorf("expected no validation error, got: %v", execResult.Errors[0])
+			}
+		})
+	}
+}
+
+// TestJSON_ParseSection_DateAsString tests that date strings in JSON
+// are correctly parsed as strings when schema expects string type.
+func TestJSON_ParseSection_DateAsString(t *testing.T) {
+	tc := NewJSON()
+
+	// Tool with schema expecting "date" as a string
+	tool := gent.NewToolFunc[map[string]any, string](
+		"search_flights",
+		"Search flights",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"origin":      map[string]any{"type": "string"},
+				"destination": map[string]any{"type": "string"},
+				"date":        map[string]any{"type": "string"},
+			},
+			"required": []any{"origin", "destination", "date"},
+		},
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return fmt.Sprintf("searching for %s", args["date"]), nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	content := `{"tool": "search_flights", "args": {"origin": "JFK", "destination": "LAX", "date": "2026-01-20"}}`
+
+	result, err := tc.ParseSection(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	calls := result.([]*gent.ToolCall)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+
+	// The date should be a string
+	dateVal := calls[0].Args["date"]
+	dateStr, ok := dateVal.(string)
+	if !ok {
+		t.Fatalf("expected date to be string, got %T: %v", dateVal, dateVal)
+	}
+
+	if dateStr != "2026-01-20" {
+		t.Errorf("expected date '2026-01-20', got '%s'", dateStr)
+	}
+
+	// Also test that schema validation passes
+	execResult, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execResult.Errors[0] != nil {
+		t.Errorf("expected no validation error, got: %v", execResult.Errors[0])
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Integration tests for full toolchain flow with type conversions
+// -----------------------------------------------------------------------------
+
+// JSONTimeTypedInput is used to test automatic type conversion to time.Time
+type JSONTimeTypedInput struct {
+	Date      time.Time `json:"date"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// JSONDurationTypedInput is used to test automatic type conversion to time.Duration
+type JSONDurationTypedInput struct {
+	Duration time.Duration `json:"duration"`
+}
+
+// TestJSON_Execute_TimeConversion tests that string dates in JSON are converted
+// to time.Time when the Go input struct expects time.Time.
+func TestJSON_Execute_TimeConversion(t *testing.T) {
+	tc := NewJSON()
+
+	tool := gent.NewToolFunc(
+		"time_tool",
+		"Tool with time.Time input",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"date":      map[string]any{"type": "string"},
+				"timestamp": map[string]any{"type": "string"},
+			},
+			"required": []any{"date", "timestamp"},
+		},
+		func(ctx context.Context, input JSONTimeTypedInput) (string, error) {
+			// Verify that both fields were converted to time.Time
+			return input.Date.Format("2006-01-02") + "|" +
+				input.Timestamp.Format(time.RFC3339), nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	// Date-only and RFC3339 timestamp
+	content := `{"tool": "time_tool", "args": {"date": "2026-01-20", "timestamp": "2026-01-20T10:30:00Z"}}`
+
+	result, err := tc.Execute(context.Background(), nil, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Errors[0] != nil {
+		t.Fatalf("unexpected tool error: %v", result.Errors[0])
+	}
+
+	expected := "2026-01-20|2026-01-20T10:30:00Z"
+	output := getTextContent(result.Results[0].Result)
+	if output != expected {
+		t.Errorf("expected '%s', got '%s'", expected, output)
+	}
+}
+
+// TestJSON_Execute_DurationConversion tests that duration strings in JSON are
+// converted to time.Duration when the Go input struct expects time.Duration.
+func TestJSON_Execute_DurationConversion(t *testing.T) {
+	tc := NewJSON()
+
+	tool := gent.NewToolFunc(
+		"duration_tool",
+		"Tool with time.Duration input",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"duration": map[string]any{"type": "string"},
+			},
+			"required": []any{"duration"},
+		},
+		func(ctx context.Context, input JSONDurationTypedInput) (string, error) {
+			return input.Duration.String(), nil
+		},
+		textFormatter,
+	)
+	tc.RegisterTool(tool)
+
+	tests := []struct {
+		name     string
+		duration string
+		expected string
+	}{
+		{"hours and minutes", "1h30m", "1h30m0s"},
+		{"just minutes", "45m", "45m0s"},
+		{"with seconds", "2h15m30s", "2h15m30s"},
+		{"milliseconds", "500ms", "500ms"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := fmt.Sprintf(
+				`{"tool": "duration_tool", "args": {"duration": "%s"}}`,
+				tt.duration,
+			)
+
+			result, err := tc.Execute(context.Background(), nil, content)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Errors[0] != nil {
+				t.Fatalf("unexpected tool error: %v", result.Errors[0])
+			}
+
+			output := getTextContent(result.Results[0].Result)
+			if output != tt.expected {
+				t.Errorf("expected '%s', got '%s'", tt.expected, output)
+			}
+		})
 	}
 }
 

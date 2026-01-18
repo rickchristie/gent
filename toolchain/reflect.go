@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/rickchristie/gent"
 )
@@ -32,7 +33,12 @@ func (m *ToolMeta) Schema() map[string]any { return m.schema }
 func (m *ToolMeta) Tool() any { return m.tool }
 
 // CallToolReflect calls a generic Tool[I, O] using reflection.
-// It converts args (map[string]any) to the tool's input type and calls the tool.
+//
+// It converts args (map[string]any) to the tool's input type. The conversion handles
+// type coercion from JSON Schema intermediary types to Go types:
+//   - string -> time.Time: Parses using common date/time formats (RFC3339, date-only, etc.)
+//   - string -> time.Duration: Parses using time.ParseDuration (e.g., "1h30m", "2h45m30s")
+//   - If target field is `any`, the intermediary value is used as-is
 func CallToolReflect(
 	ctx context.Context,
 	tool any,
@@ -67,6 +73,15 @@ func CallToolReflect(
 	}
 	inputType := callType.In(1) // ctx is 0, input is 1
 
+	// Get the actual struct type (dereference if pointer)
+	structType := inputType
+	if structType.Kind() == reflect.Ptr {
+		structType = structType.Elem()
+	}
+
+	// Pre-process args to convert intermediary types to Go types based on target struct
+	convertedArgs := convertArgsForType(args, structType)
+
 	// Create new instance of input type and unmarshal args into it
 	var inputVal reflect.Value
 	if inputType.Kind() == reflect.Ptr {
@@ -78,7 +93,7 @@ func CallToolReflect(
 	}
 
 	// Marshal args to JSON, then unmarshal into input
-	argsJSON, err := json.Marshal(args)
+	argsJSON, err := json.Marshal(convertedArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal args: %w", err)
 	}
@@ -123,6 +138,174 @@ func CallToolReflect(
 		Output: outputField.Interface(),
 		Result: resultField.Interface().([]gent.ContentPart),
 	}, nil
+}
+
+// convertArgsForType converts intermediary arg values to match the expected Go types
+// in the target struct. This handles conversions that Go's json package doesn't support:
+//   - string -> time.Time (various formats)
+//   - string -> time.Duration
+func convertArgsForType(args map[string]any, structType reflect.Type) map[string]any {
+	if args == nil || structType.Kind() != reflect.Struct {
+		return args
+	}
+
+	result := make(map[string]any, len(args))
+	for key, value := range args {
+		result[key] = convertValueForField(value, structType, key)
+	}
+	return result
+}
+
+// convertValueForField converts a single value based on the target field's type.
+func convertValueForField(value any, structType reflect.Type, fieldName string) any {
+	// Find the field in the struct (check both exact name and json tag)
+	field, found := findFieldByName(structType, fieldName)
+	if !found {
+		return value // Unknown field, return as-is
+	}
+
+	return convertValueToType(value, field.Type)
+}
+
+// findFieldByName finds a struct field by name or json tag.
+func findFieldByName(structType reflect.Type, name string) (reflect.StructField, bool) {
+	for i := range structType.NumField() {
+		field := structType.Field(i)
+
+		// Check json tag first
+		jsonTag := field.Tag.Get("json")
+		if jsonTag != "" {
+			// Handle "fieldname,omitempty" style tags
+			tagName := jsonTag
+			if comma := findComma(jsonTag); comma >= 0 {
+				tagName = jsonTag[:comma]
+			}
+			if tagName == name {
+				return field, true
+			}
+		}
+
+		// Check field name (case-insensitive for JSON compatibility)
+		if equalFold(field.Name, name) {
+			return field, true
+		}
+	}
+	return reflect.StructField{}, false
+}
+
+// findComma returns the index of the first comma in s, or -1 if not found.
+func findComma(s string) int {
+	for i := range len(s) {
+		if s[i] == ',' {
+			return i
+		}
+	}
+	return -1
+}
+
+// equalFold reports whether s and t are equal under case-folding.
+func equalFold(s, t string) bool {
+	if len(s) != len(t) {
+		return false
+	}
+	for i := range len(s) {
+		c1, c2 := s[i], t[i]
+		if c1 != c2 {
+			// Convert to lowercase
+			if c1 >= 'A' && c1 <= 'Z' {
+				c1 += 'a' - 'A'
+			}
+			if c2 >= 'A' && c2 <= 'Z' {
+				c2 += 'a' - 'A'
+			}
+			if c1 != c2 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// convertValueToType converts a value to match the target type.
+func convertValueToType(value any, targetType reflect.Type) any {
+	if value == nil {
+		return nil
+	}
+
+	// Handle pointer types - get the underlying type
+	elemType := targetType
+	if targetType.Kind() == reflect.Ptr {
+		elemType = targetType.Elem()
+	}
+
+	// Check for time.Time
+	if elemType == reflect.TypeOf(time.Time{}) {
+		if str, ok := value.(string); ok {
+			if t, err := parseTime(str); err == nil {
+				return t.Format(time.RFC3339Nano)
+			}
+		}
+		// If value is already time.Time (from YAML), format it for JSON
+		if t, ok := value.(time.Time); ok {
+			return t.Format(time.RFC3339Nano)
+		}
+		return value
+	}
+
+	// Check for time.Duration
+	if elemType == reflect.TypeOf(time.Duration(0)) {
+		if str, ok := value.(string); ok {
+			if d, err := time.ParseDuration(str); err == nil {
+				// JSON unmarshal expects nanoseconds as int64
+				return d.Nanoseconds()
+			}
+		}
+		return value
+	}
+
+	// Handle nested structs
+	if elemType.Kind() == reflect.Struct {
+		if m, ok := value.(map[string]any); ok {
+			return convertArgsForType(m, elemType)
+		}
+	}
+
+	// Handle slices
+	if elemType.Kind() == reflect.Slice {
+		if arr, ok := value.([]any); ok {
+			elemElemType := elemType.Elem()
+			result := make([]any, len(arr))
+			for i, item := range arr {
+				result[i] = convertValueToType(item, elemElemType)
+			}
+			return result
+		}
+	}
+
+	return value
+}
+
+// parseTime attempts to parse a time string using common formats.
+// Supports: RFC3339, RFC3339Nano, date-only, datetime with space, and more.
+func parseTime(s string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",      // ISO without timezone
+		"2006-01-02 15:04:05",      // Datetime with space
+		"2006-01-02 15:04:05Z07:00", // Datetime with space and timezone
+		"2006-01-02",               // Date only
+		"2006-01-02T15:04",         // ISO without seconds
+		"2006-01-02 15:04",         // Datetime without seconds
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, s); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unable to parse time: %s", s)
 }
 
 // GetToolMeta extracts metadata from a generic Tool[I, O] using reflection.

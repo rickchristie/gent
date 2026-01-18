@@ -28,19 +28,21 @@ import (
 //	  args:
 //	    date: today
 type YAML struct {
-	tools       []any
-	toolMap     map[string]any
-	schemaMap   map[string]*schema.Schema // compiled schemas for validation
-	sectionName string
+	tools        []any
+	toolMap      map[string]any
+	schemaMap    map[string]*schema.Schema // compiled schemas for validation
+	rawSchemaMap map[string]map[string]any // raw schemas for type-aware parsing
+	sectionName  string
 }
 
 // NewYAML creates a new YAML toolchain with default section name "action".
 func NewYAML() *YAML {
 	return &YAML{
-		tools:       make([]any, 0),
-		toolMap:     make(map[string]any),
-		schemaMap:   make(map[string]*schema.Schema),
-		sectionName: "action",
+		tools:        make([]any, 0),
+		toolMap:      make(map[string]any),
+		schemaMap:    make(map[string]*schema.Schema),
+		rawSchemaMap: make(map[string]map[string]any),
+		sectionName:  "action",
 	}
 }
 
@@ -97,46 +99,154 @@ func (c *YAML) Prompt() string {
 	return sb.String()
 }
 
-// rawToolCall is used for YAML unmarshalling.
-type rawToolCall struct {
-	Tool string         `yaml:"tool"`
-	Args map[string]any `yaml:"args"`
-}
-
 // ParseSection parses the raw text content and returns []*gent.ToolCall.
+// It uses schema-aware parsing to preserve string types where the schema expects strings.
 func (c *YAML) ParseSection(content string) (any, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return []*gent.ToolCall{}, nil
 	}
 
+	// Parse into yaml.Node to preserve raw values
+	var rootNode yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &rootNode); err != nil {
+		return nil, fmt.Errorf("%w: %v", gent.ErrInvalidYAML, err)
+	}
+
+	// Root node is a document node, get its content
+	if rootNode.Kind != yaml.DocumentNode || len(rootNode.Content) == 0 {
+		return nil, fmt.Errorf("%w: unexpected YAML structure", gent.ErrInvalidYAML)
+	}
+	contentNode := rootNode.Content[0]
+
 	var calls []*gent.ToolCall
 
-	// Try parsing as array first
-	if strings.HasPrefix(content, "-") {
-		var rawCalls []rawToolCall
-		if err := yaml.Unmarshal([]byte(content), &rawCalls); err != nil {
-			return nil, fmt.Errorf("%w: %v", gent.ErrInvalidYAML, err)
-		}
-		for _, rc := range rawCalls {
-			if rc.Tool == "" {
-				return nil, gent.ErrMissingToolName
+	switch contentNode.Kind {
+	case yaml.SequenceNode:
+		// Array of tool calls
+		for _, itemNode := range contentNode.Content {
+			call, err := c.parseToolCallNode(itemNode)
+			if err != nil {
+				return nil, err
 			}
-			calls = append(calls, &gent.ToolCall{Name: rc.Tool, Args: rc.Args})
+			calls = append(calls, call)
 		}
-	} else {
-		// Try parsing as single object
-		var rawCall rawToolCall
-		if err := yaml.Unmarshal([]byte(content), &rawCall); err != nil {
-			return nil, fmt.Errorf("%w: %v", gent.ErrInvalidYAML, err)
+	case yaml.MappingNode:
+		// Single tool call
+		call, err := c.parseToolCallNode(contentNode)
+		if err != nil {
+			return nil, err
 		}
-		if rawCall.Tool == "" {
-			return nil, gent.ErrMissingToolName
-		}
-		calls = append(calls, &gent.ToolCall{Name: rawCall.Tool, Args: rawCall.Args})
+		calls = append(calls, call)
+	default:
+		return nil, fmt.Errorf("%w: expected mapping or sequence", gent.ErrInvalidYAML)
 	}
 
 	return calls, nil
+}
+
+// parseToolCallNode parses a single tool call from a yaml.Node.
+func (c *YAML) parseToolCallNode(node *yaml.Node) (*gent.ToolCall, error) {
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%w: tool call must be a mapping", gent.ErrInvalidYAML)
+	}
+
+	var toolName string
+	var argsNode *yaml.Node
+
+	// Extract tool name and args node
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+
+		switch keyNode.Value {
+		case "tool":
+			toolName = valueNode.Value
+		case "args":
+			argsNode = valueNode
+		}
+	}
+
+	if toolName == "" {
+		return nil, gent.ErrMissingToolName
+	}
+
+	// Get the schema for this tool to guide parsing
+	var propTypes map[string]string
+	if rawSchema, ok := c.rawSchemaMap[toolName]; ok {
+		propTypes = extractPropertyTypes(rawSchema)
+	}
+
+	// Parse args with schema awareness
+	var args map[string]any
+	if argsNode != nil {
+		args = c.decodeArgsNode(argsNode, propTypes)
+	}
+
+	return &gent.ToolCall{Name: toolName, Args: args}, nil
+}
+
+// extractPropertyTypes extracts a map of property name -> type from a raw schema.
+func extractPropertyTypes(rawSchema map[string]any) map[string]string {
+	result := make(map[string]string)
+	props, ok := rawSchema["properties"].(map[string]any)
+	if !ok {
+		return result
+	}
+	for name, propDef := range props {
+		if propMap, ok := propDef.(map[string]any); ok {
+			if typ, ok := propMap["type"].(string); ok {
+				result[name] = typ
+			}
+		}
+	}
+	return result
+}
+
+// decodeArgsNode decodes args from a yaml.Node using schema type hints.
+func (c *YAML) decodeArgsNode(node *yaml.Node, propTypes map[string]string) map[string]any {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	result := make(map[string]any)
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		key := keyNode.Value
+
+		// Check if schema expects a string for this property
+		expectedType := propTypes[key]
+		result[key] = c.decodeValueNode(valueNode, expectedType)
+	}
+	return result
+}
+
+// decodeValueNode decodes a single value node, using expectedType to guide decoding.
+func (c *YAML) decodeValueNode(node *yaml.Node, expectedType string) any {
+	// If schema expects a string, use the raw value regardless of YAML's auto-detection
+	if expectedType == "string" && node.Kind == yaml.ScalarNode {
+		return node.Value
+	}
+
+	// Otherwise, let YAML decode naturally
+	var value any
+	if err := node.Decode(&value); err != nil {
+		// Fallback to raw value on decode error
+		return node.Value
+	}
+
+	// Handle nested structures
+	switch v := value.(type) {
+	case map[string]any:
+		// For nested objects, we don't have nested schema info here,
+		// so just return as-is (could be enhanced to support nested schemas)
+		return v
+	case []any:
+		return v
+	default:
+		return value
+	}
 }
 
 // RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
@@ -150,8 +260,9 @@ func (c *YAML) RegisterTool(tool any) gent.ToolChain {
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
 
-	// Compile schema for validation
+	// Store raw schema for type-aware parsing and compile for validation
 	if rawSchema := meta.Schema(); rawSchema != nil {
+		c.rawSchemaMap[meta.Name()] = rawSchema
 		compiled, err := schema.Compile(rawSchema)
 		if err == nil && compiled != nil {
 			c.schemaMap[meta.Name()] = compiled
