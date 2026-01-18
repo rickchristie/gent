@@ -63,3 +63,75 @@ type ErrorEvent struct {
 }
 
 func (ErrorEvent) hookEvent() {}
+
+// -----------------------------------------------------------------------------
+// Model Call Events
+// -----------------------------------------------------------------------------
+
+// BeforeModelCallEvent is emitted before each model API call.
+type BeforeModelCallEvent struct {
+	// Model is the model identifier.
+	Model string
+
+	// Request contains the messages being sent to the model.
+	Request any
+}
+
+func (BeforeModelCallEvent) hookEvent() {}
+
+// AfterModelCallEvent is emitted after each model API call completes.
+type AfterModelCallEvent struct {
+	// Model is the model identifier.
+	Model string
+
+	// Request contains the messages that were sent to the model.
+	Request any
+
+	// Response contains the full response from the model.
+	Response *ContentResponse
+
+	// Duration is how long the call took.
+	Duration time.Duration
+
+	// Error is any error that occurred (nil if successful).
+	Error error
+}
+
+func (AfterModelCallEvent) hookEvent() {}
+
+// -----------------------------------------------------------------------------
+// Tool Call Events
+// -----------------------------------------------------------------------------
+
+// BeforeToolCallEvent is emitted before each tool call execution.
+// Hooks can modify Args to change the input before execution.
+type BeforeToolCallEvent struct {
+	// ToolName is the name of the tool being called.
+	ToolName string
+
+	// Args contains the arguments that will be passed to the tool.
+	// Hooks can modify this map to change the arguments.
+	Args map[string]any
+}
+
+func (BeforeToolCallEvent) hookEvent() {}
+
+// AfterToolCallEvent is emitted after each tool call execution.
+type AfterToolCallEvent struct {
+	// ToolName is the name of the tool that was called.
+	ToolName string
+
+	// Args contains the arguments that were passed to the tool.
+	Args map[string]any
+
+	// Output contains the tool's output (nil if error occurred).
+	Output any
+
+	// Duration is how long the tool call took.
+	Duration time.Duration
+
+	// Error is any error that occurred (nil if successful).
+	Error error
+}
+
+func (AfterToolCallEvent) hookEvent() {}

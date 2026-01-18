@@ -1,9 +1,26 @@
 package gent
 
 import (
+	"context"
 	"sync"
 	"time"
 )
+
+// HookFirer is an interface for firing hooks from within framework components.
+// This is implemented by hooks.Registry and set on ExecutionContext by the Executor.
+type HookFirer interface {
+	// Model call hooks
+	FireBeforeModelCall(ctx context.Context, execCtx *ExecutionContext, event BeforeModelCallEvent)
+	FireAfterModelCall(ctx context.Context, execCtx *ExecutionContext, event AfterModelCallEvent)
+
+	// Tool call hooks
+	FireBeforeToolCall(
+		ctx context.Context,
+		execCtx *ExecutionContext,
+		event *BeforeToolCallEvent,
+	) error
+	FireAfterToolCall(ctx context.Context, execCtx *ExecutionContext, event AfterToolCallEvent)
+}
 
 // ExecutionContext is the ambient context passed through everything in the framework.
 // It provides automatic tracing, state management, and support for nested agent loops.
@@ -41,6 +58,9 @@ type ExecutionContext struct {
 	terminationReason TerminationReason
 	finalResult       []ContentPart
 	err               error
+
+	// Hook firer for model/tool call hooks (set by Executor)
+	hookFirer HookFirer
 }
 
 // ExecutionStats contains auto-aggregated metrics from trace events.
@@ -88,6 +108,72 @@ func (ctx *ExecutionContext) Name() string {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 	return ctx.name
+}
+
+// SetHookFirer sets the hook firer for model call hooks.
+// This is called by the Executor to enable model call hook firing.
+func (ctx *ExecutionContext) SetHookFirer(firer HookFirer) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.hookFirer = firer
+}
+
+// FireBeforeModelCall fires the BeforeModelCall hook if a hook firer is set.
+func (ctx *ExecutionContext) FireBeforeModelCall(
+	goCtx context.Context,
+	event BeforeModelCallEvent,
+) {
+	ctx.mu.RLock()
+	firer := ctx.hookFirer
+	ctx.mu.RUnlock()
+
+	if firer != nil {
+		firer.FireBeforeModelCall(goCtx, ctx, event)
+	}
+}
+
+// FireAfterModelCall fires the AfterModelCall hook if a hook firer is set.
+func (ctx *ExecutionContext) FireAfterModelCall(
+	goCtx context.Context,
+	event AfterModelCallEvent,
+) {
+	ctx.mu.RLock()
+	firer := ctx.hookFirer
+	ctx.mu.RUnlock()
+
+	if firer != nil {
+		firer.FireAfterModelCall(goCtx, ctx, event)
+	}
+}
+
+// FireBeforeToolCall fires the BeforeToolCall hook if a hook firer is set.
+// Returns an error if a hook aborts the tool call.
+func (ctx *ExecutionContext) FireBeforeToolCall(
+	goCtx context.Context,
+	event *BeforeToolCallEvent,
+) error {
+	ctx.mu.RLock()
+	firer := ctx.hookFirer
+	ctx.mu.RUnlock()
+
+	if firer != nil {
+		return firer.FireBeforeToolCall(goCtx, ctx, event)
+	}
+	return nil
+}
+
+// FireAfterToolCall fires the AfterToolCall hook if a hook firer is set.
+func (ctx *ExecutionContext) FireAfterToolCall(
+	goCtx context.Context,
+	event AfterToolCallEvent,
+) {
+	ctx.mu.RLock()
+	firer := ctx.hookFirer
+	ctx.mu.RUnlock()
+
+	if firer != nil {
+		firer.FireAfterToolCall(goCtx, ctx, event)
+	}
 }
 
 // -----------------------------------------------------------------------------

@@ -81,6 +81,11 @@ func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.ExecutionResult {
 	execCtx := gent.NewExecutionContext("main", data)
 
+	// Set hook firer for model call hooks
+	if e.hooks != nil {
+		execCtx.SetHookFirer(e.hooks)
+	}
+
 	result := &gent.ExecutionResult{
 		Context: execCtx,
 	}
@@ -198,6 +203,11 @@ func (e *Executor[Data]) ExecuteWithContext(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 ) *gent.ExecutionResult {
+	// Set hook firer for model call hooks if not already set
+	if e.hooks != nil {
+		execCtx.SetHookFirer(e.hooks)
+	}
+
 	result := &gent.ExecutionResult{
 		Context: execCtx,
 	}

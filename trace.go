@@ -63,6 +63,12 @@ type ModelCallTrace struct {
 	// Model is the model identifier used.
 	Model string
 
+	// Request contains the messages sent to the model ([]llms.MessageContent).
+	Request any
+
+	// Response contains the full response from the model.
+	Response *ContentResponse
+
 	// InputTokens is the number of input/prompt tokens used.
 	InputTokens int
 

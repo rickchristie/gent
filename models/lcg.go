@@ -55,6 +55,14 @@ func (m *LCGWrapper) GenerateContent(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
+	// Fire BeforeModelCall hook
+	if execCtx != nil {
+		execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
+			Model:   m.modelName,
+			Request: messages,
+		})
+	}
+
 	// Call the underlying model
 	startTime := time.Now()
 	lcgResponse, err := m.model.GenerateContent(ctx, messages, options...)
@@ -66,10 +74,22 @@ func (m *LCGWrapper) GenerateContent(
 		response = convertLCGResponse(lcgResponse, duration)
 	}
 
-	// Automatic tracing if ExecutionContext is provided
+	// Fire AfterModelCall hook and trace
 	if execCtx != nil {
+		// Fire AfterModelCall hook first (for logging)
+		execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
+			Model:    m.modelName,
+			Request:  messages,
+			Response: response,
+			Duration: duration,
+			Error:    err,
+		})
+
+		// Then trace for aggregation
 		trace := gent.ModelCallTrace{
 			Model:    m.modelName,
+			Request:  messages,
+			Response: response,
 			Duration: duration,
 			Error:    err,
 		}

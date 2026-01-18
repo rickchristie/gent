@@ -43,3 +43,44 @@ type ErrorHook interface {
 	// This is informational; the error will still be returned from Execute.
 	OnError(ctx context.Context, execCtx *ExecutionContext, event ErrorEvent)
 }
+
+// -----------------------------------------------------------------------------
+// Model Call Hook Interfaces
+// -----------------------------------------------------------------------------
+
+// BeforeModelCallHook is implemented by hooks that want to be notified before model calls.
+type BeforeModelCallHook interface {
+	// OnBeforeModelCall is called before each model API call.
+	// This is informational; errors are not propagated.
+	OnBeforeModelCall(ctx context.Context, execCtx *ExecutionContext, event BeforeModelCallEvent)
+}
+
+// AfterModelCallHook is implemented by hooks that want to be notified after model calls.
+type AfterModelCallHook interface {
+	// OnAfterModelCall is called after each model API call completes.
+	// This is informational; errors are not propagated.
+	OnAfterModelCall(ctx context.Context, execCtx *ExecutionContext, event AfterModelCallEvent)
+}
+
+// -----------------------------------------------------------------------------
+// Tool Call Hook Interfaces
+// -----------------------------------------------------------------------------
+
+// BeforeToolCallHook is implemented by hooks that want to be notified before tool calls.
+type BeforeToolCallHook interface {
+	// OnBeforeToolCall is called before each tool execution.
+	// The hook can modify event.Args to change the input.
+	// Return an error to abort the tool call (the error becomes the tool's error result).
+	OnBeforeToolCall(
+		ctx context.Context,
+		execCtx *ExecutionContext,
+		event *BeforeToolCallEvent,
+	) error
+}
+
+// AfterToolCallHook is implemented by hooks that want to be notified after tool calls.
+type AfterToolCallHook interface {
+	// OnAfterToolCall is called after each tool execution completes.
+	// This is informational; errors are not propagated.
+	OnAfterToolCall(ctx context.Context, execCtx *ExecutionContext, event AfterToolCallEvent)
+}

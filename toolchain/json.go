@@ -164,6 +164,35 @@ func (c *JSON) Execute(
 			continue
 		}
 
+		// Fire BeforeToolCall hook (may modify args or abort)
+		beforeEvent := &gent.BeforeToolCallEvent{
+			ToolName: call.Name,
+			Args:     call.Args,
+		}
+		if execCtx != nil {
+			if hookErr := execCtx.FireBeforeToolCall(ctx, beforeEvent); hookErr != nil {
+				// Hook aborted the tool call
+				result.Errors[i] = hookErr
+
+				// Fire AfterToolCall with the abort error
+				execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+					ToolName: call.Name,
+					Args:     beforeEvent.Args,
+					Error:    hookErr,
+				})
+
+				// Trace the aborted call
+				execCtx.Trace(gent.ToolCallTrace{
+					ToolName: call.Name,
+					Input:    beforeEvent.Args,
+					Error:    hookErr,
+				})
+				continue
+			}
+			// Use potentially modified args
+			call.Args = beforeEvent.Args
+		}
+
 		startTime := time.Now()
 		output, err := CallToolReflect(ctx, tool, call.Args)
 		duration := time.Since(startTime)
@@ -174,12 +203,21 @@ func (c *JSON) Execute(
 			result.Results[i] = output
 		}
 
-		// Automatic tracing if ExecutionContext is provided
+		// Fire AfterToolCall hook
+		var outputVal any
+		if output != nil {
+			outputVal = output.Output
+		}
 		if execCtx != nil {
-			var outputVal any
-			if output != nil {
-				outputVal = output.Output
-			}
+			execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+				ToolName: call.Name,
+				Args:     call.Args,
+				Output:   outputVal,
+				Duration: duration,
+				Error:    err,
+			})
+
+			// Automatic tracing
 			execCtx.Trace(gent.ToolCallTrace{
 				ToolName: call.Name,
 				Input:    call.Args,

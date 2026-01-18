@@ -129,6 +129,70 @@ func (r *Registry) FireError(ctx context.Context, execCtx *gent.ExecutionContext
 	}
 }
 
+// FireBeforeModelCall dispatches a BeforeModelCallEvent to all registered
+// BeforeModelCallHook implementations.
+// This is informational only; errors from hooks are not propagated.
+func (r *Registry) FireBeforeModelCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event gent.BeforeModelCallEvent,
+) {
+	for _, h := range r.hooks {
+		if hook, ok := h.(gent.BeforeModelCallHook); ok {
+			hook.OnBeforeModelCall(ctx, execCtx, event)
+		}
+	}
+}
+
+// FireAfterModelCall dispatches an AfterModelCallEvent to all registered
+// AfterModelCallHook implementations.
+// This is informational only; errors from hooks are not propagated.
+func (r *Registry) FireAfterModelCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event gent.AfterModelCallEvent,
+) {
+	for _, h := range r.hooks {
+		if hook, ok := h.(gent.AfterModelCallHook); ok {
+			hook.OnAfterModelCall(ctx, execCtx, event)
+		}
+	}
+}
+
+// FireBeforeToolCall dispatches a BeforeToolCallEvent to all registered
+// BeforeToolCallHook implementations.
+// Returns the first error encountered, which should abort the tool call.
+// Hooks can modify event.Args to change the tool input.
+func (r *Registry) FireBeforeToolCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event *gent.BeforeToolCallEvent,
+) error {
+	for _, h := range r.hooks {
+		if hook, ok := h.(gent.BeforeToolCallHook); ok {
+			if err := hook.OnBeforeToolCall(ctx, execCtx, event); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// FireAfterToolCall dispatches an AfterToolCallEvent to all registered
+// AfterToolCallHook implementations.
+// This is informational only; errors from hooks are not propagated.
+func (r *Registry) FireAfterToolCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event gent.AfterToolCallEvent,
+) {
+	for _, h := range r.hooks {
+		if hook, ok := h.(gent.AfterToolCallHook); ok {
+			hook.OnAfterToolCall(ctx, execCtx, event)
+		}
+	}
+}
+
 // Len returns the number of registered hooks.
 func (r *Registry) Len() int {
 	return len(r.hooks)
