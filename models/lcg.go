@@ -248,5 +248,106 @@ func getIntFromMap(m map[string]any, key string) int {
 	}
 }
 
+// GenerateContentStream implements gent.StreamingModel.GenerateContentStream.
+// It provides streaming token-by-token generation with support for reasoning/thinking content.
+//
+// The returned stream uses an unbounded internal buffer, so this method never blocks
+// the producer even if the consumer is slow or not reading.
+func (m *LCGWrapper) GenerateContentStream(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	messages []llms.MessageContent,
+	options ...llms.CallOption,
+) (gent.Stream, error) {
+	// Fire BeforeModelCall hook
+	if execCtx != nil {
+		execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
+			Model:   m.modelName,
+			Request: messages,
+		})
+	}
+
+	// Create stream with duration tracking
+	stream := gent.NewStreamWithDuration()
+
+	// Set up streaming callback using WithStreamingReasoningFunc.
+	// This callback receives both reasoning and content chunks, avoiding duplication
+	// that would occur if we also used WithStreamingFunc.
+	streamingCallback := llms.WithStreamingReasoningFunc(
+		func(_ context.Context, reasoningChunk, contentChunk []byte) error {
+			if len(reasoningChunk) > 0 {
+				stream.SendReasoning(string(reasoningChunk))
+			}
+			if len(contentChunk) > 0 {
+				stream.SendContent(string(contentChunk))
+			}
+			return nil
+		},
+	)
+
+	// Build options with streaming enabled.
+	// StreamThinking is added before user options so users can override it.
+	// The streaming callback is added last to ensure it takes effect.
+	opts := make([]llms.CallOption, 0, len(options)+2)
+	opts = append(opts, llms.WithStreamThinking(true))
+	opts = append(opts, options...)
+	opts = append(opts, streamingCallback)
+
+	// Start the model call in a goroutine
+	go func() {
+		lcgResponse, err := m.model.GenerateContent(ctx, messages, opts...)
+		duration := stream.Duration()
+
+		// Convert response
+		var response *gent.ContentResponse
+		if lcgResponse != nil && err == nil {
+			response = convertLCGResponse(lcgResponse, duration)
+		} else if err == nil {
+			// Build response from accumulated content
+			response = &gent.ContentResponse{
+				Choices: []*gent.ContentChoice{
+					{
+						Content:          stream.AccumulatedContent(),
+						ReasoningContent: stream.AccumulatedReasoning(),
+					},
+				},
+				Info: &gent.GenerationInfo{Duration: duration},
+			}
+		}
+
+		// Fire AfterModelCall hook and trace
+		if execCtx != nil {
+			execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
+				Model:    m.modelName,
+				Request:  messages,
+				Response: response,
+				Duration: duration,
+				Error:    err,
+			})
+
+			trace := gent.ModelCallTrace{
+				Model:    m.modelName,
+				Request:  messages,
+				Response: response,
+				Duration: duration,
+				Error:    err,
+			}
+			if response != nil && response.Info != nil {
+				trace.InputTokens = response.Info.InputTokens
+				trace.OutputTokens = response.Info.OutputTokens
+			}
+			execCtx.Trace(trace)
+		}
+
+		// Complete the stream
+		stream.Complete(response, err)
+	}()
+
+	return stream, nil
+}
+
 // Compile-time check that LCGWrapper implements gent.Model.
 var _ gent.Model = (*LCGWrapper)(nil)
+
+// Compile-time check that LCGWrapper implements gent.StreamingModel.
+var _ gent.StreamingModel = (*LCGWrapper)(nil)
