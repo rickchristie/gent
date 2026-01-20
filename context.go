@@ -2,6 +2,7 @@ package gent
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -61,6 +62,9 @@ type ExecutionContext struct {
 
 	// Hook firer for model/tool call hooks (set by Executor)
 	hookFirer HookFirer
+
+	// Streaming support
+	streamHub *streamHub
 }
 
 // ExecutionStats contains auto-aggregated metrics from trace events.
@@ -89,6 +93,7 @@ func NewExecutionContext(name string, data LoopData) *ExecutionContext {
 			CostByModel:         make(map[string]float64),
 			ToolCallsByName:     make(map[string]int),
 		},
+		streamHub: newStreamHub(),
 	}
 }
 
@@ -375,6 +380,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 			CostByModel:         make(map[string]float64),
 			ToolCallsByName:     make(map[string]int),
 		},
+		streamHub: newStreamHub(),
 	}
 
 	ctx.children = append(ctx.children, child)
@@ -507,4 +513,105 @@ func (ctx *ExecutionContext) Duration() time.Duration {
 		return time.Since(ctx.startTime)
 	}
 	return ctx.endTime.Sub(ctx.startTime)
+}
+
+// -----------------------------------------------------------------------------
+// Streaming Support
+// -----------------------------------------------------------------------------
+
+// SubscribeAll returns a channel receiving all chunks from this context
+// and all descendant contexts, plus an unsubscribe function.
+//
+// The channel closes when either:
+//   - The unsubscribe function is called
+//   - The ExecutionContext terminates (CloseStreams is called)
+//
+// IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
+// emitters never block. The subscriber is responsible for consuming chunks in a
+// timely manner. If the subscriber cannot keep up, memory usage will grow
+// unboundedly. Consider unsubscribing if the subscriber falls too far behind.
+func (ctx *ExecutionContext) SubscribeAll() (<-chan StreamChunk, UnsubscribeFunc) {
+	return ctx.streamHub.subscribeAll()
+}
+
+// SubscribeToStream returns a channel receiving chunks for a specific streamId,
+// plus an unsubscribe function.
+//
+// Returns (nil, nil) if streamId is empty.
+//
+// The channel closes when either:
+//   - The unsubscribe function is called
+//   - The ExecutionContext terminates (CloseStreams is called)
+//
+// IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
+// emitters never block. The subscriber is responsible for consuming chunks in a
+// timely manner. If the subscriber cannot keep up, memory usage will grow
+// unboundedly. Consider unsubscribing if the subscriber falls too far behind.
+func (ctx *ExecutionContext) SubscribeToStream(streamId string) (<-chan StreamChunk, UnsubscribeFunc) {
+	return ctx.streamHub.subscribeToStream(streamId)
+}
+ 
+// SubscribeToTopic returns a channel receiving chunks for a specific topicId,
+// plus an unsubscribe function.
+//
+// Multiple streams may share the same topic; caller handles interleaving.
+// Returns (nil, nil) if topicId is empty.
+//
+// The channel closes when either:
+//   - The unsubscribe function is called
+//   - The ExecutionContext terminates (CloseStreams is called)
+//
+// IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
+// emitters never block. The subscriber is responsible for consuming chunks in a
+// timely manner. If the subscriber cannot keep up, memory usage will grow
+// unboundedly. Consider unsubscribing if the subscriber falls too far behind.
+func (ctx *ExecutionContext) SubscribeToTopic(topicId string) (<-chan StreamChunk, UnsubscribeFunc) {
+	return ctx.streamHub.subscribeToTopic(topicId)
+}
+
+// EmitChunk emits a streaming chunk to all relevant subscribers.
+// Called by model wrappers during streaming. Automatically propagates to parent.
+// Safe for concurrent use.
+//
+// If chunk.Source is empty, it will be populated with BuildSourcePath().
+func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) {
+	// Populate source path if not set
+	if chunk.Source == "" {
+		chunk.Source = ctx.BuildSourcePath()
+	}
+
+	// Emit to local subscribers
+	ctx.streamHub.emit(chunk)
+
+	// Propagate to parent (chunk.Source already contains full path)
+	// Parent is immutable after creation, so no lock needed
+	ctx.mu.RLock()
+	parent := ctx.parent
+	ctx.mu.RUnlock()
+
+	if parent != nil {
+		parent.EmitChunk(chunk)
+	}
+}
+
+// CloseStreams closes all subscription channels. Called by Executor on termination.
+// Safe to call multiple times.
+func (ctx *ExecutionContext) CloseStreams() {
+	ctx.streamHub.close()
+}
+
+// BuildSourcePath returns the hierarchical source path for this context.
+// Format: "name/iteration" or "parent-path/name/iteration"
+func (ctx *ExecutionContext) BuildSourcePath() string {
+	ctx.mu.RLock()
+	name := ctx.name
+	iteration := ctx.iteration
+	parent := ctx.parent
+	ctx.mu.RUnlock()
+
+	if parent == nil {
+		return fmt.Sprintf("%s/%d", name, iteration)
+	}
+
+	return fmt.Sprintf("%s/%s/%d", parent.BuildSourcePath(), name, iteration)
 }

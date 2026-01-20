@@ -90,9 +90,12 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 		Context: execCtx,
 	}
 
-	// Ensure AfterExecution is always called if BeforeExecution succeeded
+	// Ensure streams are closed and AfterExecution is always called if BeforeExecution succeeded
 	beforeExecutionCalled := false
 	defer func() {
+		// Always close streams when execution ends
+		execCtx.CloseStreams()
+
 		if beforeExecutionCalled && e.hooks != nil {
 			// AfterExecution errors are logged but don't change the result
 			event := gent.AfterExecutionEvent{
@@ -212,9 +215,12 @@ func (e *Executor[Data]) ExecuteWithContext(
 		Context: execCtx,
 	}
 
-	// Ensure AfterExecution is always called if BeforeExecution succeeded
+	// Ensure streams are closed and AfterExecution is always called if BeforeExecution succeeded
 	beforeExecutionCalled := false
 	defer func() {
+		// Always close streams when execution ends
+		execCtx.CloseStreams()
+
 		if beforeExecutionCalled && e.hooks != nil {
 			event := gent.AfterExecutionEvent{
 				TerminationReason: execCtx.TerminationReason(),

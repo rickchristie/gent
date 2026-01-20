@@ -102,6 +102,7 @@ type ReactLoop struct {
 	timeProvider      gent.TimeProvider
 	observationPrefix string
 	errorPrefix       string
+	useStreaming      bool
 }
 
 // NewReactLoop creates a new ReactLoop with the given model and default settings.
@@ -206,6 +207,17 @@ func (r *ReactLoop) WithThinkingSection(section gent.TextOutputSection) *ReactLo
 	return r
 }
 
+// WithStreaming enables streaming mode for model calls.
+// When enabled and the model implements StreamingModel, responses are streamed
+// token-by-token. This allows ExecutionContext subscribers to receive chunks
+// in real-time via SubscribeAll() or SubscribeToTopic("llm-response").
+//
+// Default: false (uses non-streaming GenerateContent)
+func (r *ReactLoop) WithStreaming(enabled bool) *ReactLoop {
+	r.useStreaming = enabled
+	return r
+}
+
 // RegisterTool adds a tool to the tool chain.
 func (r *ReactLoop) RegisterTool(tool any) *ReactLoop {
 	r.toolChain.RegisterTool(tool)
@@ -224,8 +236,12 @@ func (r *ReactLoop) Next(ctx context.Context, execCtx *gent.ExecutionContext) *g
 	// Build messages for model call
 	messages := r.buildMessages(data, outputPrompt, toolsPrompt)
 
-	// Call model (automatically traced via execCtx)
-	response, err := r.model.GenerateContent(ctx, execCtx, messages)
+	// Generate stream ID based on iteration for unique identification
+	streamId := fmt.Sprintf("iter-%d", execCtx.Iteration())
+	streamTopicId := "llm-response"
+
+	// Call model - use streaming if enabled and model supports it
+	response, err := r.callModel(ctx, execCtx, streamId, streamTopicId, messages)
 	if err != nil {
 		return &gent.AgentLoopResult{
 			Action: gent.LATerminate,
@@ -317,6 +333,41 @@ func (r *ReactLoop) buildOutputSections() []gent.TextOutputSection {
 	return sections
 }
 
+// processUserSystemPrompt processes the user's system prompt as a template.
+// This allows users to use template variables like {{.Time.Today}} in their prompts.
+func (r *ReactLoop) processUserSystemPrompt() string {
+	if r.userSystemPrompt == "" {
+		return ""
+	}
+
+	// If the prompt doesn't contain template syntax, return as-is
+	if !strings.Contains(r.userSystemPrompt, "{{") {
+		return r.userSystemPrompt
+	}
+
+	// Parse and execute the user's prompt as a template
+	tmpl, err := template.New("user_system_prompt").Parse(r.userSystemPrompt)
+	if err != nil {
+		// If parsing fails, return the original string
+		return r.userSystemPrompt
+	}
+
+	// Execute with access to Time provider
+	data := struct {
+		Time gent.TimeProvider
+	}{
+		Time: r.timeProvider,
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		// If execution fails, return the original string
+		return r.userSystemPrompt
+	}
+
+	return buf.String()
+}
+
 // buildMessages constructs the message list for the model call.
 func (r *ReactLoop) buildMessages(
 	data gent.LoopData,
@@ -325,9 +376,12 @@ func (r *ReactLoop) buildMessages(
 ) []llms.MessageContent {
 	var messages []llms.MessageContent
 
+	// Process user system prompt as a template to expand variables like {{.Time.Today}}
+	processedUserPrompt := r.processUserSystemPrompt()
+
 	// Build system message using template
 	templateData := ReactTemplateData{
-		UserSystemPrompt: r.userSystemPrompt,
+		UserSystemPrompt: processedUserPrompt,
 		OutputPrompt:     outputPrompt,
 		ToolsPrompt:      toolsPrompt,
 		Time:             r.timeProvider,
@@ -440,6 +494,57 @@ func (r *ReactLoop) buildIteration(response, observation string) *gent.Iteration
 	return &gent.Iteration{
 		Messages: messages,
 	}
+}
+
+// callModel calls the model, using streaming if enabled and supported.
+func (r *ReactLoop) callModel(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	streamId string,
+	streamTopicId string,
+	messages []llms.MessageContent,
+) (*gent.ContentResponse, error) {
+	// Check if streaming is enabled and model supports it
+	if r.useStreaming {
+		if streamingModel, ok := r.model.(gent.StreamingModel); ok {
+			return r.callModelStreaming(ctx, execCtx, streamingModel, streamId, streamTopicId, messages)
+		}
+	}
+
+	// Fall back to non-streaming
+	return r.model.GenerateContent(ctx, execCtx, streamId, streamTopicId, messages)
+}
+
+// callModelStreaming calls the model with streaming and accumulates the response.
+func (r *ReactLoop) callModelStreaming(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	model gent.StreamingModel,
+	streamId string,
+	streamTopicId string,
+	messages []llms.MessageContent,
+) (*gent.ContentResponse, error) {
+	stream, err := model.GenerateContentStream(ctx, execCtx, streamId, streamTopicId, messages)
+	if err != nil {
+		return nil, err
+	}
+
+	// Accumulate chunks into response
+	acc := gent.NewStreamAccumulator()
+	for chunk := range stream.Chunks() {
+		if chunk.Err != nil {
+			return nil, chunk.Err
+		}
+		acc.Add(chunk)
+	}
+
+	// Get final response with token info from stream
+	streamResponse, err := stream.Response()
+	if err != nil {
+		return nil, err
+	}
+
+	return acc.ResponseWithInfo(streamResponse), nil
 }
 
 // Compile-time check that ReactLoop implements gent.AgentLoop.

@@ -32,6 +32,8 @@ func (m *mockModel) WithErrors(errs ...error) *mockModel {
 func (m *mockModel) GenerateContent(
 	_ context.Context,
 	_ *gent.ExecutionContext,
+	_ string,
+	_ string,
 	_ []llms.MessageContent,
 	_ ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
@@ -651,5 +653,90 @@ func TestReactLoop_WithTimeProvider(t *testing.T) {
 	}
 	if tp.Weekday() != "Sunday" {
 		t.Errorf("TimeProvider().Weekday() = %q, want %q", tp.Weekday(), "Sunday")
+	}
+}
+
+func TestReactLoop_ProcessUserSystemPrompt_ExpandsTemplateVariables(t *testing.T) {
+	model := newMockModel()
+	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
+
+	loop := NewReactLoop(model).
+		WithTimeProvider(mockTime).
+		WithSystemPrompt("Today is {{.Time.Today}} ({{.Time.Weekday}}).")
+
+	// Call processUserSystemPrompt to expand template variables
+	result := loop.processUserSystemPrompt()
+
+	expected := "Today is 2025-06-15 (Sunday)."
+	if result != expected {
+		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
+	}
+}
+
+func TestReactLoop_ProcessUserSystemPrompt_NoTemplateVariables(t *testing.T) {
+	model := newMockModel()
+
+	loop := NewReactLoop(model).
+		WithSystemPrompt("You are a helpful assistant.")
+
+	result := loop.processUserSystemPrompt()
+
+	expected := "You are a helpful assistant."
+	if result != expected {
+		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
+	}
+}
+
+func TestReactLoop_ProcessUserSystemPrompt_EmptyPrompt(t *testing.T) {
+	model := newMockModel()
+
+	loop := NewReactLoop(model)
+	// No WithSystemPrompt called
+
+	result := loop.processUserSystemPrompt()
+
+	if result != "" {
+		t.Errorf("processUserSystemPrompt() = %q, want empty string", result)
+	}
+}
+
+func TestReactLoop_ProcessUserSystemPrompt_InvalidTemplate(t *testing.T) {
+	model := newMockModel()
+
+	// Invalid template syntax should return original string
+	loop := NewReactLoop(model).
+		WithSystemPrompt("This has {{ invalid syntax")
+
+	result := loop.processUserSystemPrompt()
+
+	// Should return original string when parsing fails
+	expected := "This has {{ invalid syntax"
+	if result != expected {
+		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
+	}
+}
+
+func TestReactLoop_ProcessUserSystemPrompt_MultipleVariables(t *testing.T) {
+	model := newMockModel()
+	mockTime := gent.NewMockTimeProvider(time.Date(2024, 12, 25, 10, 0, 0, 0, time.UTC))
+
+	prompt := `## Task
+You are helping on {{.Time.Today}}.
+It's a {{.Time.Weekday}}.
+Current time: {{.Time.Format "15:04"}}`
+
+	loop := NewReactLoop(model).
+		WithTimeProvider(mockTime).
+		WithSystemPrompt(prompt)
+
+	result := loop.processUserSystemPrompt()
+
+	expected := `## Task
+You are helping on 2024-12-25.
+It's a Wednesday.
+Current time: 10:00`
+
+	if result != expected {
+		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
 	}
 }

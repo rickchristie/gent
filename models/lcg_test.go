@@ -30,7 +30,7 @@ func TestHelloGrok(t *testing.T) {
 
 	model := NewLCGWrapper(llm)
 
-	response, err := model.GenerateContent(ctx, nil, []llms.MessageContent{
+	response, err := model.GenerateContent(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeHuman, "Hello Grok! Nice to meet you!"),
 	})
 	if err != nil {

@@ -218,7 +218,7 @@ func RunStreamingBasic(ctx context.Context, w io.Writer, config StreamOutputConf
 		return err
 	}
 
-	stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+	stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(
 			llms.ChatMessageTypeHuman,
 			"Write 3 paragraphs of a creative dark fantasy story",
@@ -268,7 +268,7 @@ func RunStreamingWithReasoning(ctx context.Context, w io.Writer, config StreamOu
 		return err
 	}
 
-	stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+	stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(
 			llms.ChatMessageTypeHuman,
 			"What is 15 * 17? Show your reasoning step by step.",
@@ -318,7 +318,7 @@ func RunStreamingSlowConsumer(ctx context.Context, w io.Writer, config StreamOut
 		return err
 	}
 
-	stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+	stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(
 			llms.ChatMessageTypeHuman,
 			"Write a short poem about Go programming (4 lines).",
@@ -376,7 +376,7 @@ func RunStreamingNoListener(ctx context.Context, w io.Writer, _ StreamOutputConf
 		return err
 	}
 
-	stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+	stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeHuman, "Say hello in one word."),
 	})
 	if err != nil {
@@ -410,7 +410,7 @@ func RunStreamingCancellation(ctx context.Context, w io.Writer, config StreamOut
 		return err
 	}
 
-	stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+	stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(
 			llms.ChatMessageTypeHuman,
 			"Write a very long story about a programmer. Make it at least 500 words.",
@@ -487,7 +487,7 @@ func RunStreamingConcurrent(ctx context.Context, w io.Writer, _ StreamOutputConf
 		go func(idx int, p string) {
 			defer wg.Done()
 
-			stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+			stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 				llms.TextParts(llms.ChatMessageTypeHuman, p),
 			})
 			if err != nil {
@@ -540,7 +540,7 @@ func RunStreamingResponseInfo(ctx context.Context, w io.Writer, config StreamOut
 		return err
 	}
 
-	stream, err := model.GenerateContentStream(ctx, nil, []llms.MessageContent{
+	stream, err := model.GenerateContentStream(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeHuman, "What is 2+2?"),
 	})
 	if err != nil {

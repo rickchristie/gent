@@ -15,7 +15,23 @@
     {
       "label": "Test: CLI Streaming",
       "type": "shell",
-      "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./models/streamtest",
+      "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./models/clistreamtest",
+      "group": "test",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "isBackground": false,
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: CLI Airline Streaming",
+      "type": "shell",
+      "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./integrationtest/airline/cliairlinetest",
       "group": "test",
       "options": {
         "cwd": "${workspaceFolder}"
