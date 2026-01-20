@@ -345,3 +345,159 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 		t.Errorf("expected both to receive 'hello'")
 	}
 }
+
+func TestExecutionContext_NoListener_EmitDoesNotBlock(t *testing.T) {
+	ctx := NewExecutionContext("test", &testLoopData{})
+
+	// No subscribers - emit should complete instantly without blocking
+	const numChunks = 1000
+	start := time.Now()
+
+	for i := range numChunks {
+		ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
+	}
+
+	elapsed := time.Since(start)
+	ctx.CloseStreams()
+
+	// Emitting 1000 chunks with no listeners should be nearly instant (< 100ms)
+	// If it blocks, it would timeout or take much longer
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("EmitChunk blocked without listeners: took %v", elapsed)
+	}
+}
+
+func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
+	ctx := NewExecutionContext("test", &testLoopData{})
+
+	ch, unsub := ctx.SubscribeAll()
+	defer unsub()
+
+	const numChunks = 100
+	emitDone := make(chan time.Duration, 1)
+
+	// Emitter: emit chunks as fast as possible
+	go func() {
+		start := time.Now()
+		for i := range numChunks {
+			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
+		}
+		emitDone <- time.Since(start)
+		ctx.CloseStreams()
+	}()
+
+	// Slow listener: process each chunk with 10ms delay
+	var received int
+	for range ch {
+		received++
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Check that all chunks were received
+	if received != numChunks {
+		t.Errorf("expected %d chunks, got %d", numChunks, received)
+	}
+
+	// Check that emitter was not blocked by slow listener
+	// Emitting 100 chunks should complete in < 50ms even if listener is slow
+	emitElapsed := <-emitDone
+	if emitElapsed > 50*time.Millisecond {
+		t.Errorf("EmitChunk was blocked by slow listener: emit took %v", emitElapsed)
+	}
+}
+
+func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
+	ctx := NewExecutionContext("test", &testLoopData{})
+
+	slowCh, slowUnsub := ctx.SubscribeAll()
+	fastCh, fastUnsub := ctx.SubscribeAll()
+	defer slowUnsub()
+	defer fastUnsub()
+
+	const numChunks = 50
+	fastDone := make(chan time.Duration, 1)
+	slowDone := make(chan int, 1)
+
+	// Emit chunks
+	go func() {
+		for i := range numChunks {
+			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
+		}
+		ctx.CloseStreams()
+	}()
+
+	// Slow listener: 20ms per chunk
+	go func() {
+		count := 0
+		for range slowCh {
+			count++
+			time.Sleep(20 * time.Millisecond)
+		}
+		slowDone <- count
+	}()
+
+	// Fast listener: process immediately
+	go func() {
+		start := time.Now()
+		for range fastCh {
+			// Process instantly
+		}
+		fastDone <- time.Since(start)
+	}()
+
+	// Fast listener should finish quickly (< 50ms), not waiting for slow listener
+	fastElapsed := <-fastDone
+	if fastElapsed > 50*time.Millisecond {
+		t.Errorf("fast listener was blocked by slow listener: took %v", fastElapsed)
+	}
+
+	// Slow listener should still receive all chunks
+	slowReceived := <-slowDone
+	if slowReceived != numChunks {
+		t.Errorf("slow listener expected %d chunks, got %d", numChunks, slowReceived)
+	}
+}
+
+func TestExecutionContext_SlowListener_ParentPropagation_DoesNotBlockChild(t *testing.T) {
+	parent := NewExecutionContext("parent", &testLoopData{})
+	parent.StartIteration()
+
+	child := parent.SpawnChild("child", &testLoopData{})
+	child.StartIteration()
+
+	// Subscribe at parent level with slow processing
+	parentCh, parentUnsub := parent.SubscribeAll()
+	defer parentUnsub()
+
+	const numChunks = 100
+	emitDone := make(chan time.Duration, 1)
+
+	// Child emits chunks - should not be blocked by slow parent listener
+	go func() {
+		start := time.Now()
+		for i := range numChunks {
+			child.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
+		}
+		emitDone <- time.Since(start)
+		parent.CloseStreams()
+		child.CloseStreams()
+	}()
+
+	// Slow parent listener: 10ms per chunk
+	var received int
+	for range parentCh {
+		received++
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Verify child emit was not blocked
+	emitElapsed := <-emitDone
+	if emitElapsed > 50*time.Millisecond {
+		t.Errorf("child EmitChunk was blocked by slow parent listener: took %v", emitElapsed)
+	}
+
+	// Verify all chunks received
+	if received != numChunks {
+		t.Errorf("expected %d chunks, got %d", numChunks, received)
+	}
+}
