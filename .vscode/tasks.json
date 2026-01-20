@@ -11,6 +11,22 @@
         "panel": "new"
       },
       "problemMatcher": ["$go"]
+    },
+    {
+      "label": "Test: CLI Streaming",
+      "type": "shell",
+      "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./models/streamtest",
+      "group": "test",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "isBackground": false,
+      "problemMatcher": []
     }
   ]
 }
