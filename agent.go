@@ -30,25 +30,25 @@ type AgentLoop[Data LoopData] interface {
 // The interface methods within this interface allows custom [AgentLoop] implementations to work with
 // provided hooks, for logging, metrics, etc.
 type LoopData interface {
-	// GetOriginalInput returns the original input provided by the user that started the agent loop.
-	GetOriginalInput() []ContentPart
+	// GetTask returns the original input provided by the user that started the agent loop.
+	GetTask() []ContentPart
 
 	// GetIterationHistory returns all [Iteration] recorded, including those that may be
-	// compacted away from GetIterations.
+	// compacted away from GetScratchPad.
 	GetIterationHistory() []*Iteration
 
 	// AddIterationHistory adds a new [Iteration] to the full history only.
 	AddIterationHistory(iter *Iteration)
 
-	// GetIterations returns all [Iteration] recorded, that will be used in next iteration.
+	// GetScratchPad returns all [Iteration] recorded, that will be used in next iteration.
 	// When compaction happens, some earlier iterations may be removed from this slice, but they
 	// are preserved in GetIterationHistory.
-	GetIterations() []*Iteration
+	GetScratchPad() []*Iteration
 
-	// SetIterations sets the iterations to be used in next iteration.
-	// [AgentLoop] implementations are free to call [GetIterations] and modify it how they want,
+	// SetScratchPad sets the iterations to be used in next iteration.
+	// [AgentLoop] implementations are free to call [GetScratchPad] and modify it how they want,
 	// then call this method to set the modified iterations to be used in the next iteration.
-	SetIterations([]*Iteration)
+	SetScratchPad([]*Iteration)
 }
 
 // Iteration represents a single iteration's message content.

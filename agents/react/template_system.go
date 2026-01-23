@@ -11,6 +11,9 @@ import (
 //go:embed template_system.tmpl
 var reactSystemTemplateContent string
 
+//go:embed template_task.tmpl
+var reactTaskTemplateContent string
+
 // SystemPromptData contains the data passed to ReAct templates.
 type SystemPromptData struct {
 	// BehaviorAndContext contains behavior instructions and context provided by the user.
@@ -34,14 +37,41 @@ type SystemPromptData struct {
 // DefaultReActSystemTemplate is the default template for the ReAct system prompt.
 // It explains the Think-Act-Observe loop to the LLM.
 //
-// The template file is located at agents/react/system.tmpl
+// The template file is located at agents/react/template_system.tmpl
 // Users can replace this template via Agent.WithSystemTemplate().
 var DefaultReActSystemTemplate = template.Must(
 	template.New("react_system").Parse(reactSystemTemplateContent),
 )
 
+// DefaultReActTaskTemplate is the default template for the ReAct task message.
+// It combines the task and scratchpad into a user message.
+//
+// The template file is located at agents/react/template_task.tmpl
+// Users can replace this template via Agent.WithTaskTemplate().
+var DefaultReActTaskTemplate = template.Must(
+	template.New("react_task").Parse(reactTaskTemplateContent),
+)
+
+// TaskPromptData contains the data passed to the task template.
+type TaskPromptData struct {
+	// Task is the original task/input provided by the user.
+	Task string
+
+	// ScratchPad contains the formatted history of previous iterations.
+	ScratchPad string
+}
+
 // ExecuteTemplate executes a template with the given data and returns the result.
 func ExecuteTemplate(tmpl *template.Template, data SystemPromptData) (string, error) {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// ExecuteTaskTemplate executes a task template with the given data and returns the result.
+func ExecuteTaskTemplate(tmpl *template.Template, data TaskPromptData) (string, error) {
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", err

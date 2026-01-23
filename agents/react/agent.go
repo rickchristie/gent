@@ -15,23 +15,23 @@ import (
 
 // LoopData implements gent.LoopData for the ReAct agent loop.
 type LoopData struct {
-	originalInput    []gent.ContentPart
+	task             []gent.ContentPart
 	iterationHistory []*gent.Iteration
-	iterations       []*gent.Iteration
+	scratchpad       []*gent.Iteration
 }
 
 // NewLoopData creates a new LoopData with the given input.
 func NewLoopData(input ...gent.ContentPart) *LoopData {
 	return &LoopData{
-		originalInput:    input,
+		task:             input,
 		iterationHistory: make([]*gent.Iteration, 0),
-		iterations:       make([]*gent.Iteration, 0),
+		scratchpad:       make([]*gent.Iteration, 0),
 	}
 }
 
-// GetOriginalInput returns the original input provided by the user.
-func (d *LoopData) GetOriginalInput() []gent.ContentPart {
-	return d.originalInput
+// GetTask returns the original input provided by the user.
+func (d *LoopData) GetTask() []gent.ContentPart {
+	return d.task
 }
 
 // GetIterationHistory returns all Iteration recorded, including compacted ones.
@@ -44,14 +44,14 @@ func (d *LoopData) AddIterationHistory(iter *gent.Iteration) {
 	d.iterationHistory = append(d.iterationHistory, iter)
 }
 
-// GetIterations returns all Iteration that will be used in next iteration.
-func (d *LoopData) GetIterations() []*gent.Iteration {
-	return d.iterations
+// GetScratchPad returns all Iteration that will be used in next iteration.
+func (d *LoopData) GetScratchPad() []*gent.Iteration {
+	return d.scratchpad
 }
 
-// SetIterations sets the iterations to be used in next iteration.
-func (d *LoopData) SetIterations(iterations []*gent.Iteration) {
-	d.iterations = iterations
+// SetScratchPad sets the iterations to be used in next iteration.
+func (d *LoopData) SetScratchPad(iterations []*gent.Iteration) {
+	d.scratchpad = iterations
 }
 
 // Compile-time check that LoopData implements gent.LoopData.
@@ -87,23 +87,22 @@ func (s *simpleSection) ParseSection(content string) (any, error) {
 //
 // The prompt construction follows this structure:
 //   - System message: ReAct explanation + output format + user's additional context
-//   - User message: Original input/task
-//   - Previous iterations: Assistant responses + observations (tool results)
+//   - User message: Task and scratchpad (previous iterations)
 //
-// Templates can be customized via WithSystemTemplate() for full control over prompting.
+// Templates can be customized via WithSystemTemplate() and WithTaskTemplate() for full control
+// over prompting.
 type Agent struct {
 	behaviorAndContext string
 	criticalRules      string
 	systemTemplate     *template.Template
-	model             gent.Model
-	format            gent.TextOutputFormat
-	toolChain         gent.ToolChain
-	termination       gent.Termination
-	thinkingSection   gent.TextOutputSection
-	timeProvider      gent.TimeProvider
-	observationPrefix string
-	errorPrefix       string
-	useStreaming      bool
+	taskTemplate       *template.Template
+	model              gent.Model
+	format             gent.TextOutputFormat
+	toolChain          gent.ToolChain
+	termination        gent.Termination
+	thinkingSection    gent.TextOutputSection
+	timeProvider       gent.TimeProvider
+	useStreaming       bool
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -113,16 +112,16 @@ type Agent struct {
 //   - Termination: termination.NewText()
 //   - TimeProvider: gent.NewDefaultTimeProvider()
 //   - SystemTemplate: DefaultReActSystemTemplate
+//   - TaskTemplate: DefaultReActTaskTemplate
 func NewAgent(model gent.Model) *Agent {
 	return &Agent{
-		model:             model,
-		format:            format.NewXML(),
-		toolChain:         toolchain.NewYAML(),
-		termination:       termination.NewText(),
-		timeProvider:      gent.NewDefaultTimeProvider(),
-		systemTemplate:    DefaultReActSystemTemplate,
-		observationPrefix: "Observation:\n",
-		errorPrefix:       "Error:\n",
+		model:          model,
+		format:         format.NewXML(),
+		toolChain:      toolchain.NewYAML(),
+		termination:    termination.NewText(),
+		timeProvider:   gent.NewDefaultTimeProvider(),
+		systemTemplate: DefaultReActSystemTemplate,
+		taskTemplate:   DefaultReActTaskTemplate,
 	}
 }
 
@@ -168,6 +167,35 @@ func (r *Agent) WithSystemTemplateString(tmplStr string) (*Agent, error) {
 		return r, fmt.Errorf("failed to parse template: %w", err)
 	}
 	r.systemTemplate = tmpl
+	return r, nil
+}
+
+// WithTaskTemplate sets a custom task prompt template.
+// Use this for full control over the task/user message format.
+// See DefaultReActTaskTemplate for the expected template structure.
+func (r *Agent) WithTaskTemplate(tmpl *template.Template) *Agent {
+	r.taskTemplate = tmpl
+	return r
+}
+
+// WithTaskTemplateString sets a custom task prompt template from a string.
+// The string is parsed as a Go text/template with access to TaskPromptData fields:
+//   - {{.Task}} - the original task/input
+//   - {{.ScratchPad}} - formatted history of previous iterations
+//
+// Example:
+//
+//	loop.WithTaskTemplateString(`<task>{{.Task}}</task>
+//	{{if .ScratchPad}}{{.ScratchPad}}
+//	CONTINUE!{{else}}BEGIN!{{end}}`)
+//
+// Returns error if the template string is invalid.
+func (r *Agent) WithTaskTemplateString(tmplStr string) (*Agent, error) {
+	tmpl, err := template.New("react_task").Parse(tmplStr)
+	if err != nil {
+		return r, fmt.Errorf("failed to parse template: %w", err)
+	}
+	r.taskTemplate = tmpl
 	return r, nil
 }
 
@@ -313,10 +341,10 @@ func (r *Agent) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.
 	iter := r.buildIteration(responseContent, observation)
 	data.AddIterationHistory(iter)
 
-	// Add to iterations for next call
-	iterations := data.GetIterations()
-	iterations = append(iterations, iter)
-	data.SetIterations(iterations)
+	// Add to scratchpad for next call
+	scratchpad := data.GetScratchPad()
+	scratchpad = append(scratchpad, iter)
+	data.SetScratchPad(scratchpad)
 
 	return &gent.AgentLoopResult{
 		Action:     gent.LAContinue,
@@ -411,34 +439,55 @@ func (r *Agent) buildMessages(
 		})
 	}
 
-	// User message: original input
-	originalInput := data.GetOriginalInput()
-	if len(originalInput) > 0 {
-		userParts := make([]llms.ContentPart, len(originalInput))
-		for i, part := range originalInput {
-			userParts[i] = part
-		}
+	// User message: task and scratchpad
+	taskContent := r.buildTaskMessage(data)
+	if taskContent != "" {
 		messages = append(messages, llms.MessageContent{
 			Role:  llms.ChatMessageTypeHuman,
-			Parts: userParts,
+			Parts: []llms.ContentPart{llms.TextContent{Text: taskContent}},
 		})
 	}
 
-	// Previous iterations
-	for _, iter := range data.GetIterations() {
-		for _, msg := range iter.Messages {
-			parts := make([]llms.ContentPart, len(msg.Parts))
-			for i, part := range msg.Parts {
-				parts[i] = part
-			}
-			messages = append(messages, llms.MessageContent{
-				Role:  msg.Role,
-				Parts: parts,
-			})
+	return messages
+}
+
+// buildTaskMessage constructs the task message combining task and scratchpad.
+func (r *Agent) buildTaskMessage(data gent.LoopData) string {
+	// Get task text
+	task := data.GetTask()
+	var taskText strings.Builder
+	for _, part := range task {
+		if tc, ok := part.(llms.TextContent); ok {
+			taskText.WriteString(tc.Text)
 		}
 	}
 
-	return messages
+	// Build scratchpad from previous iterations
+	var scratchpadText strings.Builder
+	for _, iter := range data.GetScratchPad() {
+		for _, msg := range iter.Messages {
+			for _, part := range msg.Parts {
+				if tc, ok := part.(llms.TextContent); ok {
+					scratchpadText.WriteString(tc.Text)
+					scratchpadText.WriteString("\n")
+				}
+			}
+		}
+	}
+
+	// Execute task template
+	taskData := TaskPromptData{
+		Task:       taskText.String(),
+		ScratchPad: strings.TrimSpace(scratchpadText.String()),
+	}
+
+	content, err := ExecuteTaskTemplate(r.taskTemplate, taskData)
+	if err != nil {
+		// Fallback to just the task if template fails
+		return taskText.String()
+	}
+
+	return content
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.
@@ -452,8 +501,7 @@ func (r *Agent) executeToolCalls(
 	for _, content := range contents {
 		result, err := r.toolChain.Execute(ctx, execCtx, content)
 		if err != nil {
-			observations = append(observations,
-				fmt.Sprintf("%s%v", r.errorPrefix, err))
+			observations = append(observations, fmt.Sprintf("Error: %v", err))
 			continue
 		}
 
@@ -461,13 +509,12 @@ func (r *Agent) executeToolCalls(
 		for i, toolResult := range result.Results {
 			if result.Errors[i] != nil {
 				observations = append(observations,
-					fmt.Sprintf("%s%s: %v", r.errorPrefix, result.Calls[i].Name, result.Errors[i]))
+					fmt.Sprintf("[%s] Error: %v", result.Calls[i].Name, result.Errors[i]))
 				continue
 			}
 			if toolResult != nil {
 				// Format tool result
 				var resultText strings.Builder
-				resultText.WriteString(r.observationPrefix)
 				resultText.WriteString(fmt.Sprintf("[%s] ", toolResult.Name))
 				for _, part := range toolResult.Result {
 					if tc, ok := part.(llms.TextContent); ok {
@@ -479,7 +526,11 @@ func (r *Agent) executeToolCalls(
 		}
 	}
 
-	return strings.Join(observations, "\n\n")
+	if len(observations) == 0 {
+		return ""
+	}
+
+	return "<observation>\n" + strings.Join(observations, "\n") + "\n</observation>"
 }
 
 // buildIteration creates an Iteration from response and observation.

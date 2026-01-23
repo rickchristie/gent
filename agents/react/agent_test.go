@@ -193,11 +193,11 @@ func newTestExecCtx(data gent.LoopData) *gent.ExecutionContext {
 // LoopData Tests
 // ----------------------------------------------------------------------------
 
-func TestLoopData_GetOriginalInput(t *testing.T) {
+func TestLoopData_GetTask(t *testing.T) {
 	input := []gent.ContentPart{llms.TextContent{Text: "test input"}}
 	data := NewLoopData(input...)
 
-	result := data.GetOriginalInput()
+	result := data.GetTask()
 	if len(result) != 1 {
 		t.Fatalf("expected 1 part, got %d", len(result))
 	}
@@ -236,25 +236,25 @@ func TestLoopData_IterationHistory(t *testing.T) {
 	}
 }
 
-func TestLoopData_Iterations(t *testing.T) {
+func TestLoopData_ScratchPad(t *testing.T) {
 	data := NewLoopData()
 
 	// Initially empty
-	if len(data.GetIterations()) != 0 {
-		t.Fatalf("expected empty iterations, got %d", len(data.GetIterations()))
+	if len(data.GetScratchPad()) != 0 {
+		t.Fatalf("expected empty scratchpad, got %d", len(data.GetScratchPad()))
 	}
 
-	// Set iterations
+	// Set scratchpad
 	iter := &gent.Iteration{
 		Messages: []gent.MessageContent{
 			{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}},
 		},
 	}
-	data.SetIterations([]*gent.Iteration{iter})
+	data.SetScratchPad([]*gent.Iteration{iter})
 
-	iterations := data.GetIterations()
-	if len(iterations) != 1 {
-		t.Fatalf("expected 1 iteration, got %d", len(iterations))
+	scratchpad := data.GetScratchPad()
+	if len(scratchpad) != 1 {
+		t.Fatalf("expected 1 iteration in scratchpad, got %d", len(scratchpad))
 	}
 }
 
@@ -390,9 +390,9 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 		t.Error("expected NextPrompt to be set")
 	}
 
-	// Check that iteration was added
-	if len(data.GetIterations()) != 1 {
-		t.Errorf("expected 1 iteration, got %d", len(data.GetIterations()))
+	// Check that iteration was added to scratchpad
+	if len(data.GetScratchPad()) != 1 {
+		t.Errorf("expected 1 iteration in scratchpad, got %d", len(data.GetScratchPad()))
 	}
 }
 
@@ -625,14 +625,11 @@ func TestNewAgent_Defaults(t *testing.T) {
 	if loop.timeProvider == nil {
 		t.Error("expected default timeProvider to be set")
 	}
-	if loop.observationPrefix != "Observation:\n" {
-		t.Errorf("expected default observationPrefix, got %q", loop.observationPrefix)
-	}
-	if loop.errorPrefix != "Error:\n" {
-		t.Errorf("expected default errorPrefix, got %q", loop.errorPrefix)
-	}
 	if loop.systemTemplate == nil {
 		t.Error("expected default systemTemplate to be set")
+	}
+	if loop.taskTemplate == nil {
+		t.Error("expected default taskTemplate to be set")
 	}
 }
 

@@ -4,6 +4,8 @@ import "errors"
 
 // TextOutputFormat defines how sections are structured in the LLM output.
 // It handles the "envelope" - how sections are delimited and extracted.
+//
+// See: [TextOutputSection] for section definitions.
 type TextOutputFormat interface {
 	// Describe generates the prompt section explaining the output format.
 	// It combines section prompts with format-specific structure instructions.

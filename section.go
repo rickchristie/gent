@@ -11,6 +11,8 @@ package gent
 // By defining sections, we can modularize the prompt construction and output parsing logic.
 // Each section can provide its own prompt instructions and parsing logic, making it easier
 // to compose complex outputs from the LLM.
+//
+// See: [TextOutputFormat] for how sections are structured in the overall output.
 type TextOutputSection interface {
 	// Name returns the section identifier (e.g., "thinking", "action", "answer")
 	Name() string

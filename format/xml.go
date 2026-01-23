@@ -47,7 +47,7 @@ func (f *XML) Describe(sections []gent.TextOutputSection) string {
 			sb.WriteString(prompt)
 			sb.WriteString("\n")
 		}
-		fmt.Fprintf(&sb, "</%s>\n\n", name)
+		fmt.Fprintf(&sb, "</%s>\n", name)
 	}
 
 	return sb.String()
@@ -68,7 +68,7 @@ func (f *XML) DescribeStructure(sections []gent.TextOutputSection) string {
 		f.knownSections[strings.ToLower(name)] = true
 		fmt.Fprintf(&sb, "<%s>\n", name)
 		fmt.Fprintf(&sb, "... %s content here ...\n", name)
-		fmt.Fprintf(&sb, "</%s>\n\n", name)
+		fmt.Fprintf(&sb, "</%s>\n", name)
 	}
 
 	return sb.String()
