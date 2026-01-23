@@ -27,10 +27,10 @@ Tests for the ReAct AgentLoop.
 
 ## Implementation Details
 
-### ReActLoopData (LoopData Implementation)
+### LoopData (LoopData Implementation)
 
 ```go
-type ReActLoopData struct {
+type LoopData struct {
     originalInput    []ContentPart
     iterationHistory [][]*IterationInfo
     iterations       [][]*IterationInfo
@@ -44,12 +44,12 @@ Methods to implement:
 - `GetIterations() [][]*IterationInfo`
 - `SetIterations([][]*IterationInfo)`
 
-Constructor: `NewReActLoopData(input ...ContentPart) *ReActLoopData`
+Constructor: `NewLoopData(input ...ContentPart) *LoopData`
 
-### ReActLoop (AgentLoop Implementation)
+### Agent (AgentLoop Implementation)
 
 ```go
-type ReActLoop struct {
+type Agent struct {
     behaviorAndContext string
     criticalRules      string
     model              Model
@@ -64,7 +64,7 @@ type ReActLoop struct {
 
 Constructor:
 ```go
-func NewReActLoop(model Model) *ReActLoop
+func NewAgent(model Model) *Agent
 ```
 
 Defaults:
@@ -75,19 +75,19 @@ Defaults:
 - ErrorPrefix: `"Tool error:\n"`
 
 Builder methods:
-- `WithBehaviorAndContext(string) *ReActLoop`
-- `WithCriticalRules(string) *ReActLoop`
-- `WithFormat(TextOutputFormat) *ReActLoop`
-- `WithToolChain(ToolChain) *ReActLoop`
-- `WithTermination(Termination) *ReActLoop`
-- `WithThinking(prompt string) *ReActLoop`
-- `WithThinkingSection(TextOutputSection) *ReActLoop`
-- `RegisterTool(tool any) *ReActLoop`
+- `WithBehaviorAndContext(string) *Agent`
+- `WithCriticalRules(string) *Agent`
+- `WithFormat(TextOutputFormat) *Agent`
+- `WithToolChain(ToolChain) *Agent`
+- `WithTermination(Termination) *Agent`
+- `WithThinking(prompt string) *Agent`
+- `WithThinkingSection(TextOutputSection) *Agent`
+- `RegisterTool(tool any) *Agent`
 
 ### Iterate() Logic
 
 ```go
-func (r *ReActLoop) Iterate(ctx context.Context, data LoopData) *AgentLoopResult
+func (r *Agent) Iterate(ctx context.Context, data LoopData) *AgentLoopResult
 ```
 
 Steps:
@@ -105,10 +105,10 @@ Steps:
 ### Helper Methods
 
 ```go
-func (r *ReActLoop) buildOutputSections() []TextOutputSection
-func (r *ReActLoop) buildMessages(data LoopData, outputPrompt string) []llms.MessageContent
-func (r *ReActLoop) executeToolCalls(ctx context.Context, contents []string) string
-func (r *ReActLoop) buildIterationInfo(response, observation string) *IterationInfo
+func (r *Agent) buildOutputSections() []TextOutputSection
+func (r *Agent) buildMessages(data LoopData, outputPrompt string) []llms.MessageContent
+func (r *Agent) executeToolCalls(ctx context.Context, contents []string) string
+func (r *Agent) buildIterationInfo(response, observation string) *IterationInfo
 ```
 
 ### simpleSection (for thinking)
@@ -162,14 +162,14 @@ Per CLAUDE.md - never swallow errors:
 
 ### Unit Tests
 
-1. `TestReActLoopData_*` - Test LoopData implementation methods
-2. `TestReActLoop_BuildOutputSections` - Verify sections are built correctly
-3. `TestReActLoop_BuildMessages` - Verify message construction
-4. `TestReActLoop_Iterate_Termination` - Test termination path
-5. `TestReActLoop_Iterate_ToolExecution` - Test tool execution path
-6. `TestReActLoop_Iterate_MultipleTools` - Test multiple tool calls
-7. `TestReActLoop_Iterate_ToolError` - Test error handling
-8. `TestReActLoop_Iterate_ParseError` - Test parse error handling
+1. `TestLoopData_*` - Test LoopData implementation methods
+2. `TestAgent_BuildOutputSections` - Verify sections are built correctly
+3. `TestAgent_BuildMessages` - Verify message construction
+4. `TestAgent_Iterate_Termination` - Test termination path
+5. `TestAgent_Iterate_ToolExecution` - Test tool execution path
+6. `TestAgent_Iterate_MultipleTools` - Test multiple tool calls
+7. `TestAgent_Iterate_ToolError` - Test error handling
+8. `TestAgent_Iterate_ParseError` - Test parse error handling
 
 ### Mock Requirements
 
@@ -180,7 +180,7 @@ Per CLAUDE.md - never swallow errors:
 
 ```go
 // Create ReAct loop
-loop := gent.NewReActLoop(model).
+loop := gent.NewAgent(model).
     WithBehaviorAndContext("You are a helpful assistant.").
     WithCriticalRules("Always verify facts before responding.").
     WithThinking("Think step by step.").
@@ -188,7 +188,7 @@ loop := gent.NewReActLoop(model).
     RegisterTool(calculatorTool)
 
 // Create loop data
-data := gent.NewReActLoopData(llms.TextContent{Text: "What is 2+2?"})
+data := gent.NewLoopData(llms.TextContent{Text: "What is 2+2?"})
 
 // Run iteration
 result := loop.Iterate(ctx, data)

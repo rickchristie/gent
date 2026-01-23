@@ -190,12 +190,12 @@ func newTestExecCtx(data gent.LoopData) *gent.ExecutionContext {
 }
 
 // ----------------------------------------------------------------------------
-// ReActLoopData Tests
+// LoopData Tests
 // ----------------------------------------------------------------------------
 
-func TestReActLoopData_GetOriginalInput(t *testing.T) {
+func TestLoopData_GetOriginalInput(t *testing.T) {
 	input := []gent.ContentPart{llms.TextContent{Text: "test input"}}
-	data := NewReActLoopData(input...)
+	data := NewLoopData(input...)
 
 	result := data.GetOriginalInput()
 	if len(result) != 1 {
@@ -211,8 +211,8 @@ func TestReActLoopData_GetOriginalInput(t *testing.T) {
 	}
 }
 
-func TestReActLoopData_IterationHistory(t *testing.T) {
-	data := NewReActLoopData()
+func TestLoopData_IterationHistory(t *testing.T) {
+	data := NewLoopData()
 
 	// Initially empty
 	if len(data.GetIterationHistory()) != 0 {
@@ -236,8 +236,8 @@ func TestReActLoopData_IterationHistory(t *testing.T) {
 	}
 }
 
-func TestReActLoopData_Iterations(t *testing.T) {
-	data := NewReActLoopData()
+func TestLoopData_Iterations(t *testing.T) {
+	data := NewLoopData()
 
 	// Initially empty
 	if len(data.GetIterations()) != 0 {
@@ -259,15 +259,15 @@ func TestReActLoopData_Iterations(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// ReActLoop Tests
+// Agent Tests
 // ----------------------------------------------------------------------------
 
-func TestReActLoop_BuildOutputSections(t *testing.T) {
+func TestAgent_BuildOutputSections(t *testing.T) {
 	model := newMockModel()
 	tc := newMockToolChain()
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithToolChain(tc).
 		WithTermination(term)
 
@@ -284,19 +284,19 @@ func TestReActLoop_BuildOutputSections(t *testing.T) {
 	}
 }
 
-func TestReActLoop_BuildMessages(t *testing.T) {
+func TestAgent_BuildMessages(t *testing.T) {
 	model := newMockModel()
 	format := newMockFormat()
 	tc := newMockToolChain()
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithBehaviorAndContext("You are helpful.").
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "Hello"})
+	data := NewLoopData(llms.TextContent{Text: "Hello"})
 
 	messages := loop.buildMessages(data, "output prompt", "tools prompt")
 
@@ -316,7 +316,7 @@ func TestReActLoop_BuildMessages(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_Termination(t *testing.T) {
+func TestAgent_Next_Termination(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<answer>The answer is 42</answer>"}},
 	}
@@ -328,12 +328,12 @@ func TestReActLoop_Next_Termination(t *testing.T) {
 	tc := newMockToolChain()
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "What is 6*7?"})
+	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -354,7 +354,7 @@ func TestReActLoop_Next_Termination(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_ToolExecution(t *testing.T) {
+func TestAgent_Next_ToolExecution(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<action>tool: search\nargs:\n  q: test</action>"}},
 	}
@@ -373,12 +373,12 @@ func TestReActLoop_Next_ToolExecution(t *testing.T) {
 	})
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "Search for test"})
+	data := NewLoopData(llms.TextContent{Text: "Search for test"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -396,7 +396,7 @@ func TestReActLoop_Next_ToolExecution(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_ToolError(t *testing.T) {
+func TestAgent_Next_ToolError(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<action>tool: broken</action>"}},
 	}
@@ -412,12 +412,12 @@ func TestReActLoop_Next_ToolError(t *testing.T) {
 	})
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "Use broken tool"})
+	data := NewLoopData(llms.TextContent{Text: "Use broken tool"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -430,18 +430,18 @@ func TestReActLoop_Next_ToolError(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_ModelError(t *testing.T) {
+func TestAgent_Next_ModelError(t *testing.T) {
 	model := newMockModel().WithErrors(errors.New("model failed"))
 	format := newMockFormat()
 	tc := newMockToolChain()
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "Hello"})
+	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -462,7 +462,7 @@ func TestReActLoop_Next_ModelError(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_ParseError(t *testing.T) {
+func TestAgent_Next_ParseError(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "invalid response"}},
 	}
@@ -473,12 +473,12 @@ func TestReActLoop_Next_ParseError(t *testing.T) {
 	// Termination that doesn't accept raw content
 	term := &mockTermination{name: "answer", prompt: "answer"}
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "Hello"})
+	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -488,7 +488,7 @@ func TestReActLoop_Next_ParseError(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_ParseError_FallbackToTermination(t *testing.T) {
+func TestAgent_Next_ParseError_FallbackToTermination(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "The answer is 42"}},
 	}
@@ -499,12 +499,12 @@ func TestReActLoop_Next_ParseError_FallbackToTermination(t *testing.T) {
 	term := newMockTermination().
 		WithTerminationResult(llms.TextContent{Text: "The answer is 42"})
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "What is 6*7?"})
+	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -526,7 +526,7 @@ func TestReActLoop_Next_ParseError_FallbackToTermination(t *testing.T) {
 	}
 }
 
-func TestReActLoop_Next_MultipleTools(t *testing.T) {
+func TestAgent_Next_MultipleTools(t *testing.T) {
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "<action>tool: a</action><action>tool: b</action>"}},
 	}
@@ -556,12 +556,12 @@ func TestReActLoop_Next_MultipleTools(t *testing.T) {
 		)
 	term := newMockTermination()
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewReActLoopData(llms.TextContent{Text: "Use tools a and b"})
+	data := NewLoopData(llms.TextContent{Text: "Use tools a and b"})
 	execCtx := newTestExecCtx(data)
 	result := loop.Next(context.Background(), execCtx)
 
@@ -575,11 +575,11 @@ func TestReActLoop_Next_MultipleTools(t *testing.T) {
 	}
 }
 
-func TestReActLoop_RegisterTool(t *testing.T) {
+func TestAgent_RegisterTool(t *testing.T) {
 	model := newMockModel()
 	tc := newMockToolChain()
 
-	loop := NewReActLoop(model).WithToolChain(tc)
+	loop := NewAgent(model).WithToolChain(tc)
 
 	// Should be able to chain RegisterTool
 	result := loop.RegisterTool("dummy")
@@ -608,9 +608,9 @@ func TestSimpleSection(t *testing.T) {
 	}
 }
 
-func TestNewReActLoop_Defaults(t *testing.T) {
+func TestNewAgent_Defaults(t *testing.T) {
 	model := newMockModel()
-	loop := NewReActLoop(model)
+	loop := NewAgent(model)
 
 	// Verify defaults are set
 	if loop.format == nil {
@@ -636,11 +636,11 @@ func TestNewReActLoop_Defaults(t *testing.T) {
 	}
 }
 
-func TestReActLoop_WithTimeProvider(t *testing.T) {
+func TestAgent_WithTimeProvider(t *testing.T) {
 	model := newMockModel()
 	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
 
-	loop := NewReActLoop(model).WithTimeProvider(mockTime)
+	loop := NewAgent(model).WithTimeProvider(mockTime)
 
 	if loop.TimeProvider() != mockTime {
 		t.Error("expected custom time provider to be set")
@@ -656,11 +656,11 @@ func TestReActLoop_WithTimeProvider(t *testing.T) {
 	}
 }
 
-func TestReActLoop_ProcessTemplateString_ExpandsTemplateVariables(t *testing.T) {
+func TestAgent_ProcessTemplateString_ExpandsTemplateVariables(t *testing.T) {
 	model := newMockModel()
 	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithTimeProvider(mockTime)
 
 	// Call processTemplateString to expand template variables
@@ -672,10 +672,10 @@ func TestReActLoop_ProcessTemplateString_ExpandsTemplateVariables(t *testing.T) 
 	}
 }
 
-func TestReActLoop_ProcessTemplateString_NoTemplateVariables(t *testing.T) {
+func TestAgent_ProcessTemplateString_NoTemplateVariables(t *testing.T) {
 	model := newMockModel()
 
-	loop := NewReActLoop(model)
+	loop := NewAgent(model)
 
 	result := loop.processTemplateString("You are a helpful assistant.")
 
@@ -685,10 +685,10 @@ func TestReActLoop_ProcessTemplateString_NoTemplateVariables(t *testing.T) {
 	}
 }
 
-func TestReActLoop_ProcessTemplateString_EmptyInput(t *testing.T) {
+func TestAgent_ProcessTemplateString_EmptyInput(t *testing.T) {
 	model := newMockModel()
 
-	loop := NewReActLoop(model)
+	loop := NewAgent(model)
 
 	result := loop.processTemplateString("")
 
@@ -697,11 +697,11 @@ func TestReActLoop_ProcessTemplateString_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestReActLoop_ProcessTemplateString_InvalidTemplate(t *testing.T) {
+func TestAgent_ProcessTemplateString_InvalidTemplate(t *testing.T) {
 	model := newMockModel()
 
 	// Invalid template syntax should return original string
-	loop := NewReActLoop(model)
+	loop := NewAgent(model)
 
 	result := loop.processTemplateString("This has {{ invalid syntax")
 
@@ -712,7 +712,7 @@ func TestReActLoop_ProcessTemplateString_InvalidTemplate(t *testing.T) {
 	}
 }
 
-func TestReActLoop_ProcessTemplateString_MultipleVariables(t *testing.T) {
+func TestAgent_ProcessTemplateString_MultipleVariables(t *testing.T) {
 	model := newMockModel()
 	mockTime := gent.NewMockTimeProvider(time.Date(2024, 12, 25, 10, 0, 0, 0, time.UTC))
 
@@ -721,7 +721,7 @@ You are helping on {{.Time.Today}}.
 It's a {{.Time.Weekday}}.
 Current time: {{.Time.Format "15:04"}}`
 
-	loop := NewReActLoop(model).
+	loop := NewAgent(model).
 		WithTimeProvider(mockTime)
 
 	result := loop.processTemplateString(prompt)

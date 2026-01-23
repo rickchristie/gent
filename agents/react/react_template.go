@@ -8,11 +8,11 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-//go:embed react.tmpl
+//go:embed system.tmpl
 var reactSystemTemplateContent string
 
-// ReActTemplateData contains the data passed to ReAct templates.
-type ReActTemplateData struct {
+// SystemPromptData contains the data passed to ReAct templates.
+type SystemPromptData struct {
 	// BehaviorAndContext contains behavior instructions and context provided by the user.
 	BehaviorAndContext string
 
@@ -34,14 +34,14 @@ type ReActTemplateData struct {
 // DefaultReActSystemTemplate is the default template for the ReAct system prompt.
 // It explains the Think-Act-Observe loop to the LLM.
 //
-// The template file is located at agents/react/react.tmpl
-// Users can replace this template via ReActLoop.WithSystemTemplate().
+// The template file is located at agents/react/system.tmpl
+// Users can replace this template via Agent.WithSystemTemplate().
 var DefaultReActSystemTemplate = template.Must(
 	template.New("react_system").Parse(reactSystemTemplateContent),
 )
 
 // ExecuteTemplate executes a template with the given data and returns the result.
-func ExecuteTemplate(tmpl *template.Template, data ReActTemplateData) (string, error) {
+func ExecuteTemplate(tmpl *template.Template, data SystemPromptData) (string, error) {
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", err
