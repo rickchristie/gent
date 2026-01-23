@@ -104,7 +104,7 @@ func RunRescheduleScenario(ctx context.Context, w io.Writer, config AirlineTestC
 		WithToolChain(tc).
 		WithTimeProvider(fixture.TimeProvider()).
 		WithStreaming(config.UseStreaming).
-		WithSystemPrompt(`## Task Description
+		WithBehaviorAndContext(`## Task Description
 
 You are a helpful airline customer service agent for SkyWings Airlines.
 Your role is to assist customers with their flight bookings, including checking flight information,

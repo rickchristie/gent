@@ -24,10 +24,10 @@ type AgentLoop[Data LoopData] interface {
 	Next(ctx context.Context, execCtx *ExecutionContext) *AgentLoopResult
 }
 
-// LoopData is the data that is being passed through each AgentLoop execution. Each AgentLoop
+// LoopData is the data that is being passed through each [AgentLoop] execution. Each [AgentLoop]
 // implementation may define their own Data interface.
 //
-// The interface methods within this interface allows custom AgentLoop implementations to work with
+// The interface methods within this interface allows custom [AgentLoop] implementations to work with
 // provided hooks, for logging, metrics, etc.
 type LoopData interface {
 	// GetOriginalInput returns the original input provided by the user that started the agent loop.

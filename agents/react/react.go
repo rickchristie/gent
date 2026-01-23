@@ -92,8 +92,9 @@ func (s *simpleSection) ParseSection(content string) (any, error) {
 //
 // Templates can be customized via WithSystemTemplate() for full control over prompting.
 type ReActLoop struct {
-	userSystemPrompt  string
-	systemTemplate    *template.Template
+	behaviorAndContext string
+	criticalRules      string
+	systemTemplate     *template.Template
 	model             gent.Model
 	format            gent.TextOutputFormat
 	toolChain         gent.ToolChain
@@ -125,11 +126,18 @@ func NewReActLoop(model gent.Model) *ReActLoop {
 	}
 }
 
-// WithSystemPrompt sets additional context to include in the system prompt.
+// WithBehaviorAndContext sets behavior instructions and context to include in the system prompt.
 // This is appended to the default ReAct instructions, not a replacement.
 // Use WithSystemTemplate() to completely replace the system prompt template.
-func (r *ReActLoop) WithSystemPrompt(prompt string) *ReActLoop {
-	r.userSystemPrompt = prompt
+func (r *ReActLoop) WithBehaviorAndContext(prompt string) *ReActLoop {
+	r.behaviorAndContext = prompt
+	return r
+}
+
+// WithCriticalRules sets critical rules to include in the system prompt.
+// Critical rules are placed in a separate section from behavior and context.
+func (r *ReActLoop) WithCriticalRules(rules string) *ReActLoop {
+	r.criticalRules = rules
 	return r
 }
 
@@ -143,13 +151,14 @@ func (r *ReActLoop) WithSystemTemplate(tmpl *template.Template) *ReActLoop {
 
 // WithSystemTemplateString sets a custom system prompt template from a string.
 // The string is parsed as a Go text/template with access to ReActTemplateData fields:
-//   - {{.UserSystemPrompt}} - additional context from WithSystemPrompt()
+//   - {{.BehaviorAndContext}} - behavior instructions from WithBehaviorAndContext()
+//   - {{.CriticalRules}} - critical rules from WithCriticalRules()
 //   - {{.OutputPrompt}} - output format instructions (tools, termination, etc.)
 //
 // Example:
 //
 //	loop.WithSystemTemplateString(`You are a coding assistant.
-//	{{if .UserSystemPrompt}}{{.UserSystemPrompt}}{{end}}
+//	{{if .BehaviorAndContext}}{{.BehaviorAndContext}}{{end}}
 //	{{.OutputPrompt}}`)
 //
 // Returns error if the template string is invalid.
@@ -333,23 +342,23 @@ func (r *ReActLoop) buildOutputSections() []gent.TextOutputSection {
 	return sections
 }
 
-// processUserSystemPrompt processes the user's system prompt as a template.
+// processTemplateString processes a string as a template.
 // This allows users to use template variables like {{.Time.Today}} in their prompts.
-func (r *ReActLoop) processUserSystemPrompt() string {
-	if r.userSystemPrompt == "" {
+func (r *ReActLoop) processTemplateString(input string) string {
+	if input == "" {
 		return ""
 	}
 
-	// If the prompt doesn't contain template syntax, return as-is
-	if !strings.Contains(r.userSystemPrompt, "{{") {
-		return r.userSystemPrompt
+	// If the input doesn't contain template syntax, return as-is
+	if !strings.Contains(input, "{{") {
+		return input
 	}
 
-	// Parse and execute the user's prompt as a template
-	tmpl, err := template.New("user_system_prompt").Parse(r.userSystemPrompt)
+	// Parse and execute the input as a template
+	tmpl, err := template.New("template_string").Parse(input)
 	if err != nil {
 		// If parsing fails, return the original string
-		return r.userSystemPrompt
+		return input
 	}
 
 	// Execute with access to Time provider
@@ -362,7 +371,7 @@ func (r *ReActLoop) processUserSystemPrompt() string {
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
 		// If execution fails, return the original string
-		return r.userSystemPrompt
+		return input
 	}
 
 	return buf.String()
@@ -376,15 +385,17 @@ func (r *ReActLoop) buildMessages(
 ) []llms.MessageContent {
 	var messages []llms.MessageContent
 
-	// Process user system prompt as a template to expand variables like {{.Time.Today}}
-	processedUserPrompt := r.processUserSystemPrompt()
+	// Process prompts as templates to expand variables like {{.Time.Today}}
+	processedBehavior := r.processTemplateString(r.behaviorAndContext)
+	processedRules := r.processTemplateString(r.criticalRules)
 
 	// Build system message using template
 	templateData := ReActTemplateData{
-		UserSystemPrompt: processedUserPrompt,
-		OutputPrompt:     outputPrompt,
-		ToolsPrompt:      toolsPrompt,
-		Time:             r.timeProvider,
+		BehaviorAndContext: processedBehavior,
+		CriticalRules:      processedRules,
+		OutputPrompt:       outputPrompt,
+		ToolsPrompt:        toolsPrompt,
+		Time:               r.timeProvider,
 	}
 
 	systemContent, err := ExecuteTemplate(r.systemTemplate, templateData)

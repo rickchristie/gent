@@ -16,9 +16,15 @@ Repeat this cycle until you have enough information to provide a final answer.
 - If a tool call fails, analyze the error and try a different approach.
 - When you have sufficient information to answer, provide your final response.
 - Be concise but thorough in your reasoning.
-{{if .UserSystemPrompt}}
+{{if .BehaviorAndContext}}
 
-{{.UserSystemPrompt}}
+{{.BehaviorAndContext}}
+{{end}}
+{{- if .CriticalRules}}
+
+## Critical Rules
+
+{{.CriticalRules}}
 {{end}}
 {{if .ToolsPrompt}}
 

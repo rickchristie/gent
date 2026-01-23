@@ -291,7 +291,7 @@ func TestReActLoop_BuildMessages(t *testing.T) {
 	term := newMockTermination()
 
 	loop := NewReActLoop(model).
-		WithSystemPrompt("You are helpful.").
+		WithBehaviorAndContext("You are helpful.").
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
@@ -656,67 +656,63 @@ func TestReActLoop_WithTimeProvider(t *testing.T) {
 	}
 }
 
-func TestReActLoop_ProcessUserSystemPrompt_ExpandsTemplateVariables(t *testing.T) {
+func TestReActLoop_ProcessTemplateString_ExpandsTemplateVariables(t *testing.T) {
 	model := newMockModel()
 	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
 
 	loop := NewReActLoop(model).
-		WithTimeProvider(mockTime).
-		WithSystemPrompt("Today is {{.Time.Today}} ({{.Time.Weekday}}).")
+		WithTimeProvider(mockTime)
 
-	// Call processUserSystemPrompt to expand template variables
-	result := loop.processUserSystemPrompt()
+	// Call processTemplateString to expand template variables
+	result := loop.processTemplateString("Today is {{.Time.Today}} ({{.Time.Weekday}}).")
 
 	expected := "Today is 2025-06-15 (Sunday)."
 	if result != expected {
-		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
+		t.Errorf("processTemplateString() = %q, want %q", result, expected)
 	}
 }
 
-func TestReActLoop_ProcessUserSystemPrompt_NoTemplateVariables(t *testing.T) {
-	model := newMockModel()
-
-	loop := NewReActLoop(model).
-		WithSystemPrompt("You are a helpful assistant.")
-
-	result := loop.processUserSystemPrompt()
-
-	expected := "You are a helpful assistant."
-	if result != expected {
-		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
-	}
-}
-
-func TestReActLoop_ProcessUserSystemPrompt_EmptyPrompt(t *testing.T) {
+func TestReActLoop_ProcessTemplateString_NoTemplateVariables(t *testing.T) {
 	model := newMockModel()
 
 	loop := NewReActLoop(model)
-	// No WithSystemPrompt called
 
-	result := loop.processUserSystemPrompt()
+	result := loop.processTemplateString("You are a helpful assistant.")
 
-	if result != "" {
-		t.Errorf("processUserSystemPrompt() = %q, want empty string", result)
+	expected := "You are a helpful assistant."
+	if result != expected {
+		t.Errorf("processTemplateString() = %q, want %q", result, expected)
 	}
 }
 
-func TestReActLoop_ProcessUserSystemPrompt_InvalidTemplate(t *testing.T) {
+func TestReActLoop_ProcessTemplateString_EmptyInput(t *testing.T) {
+	model := newMockModel()
+
+	loop := NewReActLoop(model)
+
+	result := loop.processTemplateString("")
+
+	if result != "" {
+		t.Errorf("processTemplateString() = %q, want empty string", result)
+	}
+}
+
+func TestReActLoop_ProcessTemplateString_InvalidTemplate(t *testing.T) {
 	model := newMockModel()
 
 	// Invalid template syntax should return original string
-	loop := NewReActLoop(model).
-		WithSystemPrompt("This has {{ invalid syntax")
+	loop := NewReActLoop(model)
 
-	result := loop.processUserSystemPrompt()
+	result := loop.processTemplateString("This has {{ invalid syntax")
 
 	// Should return original string when parsing fails
 	expected := "This has {{ invalid syntax"
 	if result != expected {
-		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
+		t.Errorf("processTemplateString() = %q, want %q", result, expected)
 	}
 }
 
-func TestReActLoop_ProcessUserSystemPrompt_MultipleVariables(t *testing.T) {
+func TestReActLoop_ProcessTemplateString_MultipleVariables(t *testing.T) {
 	model := newMockModel()
 	mockTime := gent.NewMockTimeProvider(time.Date(2024, 12, 25, 10, 0, 0, 0, time.UTC))
 
@@ -726,10 +722,9 @@ It's a {{.Time.Weekday}}.
 Current time: {{.Time.Format "15:04"}}`
 
 	loop := NewReActLoop(model).
-		WithTimeProvider(mockTime).
-		WithSystemPrompt(prompt)
+		WithTimeProvider(mockTime)
 
-	result := loop.processUserSystemPrompt()
+	result := loop.processTemplateString(prompt)
 
 	expected := `## Task
 You are helping on 2024-12-25.
@@ -737,6 +732,6 @@ It's a Wednesday.
 Current time: 10:00`
 
 	if result != expected {
-		t.Errorf("processUserSystemPrompt() = %q, want %q", result, expected)
+		t.Errorf("processTemplateString() = %q, want %q", result, expected)
 	}
 }

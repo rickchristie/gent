@@ -50,14 +50,15 @@ Constructor: `NewReActLoopData(input ...ContentPart) *ReActLoopData`
 
 ```go
 type ReActLoop struct {
-    systemPrompt      string
-    model             Model
-    format            TextOutputFormat
-    toolChain         ToolChain
-    termination       Termination
-    thinkingSection   TextOutputSection
-    observationPrefix string
-    errorPrefix       string
+    behaviorAndContext string
+    criticalRules      string
+    model              Model
+    format             TextOutputFormat
+    toolChain          ToolChain
+    termination        Termination
+    thinkingSection    TextOutputSection
+    observationPrefix  string
+    errorPrefix        string
 }
 ```
 
@@ -74,7 +75,8 @@ Defaults:
 - ErrorPrefix: `"Tool error:\n"`
 
 Builder methods:
-- `WithSystemPrompt(string) *ReActLoop`
+- `WithBehaviorAndContext(string) *ReActLoop`
+- `WithCriticalRules(string) *ReActLoop`
 - `WithFormat(TextOutputFormat) *ReActLoop`
 - `WithToolChain(ToolChain) *ReActLoop`
 - `WithTermination(Termination) *ReActLoop`
@@ -179,7 +181,8 @@ Per CLAUDE.md - never swallow errors:
 ```go
 // Create ReAct loop
 loop := gent.NewReActLoop(model).
-    WithSystemPrompt("You are a helpful assistant.").
+    WithBehaviorAndContext("You are a helpful assistant.").
+    WithCriticalRules("Always verify facts before responding.").
     WithThinking("Think step by step.").
     RegisterTool(searchTool).
     RegisterTool(calculatorTool)

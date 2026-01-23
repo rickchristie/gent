@@ -13,8 +13,11 @@ var reactSystemTemplateContent string
 
 // ReActTemplateData contains the data passed to ReAct templates.
 type ReActTemplateData struct {
-	// UserSystemPrompt is additional context provided by the user.
-	UserSystemPrompt string
+	// BehaviorAndContext contains behavior instructions and context provided by the user.
+	BehaviorAndContext string
+
+	// CriticalRules contains critical rules that the agent must follow.
+	CriticalRules string
 
 	// OutputPrompt explains how to format output sections (from Formatter).
 	// This describes only the format structure (e.g., XML tags) without tool details.
