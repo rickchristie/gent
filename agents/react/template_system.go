@@ -8,7 +8,7 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-//go:embed system.tmpl
+//go:embed template_system.tmpl
 var reactSystemTemplateContent string
 
 // SystemPromptData contains the data passed to ReAct templates.
