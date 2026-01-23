@@ -1,4 +1,4 @@
-package agents
+package react
 
 import (
 	"context"

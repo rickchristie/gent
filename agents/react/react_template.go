@@ -1,4 +1,4 @@
-package agents
+package react
 
 import (
 	"bytes"
@@ -23,19 +23,6 @@ type ReActTemplateData struct {
 	// ToolsPrompt describes available tools and how to call them (from ToolChain).
 	ToolsPrompt string
 
-	// AvailableTools describes available tools (from ToolChain).
-	// Deprecated: Use ToolsPrompt instead.
-	AvailableTools string
-
-	// Termination describes how to terminate (from Termination).
-	Termination string
-
-	// UserInput is the original input/task/question.
-	UserInput string
-
-	// LoopText contains previous ReAct iterations and observations.
-	LoopText string
-
 	// Time provides access to time-related functions in templates.
 	// Use {{.Time.Today}}, {{.Time.Weekday}}, {{.Time.Format "2006-01-02"}}, etc.
 	Time gent.TimeProvider
@@ -44,7 +31,7 @@ type ReActTemplateData struct {
 // DefaultReActSystemTemplate is the default template for the ReAct system prompt.
 // It explains the Think-Act-Observe loop to the LLM.
 //
-// The template file is located at agents/react.tmpl
+// The template file is located at agents/react/react.tmpl
 // Users can replace this template via ReActLoop.WithSystemTemplate().
 var DefaultReActSystemTemplate = template.Must(
 	template.New("react_system").Parse(reactSystemTemplateContent),
