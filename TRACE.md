@@ -357,7 +357,7 @@ context. The child's traces are automatically attached to the parent.
 ### Example: Compaction Sub-Agent
 
 ```go
-func (loop *ReactLoop) Next(
+func (loop *ReActLoop) Next(
     ctx context.Context,
     execCtx *ExecutionContext,
 ) *AgentLoopResult {
@@ -374,7 +374,7 @@ func (loop *ReactLoop) Next(
     // ... continue with iteration ...
 }
 
-func (loop *ReactLoop) runCompaction(
+func (loop *ReActLoop) runCompaction(
     ctx context.Context,
     execCtx *ExecutionContext,
 ) ([]*Iteration, error) {

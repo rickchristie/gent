@@ -13,16 +13,16 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// ReactLoopData implements gent.LoopData for the ReAct agent loop.
-type ReactLoopData struct {
+// ReActLoopData implements gent.LoopData for the ReAct agent loop.
+type ReActLoopData struct {
 	originalInput    []gent.ContentPart
 	iterationHistory []*gent.Iteration
 	iterations       []*gent.Iteration
 }
 
-// NewReactLoopData creates a new ReactLoopData with the given input.
-func NewReactLoopData(input ...gent.ContentPart) *ReactLoopData {
-	return &ReactLoopData{
+// NewReActLoopData creates a new ReActLoopData with the given input.
+func NewReActLoopData(input ...gent.ContentPart) *ReActLoopData {
+	return &ReActLoopData{
 		originalInput:    input,
 		iterationHistory: make([]*gent.Iteration, 0),
 		iterations:       make([]*gent.Iteration, 0),
@@ -30,32 +30,32 @@ func NewReactLoopData(input ...gent.ContentPart) *ReactLoopData {
 }
 
 // GetOriginalInput returns the original input provided by the user.
-func (d *ReactLoopData) GetOriginalInput() []gent.ContentPart {
+func (d *ReActLoopData) GetOriginalInput() []gent.ContentPart {
 	return d.originalInput
 }
 
 // GetIterationHistory returns all Iteration recorded, including compacted ones.
-func (d *ReactLoopData) GetIterationHistory() []*gent.Iteration {
+func (d *ReActLoopData) GetIterationHistory() []*gent.Iteration {
 	return d.iterationHistory
 }
 
 // AddIterationHistory adds a new Iteration to the full history.
-func (d *ReactLoopData) AddIterationHistory(iter *gent.Iteration) {
+func (d *ReActLoopData) AddIterationHistory(iter *gent.Iteration) {
 	d.iterationHistory = append(d.iterationHistory, iter)
 }
 
 // GetIterations returns all Iteration that will be used in next iteration.
-func (d *ReactLoopData) GetIterations() []*gent.Iteration {
+func (d *ReActLoopData) GetIterations() []*gent.Iteration {
 	return d.iterations
 }
 
 // SetIterations sets the iterations to be used in next iteration.
-func (d *ReactLoopData) SetIterations(iterations []*gent.Iteration) {
+func (d *ReActLoopData) SetIterations(iterations []*gent.Iteration) {
 	d.iterations = iterations
 }
 
-// Compile-time check that ReactLoopData implements gent.LoopData.
-var _ gent.LoopData = (*ReactLoopData)(nil)
+// Compile-time check that ReActLoopData implements gent.LoopData.
+var _ gent.LoopData = (*ReActLoopData)(nil)
 
 // ----------------------------------------------------------------------------
 // simpleSection - for thinking section
@@ -79,10 +79,10 @@ func (s *simpleSection) ParseSection(content string) (any, error) {
 }
 
 // ----------------------------------------------------------------------------
-// ReactLoop - ReAct AgentLoop Implementation
+// ReActLoop - ReAct AgentLoop Implementation
 // ----------------------------------------------------------------------------
 
-// ReactLoop implements the ReAct (Reasoning and Acting) agent loop.
+// ReActLoop implements the ReAct (Reasoning and Acting) agent loop.
 // Flow: Think -> Act -> Observe -> Repeat until termination.
 //
 // The prompt construction follows this structure:
@@ -91,7 +91,7 @@ func (s *simpleSection) ParseSection(content string) (any, error) {
 //   - Previous iterations: Assistant responses + observations (tool results)
 //
 // Templates can be customized via WithSystemTemplate() for full control over prompting.
-type ReactLoop struct {
+type ReActLoop struct {
 	userSystemPrompt  string
 	systemTemplate    *template.Template
 	model             gent.Model
@@ -105,21 +105,21 @@ type ReactLoop struct {
 	useStreaming      bool
 }
 
-// NewReactLoop creates a new ReactLoop with the given model and default settings.
+// NewReActLoop creates a new ReActLoop with the given model and default settings.
 // Defaults:
 //   - Format: format.NewXML()
 //   - ToolChain: toolchain.NewYAML()
 //   - Termination: termination.NewText()
 //   - TimeProvider: gent.NewDefaultTimeProvider()
-//   - SystemTemplate: DefaultReactSystemTemplate
-func NewReactLoop(model gent.Model) *ReactLoop {
-	return &ReactLoop{
+//   - SystemTemplate: DefaultReActSystemTemplate
+func NewReActLoop(model gent.Model) *ReActLoop {
+	return &ReActLoop{
 		model:             model,
 		format:            format.NewXML(),
 		toolChain:         toolchain.NewYAML(),
 		termination:       termination.NewText(),
 		timeProvider:      gent.NewDefaultTimeProvider(),
-		systemTemplate:    DefaultReactSystemTemplate,
+		systemTemplate:    DefaultReActSystemTemplate,
 		observationPrefix: "Observation:\n",
 		errorPrefix:       "Error:\n",
 	}
@@ -128,21 +128,21 @@ func NewReactLoop(model gent.Model) *ReactLoop {
 // WithSystemPrompt sets additional context to include in the system prompt.
 // This is appended to the default ReAct instructions, not a replacement.
 // Use WithSystemTemplate() to completely replace the system prompt template.
-func (r *ReactLoop) WithSystemPrompt(prompt string) *ReactLoop {
+func (r *ReActLoop) WithSystemPrompt(prompt string) *ReActLoop {
 	r.userSystemPrompt = prompt
 	return r
 }
 
 // WithSystemTemplate sets a custom system prompt template.
 // Use this for full control over the ReAct prompting.
-// See DefaultReactSystemTemplate for the expected template structure.
-func (r *ReactLoop) WithSystemTemplate(tmpl *template.Template) *ReactLoop {
+// See DefaultReActSystemTemplate for the expected template structure.
+func (r *ReActLoop) WithSystemTemplate(tmpl *template.Template) *ReActLoop {
 	r.systemTemplate = tmpl
 	return r
 }
 
 // WithSystemTemplateString sets a custom system prompt template from a string.
-// The string is parsed as a Go text/template with access to ReactTemplateData fields:
+// The string is parsed as a Go text/template with access to ReActTemplateData fields:
 //   - {{.UserSystemPrompt}} - additional context from WithSystemPrompt()
 //   - {{.OutputPrompt}} - output format instructions (tools, termination, etc.)
 //
@@ -153,7 +153,7 @@ func (r *ReactLoop) WithSystemTemplate(tmpl *template.Template) *ReactLoop {
 //	{{.OutputPrompt}}`)
 //
 // Returns error if the template string is invalid.
-func (r *ReactLoop) WithSystemTemplateString(tmplStr string) (*ReactLoop, error) {
+func (r *ReActLoop) WithSystemTemplateString(tmplStr string) (*ReActLoop, error) {
 	tmpl, err := template.New("react_system").Parse(tmplStr)
 	if err != nil {
 		return r, fmt.Errorf("failed to parse template: %w", err)
@@ -163,37 +163,37 @@ func (r *ReactLoop) WithSystemTemplateString(tmplStr string) (*ReactLoop, error)
 }
 
 // WithFormat sets the text output format.
-func (r *ReactLoop) WithFormat(f gent.TextOutputFormat) *ReactLoop {
+func (r *ReActLoop) WithFormat(f gent.TextOutputFormat) *ReActLoop {
 	r.format = f
 	return r
 }
 
 // WithToolChain sets the tool chain.
-func (r *ReactLoop) WithToolChain(tc gent.ToolChain) *ReactLoop {
+func (r *ReActLoop) WithToolChain(tc gent.ToolChain) *ReActLoop {
 	r.toolChain = tc
 	return r
 }
 
 // WithTermination sets the termination handler.
-func (r *ReactLoop) WithTermination(t gent.Termination) *ReactLoop {
+func (r *ReActLoop) WithTermination(t gent.Termination) *ReActLoop {
 	r.termination = t
 	return r
 }
 
 // WithTimeProvider sets the time provider.
 // Use this to inject a mock time provider for testing.
-func (r *ReactLoop) WithTimeProvider(tp gent.TimeProvider) *ReactLoop {
+func (r *ReActLoop) WithTimeProvider(tp gent.TimeProvider) *ReActLoop {
 	r.timeProvider = tp
 	return r
 }
 
 // TimeProvider returns the current time provider.
-func (r *ReactLoop) TimeProvider() gent.TimeProvider {
+func (r *ReActLoop) TimeProvider() gent.TimeProvider {
 	return r.timeProvider
 }
 
 // WithThinking enables the thinking section with the given prompt.
-func (r *ReactLoop) WithThinking(prompt string) *ReactLoop {
+func (r *ReActLoop) WithThinking(prompt string) *ReActLoop {
 	r.thinkingSection = &simpleSection{
 		name:   "thinking",
 		prompt: prompt,
@@ -202,7 +202,7 @@ func (r *ReactLoop) WithThinking(prompt string) *ReactLoop {
 }
 
 // WithThinkingSection sets a custom thinking section.
-func (r *ReactLoop) WithThinkingSection(section gent.TextOutputSection) *ReactLoop {
+func (r *ReActLoop) WithThinkingSection(section gent.TextOutputSection) *ReActLoop {
 	r.thinkingSection = section
 	return r
 }
@@ -213,19 +213,19 @@ func (r *ReactLoop) WithThinkingSection(section gent.TextOutputSection) *ReactLo
 // in real-time via SubscribeAll() or SubscribeToTopic("llm-response").
 //
 // Default: false (uses non-streaming GenerateContent)
-func (r *ReactLoop) WithStreaming(enabled bool) *ReactLoop {
+func (r *ReActLoop) WithStreaming(enabled bool) *ReActLoop {
 	r.useStreaming = enabled
 	return r
 }
 
 // RegisterTool adds a tool to the tool chain.
-func (r *ReactLoop) RegisterTool(tool any) *ReactLoop {
+func (r *ReActLoop) RegisterTool(tool any) *ReActLoop {
 	r.toolChain.RegisterTool(tool)
 	return r
 }
 
 // Next executes one iteration of the ReAct loop.
-func (r *ReactLoop) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.AgentLoopResult {
+func (r *ReActLoop) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.AgentLoopResult {
 	data := execCtx.Data()
 
 	// Build output sections and generate prompts
@@ -316,7 +316,7 @@ func (r *ReactLoop) Next(ctx context.Context, execCtx *gent.ExecutionContext) *g
 }
 
 // buildOutputSections constructs the list of output sections.
-func (r *ReactLoop) buildOutputSections() []gent.TextOutputSection {
+func (r *ReActLoop) buildOutputSections() []gent.TextOutputSection {
 	var sections []gent.TextOutputSection
 
 	// Add thinking section if configured
@@ -335,7 +335,7 @@ func (r *ReactLoop) buildOutputSections() []gent.TextOutputSection {
 
 // processUserSystemPrompt processes the user's system prompt as a template.
 // This allows users to use template variables like {{.Time.Today}} in their prompts.
-func (r *ReactLoop) processUserSystemPrompt() string {
+func (r *ReActLoop) processUserSystemPrompt() string {
 	if r.userSystemPrompt == "" {
 		return ""
 	}
@@ -369,7 +369,7 @@ func (r *ReactLoop) processUserSystemPrompt() string {
 }
 
 // buildMessages constructs the message list for the model call.
-func (r *ReactLoop) buildMessages(
+func (r *ReActLoop) buildMessages(
 	data gent.LoopData,
 	outputPrompt string,
 	toolsPrompt string,
@@ -380,7 +380,7 @@ func (r *ReactLoop) buildMessages(
 	processedUserPrompt := r.processUserSystemPrompt()
 
 	// Build system message using template
-	templateData := ReactTemplateData{
+	templateData := ReActTemplateData{
 		UserSystemPrompt: processedUserPrompt,
 		OutputPrompt:     outputPrompt,
 		ToolsPrompt:      toolsPrompt,
@@ -431,7 +431,7 @@ func (r *ReactLoop) buildMessages(
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.
-func (r *ReactLoop) executeToolCalls(
+func (r *ReActLoop) executeToolCalls(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	contents []string,
@@ -472,7 +472,7 @@ func (r *ReactLoop) executeToolCalls(
 }
 
 // buildIteration creates an Iteration from response and observation.
-func (r *ReactLoop) buildIteration(response, observation string) *gent.Iteration {
+func (r *ReActLoop) buildIteration(response, observation string) *gent.Iteration {
 	var messages []gent.MessageContent
 
 	// Assistant message (response)
@@ -497,7 +497,7 @@ func (r *ReactLoop) buildIteration(response, observation string) *gent.Iteration
 }
 
 // callModel calls the model, using streaming if enabled and supported.
-func (r *ReactLoop) callModel(
+func (r *ReActLoop) callModel(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	streamId string,
@@ -516,7 +516,7 @@ func (r *ReactLoop) callModel(
 }
 
 // callModelStreaming calls the model with streaming and accumulates the response.
-func (r *ReactLoop) callModelStreaming(
+func (r *ReActLoop) callModelStreaming(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	model gent.StreamingModel,
@@ -547,5 +547,5 @@ func (r *ReactLoop) callModelStreaming(
 	return acc.ResponseWithInfo(streamResponse), nil
 }
 
-// Compile-time check that ReactLoop implements gent.AgentLoop.
-var _ gent.AgentLoop[*ReactLoopData] = (*ReactLoop)(nil)
+// Compile-time check that ReActLoop implements gent.AgentLoop.
+var _ gent.AgentLoop[*ReActLoopData] = (*ReActLoop)(nil)

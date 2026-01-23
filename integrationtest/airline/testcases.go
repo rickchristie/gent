@@ -100,7 +100,7 @@ func RunRescheduleScenario(ctx context.Context, w io.Writer, config AirlineTestC
 	fixture.RegisterAllTools(tc)
 
 	// Create the ReAct loop
-	loop := agents.NewReactLoop(model).
+	loop := agents.NewReActLoop(model).
 		WithToolChain(tc).
 		WithTimeProvider(fixture.TimeProvider()).
 		WithStreaming(config.UseStreaming).
@@ -125,7 +125,7 @@ Always be polite and professional. When rescheduling, make sure to:
 I have a flight booked for tomorrow (flight AA100 from JFK to LAX) but my meeting is running late.
 Can you help me reschedule to a later flight on the same day? I'd prefer an evening flight if possible.`
 
-	data := agents.NewReactLoopData(llms.TextContent{Text: customerRequest})
+	data := agents.NewReActLoopData(llms.TextContent{Text: customerRequest})
 
 	// Create ExecutionContext
 	execCtx := gent.NewExecutionContext("airline-reschedule", data)
@@ -160,7 +160,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	}
 
 	// Create executor
-	exec := executor.New[*agents.ReactLoopData](loop, executor.Config{MaxIterations: 15}).
+	exec := executor.New[*agents.ReActLoopData](loop, executor.Config{MaxIterations: 15}).
 		WithHooks(hookRegistry)
 
 	// Print header

@@ -548,7 +548,7 @@ go func() {
    - Call execCtx.EmitChunk for each chunk
    - Populate chunk metadata
 
-7. **Update ReactLoop** (`agents/react.go`)
+7. **Update ReActLoop** (`agents/react.go`)
    - Use GenerateContentStream when model supports it
    - Define streamId and streamTopicId for model calls
 

@@ -13,7 +13,7 @@
 // TimeProvider allows injecting time into prompts and enables deterministic testing:
 //
 //	// Use in templates
-//	loop := agents.NewReactLoop(model).
+//	loop := agents.NewReActLoop(model).
 //	    WithSystemPrompt("Today is {{.Time.Today}} ({{.Time.Weekday}})")
 //
 //	// Mock time for testing
