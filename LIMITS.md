@@ -226,6 +226,16 @@ This ensures:
 - Limits on parent context are enforced correctly for nested/parallel loops
 - If parent has 1M token limit, child token usage counts toward that limit immediately
 
+**Parallel Children**: When multiple child contexts run in parallel (separate goroutines),
+all propagate to the parent concurrently. This is thread-safe - the parent's mutex
+protects against data races. Example:
+
+```
+Parent
+├── Child A (goroutine 1) ─┬─► Parent.IncrCounter() ─► mutex protected
+└── Child B (goroutine 2) ─┘
+```
+
 ## Package: executor
 
 ### Limit Configuration
