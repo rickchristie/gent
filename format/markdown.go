@@ -83,7 +83,9 @@ func (f *Markdown) Parse(output string) (map[string][]string, error) {
 		}
 
 		content := strings.TrimSpace(output[contentStart:contentEnd])
-		result[sectionNameLower] = append(result[sectionNameLower], content)
+		if content != "" {
+			result[sectionNameLower] = append(result[sectionNameLower], content)
+		}
 	}
 
 	if len(result) == 0 {

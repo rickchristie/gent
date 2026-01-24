@@ -148,7 +148,10 @@ func (f *XML) findSectionMatches(output string, sectionName string) []string {
 		if bestOpen != nil {
 			usedOpens[bestOpen[0]] = true
 			content := output[bestOpen[1]:closeStart]
-			results = append(results, strings.TrimSpace(content))
+			trimmed := strings.TrimSpace(content)
+			if trimmed != "" {
+				results = append(results, trimmed)
+			}
 		}
 	}
 

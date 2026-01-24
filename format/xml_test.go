@@ -118,7 +118,7 @@ Some content after tags.`,
 			},
 		},
 		{
-			name: "empty section",
+			name: "empty section excluded from results",
 			input: input{
 				sections: []string{"thinking", "answer"},
 				output: `<thinking></thinking>
@@ -126,8 +126,76 @@ Some content after tags.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {""},
-					"answer":   {"The answer."},
+					"answer": {"The answer."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "empty action tag with answer should terminate not loop",
+			input: input{
+				sections: []string{"thinking", "action", "answer"},
+				output: `<thinking>
+The customer is referring to their "number," likely meaning booking reference number, phone number, or customer ID, based on the context of rescheduling. From the message history, no booking ID, customer ID, email, or other identifiers have been provided by the user. I cannot access or retrieve any personal booking information without these details due to privacy and security policies. Tools like get_customer_info or get_booking_info require customer_id, email, or booking_id, none of which are available.
+
+To proceed with rescheduling AA100 for tomorrow (2026-01-25), I must follow the rescheduling steps: verify identity/booking first. No tools can be called yet without identifiers.
+
+I should respond politely, explain the need for verification for security reasons, and reiterate the required information. Also, offer to look up general flight info for AA100 if helpful, but do not assume or invent details.
+
+No tool actions needed at this stage, as I lack parameters. Proceed to final polite response asking for details.
+</thinking>
+<action>
+</action>
+<answer>
+Hello! I apologize for any inconvenience. For security and privacy reasons, I don't have access to your personal booking details without verification. This ensures we protect your information and make changes only to the correct booking.
+
+To assist with rescheduling your AA100 flight for tomorrow (January 25, 2026), please provide:
+- Your booking reference number (e.g., BK001)
+- Your email address or customer ID
+- Preferred new travel date and airports (or alternative flight preferences)
+
+Once verified, I'll check availability, our change policy, and any fees right away. Thank you for your understanding!
+</answer>`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"thinking": {
+						`The customer is referring to their "number," likely meaning booking ` +
+							`reference number, phone number, or customer ID, based on the context ` +
+							`of rescheduling. From the message history, no booking ID, customer ` +
+							`ID, email, or other identifiers have been provided by the user. I ` +
+							`cannot access or retrieve any personal booking information without ` +
+							`these details due to privacy and security policies. Tools like ` +
+							`get_customer_info or get_booking_info require customer_id, email, ` +
+							`or booking_id, none of which are available.
+
+To proceed with rescheduling AA100 for tomorrow (2026-01-25), I must follow the ` +
+							`rescheduling steps: verify identity/booking first. No tools can be ` +
+							`called yet without identifiers.
+
+I should respond politely, explain the need for verification for security reasons, ` +
+							`and reiterate the required information. Also, offer to look up ` +
+							`general flight info for AA100 if helpful, but do not assume or ` +
+							`invent details.
+
+No tool actions needed at this stage, as I lack parameters. Proceed to final ` +
+							`polite response asking for details.`,
+					},
+					"answer": {
+						`Hello! I apologize for any inconvenience. For security and privacy ` +
+							`reasons, I don't have access to your personal booking details ` +
+							`without verification. This ensures we protect your information and ` +
+							`make changes only to the correct booking.
+
+To assist with rescheduling your AA100 flight for tomorrow (January 25, 2026), ` +
+							`please provide:
+- Your booking reference number (e.g., BK001)
+- Your email address or customer ID
+- Preferred new travel date and airports (or alternative flight preferences)
+
+Once verified, I'll check availability, our change policy, and any fees right ` +
+							`away. Thank you for your understanding!`,
+					},
 				},
 				err: nil,
 			},

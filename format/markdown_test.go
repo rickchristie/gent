@@ -119,7 +119,7 @@ The actual answer.`,
 			},
 		},
 		{
-			name: "empty section",
+			name: "empty section excluded from results",
 			input: input{
 				sections: []string{"Thinking", "Answer"},
 				output: `# Thinking
@@ -129,8 +129,34 @@ The answer.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {""},
-					"answer":   {"The answer."},
+					"answer": {"The answer."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "empty action with answer should terminate not loop",
+			input: input{
+				sections: []string{"Thinking", "Action", "Answer"},
+				output: `# Thinking
+The customer is referring to their "number," likely meaning booking reference number. No tools can be called yet without identifiers. Proceed to final response.
+
+# Action
+
+# Answer
+Hello! I apologize for any inconvenience. Please provide your booking reference number.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"thinking": {
+						`The customer is referring to their "number," likely meaning booking ` +
+							`reference number. No tools can be called yet without identifiers. ` +
+							`Proceed to final response.`,
+					},
+					"answer": {
+						"Hello! I apologize for any inconvenience. Please provide your " +
+							"booking reference number.",
+					},
 				},
 				err: nil,
 			},
