@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,457 +53,746 @@ func TestYAML_Name(t *testing.T) {
 }
 
 func TestYAML_RegisterTool(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"test",
-		"A test tool",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "result", nil
+	type input struct {
+		toolName string
+		content  string
+	}
+
+	type expected struct {
+		callCount int
+		callName  string
+		err       error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "register and execute tool",
+			input: input{
+				toolName: "test",
+				content: `tool: test
+args: {}`,
+			},
+			expected: expected{
+				callCount: 1,
+				callName:  "test",
+				err:       nil,
+			},
 		},
-		yamlTextFormatter,
-	)
+	}
 
-	tc.RegisterTool(tool)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			tool := gent.NewToolFunc(
+				tt.input.toolName,
+				"A test tool",
+				nil,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return "result", nil
+				},
+				yamlTextFormatter,
+			)
 
-	content := `tool: test
-args: {}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.Len(t, result.Calls, 1)
-	assert.Equal(t, "test", result.Calls[0].Name)
+			tc.RegisterTool(tool)
+
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+
+			if tt.expected.err != nil {
+				assert.ErrorIs(t, err, tt.expected.err)
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, result.Calls, tt.expected.callCount)
+				assert.Equal(t, tt.expected.callName, result.Calls[0].Name)
+			}
+		})
+	}
 }
 
 func TestYAML_Prompt(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+	type input struct {
+		toolName        string
+		toolDescription string
+		toolSchema      map[string]any
+	}
+
+	type expected struct {
+		prompt string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "tool with schema",
+			input: input{
+				toolName:        "search",
+				toolDescription: "Search the web",
+				toolSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"query": map[string]any{"type": "string"},
+					},
+				},
+			},
+			expected: expected{
+				prompt: `Call tools using YAML format:
+tool: tool_name
+args:
+  param: value
+
+For multiple parallel calls, use a list:
+- tool: tool1
+  args:
+    param: value
+- tool: tool2
+  args:
+    param: value
+
+For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+- tool: send_email
+  args:
+    subject: "Unsubscribe Confirmation: Newsletter"
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+
+Available tools:
+
+- search: Search the web
+  Parameters:
+    properties:
+        query:
+            type: string
+    type: object
+`,
 			},
 		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "", nil
-		},
-		nil,
-	)
-	tc.RegisterTool(tool)
+	}
 
-	prompt := tc.Prompt()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			tool := gent.NewToolFunc(
+				tt.input.toolName,
+				tt.input.toolDescription,
+				tt.input.toolSchema,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return "", nil
+				},
+				nil,
+			)
+			tc.RegisterTool(tool)
 
-	assert.True(t, strings.Contains(prompt, "search"), "expected tool name in prompt")
-	assert.True(t, strings.Contains(prompt, "Search the web"),
-		"expected tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "tool:"), "expected YAML format instruction in prompt")
+			prompt := tc.Prompt()
+
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
-func TestYAML_ParseSection_SingleCall(t *testing.T) {
-	tc := NewYAML()
+func TestYAML_ParseSection(t *testing.T) {
+	type input struct {
+		content string
+	}
 
-	content := `tool: search
+	type expected struct {
+		calls []*gent.ToolCall
+		err   error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "single call",
+			input: input{
+				content: `tool: search
 args:
-  query: weather`
-
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 1)
-	assert.Equal(t, "search", calls[0].Name)
-	assert.Equal(t, "weather", calls[0].Args["query"])
-}
-
-func TestYAML_ParseSection_MultipleCall(t *testing.T) {
-	tc := NewYAML()
-
-	content := `- tool: search
+  query: weather`,
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{
+					{Name: "search", Args: map[string]any{"query": "weather"}},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "multiple calls",
+			input: input{
+				content: `- tool: search
   args:
     query: weather
 - tool: calendar
   args:
-    date: today`
-
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 2)
-	assert.Equal(t, "search", calls[0].Name)
-	assert.Equal(t, "calendar", calls[1].Name)
-}
-
-func TestYAML_ParseSection_EmptyContent(t *testing.T) {
-	tc := NewYAML()
-
-	result, err := tc.ParseSection("")
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	assert.Empty(t, calls)
-}
-
-func TestYAML_ParseSection_InvalidYAML(t *testing.T) {
-	tc := NewYAML()
-
-	content := `tool: search
+    date: today`,
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{
+					{Name: "search", Args: map[string]any{"query": "weather"}},
+					{Name: "calendar", Args: map[string]any{"date": "today"}},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "empty content",
+			input: input{
+				content: "",
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{},
+				err:   nil,
+			},
+		},
+		{
+			name: "invalid YAML",
+			input: input{
+				content: `tool: search
 args:
     query: test
-  invalid: indentation`
-	_, err := tc.ParseSection(content)
-	assert.ErrorIs(t, err, gent.ErrInvalidYAML)
-}
-
-func TestYAML_ParseSection_MissingToolName(t *testing.T) {
-	tc := NewYAML()
-
-	content := `args:
-  query: weather`
-	_, err := tc.ParseSection(content)
-	assert.ErrorIs(t, err, gent.ErrMissingToolName)
-}
-
-func TestYAML_ParseSection_MissingToolNameInArray(t *testing.T) {
-	tc := NewYAML()
-
-	content := `- tool: search
+  invalid: indentation`,
+			},
+			expected: expected{
+				calls: nil,
+				err:   gent.ErrInvalidYAML,
+			},
+		},
+		{
+			name: "missing tool name",
+			input: input{
+				content: `args:
+  query: weather`,
+			},
+			expected: expected{
+				calls: nil,
+				err:   gent.ErrMissingToolName,
+			},
+		},
+		{
+			name: "missing tool name in array",
+			input: input{
+				content: `- tool: search
   args: {}
-- args: {}`
-	_, err := tc.ParseSection(content)
-	assert.ErrorIs(t, err, gent.ErrMissingToolName)
-}
-
-func TestYAML_Execute_Success(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			query := args["query"].(string)
-			return fmt.Sprintf("Results for: %s", query), nil
+- args: {}`,
+			},
+			expected: expected{
+				calls: nil,
+				err:   gent.ErrMissingToolName,
+			},
 		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `tool: search
-args:
-  query: weather`
-
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.Len(t, result.Calls, 1)
-	require.NotNil(t, result.Results[0])
-
-	assert.Equal(t, "Results for: weather", yamlGetTextContent(result.Results[0].Result))
-	assert.NoError(t, result.Errors[0])
-}
-
-func TestYAML_Execute_UnknownTool(t *testing.T) {
-	tc := NewYAML()
-
-	content := `tool: unknown
-args: {}`
-
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	assert.ErrorIs(t, result.Errors[0], gent.ErrUnknownTool)
-}
-
-func TestYAML_Execute_ToolError(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"failing",
-		"A failing tool",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "", errors.New("tool execution failed")
-		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	content := `tool: failing
-args: {}`
-
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	require.Error(t, result.Errors[0])
-	assert.Equal(t, "tool execution failed", result.Errors[0].Error())
-}
-
-func TestYAML_Execute_MultipleTools(t *testing.T) {
-	tc := NewYAML()
-
-	searchTool := gent.NewToolFunc(
-		"search",
-		"Search",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "search result", nil
-		},
-		yamlTextFormatter,
-	)
-
-	calendarTool := gent.NewToolFunc(
-		"calendar",
-		"Calendar",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "calendar result", nil
-		},
-		yamlTextFormatter,
-	)
-
-	tc.RegisterTool(searchTool)
-	tc.RegisterTool(calendarTool)
-
-	content := `- tool: search
-  args: {}
-- tool: calendar
-  args: {}`
-
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.Len(t, result.Results, 2)
-
-	assert.Equal(t, "search result", yamlGetTextContent(result.Results[0].Result))
-	assert.Equal(t, "calendar result", yamlGetTextContent(result.Results[1].Result))
-}
-
-func TestYAML_ParseSection_MultilineStringArgs(t *testing.T) {
-	tc := NewYAML()
-
-	content := `tool: write
+		{
+			name: "multiline string args",
+			input: input{
+				content: `tool: write
 args:
   content: |
     This is a multi-line
     string argument that
-    spans multiple lines.`
+    spans multiple lines.`,
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{
+					{
+						Name: "write",
+						Args: map[string]any{
+							"content": "This is a multi-line\nstring argument that\nspans multiple lines.",
+						},
+					},
+				},
+				err: nil,
+			},
+		},
+	}
 
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
 
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 1)
+			result, err := tc.ParseSection(tt.input.content)
 
-	argContent, ok := calls[0].Args["content"].(string)
-	require.True(t, ok, "expected content to be string")
-	assert.True(t, strings.Contains(argContent, "multi-line"),
-		"expected multi-line content to be preserved")
-	assert.True(t, strings.Contains(argContent, "spans multiple lines"),
-		"expected full content to be preserved")
+			if tt.expected.err != nil {
+				assert.ErrorIs(t, err, tt.expected.err)
+				return
+			}
+
+			require.NoError(t, err)
+			calls := result.([]*gent.ToolCall)
+			assert.Len(t, calls, len(tt.expected.calls))
+
+			for i, expectedCall := range tt.expected.calls {
+				assert.Equal(t, expectedCall.Name, calls[i].Name)
+				assert.Equal(t, expectedCall.Args, calls[i].Args)
+			}
+		})
+	}
 }
 
-func TestYAML_Execute_SchemaValidation_Success(t *testing.T) {
-	tc := NewYAML()
+func TestYAML_Execute(t *testing.T) {
+	type mockTool struct {
+		name        string
+		description string
+		schema      map[string]any
+		fn          func(ctx context.Context, args map[string]any) (string, error)
+	}
 
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		callCount   int
+		results     []string
+		errors      []error
+		executeErr  error
+		resultNames []string
+	}
+
+	tests := []struct {
+		name     string
+		mocks    []mockTool
+		input    input
+		expected expected
+	}{
+		{
+			name: "success",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search the web",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						query := args["query"].(string)
+						return fmt.Sprintf("Results for: %s", query), nil
+					},
+				},
 			},
-			"required": []any{"query"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return fmt.Sprintf("Results for: %s", args["query"]), nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `tool: search
+			input: input{
+				content: `tool: search
 args:
-  query: weather`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
+  query: weather`,
+			},
+			expected: expected{
+				callCount:   1,
+				results:     []string{"Results for: weather"},
+				errors:      []error{nil},
+				resultNames: []string{"search"},
+			},
+		},
+		{
+			name:  "unknown tool",
+			mocks: []mockTool{},
+			input: input{
+				content: `tool: unknown
+args: {}`,
+			},
+			expected: expected{
+				callCount: 1,
+				results:   []string{""},
+				errors:    []error{gent.ErrUnknownTool},
+			},
+		},
+		{
+			name: "tool error",
+			mocks: []mockTool{
+				{
+					name:        "failing",
+					description: "A failing tool",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "", errors.New("tool execution failed")
+					},
+				},
+			},
+			input: input{
+				content: `tool: failing
+args: {}`,
+			},
+			expected: expected{
+				callCount: 1,
+				results:   []string{""},
+				errors:    []error{errors.New("tool execution failed")},
+			},
+		},
+		{
+			name: "multiple tools",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "search result", nil
+					},
+				},
+				{
+					name:        "calendar",
+					description: "Calendar",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "calendar result", nil
+					},
+				},
+			},
+			input: input{
+				content: `- tool: search
+  args: {}
+- tool: calendar
+  args: {}`,
+			},
+			expected: expected{
+				callCount:   2,
+				results:     []string{"search result", "calendar result"},
+				errors:      []error{nil, nil},
+				resultNames: []string{"search", "calendar"},
+			},
+		},
+	}
 
-	assert.NoError(t, result.Errors[0])
-	require.NotNil(t, result.Results[0])
-	assert.Equal(t, "Results for: weather", yamlGetTextContent(result.Results[0].Result))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			for _, mock := range tt.mocks {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					mock.fn,
+					yamlTextFormatter,
+				)
+				tc.RegisterTool(tool)
+			}
+
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+
+			if tt.expected.executeErr != nil {
+				assert.ErrorIs(t, err, tt.expected.executeErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Len(t, result.Calls, tt.expected.callCount)
+
+			for i, expectedResult := range tt.expected.results {
+				if tt.expected.errors[i] != nil {
+					assert.Error(t, result.Errors[i])
+					if errors.Is(tt.expected.errors[i], gent.ErrUnknownTool) {
+						assert.ErrorIs(t, result.Errors[i], gent.ErrUnknownTool)
+					} else {
+						assert.Equal(t, tt.expected.errors[i].Error(), result.Errors[i].Error())
+					}
+				} else {
+					assert.NoError(t, result.Errors[i])
+					assert.Equal(t, expectedResult, yamlGetTextContent(result.Results[i].Result))
+					if len(tt.expected.resultNames) > i {
+						assert.Equal(t, tt.expected.resultNames[i], result.Results[i].Name)
+					}
+				}
+			}
+		})
+	}
 }
 
-func TestYAML_Execute_SchemaValidation_MissingRequired(t *testing.T) {
-	tc := NewYAML()
+func TestYAML_Execute_SchemaValidation(t *testing.T) {
+	type mockTool struct {
+		name        string
+		description string
+		schema      map[string]any
+		fn          func(ctx context.Context, args map[string]any) (string, error)
+	}
 
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		result       string
+		errContains  string
+		resultIsNil  bool
+		noToolError  bool
+	}
+
+	tests := []struct {
+		name     string
+		mocks    []mockTool
+		input    input
+		expected expected
+	}{
+		{
+			name: "valid args",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search the web",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{"type": "string"},
+						},
+						"required": []any{"query"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return fmt.Sprintf("Results for: %s", args["query"]), nil
+					},
+				},
 			},
-			"required": []any{"query"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "should not reach here", nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `tool: search
-args: {}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	require.Error(t, result.Errors[0])
-	assert.True(t, strings.Contains(result.Errors[0].Error(), "schema validation failed"),
-		"expected schema validation error, got: %v", result.Errors[0])
-	assert.Nil(t, result.Results[0])
-}
-
-func TestYAML_Execute_SchemaValidation_WrongType(t *testing.T) {
-	tc := NewYAML()
-
-	tool := gent.NewToolFunc(
-		"counter",
-		"Count things",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"count": map[string]any{"type": "integer"},
-			},
-			"required": []any{"count"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "should not reach here", nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `tool: counter
+			input: input{
+				content: `tool: search
 args:
-  count: not a number`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	require.Error(t, result.Errors[0])
-	assert.True(t, strings.Contains(result.Errors[0].Error(), "schema validation failed"),
-		"expected schema validation error, got: %v", result.Errors[0])
-	assert.Nil(t, result.Results[0])
-}
-
-func TestYAML_Execute_NoSchema_NoValidation(t *testing.T) {
-	tc := NewYAML()
-
-	tool := gent.NewToolFunc(
-		"flexible",
-		"A flexible tool",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "success", nil
+  query: weather`,
+			},
+			expected: expected{
+				result:      "Results for: weather",
+				noToolError: true,
+			},
 		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `tool: flexible
+		{
+			name: "missing required field",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search the web",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{"type": "string"},
+						},
+						"required": []any{"query"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "should not reach here", nil
+					},
+				},
+			},
+			input: input{
+				content: `tool: search
+args: {}`,
+			},
+			expected: expected{
+				errContains: "schema validation failed",
+				resultIsNil: true,
+			},
+		},
+		{
+			name: "wrong type",
+			mocks: []mockTool{
+				{
+					name:        "counter",
+					description: "Count things",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"count": map[string]any{"type": "integer"},
+						},
+						"required": []any{"count"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "should not reach here", nil
+					},
+				},
+			},
+			input: input{
+				content: `tool: counter
+args:
+  count: not a number`,
+			},
+			expected: expected{
+				errContains: "schema validation failed",
+				resultIsNil: true,
+			},
+		},
+		{
+			name: "no schema allows any args",
+			mocks: []mockTool{
+				{
+					name:        "flexible",
+					description: "A flexible tool",
+					schema:      nil,
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "success", nil
+					},
+				},
+			},
+			input: input{
+				content: `tool: flexible
 args:
   anything: works
-  numbers: 123`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	assert.NoError(t, result.Errors[0])
-	assert.Equal(t, "success", yamlGetTextContent(result.Results[0].Result))
-}
-
-func TestYAML_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
-	tc := NewYAML()
-
-	tool := gent.NewToolFunc(
-		"booking",
-		"Book a flight",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"origin":      map[string]any{"type": "string"},
-				"destination": map[string]any{"type": "string"},
-				"passengers":  map[string]any{"type": "integer"},
+  numbers: 123`,
 			},
-			"required": []any{"origin", "destination", "passengers"},
+			expected: expected{
+				result:      "success",
+				noToolError: true,
+			},
 		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "booked", nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	t.Run("valid args", func(t *testing.T) {
-		content := `tool: booking
+		{
+			name: "multiple properties valid",
+			mocks: []mockTool{
+				{
+					name:        "booking",
+					description: "Book a flight",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"origin":      map[string]any{"type": "string"},
+							"destination": map[string]any{"type": "string"},
+							"passengers":  map[string]any{"type": "integer"},
+						},
+						"required": []any{"origin", "destination", "passengers"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "booked", nil
+					},
+				},
+			},
+			input: input{
+				content: `tool: booking
 args:
   origin: NYC
   destination: LAX
-  passengers: 2`
-		result, err := tc.Execute(context.Background(), nil, content)
-		require.NoError(t, err)
-		assert.NoError(t, result.Errors[0])
-	})
-
-	t.Run("missing required field", func(t *testing.T) {
-		content := `tool: booking
+  passengers: 2`,
+			},
+			expected: expected{
+				result:      "booked",
+				noToolError: true,
+			},
+		},
+		{
+			name: "multiple properties missing required",
+			mocks: []mockTool{
+				{
+					name:        "booking",
+					description: "Book a flight",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"origin":      map[string]any{"type": "string"},
+							"destination": map[string]any{"type": "string"},
+							"passengers":  map[string]any{"type": "integer"},
+						},
+						"required": []any{"origin", "destination", "passengers"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "booked", nil
+					},
+				},
+			},
+			input: input{
+				content: `tool: booking
 args:
   origin: NYC
-  destination: LAX`
-		result, err := tc.Execute(context.Background(), nil, content)
-		require.NoError(t, err)
-		require.Error(t, result.Errors[0])
-	})
+  destination: LAX`,
+			},
+			expected: expected{
+				errContains: "schema validation failed",
+				resultIsNil: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			for _, mock := range tt.mocks {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					mock.fn,
+					yamlTextFormatter,
+				)
+				tc.RegisterTool(tool)
+			}
+
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			require.NoError(t, err)
+
+			if tt.expected.noToolError {
+				assert.NoError(t, result.Errors[0])
+				require.NotNil(t, result.Results[0])
+				assert.Equal(t, tt.expected.result, yamlGetTextContent(result.Results[0].Result))
+			} else {
+				require.Error(t, result.Errors[0])
+				assert.Contains(t, result.Errors[0].Error(), tt.expected.errContains)
+				if tt.expected.resultIsNil {
+					assert.Nil(t, result.Results[0])
+				}
+			}
+		})
+	}
 }
 
 func TestYAML_ParseSection_DateAsString(t *testing.T) {
-	tc := NewYAML()
+	type input struct {
+		content string
+	}
 
-	tool := gent.NewToolFunc(
-		"search_flights",
-		"Search flights",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"origin":      map[string]any{"type": "string"},
-				"destination": map[string]any{"type": "string"},
-				"date":        map[string]any{"type": "string"},
-			},
-			"required": []any{"origin", "destination", "date"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return fmt.Sprintf("searching for %s", args["date"]), nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
+	type expected struct {
+		dateValue string
+		execErr   error
+	}
 
-	content := `tool: search_flights
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "date preserved as string",
+			input: input{
+				content: `tool: search_flights
 args:
   origin: JFK
   destination: LAX
-  date: 2026-01-20`
+  date: 2026-01-20`,
+			},
+			expected: expected{
+				dateValue: "2026-01-20",
+				execErr:   nil,
+			},
+		},
+	}
 
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
 
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 1)
+			tool := gent.NewToolFunc(
+				"search_flights",
+				"Search flights",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"origin":      map[string]any{"type": "string"},
+						"destination": map[string]any{"type": "string"},
+						"date":        map[string]any{"type": "string"},
+					},
+					"required": []any{"origin", "destination", "date"},
+				},
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return fmt.Sprintf("searching for %s", args["date"]), nil
+				},
+				yamlTextFormatter,
+			)
+			tc.RegisterTool(tool)
 
-	dateVal := calls[0].Args["date"]
-	dateStr, ok := dateVal.(string)
-	require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
-	assert.Equal(t, "2026-01-20", dateStr)
+			result, err := tc.ParseSection(tt.input.content)
+			require.NoError(t, err)
 
-	execResult, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	assert.NoError(t, execResult.Errors[0])
+			calls := result.([]*gent.ToolCall)
+			require.Len(t, calls, 1)
+
+			dateVal := calls[0].Args["date"]
+			dateStr, ok := dateVal.(string)
+			require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
+			assert.Equal(t, tt.expected.dateValue, dateStr)
+
+			execResult, err := tc.Execute(context.Background(), nil, tt.input.content)
+			require.NoError(t, err)
+			assert.NoError(t, execResult.Errors[0])
+		})
+	}
 }
 
 func TestYAML_ParseSection_TimeFormatsAsString(t *testing.T) {
@@ -600,33 +888,60 @@ args:
 }
 
 func TestYAML_ParseSection_NoSchemaLetsYAMLDecide(t *testing.T) {
-	tc := NewYAML()
+	type input struct {
+		content string
+	}
 
-	tool := gent.NewToolFunc(
-		"untyped_tool",
-		"Tool without schema",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "ok", nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
+	type expected struct {
+		acceptableTypes []string
+	}
 
-	content := `tool: untyped_tool
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "date without schema can be time.Time or string",
+			input: input{
+				content: `tool: untyped_tool
 args:
-  date: 2026-01-20`
+  date: 2026-01-20`,
+			},
+			expected: expected{
+				acceptableTypes: []string{"time.Time", "string"},
+			},
+		},
+	}
 
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
 
-	calls := result.([]*gent.ToolCall)
-	val := calls[0].Args["date"]
+			tool := gent.NewToolFunc(
+				"untyped_tool",
+				"Tool without schema",
+				nil,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return "ok", nil
+				},
+				yamlTextFormatter,
+			)
+			tc.RegisterTool(tool)
 
-	_, isTime := val.(time.Time)
-	_, isString := val.(string)
+			result, err := tc.ParseSection(tt.input.content)
+			require.NoError(t, err)
 
-	assert.True(t, isTime || isString, "expected time.Time or string, got %T", val)
+			calls := result.([]*gent.ToolCall)
+			val := calls[0].Args["date"]
+
+			_, isTime := val.(time.Time)
+			_, isString := val.(string)
+
+			assert.True(t, isTime || isString,
+				"expected one of %v, got %T", tt.expected.acceptableTypes, val)
+		})
+	}
 }
 
 // TimeTypedInput is used to test automatic type conversion to time.Time
@@ -641,39 +956,64 @@ type DurationTypedInput struct {
 }
 
 func TestYAML_Execute_TimeConversion(t *testing.T) {
-	tc := NewYAML()
+	type input struct {
+		content string
+	}
 
-	tool := gent.NewToolFunc(
-		"time_tool",
-		"Tool with time.Time input",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"date":      map[string]any{"type": "string"},
-				"timestamp": map[string]any{"type": "string"},
-			},
-			"required": []any{"date", "timestamp"},
-		},
-		func(ctx context.Context, input TimeTypedInput) (string, error) {
-			return input.Date.Format("2006-01-02") + "|" +
-				input.Timestamp.Format(time.RFC3339), nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
+	type expected struct {
+		output string
+	}
 
-	content := `tool: time_tool
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "time values converted correctly",
+			input: input{
+				content: `tool: time_tool
 args:
   date: 2026-01-20
-  timestamp: 2026-01-20T10:30:00Z`
+  timestamp: 2026-01-20T10:30:00Z`,
+			},
+			expected: expected{
+				output: "2026-01-20|2026-01-20T10:30:00Z",
+			},
+		},
+	}
 
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.NoError(t, result.Errors[0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
 
-	expected := "2026-01-20|2026-01-20T10:30:00Z"
-	output := yamlGetTextContent(result.Results[0].Result)
-	assert.Equal(t, expected, output)
+			tool := gent.NewToolFunc(
+				"time_tool",
+				"Tool with time.Time input",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"date":      map[string]any{"type": "string"},
+						"timestamp": map[string]any{"type": "string"},
+					},
+					"required": []any{"date", "timestamp"},
+				},
+				func(ctx context.Context, input TimeTypedInput) (string, error) {
+					return input.Date.Format("2006-01-02") + "|" +
+						input.Timestamp.Format(time.RFC3339), nil
+				},
+				yamlTextFormatter,
+			)
+			tc.RegisterTool(tool)
+
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			require.NoError(t, err)
+			require.NoError(t, result.Errors[0])
+
+			output := yamlGetTextContent(result.Results[0].Result)
+			assert.Equal(t, tt.expected.output, output)
+		})
+	}
 }
 
 func TestYAML_Execute_DurationConversion(t *testing.T) {
@@ -747,281 +1087,469 @@ args:
 	}
 }
 
-func TestYAML_Prompt_SchemaWithDescriptions(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"search_flights",
-		"Search for available flights",
-		schema.Object(map[string]*schema.Property{
-			"origin":      schema.String("Origin airport code (IATA)"),
-			"destination": schema.String("Destination airport code (IATA)"),
-			"date":        schema.String("Departure date in YYYY-MM-DD format"),
-		}, "origin", "destination", "date"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+func TestYAML_Prompt_SchemaFeatures(t *testing.T) {
+	type input struct {
+		toolName        string
+		toolDescription string
+		schema          map[string]any
+	}
+
+	type expected struct {
+		prompt string
+	}
+
+	basePromptPrefix := `Call tools using YAML format:
+tool: tool_name
+args:
+  param: value
+
+For multiple parallel calls, use a list:
+- tool: tool1
+  args:
+    param: value
+- tool: tool2
+  args:
+    param: value
+
+For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+- tool: send_email
+  args:
+    subject: "Unsubscribe Confirmation: Newsletter"
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+
+Available tools:
+`
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "schema with descriptions",
+			input: input{
+				toolName:        "search_flights",
+				toolDescription: "Search for available flights",
+				schema: schema.Object(map[string]*schema.Property{
+					"origin":      schema.String("Origin airport code (IATA)"),
+					"destination": schema.String("Destination airport code (IATA)"),
+					"date":        schema.String("Departure date in YYYY-MM-DD format"),
+				}, "origin", "destination", "date"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- search_flights: Search for available flights
+  Parameters:
+    properties:
+        date:
+            description: Departure date in YYYY-MM-DD format
+            type: string
+        destination:
+            description: Destination airport code (IATA)
+            type: string
+        origin:
+            description: Origin airport code (IATA)
+            type: string
+    required:
+        - origin
+        - destination
+        - date
+    type: object
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "search_flights"),
-		"expected tool name 'search_flights' in prompt")
-	assert.True(t, strings.Contains(prompt, "Search for available flights"),
-		"expected tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "Origin airport code (IATA)"),
-		"expected 'origin' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "Destination airport code (IATA)"),
-		"expected 'destination' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "Departure date in YYYY-MM-DD format"),
-		"expected 'date' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "type: string"),
-		"expected type information in prompt")
-}
-
-func TestYAML_Prompt_SchemaWithRequiredFields(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"create_user",
-		"Create a new user",
-		schema.Object(map[string]*schema.Property{
-			"name":  schema.String("User's full name"),
-			"email": schema.String("User's email address"),
-			"phone": schema.String("User's phone number"),
-		}, "name", "email"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with required fields",
+			input: input{
+				toolName:        "create_user",
+				toolDescription: "Create a new user",
+				schema: schema.Object(map[string]*schema.Property{
+					"name":  schema.String("User's full name"),
+					"email": schema.String("User's email address"),
+					"phone": schema.String("User's phone number"),
+				}, "name", "email"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- create_user: Create a new user
+  Parameters:
+    properties:
+        email:
+            description: User's email address
+            type: string
+        name:
+            description: User's full name
+            type: string
+        phone:
+            description: User's phone number
+            type: string
+    required:
+        - name
+        - email
+    type: object
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "required:"), "expected 'required' section in prompt")
-	assert.True(t, strings.Contains(prompt, "- name"), "expected 'name' in required list")
-	assert.True(t, strings.Contains(prompt, "- email"), "expected 'email' in required list")
-}
-
-func TestYAML_Prompt_SchemaWithEnumValues(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"book_flight",
-		"Book a flight",
-		schema.Object(map[string]*schema.Property{
-			"class": schema.String("Travel class").Enum("economy", "business", "first"),
-		}),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with enum values",
+			input: input{
+				toolName:        "book_flight",
+				toolDescription: "Book a flight",
+				schema: schema.Object(map[string]*schema.Property{
+					"class": schema.String("Travel class").Enum("economy", "business", "first"),
+				}),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- book_flight: Book a flight
+  Parameters:
+    properties:
+        class:
+            description: Travel class
+            enum:
+                - economy
+                - business
+                - first
+            type: string
+    type: object
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "enum:"), "expected 'enum' section in prompt")
-	assert.True(t, strings.Contains(prompt, "- economy"), "expected 'economy' in enum list")
-	assert.True(t, strings.Contains(prompt, "- business"), "expected 'business' in enum list")
-	assert.True(t, strings.Contains(prompt, "- first"), "expected 'first' in enum list")
-}
-
-func TestYAML_Prompt_SchemaWithMinMax(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"set_quantity",
-		"Set item quantity",
-		schema.Object(map[string]*schema.Property{
-			"quantity": schema.Integer("Number of items").Min(1).Max(100),
-		}, "quantity"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with min max",
+			input: input{
+				toolName:        "set_quantity",
+				toolDescription: "Set item quantity",
+				schema: schema.Object(map[string]*schema.Property{
+					"quantity": schema.Integer("Number of items").Min(1).Max(100),
+				}, "quantity"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- set_quantity: Set item quantity
+  Parameters:
+    properties:
+        quantity:
+            description: Number of items
+            maximum: 100
+            minimum: 1
+            type: integer
+    required:
+        - quantity
+    type: object
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "minimum: 1"), "expected 'minimum: 1' in prompt")
-	assert.True(t, strings.Contains(prompt, "maximum: 100"), "expected 'maximum: 100' in prompt")
-	assert.True(t, strings.Contains(prompt, "type: integer"), "expected 'type: integer' in prompt")
-}
-
-func TestYAML_Prompt_SchemaWithDefaultValues(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"search",
-		"Search for items",
-		schema.Object(map[string]*schema.Property{
-			"query": schema.String("Search query"),
-			"limit": schema.Integer("Maximum results").Default(10),
-		}, "query"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with default values",
+			input: input{
+				toolName:        "search",
+				toolDescription: "Search for items",
+				schema: schema.Object(map[string]*schema.Property{
+					"query": schema.String("Search query"),
+					"limit": schema.Integer("Maximum results").Default(10),
+				}, "query"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- search: Search for items
+  Parameters:
+    properties:
+        limit:
+            default: 10
+            description: Maximum results
+            type: integer
+        query:
+            description: Search query
+            type: string
+    required:
+        - query
+    type: object
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "default: 10"), "expected 'default: 10' in prompt")
-}
-
-func TestYAML_Prompt_SchemaWithMultipleTypes(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"complex_tool",
-		"A tool with multiple types",
-		schema.Object(map[string]*schema.Property{
-			"name":   schema.String("Name of the item"),
-			"count":  schema.Integer("Number of items"),
-			"price":  schema.Number("Price in dollars"),
-			"active": schema.Boolean("Whether the item is active"),
-			"tags":   schema.Array("List of tags", map[string]any{"type": "string"}),
-		}, "name"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with multiple types",
+			input: input{
+				toolName:        "complex_tool",
+				toolDescription: "A tool with multiple types",
+				schema: schema.Object(map[string]*schema.Property{
+					"name":   schema.String("Name of the item"),
+					"count":  schema.Integer("Number of items"),
+					"price":  schema.Number("Price in dollars"),
+					"active": schema.Boolean("Whether the item is active"),
+					"tags":   schema.Array("List of tags", map[string]any{"type": "string"}),
+				}, "name"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- complex_tool: A tool with multiple types
+  Parameters:
+    properties:
+        active:
+            description: Whether the item is active
+            type: boolean
+        count:
+            description: Number of items
+            type: integer
+        name:
+            description: Name of the item
+            type: string
+        price:
+            description: Price in dollars
+            type: number
+        tags:
+            description: List of tags
+            items:
+                type: string
+            type: array
+    required:
+        - name
+    type: object
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
+		{
+			name: "tool with no schema",
+			input: input{
+				toolName:        "simple_tool",
+				toolDescription: "A simple tool without schema",
+				schema:          nil,
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- simple_tool: A simple tool without schema
+`,
+			},
+		},
+		{
+			name: "schema with string constraints",
+			input: input{
+				toolName:        "validate_input",
+				toolDescription: "Validate user input",
+				schema: schema.Object(map[string]*schema.Property{
+					"username": schema.String("Username").MinLength(3).MaxLength(20),
+					"email":    schema.String("Email address").Format("email"),
+					"code":     schema.String("Verification code").Pattern(`^[A-Z]{2}[0-9]{4}$`),
+				}, "username", "email"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- validate_input: Validate user input
+  Parameters:
+    properties:
+        code:
+            description: Verification code
+            pattern: ^[A-Z]{2}[0-9]{4}$
+            type: string
+        email:
+            description: Email address
+            format: email
+            type: string
+        username:
+            description: Username
+            maxLength: 20
+            minLength: 3
+            type: string
+    required:
+        - username
+        - email
+    type: object
+`,
+			},
+		},
+	}
 
-	prompt := tc.Prompt()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			tool := gent.NewToolFunc(
+				tt.input.toolName,
+				tt.input.toolDescription,
+				tt.input.schema,
+				func(ctx context.Context, input map[string]any) (string, error) {
+					return "ok", nil
+				},
+				nil,
+			)
+			tc.RegisterTool(tool)
 
-	assert.True(t, strings.Contains(prompt, "type: string"), "expected 'type: string' in prompt")
-	assert.True(t, strings.Contains(prompt, "type: integer"), "expected 'type: integer' in prompt")
-	assert.True(t, strings.Contains(prompt, "type: number"), "expected 'type: number' in prompt")
-	assert.True(t, strings.Contains(prompt, "type: boolean"), "expected 'type: boolean' in prompt")
-	assert.True(t, strings.Contains(prompt, "type: array"), "expected 'type: array' in prompt")
-	assert.True(t, strings.Contains(prompt, "Name of the item"),
-		"expected string description in prompt")
-	assert.True(t, strings.Contains(prompt, "Number of items"),
-		"expected integer description in prompt")
-	assert.True(t, strings.Contains(prompt, "Price in dollars"),
-		"expected number description in prompt")
-	assert.True(t, strings.Contains(prompt, "Whether the item is active"),
-		"expected boolean description in prompt")
-	assert.True(t, strings.Contains(prompt, "List of tags"),
-		"expected array description in prompt")
+			prompt := tc.Prompt()
+
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
 func TestYAML_Prompt_MultipleTools(t *testing.T) {
-	tc := NewYAML()
+	type mockTool struct {
+		name        string
+		description string
+		schema      map[string]any
+	}
 
-	tool1 := gent.NewToolFunc(
-		"search",
-		"Search for information",
-		schema.Object(map[string]*schema.Property{
-			"query": schema.String("Search query"),
-		}, "query"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+	type input struct {
+		tools []mockTool
+	}
+
+	type expected struct {
+		prompt string
+	}
+
+	basePromptPrefix := `Call tools using YAML format:
+tool: tool_name
+args:
+  param: value
+
+For multiple parallel calls, use a list:
+- tool: tool1
+  args:
+    param: value
+- tool: tool2
+  args:
+    param: value
+
+For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+- tool: send_email
+  args:
+    subject: "Unsubscribe Confirmation: Newsletter"
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+
+Available tools:
+`
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "two tools",
+			input: input{
+				tools: []mockTool{
+					{
+						name:        "search",
+						description: "Search for information",
+						schema: schema.Object(map[string]*schema.Property{
+							"query": schema.String("Search query"),
+						}, "query"),
+					},
+					{
+						name:        "calculate",
+						description: "Perform calculations",
+						schema: schema.Object(map[string]*schema.Property{
+							"expression": schema.String("Mathematical expression"),
+						}, "expression"),
+					},
+				},
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- search: Search for information
+  Parameters:
+    properties:
+        query:
+            description: Search query
+            type: string
+    required:
+        - query
+    type: object
+
+- calculate: Perform calculations
+  Parameters:
+    properties:
+        expression:
+            description: Mathematical expression
+            type: string
+    required:
+        - expression
+    type: object
+`,
+			},
 		},
-		nil,
-	)
+	}
 
-	tool2 := gent.NewToolFunc(
-		"calculate",
-		"Perform calculations",
-		schema.Object(map[string]*schema.Property{
-			"expression": schema.String("Mathematical expression"),
-		}, "expression"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
-		},
-		nil,
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			for _, mock := range tt.input.tools {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					func(ctx context.Context, input map[string]any) (string, error) {
+						return "ok", nil
+					},
+					nil,
+				)
+				tc.RegisterTool(tool)
+			}
 
-	tc.RegisterTool(tool1)
-	tc.RegisterTool(tool2)
+			prompt := tc.Prompt()
 
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "- search:"), "expected 'search' tool in prompt")
-	assert.True(t, strings.Contains(prompt, "- calculate:"), "expected 'calculate' tool in prompt")
-	assert.True(t, strings.Contains(prompt, "Search for information"),
-		"expected 'search' tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "Perform calculations"),
-		"expected 'calculate' tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "Search query"),
-		"expected 'query' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "Mathematical expression"),
-		"expected 'expression' field description in prompt")
-}
-
-func TestYAML_Prompt_ToolWithNoSchema(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"simple_tool",
-		"A simple tool without schema",
-		nil,
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
-		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "simple_tool"),
-		"expected tool name 'simple_tool' in prompt")
-	assert.True(t, strings.Contains(prompt, "A simple tool without schema"),
-		"expected tool description in prompt")
-}
-
-func TestYAML_Prompt_SchemaWithStringConstraints(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"validate_input",
-		"Validate user input",
-		schema.Object(map[string]*schema.Property{
-			"username": schema.String("Username").MinLength(3).MaxLength(20),
-			"email":    schema.String("Email address").Format("email"),
-			"code":     schema.String("Verification code").Pattern(`^[A-Z]{2}[0-9]{4}$`),
-		}, "username", "email"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
-		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "minLength: 3"), "expected 'minLength: 3' in prompt")
-	assert.True(t, strings.Contains(prompt, "maxLength: 20"), "expected 'maxLength: 20' in prompt")
-	assert.True(t, strings.Contains(prompt, "format: email"), "expected 'format: email' in prompt")
-	assert.True(t, strings.Contains(prompt, "pattern:"), "expected 'pattern' in prompt")
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
 func TestYAML_Prompt_FormatInstructions(t *testing.T) {
-	tc := NewYAML()
-	tool := gent.NewToolFunc(
-		"test",
-		"Test tool",
-		nil,
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+	type expected struct {
+		prompt string
+	}
+
+	tests := []struct {
+		name     string
+		expected expected
+	}{
+		{
+			name: "format instructions present",
+			expected: expected{
+				prompt: `Call tools using YAML format:
+tool: tool_name
+args:
+  param: value
+
+For multiple parallel calls, use a list:
+- tool: tool1
+  args:
+    param: value
+- tool: tool2
+  args:
+    param: value
+
+For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+- tool: send_email
+  args:
+    subject: "Unsubscribe Confirmation: Newsletter"
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+
+Available tools:
+
+- test: Test tool
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
+	}
 
-	prompt := tc.Prompt()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			tool := gent.NewToolFunc(
+				"test",
+				"Test tool",
+				nil,
+				func(ctx context.Context, input map[string]any) (string, error) {
+					return "ok", nil
+				},
+				nil,
+			)
+			tc.RegisterTool(tool)
 
-	assert.True(t, strings.Contains(prompt, "tool: tool_name"),
-		"expected single tool format instruction")
-	assert.True(t, strings.Contains(prompt, "args:"), "expected 'args:' in format instruction")
-	assert.True(t, strings.Contains(prompt, "param: value"),
-		"expected 'param: value' in format instruction")
-	assert.True(t, strings.Contains(prompt, "- tool: tool1"),
-		"expected array format instruction for parallel calls")
-	assert.True(t, strings.Contains(prompt, "Available tools:"),
-		"expected 'Available tools:' header")
+			prompt := tc.Prompt()
+
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
 // yamlTextFormatter converts a string to []gent.ContentPart.
