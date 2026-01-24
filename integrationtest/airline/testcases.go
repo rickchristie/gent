@@ -66,6 +66,21 @@ func GetAirlineTestCases() []AirlineTestCase {
 	}
 }
 
+// ConversationMessage represents a message in the conversation history.
+type ConversationMessage struct {
+	Role    string // "user" or "agent"
+	Content string
+}
+
+// InteractiveChatState holds state for an interactive chat session.
+type InteractiveChatState struct {
+	Fixture  *AirlineFixture
+	History  []ConversationMessage
+	Model    gent.StreamingModel
+	Config   AirlineTestConfig
+	Writer   io.Writer
+}
+
 // createModel creates an xAI model for testing.
 func createModel() (gent.StreamingModel, error) {
 	apiKey := os.Getenv("GENT_TEST_XAI_KEY")
@@ -118,6 +133,10 @@ Always be polite and professional. When rescheduling, make sure to:
 3. Search for available alternative flights
 4. Inform the customer of any fees before making changes
 5. Confirm the change and provide updated booking details`).
+		WithCriticalRules(`DO NOT HALLUCINATE
+- Every claim in your answer MUST come from tool outputs or user-provided information
+- NEVER invent specific data (IDs, prices, times, availability)
+- If information is missing, say so explicitly`).
 		WithThinking("Think step by step about how to help the customer.")
 
 	// Customer request
@@ -176,7 +195,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	printSection(w, "Agent Execution")
 	fmt.Fprintln(w)
 
-	result := exec.ExecuteWithContext(ctx, execCtx)
+	result, err := exec.ExecuteWithContext(ctx, execCtx)
 
 	// Print final summary
 	fmt.Fprintln(w)
@@ -184,8 +203,8 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	fmt.Fprintln(w)
 
 	// Print final result
-	if result.Error != nil {
-		fmt.Fprintf(w, "Error: %v\n", result.Error)
+	if err != nil {
+		fmt.Fprintf(w, "Error: %v\n", err)
 	} else {
 		printSection(w, "Final Response to Customer")
 		for _, part := range result.Result {
@@ -265,7 +284,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	fmt.Fprintln(w)
 	printHeader(w, "TEST COMPLETE")
 
-	return nil
+	return err
 }
 
 // streamingOutputHook handles iteration and tool call output for streaming mode.
@@ -386,4 +405,162 @@ func printHeader(w io.Writer, title string) {
 
 func printSection(w io.Writer, title string) {
 	fmt.Fprintf(w, "--- %s ---\n", title)
+}
+
+// NewInteractiveChat creates a new interactive chat session.
+func NewInteractiveChat(w io.Writer, config AirlineTestConfig) (*InteractiveChatState, error) {
+	model, err := createModel()
+	if err != nil {
+		return nil, err
+	}
+
+	fixture := NewAirlineFixture(nil)
+
+	return &InteractiveChatState{
+		Fixture: fixture,
+		History: make([]ConversationMessage, 0),
+		Model:   model,
+		Config:  config,
+		Writer:  w,
+	}, nil
+}
+
+// formatMessageHistory formats the conversation history for the task template.
+func (s *InteractiveChatState) formatMessageHistory() string {
+	if len(s.History) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<message_history>\n")
+	for i, msg := range s.History {
+		if msg.Role == "user" && i == len(s.History)-1 {
+			sb.WriteString("user(most_recent):\n")
+		} else {
+			sb.WriteString(msg.Role + ":\n")
+		}
+		sb.WriteString(msg.Content)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("</message_history>\n")
+	sb.WriteString("\nAssist and reply to the customer!")
+	return sb.String()
+}
+
+// SendMessage sends a user message and gets the agent response.
+func (s *InteractiveChatState) SendMessage(ctx context.Context, userMessage string) error {
+	// Add user message to history
+	s.History = append(s.History, ConversationMessage{
+		Role:    "user",
+		Content: userMessage,
+	})
+
+	// Create toolchain and register all airline tools
+	tc := toolchain.NewYAML()
+	s.Fixture.RegisterAllTools(tc)
+
+	// Create the ReAct loop
+	loop := react.NewAgent(s.Model).
+		WithToolChain(tc).
+		WithTimeProvider(s.Fixture.TimeProvider()).
+		WithStreaming(s.Config.UseStreaming).
+		WithBehaviorAndContext(`## Task Description
+
+You are a helpful airline customer service agent for SkyWings Airlines.
+Your role is to assist customers with their flight bookings, including checking flight information,
+rescheduling flights, and answering policy questions.
+
+Today is {{.Time.Today}} ({{.Time.Weekday}}).
+
+Always be polite and professional. When rescheduling, make sure to:
+1. Verify the customer's identity and booking
+2. Check the airline's change policy
+3. Search for available alternative flights
+4. Inform the customer of any fees before making changes
+5. Confirm the change and provide updated booking details`).
+		WithCriticalRules(`DO NOT HALLUCINATE
+- Every claim in your answer MUST come from tool outputs or user-provided information
+- NEVER invent specific data (IDs, prices, times, availability)
+- If information is missing, say so explicitly`).
+		WithThinking("Think step by step about how to help the customer.")
+
+	// Format message history as the task
+	taskContent := s.formatMessageHistory()
+	data := react.NewLoopData(llms.TextContent{Text: taskContent})
+
+	// Create ExecutionContext
+	execCtx := gent.NewExecutionContext("airline-chat", data)
+
+	// Create hook registry
+	hookRegistry := hooks.NewRegistry()
+
+	// Set up streaming hook
+	var streamWg sync.WaitGroup
+	streamingHook := newStreamingOutputHook(s.Writer)
+	hookRegistry.Register(streamingHook)
+
+	// Subscribe to LLM response stream
+	chunks, unsubscribe := execCtx.SubscribeToTopic("llm-response")
+
+	streamWg.Add(1)
+	go func() {
+		defer streamWg.Done()
+		streamConsumer(chunks, s.Writer, streamingHook)
+	}()
+
+	defer func() {
+		unsubscribe()
+		streamWg.Wait()
+	}()
+
+	// Create executor
+	exec := executor.New[*react.LoopData](loop, executor.Config{MaxIterations: 15}).
+		WithHooks(hookRegistry)
+
+	// Print user input
+	fmt.Fprintln(s.Writer)
+	printSection(s.Writer, "Your Input")
+	fmt.Fprintln(s.Writer, userMessage)
+
+	// Execute
+	fmt.Fprintln(s.Writer)
+	printSection(s.Writer, "Agent Processing")
+	fmt.Fprintln(s.Writer)
+
+	result, err := exec.ExecuteWithContext(ctx, execCtx)
+
+	// Print stats
+	fmt.Fprintln(s.Writer)
+	stats := execCtx.Stats()
+	fmt.Fprintf(s.Writer, "[Stats: %d iterations, %d input tokens, %d output tokens, %v]\n",
+		execCtx.Iteration(), stats.TotalInputTokens, stats.TotalOutputTokens, execCtx.Duration())
+
+	// Extract agent response
+	if err != nil {
+		fmt.Fprintf(s.Writer, "\nError: %v\n", err)
+		return err
+	}
+
+	// Get the final response text
+	var responseText string
+	for _, part := range result.Result {
+		if tc, ok := part.(llms.TextContent); ok {
+			responseText = tc.Text
+		}
+	}
+
+	// Add agent response to history
+	if responseText != "" {
+		s.History = append(s.History, ConversationMessage{
+			Role:    "agent",
+			Content: responseText,
+		})
+
+		// Print final response
+		fmt.Fprintln(s.Writer)
+		printSection(s.Writer, "Agent Response")
+		fmt.Fprintln(s.Writer, responseText)
+	}
+
+	return nil
 }

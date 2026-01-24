@@ -8,6 +8,9 @@ import (
 	"github.com/rickchristie/gent"
 )
 
+// ErrAmbiguousTags is returned in strict mode when section tags appear inside other sections.
+var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside another section")
+
 // XML uses XML-style tags to delimit sections.
 //
 // Example output:
@@ -21,6 +24,7 @@ import (
 //	</action>
 type XML struct {
 	knownSections map[string]bool
+	strict        bool
 }
 
 // NewXML creates a new XML format.
@@ -28,6 +32,14 @@ func NewXML() *XML {
 	return &XML{
 		knownSections: make(map[string]bool),
 	}
+}
+
+// WithStrict enables strict mode validation.
+// In strict mode, Parse returns an error if there are parsing ambiguities,
+// such as section tags appearing inside other sections' content.
+func (f *XML) WithStrict(strict bool) *XML {
+	f.strict = strict
+	return f
 }
 
 // Describe generates the prompt section explaining the output format.
@@ -78,18 +90,12 @@ func (f *XML) DescribeStructure(sections []gent.TextOutputSection) string {
 func (f *XML) Parse(output string) (map[string][]string, error) {
 	result := make(map[string][]string)
 
-	// Match XML-style tags: <name>...</name> (case-insensitive, multiline)
-	// We use (?s) to make . match newlines
+	// For each known section, find matches by pairing closing tags with their nearest
+	// preceding opening tags. This handles cases where LLM writes literal tags in content.
 	for sectionName := range f.knownSections {
-		pattern := fmt.Sprintf(`(?si)<%s>(.*?)</%s>`, sectionName, sectionName)
-		re := regexp.MustCompile(pattern)
-		matches := re.FindAllStringSubmatch(output, -1)
-
-		for _, match := range matches {
-			if len(match) >= 2 {
-				content := strings.TrimSpace(match[1])
-				result[sectionName] = append(result[sectionName], content)
-			}
+		matches := f.findSectionMatches(output, sectionName)
+		for _, content := range matches {
+			result[sectionName] = append(result[sectionName], content)
 		}
 	}
 
@@ -112,5 +118,88 @@ func (f *XML) Parse(output string) (map[string][]string, error) {
 		return nil, gent.ErrNoSectionsFound
 	}
 
+	// In strict mode, check for ambiguities
+	if f.strict {
+		if err := f.validateNoAmbiguities(output, result); err != nil {
+			return nil, err
+		}
+	}
+
 	return result, nil
+}
+
+// findSectionMatches finds all instances of a section by pairing closing tags with their
+// nearest preceding opening tags. This handles cases where the LLM writes literal tag names
+// in content (e.g., "provide <answer>." inside <thinking>).
+func (f *XML) findSectionMatches(output string, sectionName string) []string {
+	var results []string
+
+	// Find all closing tags
+	closePattern := fmt.Sprintf(`(?i)</%s>`, sectionName)
+	closeRe := regexp.MustCompile(closePattern)
+	closeMatches := closeRe.FindAllStringIndex(output, -1)
+
+	if len(closeMatches) == 0 {
+		return nil
+	}
+
+	// Find all opening tags
+	openPattern := fmt.Sprintf(`(?i)<%s>`, sectionName)
+	openRe := regexp.MustCompile(openPattern)
+	openMatches := openRe.FindAllStringIndex(output, -1)
+
+	if len(openMatches) == 0 {
+		return nil
+	}
+
+	// For each closing tag, find the LAST opening tag before it that hasn't been used
+	// This correctly handles cases like: <thinking>...<answer>...</thinking>...<answer>...</answer>
+	usedOpens := make(map[int]bool)
+
+	for _, closeMatch := range closeMatches {
+		closeStart := closeMatch[0]
+
+		// Find the LAST opening tag before this closing tag that hasn't been used
+		var bestOpen []int
+		for _, openMatch := range openMatches {
+			openEnd := openMatch[1]
+			if openEnd <= closeStart && !usedOpens[openMatch[0]] {
+				bestOpen = openMatch // Keep updating to get the LAST one
+			}
+		}
+
+		if bestOpen != nil {
+			usedOpens[bestOpen[0]] = true
+			content := output[bestOpen[1]:closeStart]
+			results = append(results, strings.TrimSpace(content))
+		}
+	}
+
+	return results
+}
+
+// validateNoAmbiguities checks if any parsed section's content contains another section's tags.
+// This is used in strict mode to detect potentially ambiguous parses.
+func (f *XML) validateNoAmbiguities(output string, result map[string][]string) error {
+	for sectionName, contents := range result {
+		for _, content := range contents {
+			for otherSection := range f.knownSections {
+				if otherSection == sectionName {
+					continue
+				}
+				// Check if content contains another section's opening or closing tag
+				openPattern := fmt.Sprintf(`(?i)<%s>`, otherSection)
+				closePattern := fmt.Sprintf(`(?i)</%s>`, otherSection)
+				if matched, _ := regexp.MatchString(openPattern, content); matched {
+					return fmt.Errorf("%w: <%s> found inside <%s> content",
+						ErrAmbiguousTags, otherSection, sectionName)
+				}
+				if matched, _ := regexp.MatchString(closePattern, content); matched {
+					return fmt.Errorf("%w: </%s> found inside <%s> content",
+						ErrAmbiguousTags, otherSection, sectionName)
+				}
+			}
+		}
+	}
+	return nil
 }

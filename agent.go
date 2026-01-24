@@ -21,7 +21,10 @@ type AgentLoop[Data LoopData] interface {
 	// The ExecutionContext provides access to LoopData via execCtx.Data() and enables automatic
 	// tracing. All framework components (Model, ToolChain) will trace automatically when given
 	// the ExecutionContext.
-	Next(ctx context.Context, execCtx *ExecutionContext) *AgentLoopResult
+	//
+	// Returns an error if the iteration fails (e.g., LLM call failure, parse error).
+	// The executor will handle the error appropriately.
+	Next(ctx context.Context, execCtx *ExecutionContext) (*AgentLoopResult, error)
 }
 
 // LoopData is the data that is being passed through each [AgentLoop] execution. Each [AgentLoop]

@@ -52,12 +52,29 @@ var DefaultReActTaskTemplate = template.Must(
 	template.New("react_task").Parse(reactTaskTemplateContent),
 )
 
+// TaskMessage represents a single message in the conversation history.
+type TaskMessage struct {
+	// Role is "user" or "agent"
+	Role string
+	// Content is the message content
+	Content string
+	// IsMostRecent marks the most recent user message
+	IsMostRecent bool
+}
+
 // TaskPromptData contains the data passed to the task template.
 type TaskPromptData struct {
-	// Task is the original task/input provided by the user.
+	// Task is the original task/input provided by the user (for simple single-turn tasks).
 	Task string
 
-	// ScratchPad contains the formatted history of previous iterations.
+	// MessageHistory contains the conversation history for multi-turn tasks.
+	// When set, the template will render message history instead of just Task.
+	MessageHistory []TaskMessage
+
+	// TaskInstruction is the instruction shown after message history (e.g., "Assist the customer!")
+	TaskInstruction string
+
+	// ScratchPad contains the formatted history of previous iterations (agent's internal reasoning).
 	ScratchPad string
 }
 

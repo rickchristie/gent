@@ -1,5 +1,17 @@
 <task>
+{{- if .MessageHistory}}
+<message_history>
+{{- range .MessageHistory}}
+{{if .IsMostRecent}}user(most_recent):{{else}}{{.Role}}:{{end}}
+{{.Content}}
+{{end -}}
+</message_history>
+{{if .TaskInstruction}}
+{{.TaskInstruction}}
+{{end -}}
+{{- else}}
 {{.Task}}
+{{- end}}
 </task>
 {{if .ScratchPad}}
 {{.ScratchPad}}

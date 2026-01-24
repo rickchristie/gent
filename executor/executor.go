@@ -78,7 +78,7 @@ func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 //
 // The ExecutionContext flows through all components (Model, ToolChain, Hooks),
 // enabling automatic tracing without manual wiring.
-func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.ExecutionResult {
+func (e *Executor[Data]) Execute(ctx context.Context, data Data) (*gent.ExecutionResult, error) {
 	execCtx := gent.NewExecutionContext("main", data)
 
 	// Set hook firer for model call hooks
@@ -91,6 +91,7 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 	}
 
 	// Ensure streams are closed and AfterExecution is always called if BeforeExecution succeeded
+	var execErr error
 	beforeExecutionCalled := false
 	defer func() {
 		// Always close streams when execution ends
@@ -117,9 +118,9 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 	if e.hooks != nil {
 		event := gent.BeforeExecutionEvent{}
 		if err := e.hooks.FireBeforeExecution(ctx, execCtx, event); err != nil {
-			result.Error = fmt.Errorf("BeforeExecution hook: %w", err)
-			execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
-			return result
+			execErr = fmt.Errorf("BeforeExecution hook: %w", err)
+			execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
+			return result, execErr
 		}
 	}
 	beforeExecutionCalled = true
@@ -128,20 +129,20 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 	for {
 		// Check context cancellation
 		if ctx.Err() != nil {
-			result.Error = ctx.Err()
-			execCtx.SetTermination(gent.TerminationContextCanceled, nil, result.Error)
-			return result
+			execErr = ctx.Err()
+			execCtx.SetTermination(gent.TerminationContextCanceled, nil, execErr)
+			return result, execErr
 		}
 
 		// Check max iterations
 		if e.config.MaxIterations > 0 && execCtx.Iteration() >= e.config.MaxIterations {
-			result.Error = fmt.Errorf(
+			execErr = fmt.Errorf(
 				"%w: exceeded %d iterations",
 				ErrMaxIterationsExceeded,
 				e.config.MaxIterations,
 			)
-			execCtx.SetTermination(gent.TerminationMaxIterations, nil, result.Error)
-			return result
+			execCtx.SetTermination(gent.TerminationMaxIterations, nil, execErr)
+			return result, execErr
 		}
 
 		// Start iteration (increments counter and records IterationStartTrace)
@@ -153,19 +154,27 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 			event := gent.BeforeIterationEvent{Iteration: execCtx.Iteration()}
 			if err := e.hooks.FireBeforeIteration(ctx, execCtx, event); err != nil {
 				execCtx.EndIteration(gent.LATerminate, time.Since(iterStart))
-				result.Error = fmt.Errorf(
+				execErr = fmt.Errorf(
 					"BeforeIteration hook (iteration %d): %w",
 					execCtx.Iteration(),
 					err,
 				)
-				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
-				return result
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
+				return result, execErr
 			}
 		}
 
 		// Execute the AgentLoop iteration
-		loopResult := e.loop.Next(ctx, execCtx)
+		loopResult, loopErr := e.loop.Next(ctx, execCtx)
 		iterDuration := time.Since(iterStart)
+
+		// Handle loop error
+		if loopErr != nil {
+			execCtx.EndIteration(gent.LATerminate, iterDuration)
+			execErr = fmt.Errorf("AgentLoop.Next (iteration %d): %w", execCtx.Iteration(), loopErr)
+			execCtx.SetTermination(gent.TerminationError, nil, execErr)
+			return result, execErr
+		}
 
 		// End iteration (records IterationEndTrace)
 		execCtx.EndIteration(loopResult.Action, iterDuration)
@@ -178,13 +187,13 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 				Duration:  iterDuration,
 			}
 			if err := e.hooks.FireAfterIteration(ctx, execCtx, event); err != nil {
-				result.Error = fmt.Errorf(
+				execErr = fmt.Errorf(
 					"AfterIteration hook (iteration %d): %w",
 					execCtx.Iteration(),
 					err,
 				)
-				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
-				return result
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
+				return result, execErr
 			}
 		}
 
@@ -192,7 +201,7 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 		if loopResult.Action == gent.LATerminate {
 			result.Result = loopResult.Result
 			execCtx.SetTermination(gent.TerminationSuccess, loopResult.Result, nil)
-			return result
+			return result, nil
 		}
 
 		// Continue - the AgentLoop is responsible for updating data with NextPrompt
@@ -205,7 +214,7 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) *gent.Execution
 func (e *Executor[Data]) ExecuteWithContext(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-) *gent.ExecutionResult {
+) (*gent.ExecutionResult, error) {
 	// Set hook firer for model call hooks if not already set
 	if e.hooks != nil {
 		execCtx.SetHookFirer(e.hooks)
@@ -216,6 +225,7 @@ func (e *Executor[Data]) ExecuteWithContext(
 	}
 
 	// Ensure streams are closed and AfterExecution is always called if BeforeExecution succeeded
+	var execErr error
 	beforeExecutionCalled := false
 	defer func() {
 		// Always close streams when execution ends
@@ -239,9 +249,9 @@ func (e *Executor[Data]) ExecuteWithContext(
 	if e.hooks != nil {
 		event := gent.BeforeExecutionEvent{}
 		if err := e.hooks.FireBeforeExecution(ctx, execCtx, event); err != nil {
-			result.Error = fmt.Errorf("BeforeExecution hook: %w", err)
-			execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
-			return result
+			execErr = fmt.Errorf("BeforeExecution hook: %w", err)
+			execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
+			return result, execErr
 		}
 	}
 	beforeExecutionCalled = true
@@ -249,19 +259,19 @@ func (e *Executor[Data]) ExecuteWithContext(
 	// Main execution loop
 	for {
 		if ctx.Err() != nil {
-			result.Error = ctx.Err()
-			execCtx.SetTermination(gent.TerminationContextCanceled, nil, result.Error)
-			return result
+			execErr = ctx.Err()
+			execCtx.SetTermination(gent.TerminationContextCanceled, nil, execErr)
+			return result, execErr
 		}
 
 		if e.config.MaxIterations > 0 && execCtx.Iteration() >= e.config.MaxIterations {
-			result.Error = fmt.Errorf(
+			execErr = fmt.Errorf(
 				"%w: exceeded %d iterations",
 				ErrMaxIterationsExceeded,
 				e.config.MaxIterations,
 			)
-			execCtx.SetTermination(gent.TerminationMaxIterations, nil, result.Error)
-			return result
+			execCtx.SetTermination(gent.TerminationMaxIterations, nil, execErr)
+			return result, execErr
 		}
 
 		execCtx.StartIteration()
@@ -271,18 +281,27 @@ func (e *Executor[Data]) ExecuteWithContext(
 			event := gent.BeforeIterationEvent{Iteration: execCtx.Iteration()}
 			if err := e.hooks.FireBeforeIteration(ctx, execCtx, event); err != nil {
 				execCtx.EndIteration(gent.LATerminate, time.Since(iterStart))
-				result.Error = fmt.Errorf(
+				execErr = fmt.Errorf(
 					"BeforeIteration hook (iteration %d): %w",
 					execCtx.Iteration(),
 					err,
 				)
-				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
-				return result
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
+				return result, execErr
 			}
 		}
 
-		loopResult := e.loop.Next(ctx, execCtx)
+		loopResult, loopErr := e.loop.Next(ctx, execCtx)
 		iterDuration := time.Since(iterStart)
+
+		// Handle loop error
+		if loopErr != nil {
+			execCtx.EndIteration(gent.LATerminate, iterDuration)
+			execErr = fmt.Errorf("AgentLoop.Next (iteration %d): %w", execCtx.Iteration(), loopErr)
+			execCtx.SetTermination(gent.TerminationError, nil, execErr)
+			return result, execErr
+		}
+
 		execCtx.EndIteration(loopResult.Action, iterDuration)
 
 		if e.hooks != nil {
@@ -292,20 +311,20 @@ func (e *Executor[Data]) ExecuteWithContext(
 				Duration:  iterDuration,
 			}
 			if err := e.hooks.FireAfterIteration(ctx, execCtx, event); err != nil {
-				result.Error = fmt.Errorf(
+				execErr = fmt.Errorf(
 					"AfterIteration hook (iteration %d): %w",
 					execCtx.Iteration(),
 					err,
 				)
-				execCtx.SetTermination(gent.TerminationHookAbort, nil, result.Error)
-				return result
+				execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
+				return result, execErr
 			}
 		}
 
 		if loopResult.Action == gent.LATerminate {
 			result.Result = loopResult.Result
 			execCtx.SetTermination(gent.TerminationSuccess, loopResult.Result, nil)
-			return result
+			return result, nil
 		}
 	}
 }

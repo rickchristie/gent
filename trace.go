@@ -181,7 +181,4 @@ type ExecutionResult struct {
 
 	// Context is the ExecutionContext with full trace data.
 	Context *ExecutionContext
-
-	// Error is any error that occurred (nil if successful).
-	Error error
 }

@@ -262,7 +262,10 @@ func (r *Agent) RegisterTool(tool any) *Agent {
 }
 
 // Next executes one iteration of the ReAct loop.
-func (r *Agent) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.AgentLoopResult {
+func (r *Agent) Next(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+) (*gent.AgentLoopResult, error) {
 	data := execCtx.Data()
 
 	// Build output sections and generate prompts
@@ -280,10 +283,7 @@ func (r *Agent) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.
 	// Call model - use streaming if enabled and model supports it
 	response, err := r.callModel(ctx, execCtx, streamId, streamTopicId, messages)
 	if err != nil {
-		return &gent.AgentLoopResult{
-			Action: gent.LATerminate,
-			Result: []gent.ContentPart{llms.TextContent{Text: fmt.Sprintf("Model error: %v", err)}},
-		}
+		return nil, fmt.Errorf("model call failed: %w", err)
 	}
 
 	// Extract response content
@@ -306,28 +306,14 @@ func (r *Agent) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.
 				return &gent.AgentLoopResult{
 					Action: gent.LATerminate,
 					Result: result,
-				}
+				}, nil
 			}
 		}
 	}
 
-	// Handle parse error after termination check
+	// Handle parse error after termination check - no fallback, bubble up the error
 	if parseErr != nil {
-		// Try treating raw content as termination
-		if result := r.termination.ShouldTerminate(responseContent); len(result) > 0 {
-			iter := r.buildIteration(responseContent, "")
-			data.AddIterationHistory(iter)
-			return &gent.AgentLoopResult{
-				Action: gent.LATerminate,
-				Result: result,
-			}
-		}
-		return &gent.AgentLoopResult{
-			Action: gent.LATerminate,
-			Result: []gent.ContentPart{llms.TextContent{
-				Text: fmt.Sprintf("Parse error: %v\nRaw response: %s", parseErr, responseContent),
-			}},
-		}
+		return nil, fmt.Errorf("failed to parse LLM response: %w\nRaw response: %s", parseErr, responseContent)
 	}
 
 	// Execute tool calls if action section is present (automatically traced via execCtx)
@@ -349,7 +335,7 @@ func (r *Agent) Next(ctx context.Context, execCtx *gent.ExecutionContext) *gent.
 	return &gent.AgentLoopResult{
 		Action:     gent.LAContinue,
 		NextPrompt: observation,
-	}
+	}, nil
 }
 
 // buildOutputSections constructs the list of output sections.

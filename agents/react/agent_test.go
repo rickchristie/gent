@@ -3,6 +3,7 @@ package react
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -335,7 +336,10 @@ func TestAgent_Next_Termination(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(context.Background(), execCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if result.Action != gent.LATerminate {
 		t.Errorf("expected LATerminate, got %v", result.Action)
@@ -380,7 +384,10 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Search for test"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(context.Background(), execCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if result.Action != gent.LAContinue {
 		t.Errorf("expected LAContinue, got %v", result.Action)
@@ -419,7 +426,10 @@ func TestAgent_Next_ToolError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Use broken tool"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(context.Background(), execCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if result.Action != gent.LAContinue {
 		t.Errorf("expected LAContinue, got %v", result.Action)
@@ -443,22 +453,14 @@ func TestAgent_Next_ModelError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	_, err := loop.Next(context.Background(), execCtx)
 
-	if result.Action != gent.LATerminate {
-		t.Errorf("expected LATerminate, got %v", result.Action)
+	// Should return an error when model fails
+	if err == nil {
+		t.Fatal("expected error from model failure, got nil")
 	}
-
-	if len(result.Result) == 0 {
-		t.Fatal("expected error result")
-	}
-
-	tc2, ok := result.Result[0].(llms.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Result[0])
-	}
-	if tc2.Text == "" {
-		t.Error("expected error message in result")
+	if !strings.Contains(err.Error(), "model failed") {
+		t.Errorf("expected error to contain 'model failed', got %q", err.Error())
 	}
 }
 
@@ -480,11 +482,11 @@ func TestAgent_Next_ParseError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	_, err := loop.Next(context.Background(), execCtx)
 
-	// Should terminate with error since parse failed and raw content isn't valid termination
-	if result.Action != gent.LATerminate {
-		t.Errorf("expected LATerminate, got %v", result.Action)
+	// Should return an error since parse failed
+	if err == nil {
+		t.Error("expected error from parse failure, got nil")
 	}
 }
 
@@ -506,23 +508,11 @@ func TestAgent_Next_ParseError_FallbackToTermination(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	_, err := loop.Next(context.Background(), execCtx)
 
-	// Should terminate successfully since raw content is valid termination
-	if result.Action != gent.LATerminate {
-		t.Errorf("expected LATerminate, got %v", result.Action)
-	}
-
-	if len(result.Result) == 0 {
-		t.Fatal("expected result")
-	}
-
-	tc2, ok := result.Result[0].(llms.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Result[0])
-	}
-	if tc2.Text != "The answer is 42" {
-		t.Errorf("expected 'The answer is 42', got %q", tc2.Text)
+	// Should return an error since parse failed (no fallback anymore)
+	if err == nil {
+		t.Error("expected error from parse failure, got nil")
 	}
 }
 
@@ -563,7 +553,10 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Use tools a and b"})
 	execCtx := newTestExecCtx(data)
-	result := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(context.Background(), execCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if result.Action != gent.LAContinue {
 		t.Errorf("expected LAContinue, got %v", result.Action)
