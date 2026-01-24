@@ -1,10 +1,10 @@
 package format
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/rickchristie/gent"
+	"github.com/stretchr/testify/assert"
 )
 
 // mockSection is a simple TextOutputSection for testing.
@@ -19,225 +19,297 @@ func (m *mockSection) ParseSection(content string) (any, error) {
 	return content, nil
 }
 
-func TestMarkdown_Parse_SingleSection(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `# Answer
-The weather is sunny today.`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestMarkdown_Parse(t *testing.T) {
+	type input struct {
+		sections []string
+		output   string
 	}
 
-	if len(result["answer"]) != 1 {
-		t.Fatalf("expected 1 answer section, got %d", len(result["answer"]))
+	type expected struct {
+		sections map[string][]string
+		err      error
 	}
 
-	if result["answer"][0] != "The weather is sunny today." {
-		t.Errorf("unexpected content: %s", result["answer"][0])
-	}
-}
-
-func TestMarkdown_Parse_MultipleSections(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Thinking", prompt: ""},
-		&mockSection{name: "Action", prompt: ""},
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `# Thinking
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "single section",
+			input: input{
+				sections: []string{"Answer"},
+				output: `# Answer
+The weather is sunny today.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"answer": {"The weather is sunny today."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "multiple sections",
+			input: input{
+				sections: []string{"Thinking", "Action", "Answer"},
+				output: `# Thinking
 I need to search for weather information.
 
 # Action
 {"tool": "search", "args": {"query": "weather"}}
 
 # Answer
-The weather is sunny.`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(result) != 3 {
-		t.Fatalf("expected 3 sections, got %d", len(result))
-	}
-
-	if result["thinking"][0] != "I need to search for weather information." {
-		t.Errorf("unexpected thinking content: %s", result["thinking"][0])
-	}
-
-	expected := `{"tool": "search", "args": {"query": "weather"}}`
-	if result["action"][0] != expected {
-		t.Errorf("unexpected action content: %s", result["action"][0])
-	}
-
-	if result["answer"][0] != "The weather is sunny." {
-		t.Errorf("unexpected answer content: %s", result["answer"][0])
-	}
-}
-
-func TestMarkdown_Parse_MultipleSameSection(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Action", prompt: ""},
-	})
-
-	output := `# Action
+The weather is sunny.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"thinking": {"I need to search for weather information."},
+					"action":   {`{"tool": "search", "args": {"query": "weather"}}`},
+					"answer":   {"The weather is sunny."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "multiple same section",
+			input: input{
+				sections: []string{"Action"},
+				output: `# Action
 First action content.
 
 # Action
-Second action content.`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(result["action"]) != 2 {
-		t.Fatalf("expected 2 action sections, got %d", len(result["action"]))
-	}
-
-	if result["action"][0] != "First action content." {
-		t.Errorf("unexpected first action: %s", result["action"][0])
-	}
-
-	if result["action"][1] != "Second action content." {
-		t.Errorf("unexpected second action: %s", result["action"][1])
-	}
-}
-
-func TestMarkdown_Parse_CaseInsensitive(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Thinking", prompt: ""},
-	})
-
-	output := `# THINKING
-Case insensitive content.`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(result["thinking"]) != 1 {
-		t.Fatalf("expected 1 thinking section, got %d", len(result["thinking"]))
-	}
-}
-
-func TestMarkdown_Parse_ContentBeforeFirstHeader(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `Some content before the first header that should be ignored.
+Second action content.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"action": {"First action content.", "Second action content."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "case insensitive",
+			input: input{
+				sections: []string{"Thinking"},
+				output: `# THINKING
+Case insensitive content.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"thinking": {"Case insensitive content."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "content before first header ignored",
+			input: input{
+				sections: []string{"Answer"},
+				output: `Some content before the first header that should be ignored.
 
 # Answer
-The actual answer.`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(result["answer"]) != 1 {
-		t.Fatalf("expected 1 answer section, got %d", len(result["answer"]))
-	}
-
-	if result["answer"][0] != "The actual answer." {
-		t.Errorf("unexpected answer content: %s", result["answer"][0])
-	}
-}
-
-func TestMarkdown_Parse_EmptySection(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Thinking", prompt: ""},
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `# Thinking
+The actual answer.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"answer": {"The actual answer."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "empty section",
+			input: input{
+				sections: []string{"Thinking", "Answer"},
+				output: `# Thinking
 
 # Answer
-The answer.`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result["thinking"][0] != "" {
-		t.Errorf("expected empty thinking section, got: %s", result["thinking"][0])
-	}
-
-	if result["answer"][0] != "The answer." {
-		t.Errorf("unexpected answer content: %s", result["answer"][0])
-	}
-}
-
-func TestMarkdown_Parse_WhitespaceTrimming(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `# Answer
+The answer.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"thinking": {""},
+					"answer":   {"The answer."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "whitespace trimming",
+			input: input{
+				sections: []string{"Answer"},
+				output: `# Answer
 
    Content with whitespace around it.
 
-`
-
-	result, err := format.Parse(output)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"answer": {"Content with whitespace around it."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "no recognized sections returns error",
+			input: input{
+				sections: []string{"Answer"},
+				output: `# Unknown
+Some content.`,
+			},
+			expected: expected{
+				sections: nil,
+				err:      gent.ErrNoSectionsFound,
+			},
+		},
+		{
+			name: "no headers returns error",
+			input: input{
+				sections: []string{"Answer"},
+				output:   `Just some plain text without any headers.`,
+			},
+			expected: expected{
+				sections: nil,
+				err:      gent.ErrNoSectionsFound,
+			},
+		},
+		{
+			name: "inline multiple sections",
+			input: input{
+				sections: []string{"Thinking", "Action", "Answer"},
+				output: `# Thinking
+Quick thought.
+# Action
+do_something
+# Answer
+Done.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"thinking": {"Quick thought."},
+					"action":   {"do_something"},
+					"answer":   {"Done."},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "content with literal hash characters",
+			input: input{
+				sections: []string{"Code"},
+				output: `# Code
+func main() {
+    // This is a comment with # symbol
+    fmt.Println("Hello")
+}`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"code": {"func main() {\n    // This is a comment with # symbol\n    fmt.Println(\"Hello\")\n}"},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "header with extra spaces",
+			input: input{
+				sections: []string{"Answer"},
+				output: `#    Answer
+The answer with extra spaces in header.`,
+			},
+			expected: expected{
+				sections: map[string][]string{
+					"answer": {"The answer with extra spaces in header."},
+				},
+				err: nil,
+			},
+		},
 	}
 
-	if result["answer"][0] != "Content with whitespace around it." {
-		t.Errorf("whitespace not trimmed properly: '%s'", result["answer"][0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := NewMarkdown()
+
+			var sections []gent.TextOutputSection
+			for _, name := range tt.input.sections {
+				sections = append(sections, &mockSection{name: name, prompt: ""})
+			}
+			format.DescribeStructure(sections)
+
+			result, err := format.Parse(tt.input.output)
+
+			assert.ErrorIs(t, err, tt.expected.err)
+			assert.Equal(t, tt.expected.sections, result)
+		})
 	}
 }
 
-func TestMarkdown_Parse_NoRecognizedSections(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `# Unknown
-Some content.`
-
-	_, err := format.Parse(output)
-	if !errors.Is(err, gent.ErrNoSectionsFound) {
-		t.Errorf("expected ErrNoSectionsFound, got: %v", err)
+func TestMarkdown_DescribeStructure(t *testing.T) {
+	type input struct {
+		sections []string
 	}
-}
 
-func TestMarkdown_Parse_NoHeaders(t *testing.T) {
-	format := NewMarkdown()
-	format.DescribeStructure([]gent.TextOutputSection{
-		&mockSection{name: "Answer", prompt: ""},
-	})
-
-	output := `Just some plain text without any headers.`
-
-	_, err := format.Parse(output)
-	if !errors.Is(err, gent.ErrNoSectionsFound) {
-		t.Errorf("expected ErrNoSectionsFound, got: %v", err)
+	type expected struct {
+		output string
 	}
-}
 
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "empty sections returns empty string",
+			input: input{
+				sections: nil,
+			},
+			expected: expected{
+				output: "",
+			},
+		},
+		{
+			name: "single section",
+			input: input{
+				sections: []string{"Answer"},
+			},
+			expected: expected{
+				output: "Format your response using markdown headers for each section:\n\n" +
+					"# Answer\n" +
+					"... Answer content here ...\n\n",
+			},
+		},
+		{
+			name: "multiple sections ignores prompts",
+			input: input{
+				sections: []string{"Thinking", "Action"},
+			},
+			expected: expected{
+				output: "Format your response using markdown headers for each section:\n\n" +
+					"# Thinking\n" +
+					"... Thinking content here ...\n\n" +
+					"# Action\n" +
+					"... Action content here ...\n\n",
+			},
+		},
 	}
-	return false
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := NewMarkdown()
+
+			var sections []gent.TextOutputSection
+			for _, name := range tt.input.sections {
+				sections = append(sections, &mockSection{
+					name:   name,
+					prompt: "This prompt should be ignored",
+				})
+			}
+
+			result := format.DescribeStructure(sections)
+
+			assert.Equal(t, tt.expected.output, result)
+		})
+	}
 }
