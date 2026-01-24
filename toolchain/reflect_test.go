@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -42,6 +44,32 @@ type NestedInput struct {
 // -----------------------------------------------------------------------------
 
 func TestCallToolReflect_DateStringToTime(t *testing.T) {
+	type input struct {
+		dateStr string
+	}
+
+	type expected struct {
+		result string
+		err    error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "date only YYYY-MM-DD",
+			input:    input{dateStr: "2026-01-20"},
+			expected: expected{result: "2026-01-20", err: nil},
+		},
+		{
+			name:     "date only different date",
+			input:    input{dateStr: "2025-12-25"},
+			expected: expected{result: "2025-12-25", err: nil},
+		},
+	}
+
 	tool := gent.NewToolFunc(
 		"date_tool",
 		"Tool with date input",
@@ -52,44 +80,65 @@ func TestCallToolReflect_DateStringToTime(t *testing.T) {
 		reflectTextFormatter,
 	)
 
-	tests := []struct {
-		name     string
-		dateStr  string
-		expected string
-	}{
-		{
-			name:     "date only YYYY-MM-DD",
-			dateStr:  "2026-01-20",
-			expected: "2026-01-20",
-		},
-		{
-			name:     "date only different date",
-			dateStr:  "2025-12-25",
-			expected: "2025-12-25",
-		},
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := map[string]any{
-				"date":      tt.dateStr,
-				"timestamp": "2026-01-01T00:00:00Z", // Required field
+				"date":      tt.input.dateStr,
+				"timestamp": "2026-01-01T00:00:00Z",
 			}
 
 			result, err := CallToolReflect(context.Background(), tool, args)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
 
+			assert.ErrorIs(t, err, tt.expected.err)
+			require.NotNil(t, result)
 			output := result.Output.(string)
-			if output != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, output)
-			}
+			assert.Equal(t, tt.expected.result, output)
 		})
 	}
 }
 
 func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
+	type input struct {
+		timestampStr string
+	}
+
+	type expected struct {
+		result string
+		err    error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "RFC3339",
+			input:    input{timestampStr: "2026-01-20T10:30:00Z"},
+			expected: expected{result: "2026-01-20T10:30:00Z", err: nil},
+		},
+		{
+			name:     "RFC3339 with timezone offset",
+			input:    input{timestampStr: "2026-01-20T10:30:00+05:00"},
+			expected: expected{result: "2026-01-20T10:30:00+05:00", err: nil},
+		},
+		{
+			name:     "RFC3339 with negative offset",
+			input:    input{timestampStr: "2026-01-20T10:30:00-08:00"},
+			expected: expected{result: "2026-01-20T10:30:00-08:00", err: nil},
+		},
+		{
+			name:     "ISO without timezone",
+			input:    input{timestampStr: "2026-01-20T10:30:00"},
+			expected: expected{result: "2026-01-20T10:30:00Z", err: nil},
+		},
+		{
+			name:     "datetime with space",
+			input:    input{timestampStr: "2026-01-20 10:30:00"},
+			expected: expected{result: "2026-01-20T10:30:00Z", err: nil},
+		},
+	}
+
 	tool := gent.NewToolFunc(
 		"timestamp_tool",
 		"Tool with timestamp input",
@@ -100,54 +149,19 @@ func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
 		reflectTextFormatter,
 	)
 
-	tests := []struct {
-		name         string
-		timestampStr string
-		expected     string
-	}{
-		{
-			name:         "RFC3339",
-			timestampStr: "2026-01-20T10:30:00Z",
-			expected:     "2026-01-20T10:30:00Z",
-		},
-		{
-			name:         "RFC3339 with timezone offset",
-			timestampStr: "2026-01-20T10:30:00+05:00",
-			expected:     "2026-01-20T10:30:00+05:00",
-		},
-		{
-			name:         "RFC3339 with negative offset",
-			timestampStr: "2026-01-20T10:30:00-08:00",
-			expected:     "2026-01-20T10:30:00-08:00",
-		},
-		{
-			name:         "ISO without timezone",
-			timestampStr: "2026-01-20T10:30:00",
-			expected:     "2026-01-20T10:30:00Z", // Parsed as UTC
-		},
-		{
-			name:         "datetime with space",
-			timestampStr: "2026-01-20 10:30:00",
-			expected:     "2026-01-20T10:30:00Z", // Parsed as UTC
-		},
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := map[string]any{
-				"date":      "2026-01-01", // Required field
-				"timestamp": tt.timestampStr,
+				"date":      "2026-01-01",
+				"timestamp": tt.input.timestampStr,
 			}
 
 			result, err := CallToolReflect(context.Background(), tool, args)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
 
+			assert.ErrorIs(t, err, tt.expected.err)
+			require.NotNil(t, result)
 			output := result.Output.(string)
-			if output != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, output)
-			}
+			assert.Equal(t, tt.expected.result, output)
 		})
 	}
 }
@@ -157,6 +171,52 @@ func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
+	type input struct {
+		durationStr string
+	}
+
+	type expected struct {
+		result string
+		err    error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "hours and minutes",
+			input:    input{durationStr: "1h30m"},
+			expected: expected{result: "1h30m0s", err: nil},
+		},
+		{
+			name:     "hours minutes seconds",
+			input:    input{durationStr: "2h45m30s"},
+			expected: expected{result: "2h45m30s", err: nil},
+		},
+		{
+			name:     "minutes only",
+			input:    input{durationStr: "30m"},
+			expected: expected{result: "30m0s", err: nil},
+		},
+		{
+			name:     "seconds only",
+			input:    input{durationStr: "45s"},
+			expected: expected{result: "45s", err: nil},
+		},
+		{
+			name:     "milliseconds",
+			input:    input{durationStr: "500ms"},
+			expected: expected{result: "500ms", err: nil},
+		},
+		{
+			name:     "complex duration",
+			input:    input{durationStr: "1h2m3s4ms"},
+			expected: expected{result: "1h2m3.004s", err: nil},
+		},
+	}
+
 	tool := gent.NewToolFunc(
 		"duration_tool",
 		"Tool with duration input",
@@ -167,59 +227,19 @@ func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
 		reflectTextFormatter,
 	)
 
-	tests := []struct {
-		name        string
-		durationStr string
-		expected    string
-	}{
-		{
-			name:        "hours and minutes",
-			durationStr: "1h30m",
-			expected:    "1h30m0s",
-		},
-		{
-			name:        "hours minutes seconds",
-			durationStr: "2h45m30s",
-			expected:    "2h45m30s",
-		},
-		{
-			name:        "minutes only",
-			durationStr: "30m",
-			expected:    "30m0s",
-		},
-		{
-			name:        "seconds only",
-			durationStr: "45s",
-			expected:    "45s",
-		},
-		{
-			name:        "milliseconds",
-			durationStr: "500ms",
-			expected:    "500ms",
-		},
-		{
-			name:        "complex duration",
-			durationStr: "1h2m3s4ms",
-			expected:    "1h2m3.004s",
-		},
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := map[string]any{
-				"duration": tt.durationStr,
-				"timeout":  "1s", // Required field
+				"duration": tt.input.durationStr,
+				"timeout":  "1s",
 			}
 
 			result, err := CallToolReflect(context.Background(), tool, args)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
 
+			assert.ErrorIs(t, err, tt.expected.err)
+			require.NotNil(t, result)
 			output := result.Output.(string)
-			if output != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, output)
-			}
+			assert.Equal(t, tt.expected.result, output)
 		})
 	}
 }
@@ -249,15 +269,11 @@ func TestCallToolReflect_MixedTypes(t *testing.T) {
 	}
 
 	result, err := CallToolReflect(context.Background(), tool, args)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
+	require.NoError(t, err)
 	expected := "test-event|2026-06-15|2h30m0s"
 	output := result.Output.(string)
-	if output != expected {
-		t.Errorf("expected '%s', got '%s'", expected, output)
-	}
+	assert.Equal(t, expected, output)
 }
 
 // -----------------------------------------------------------------------------
@@ -270,7 +286,6 @@ func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 		"Tool with map[string]any input",
 		nil,
 		func(ctx context.Context, input map[string]any) (string, error) {
-			// When input is map[string]any, values stay as intermediary types
 			dateVal := input["date"]
 			_, isString := dateVal.(string)
 			if !isString {
@@ -286,15 +301,10 @@ func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 	}
 
 	result, err := CallToolReflect(context.Background(), tool, args)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	// For map[string]any input, date should remain as string (no conversion)
+	require.NoError(t, err)
 	output := result.Output.(string)
-	if output != "is-a-string" {
-		t.Errorf("expected date to be string when input type is map[string]any")
-	}
+	assert.Equal(t, "is-a-string", output)
 }
 
 // -----------------------------------------------------------------------------
@@ -312,23 +322,18 @@ func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 		reflectTextFormatter,
 	)
 
-	// Simulate YAML-parsed time.Time value
 	parsedTime := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
 	args := map[string]any{
-		"date":      parsedTime, // Already time.Time from YAML
+		"date":      parsedTime,
 		"timestamp": parsedTime,
 	}
 
 	result, err := CallToolReflect(context.Background(), tool, args)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
+	require.NoError(t, err)
 	expected := "2026-01-20"
 	output := result.Output.(string)
-	if output != expected {
-		t.Errorf("expected '%s', got '%s'", expected, output)
-	}
+	assert.Equal(t, expected, output)
 }
 
 // -----------------------------------------------------------------------------

@@ -2,144 +2,214 @@ package schema
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestCompile_NilSchema(t *testing.T) {
-	s, err := Compile(nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestCompile(t *testing.T) {
+	type input struct {
+		raw map[string]any
 	}
-	if s != nil {
-		t.Error("expected nil schema for nil input")
-	}
-}
 
-func TestCompile_ValidSchema(t *testing.T) {
-	raw := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name": map[string]any{"type": "string"},
+	type expected struct {
+		isNil   bool
+		hasErr  bool
+		rawIsNil bool
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:  "nil schema returns nil",
+			input: input{raw: nil},
+			expected: expected{
+				isNil:    true,
+				hasErr:   false,
+				rawIsNil: true,
+			},
+		},
+		{
+			name: "valid schema compiles",
+			input: input{
+				raw: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
+					},
+				},
+			},
+			expected: expected{
+				isNil:    false,
+				hasErr:   false,
+				rawIsNil: false,
+			},
 		},
 	}
 
-	s, err := Compile(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if s == nil {
-		t.Fatal("expected non-nil schema")
-	}
-	if s.Raw() == nil {
-		t.Error("expected non-nil raw schema")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := Compile(tt.input.raw)
+
+			if tt.expected.hasErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			if tt.expected.isNil {
+				assert.Nil(t, s)
+			} else {
+				assert.NotNil(t, s)
+				if !tt.expected.rawIsNil {
+					assert.NotNil(t, s.Raw())
+				}
+			}
+		})
 	}
 }
 
-func TestSchema_Validate_Valid(t *testing.T) {
-	raw := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name": map[string]any{"type": "string"},
-			"age":  map[string]any{"type": "integer"},
+func TestSchema_Validate(t *testing.T) {
+	type input struct {
+		schema map[string]any
+		data   map[string]any
+	}
+
+	type expected struct {
+		hasErr          bool
+		isValidationErr bool
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "valid data passes",
+			input: input{
+				schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
+						"age":  map[string]any{"type": "integer"},
+					},
+					"required": []any{"name"},
+				},
+				data: map[string]any{
+					"name": "John",
+					"age":  30,
+				},
+			},
+			expected: expected{
+				hasErr:          false,
+				isValidationErr: false,
+			},
 		},
-		"required": []any{"name"},
-	}
-
-	s, err := Compile(raw)
-	if err != nil {
-		t.Fatalf("failed to compile: %v", err)
-	}
-
-	// Valid data
-	data := map[string]any{
-		"name": "John",
-		"age":  30,
-	}
-
-	err = s.Validate(data)
-	if err != nil {
-		t.Errorf("expected valid data to pass, got: %v", err)
-	}
-}
-
-func TestSchema_Validate_MissingRequired(t *testing.T) {
-	raw := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name": map[string]any{"type": "string"},
+		{
+			name: "missing required field fails",
+			input: input{
+				schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
+					},
+					"required": []any{"name"},
+				},
+				data: map[string]any{},
+			},
+			expected: expected{
+				hasErr:          true,
+				isValidationErr: true,
+			},
 		},
-		"required": []any{"name"},
-	}
-
-	s, err := Compile(raw)
-	if err != nil {
-		t.Fatalf("failed to compile: %v", err)
-	}
-
-	// Missing required field
-	data := map[string]any{}
-
-	err = s.Validate(data)
-	if err == nil {
-		t.Error("expected validation error for missing required field")
-	}
-
-	// Check it's a ValidationError
-	if _, ok := err.(*ValidationError); !ok {
-		t.Errorf("expected *ValidationError, got %T", err)
-	}
-}
-
-func TestSchema_Validate_WrongType(t *testing.T) {
-	raw := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"count": map[string]any{"type": "integer"},
+		{
+			name: "wrong type fails",
+			input: input{
+				schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"count": map[string]any{"type": "integer"},
+					},
+				},
+				data: map[string]any{
+					"count": "not an integer",
+				},
+			},
+			expected: expected{
+				hasErr:          true,
+				isValidationErr: true,
+			},
 		},
 	}
 
-	s, err := Compile(raw)
-	if err != nil {
-		t.Fatalf("failed to compile: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := Compile(tt.input.schema)
+			require.NoError(t, err)
 
-	// Wrong type
-	data := map[string]any{
-		"count": "not an integer",
-	}
+			err = s.Validate(tt.input.data)
 
-	err = s.Validate(data)
-	if err == nil {
-		t.Error("expected validation error for wrong type")
+			if tt.expected.hasErr {
+				assert.Error(t, err)
+				if tt.expected.isValidationErr {
+					_, ok := err.(*ValidationError)
+					assert.True(t, ok, "expected *ValidationError, got %T", err)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }
 
 func TestSchema_Validate_NilSchema(t *testing.T) {
 	var s *Schema
 	err := s.Validate(map[string]any{"foo": "bar"})
-	if err != nil {
-		t.Errorf("nil schema should always pass validation, got: %v", err)
-	}
+	assert.NoError(t, err, "nil schema should always pass validation")
 }
 
-func TestMustCompile_Valid(t *testing.T) {
-	raw := map[string]any{
-		"type": "object",
+func TestMustCompile(t *testing.T) {
+	type input struct {
+		raw map[string]any
 	}
 
-	s := MustCompile(raw)
-	if s == nil {
-		t.Error("expected non-nil schema")
+	type expected struct {
+		isNil bool
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "valid schema returns non-nil",
+			input:    input{raw: map[string]any{"type": "object"}},
+			expected: expected{isNil: false},
+		},
+		{
+			name:     "nil input returns nil",
+			input:    input{raw: nil},
+			expected: expected{isNil: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := MustCompile(tt.input.raw)
+
+			if tt.expected.isNil {
+				assert.Nil(t, s)
+			} else {
+				assert.NotNil(t, s)
+			}
+		})
 	}
 }
-
-func TestMustCompile_Nil(t *testing.T) {
-	s := MustCompile(nil)
-	if s != nil {
-		t.Error("expected nil schema for nil input")
-	}
-}
-
-// Test the builder functions
 
 func TestObject_Basic(t *testing.T) {
 	schema := Object(map[string]*Property{
@@ -147,27 +217,15 @@ func TestObject_Basic(t *testing.T) {
 		"age":  Integer("The age"),
 	}, "name")
 
-	if schema["type"] != "object" {
-		t.Error("expected type 'object'")
-	}
+	assert.Equal(t, "object", schema["type"])
 
 	props, ok := schema["properties"].(map[string]any)
-	if !ok {
-		t.Fatal("expected properties map")
-	}
-
-	if len(props) != 2 {
-		t.Errorf("expected 2 properties, got %d", len(props))
-	}
+	require.True(t, ok, "expected properties map")
+	assert.Len(t, props, 2)
 
 	required, ok := schema["required"].([]string)
-	if !ok {
-		t.Fatal("expected required array")
-	}
-
-	if len(required) != 1 || required[0] != "name" {
-		t.Errorf("expected required=['name'], got %v", required)
-	}
+	require.True(t, ok, "expected required array")
+	assert.Equal(t, []string{"name"}, required)
 }
 
 func TestString_WithConstraints(t *testing.T) {
@@ -179,24 +237,12 @@ func TestString_WithConstraints(t *testing.T) {
 
 	built := prop.build()
 
-	if built["type"] != "string" {
-		t.Error("expected type 'string'")
-	}
-	if built["description"] != "A description" {
-		t.Error("expected description")
-	}
-	if built["minLength"] != 1 {
-		t.Error("expected minLength 1")
-	}
-	if built["maxLength"] != 100 {
-		t.Error("expected maxLength 100")
-	}
-	if built["pattern"] != "^[a-z]+$" {
-		t.Error("expected pattern")
-	}
-	if built["format"] != "email" {
-		t.Error("expected format")
-	}
+	assert.Equal(t, "string", built["type"])
+	assert.Equal(t, "A description", built["description"])
+	assert.Equal(t, 1, built["minLength"])
+	assert.Equal(t, 100, built["maxLength"])
+	assert.Equal(t, "^[a-z]+$", built["pattern"])
+	assert.Equal(t, "email", built["format"])
 }
 
 func TestInteger_WithConstraints(t *testing.T) {
@@ -204,33 +250,25 @@ func TestInteger_WithConstraints(t *testing.T) {
 
 	built := prop.build()
 
-	if built["type"] != "integer" {
-		t.Error("expected type 'integer'")
-	}
-	if built["minimum"] != float64(0) {
-		t.Errorf("expected minimum 0, got %v", built["minimum"])
-	}
-	if built["maximum"] != float64(100) {
-		t.Errorf("expected maximum 100, got %v", built["maximum"])
-	}
+	assert.Equal(t, "integer", built["type"])
+	assert.Equal(t, float64(0), built["minimum"])
+	assert.Equal(t, float64(100), built["maximum"])
 }
 
 func TestNumber_Basic(t *testing.T) {
 	prop := Number("A price")
 	built := prop.build()
 
-	if built["type"] != "number" {
-		t.Error("expected type 'number'")
-	}
+	assert.Equal(t, "number", built["type"])
+	assert.Equal(t, "A price", built["description"])
 }
 
 func TestBoolean_Basic(t *testing.T) {
 	prop := Boolean("A flag")
 	built := prop.build()
 
-	if built["type"] != "boolean" {
-		t.Error("expected type 'boolean'")
-	}
+	assert.Equal(t, "boolean", built["type"])
+	assert.Equal(t, "A flag", built["description"])
 }
 
 func TestArray_Basic(t *testing.T) {
@@ -238,12 +276,9 @@ func TestArray_Basic(t *testing.T) {
 	prop := Array("A list", items)
 	built := prop.build()
 
-	if built["type"] != "array" {
-		t.Error("expected type 'array'")
-	}
-	if built["items"] == nil {
-		t.Error("expected items")
-	}
+	assert.Equal(t, "array", built["type"])
+	assert.Equal(t, "A list", built["description"])
+	assert.NotNil(t, built["items"])
 }
 
 func TestProperty_Enum(t *testing.T) {
@@ -251,30 +286,21 @@ func TestProperty_Enum(t *testing.T) {
 	built := prop.build()
 
 	enum, ok := built["enum"].([]any)
-	if !ok {
-		t.Fatal("expected enum array")
-	}
-
-	if len(enum) != 3 {
-		t.Errorf("expected 3 enum values, got %d", len(enum))
-	}
+	require.True(t, ok, "expected enum array")
+	assert.Equal(t, []any{"pending", "active", "closed"}, enum)
 }
 
 func TestProperty_Default(t *testing.T) {
 	prop := String("A field").Default("default_value")
 	built := prop.build()
 
-	if built["default"] != "default_value" {
-		t.Error("expected default value")
-	}
+	assert.Equal(t, "default_value", built["default"])
 }
 
 func TestValidationError_Error(t *testing.T) {
 	originalErr := &ValidationError{Err: nil}
 	msg := originalErr.Error()
-	if msg != "schema validation failed: <nil>" {
-		t.Errorf("unexpected error message: %s", msg)
-	}
+	assert.Equal(t, "schema validation failed: <nil>", msg)
 }
 
 func TestValidationError_Unwrap(t *testing.T) {
@@ -282,14 +308,45 @@ func TestValidationError_Unwrap(t *testing.T) {
 	outer := &ValidationError{Err: inner}
 
 	unwrapped := outer.Unwrap()
-	if unwrapped != inner {
-		t.Error("Unwrap should return inner error")
-	}
+	assert.Equal(t, inner, unwrapped)
 }
 
-// Test schema validation with builder-created schemas
-
 func TestBuilderSchema_Validation(t *testing.T) {
+	type input struct {
+		data map[string]any
+	}
+
+	type expected struct {
+		hasErr bool
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "valid data passes",
+			input: input{
+				data: map[string]any{
+					"name":  "John",
+					"email": "john@example.com",
+					"age":   30,
+				},
+			},
+			expected: expected{hasErr: false},
+		},
+		{
+			name: "missing required email fails",
+			input: input{
+				data: map[string]any{
+					"name": "John",
+				},
+			},
+			expected: expected{hasErr: true},
+		},
+	}
+
 	raw := Object(map[string]*Property{
 		"name":  String("User name").MinLength(1),
 		"email": String("Email address").Format("email"),
@@ -297,25 +354,17 @@ func TestBuilderSchema_Validation(t *testing.T) {
 	}, "name", "email")
 
 	s, err := Compile(raw)
-	if err != nil {
-		t.Fatalf("failed to compile builder schema: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Valid data
-	err = s.Validate(map[string]any{
-		"name":  "John",
-		"email": "john@example.com",
-		"age":   30,
-	})
-	if err != nil {
-		t.Errorf("expected valid data to pass: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := s.Validate(tt.input.data)
 
-	// Missing required email
-	err = s.Validate(map[string]any{
-		"name": "John",
-	})
-	if err == nil {
-		t.Error("expected validation error for missing email")
+			if tt.expected.hasErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }

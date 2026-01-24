@@ -4,29 +4,58 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/schema"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
 )
 
 func TestYAML_Name(t *testing.T) {
-	tc := NewYAML()
-	if tc.Name() != "action" {
-		t.Errorf("expected default name 'action', got '%s'", tc.Name())
+	type input struct {
+		customName string
 	}
 
-	tc.WithSectionName("tools")
-	if tc.Name() != "tools" {
-		t.Errorf("expected name 'tools', got '%s'", tc.Name())
+	type expected struct {
+		name string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "default name",
+			input:    input{customName: ""},
+			expected: expected{name: "action"},
+		},
+		{
+			name:     "custom name",
+			input:    input{customName: "tools"},
+			expected: expected{name: "tools"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			if tt.input.customName != "" {
+				tc.WithSectionName(tt.input.customName)
+			}
+
+			assert.Equal(t, tt.expected.name, tc.Name())
+		})
 	}
 }
 
 func TestYAML_RegisterTool(t *testing.T) {
 	tc := NewYAML()
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"test",
 		"A test tool",
 		nil,
@@ -38,26 +67,17 @@ func TestYAML_RegisterTool(t *testing.T) {
 
 	tc.RegisterTool(tool)
 
-	// Verify registration by executing the tool
 	content := `tool: test
 args: {}`
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(result.Calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(result.Calls))
-	}
-
-	if result.Calls[0].Name != "test" {
-		t.Errorf("expected tool name 'test', got '%s'", result.Calls[0].Name)
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Calls, 1)
+	assert.Equal(t, "test", result.Calls[0].Name)
 }
 
 func TestYAML_Prompt(t *testing.T) {
 	tc := NewYAML()
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"search",
 		"Search the web",
 		map[string]any{
@@ -75,15 +95,10 @@ func TestYAML_Prompt(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	if !containsYAML(prompt, "search") {
-		t.Error("expected tool name in prompt")
-	}
-	if !containsYAML(prompt, "Search the web") {
-		t.Error("expected tool description in prompt")
-	}
-	if !containsYAML(prompt, "tool:") {
-		t.Error("expected YAML format instruction in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "search"), "expected tool name in prompt")
+	assert.True(t, strings.Contains(prompt, "Search the web"),
+		"expected tool description in prompt")
+	assert.True(t, strings.Contains(prompt, "tool:"), "expected YAML format instruction in prompt")
 }
 
 func TestYAML_ParseSection_SingleCall(t *testing.T) {
@@ -94,22 +109,12 @@ args:
   query: weather`
 
 	result, err := tc.ParseSection(content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	calls := result.([]*gent.ToolCall)
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
-
-	if calls[0].Name != "search" {
-		t.Errorf("expected tool name 'search', got '%s'", calls[0].Name)
-	}
-
-	if calls[0].Args["query"] != "weather" {
-		t.Errorf("expected query 'weather', got '%v'", calls[0].Args["query"])
-	}
+	require.Len(t, calls, 1)
+	assert.Equal(t, "search", calls[0].Name)
+	assert.Equal(t, "weather", calls[0].Args["query"])
 }
 
 func TestYAML_ParseSection_MultipleCall(t *testing.T) {
@@ -123,50 +128,33 @@ func TestYAML_ParseSection_MultipleCall(t *testing.T) {
     date: today`
 
 	result, err := tc.ParseSection(content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	calls := result.([]*gent.ToolCall)
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 calls, got %d", len(calls))
-	}
-
-	if calls[0].Name != "search" {
-		t.Errorf("expected first tool 'search', got '%s'", calls[0].Name)
-	}
-
-	if calls[1].Name != "calendar" {
-		t.Errorf("expected second tool 'calendar', got '%s'", calls[1].Name)
-	}
+	require.Len(t, calls, 2)
+	assert.Equal(t, "search", calls[0].Name)
+	assert.Equal(t, "calendar", calls[1].Name)
 }
 
 func TestYAML_ParseSection_EmptyContent(t *testing.T) {
 	tc := NewYAML()
 
 	result, err := tc.ParseSection("")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	calls := result.([]*gent.ToolCall)
-	if len(calls) != 0 {
-		t.Errorf("expected 0 calls for empty content, got %d", len(calls))
-	}
+	assert.Empty(t, calls)
 }
 
 func TestYAML_ParseSection_InvalidYAML(t *testing.T) {
 	tc := NewYAML()
 
-	// Use truly invalid YAML with mixed tabs and spaces in an invalid way
 	content := `tool: search
 args:
     query: test
   invalid: indentation`
 	_, err := tc.ParseSection(content)
-	if !errors.Is(err, gent.ErrInvalidYAML) {
-		t.Errorf("expected ErrInvalidYAML, got: %v", err)
-	}
+	assert.ErrorIs(t, err, gent.ErrInvalidYAML)
 }
 
 func TestYAML_ParseSection_MissingToolName(t *testing.T) {
@@ -175,9 +163,7 @@ func TestYAML_ParseSection_MissingToolName(t *testing.T) {
 	content := `args:
   query: weather`
 	_, err := tc.ParseSection(content)
-	if !errors.Is(err, gent.ErrMissingToolName) {
-		t.Errorf("expected ErrMissingToolName, got: %v", err)
-	}
+	assert.ErrorIs(t, err, gent.ErrMissingToolName)
 }
 
 func TestYAML_ParseSection_MissingToolNameInArray(t *testing.T) {
@@ -187,14 +173,12 @@ func TestYAML_ParseSection_MissingToolNameInArray(t *testing.T) {
   args: {}
 - args: {}`
 	_, err := tc.ParseSection(content)
-	if !errors.Is(err, gent.ErrMissingToolName) {
-		t.Errorf("expected ErrMissingToolName, got: %v", err)
-	}
+	assert.ErrorIs(t, err, gent.ErrMissingToolName)
 }
 
 func TestYAML_Execute_Success(t *testing.T) {
 	tc := NewYAML()
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"search",
 		"Search the web",
 		nil,
@@ -211,25 +195,12 @@ args:
   query: weather`
 
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Calls, 1)
+	require.NotNil(t, result.Results[0])
 
-	if len(result.Calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(result.Calls))
-	}
-
-	if result.Results[0] == nil {
-		t.Fatal("expected non-nil result")
-	}
-
-	if yamlGetTextContent(result.Results[0].Result) != "Results for: weather" {
-		t.Errorf("unexpected result: %v", result.Results[0].Result)
-	}
-
-	if result.Errors[0] != nil {
-		t.Errorf("unexpected error in result: %v", result.Errors[0])
-	}
+	assert.Equal(t, "Results for: weather", yamlGetTextContent(result.Results[0].Result))
+	assert.NoError(t, result.Errors[0])
 }
 
 func TestYAML_Execute_UnknownTool(t *testing.T) {
@@ -239,18 +210,13 @@ func TestYAML_Execute_UnknownTool(t *testing.T) {
 args: {}`
 
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !errors.Is(result.Errors[0], gent.ErrUnknownTool) {
-		t.Errorf("expected ErrUnknownTool, got: %v", result.Errors[0])
-	}
+	require.NoError(t, err)
+	assert.ErrorIs(t, result.Errors[0], gent.ErrUnknownTool)
 }
 
 func TestYAML_Execute_ToolError(t *testing.T) {
 	tc := NewYAML()
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"failing",
 		"A failing tool",
 		nil,
@@ -265,23 +231,16 @@ func TestYAML_Execute_ToolError(t *testing.T) {
 args: {}`
 
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if result.Errors[0] == nil {
-		t.Error("expected error in result")
-	}
-
-	if result.Errors[0].Error() != "tool execution failed" {
-		t.Errorf("unexpected error message: %s", result.Errors[0].Error())
-	}
+	require.Error(t, result.Errors[0])
+	assert.Equal(t, "tool execution failed", result.Errors[0].Error())
 }
 
 func TestYAML_Execute_MultipleTools(t *testing.T) {
 	tc := NewYAML()
 
-	searchTool := gent.NewToolFunc[map[string]any, string](
+	searchTool := gent.NewToolFunc(
 		"search",
 		"Search",
 		nil,
@@ -291,7 +250,7 @@ func TestYAML_Execute_MultipleTools(t *testing.T) {
 		yamlTextFormatter,
 	)
 
-	calendarTool := gent.NewToolFunc[map[string]any, string](
+	calendarTool := gent.NewToolFunc(
 		"calendar",
 		"Calendar",
 		nil,
@@ -310,21 +269,11 @@ func TestYAML_Execute_MultipleTools(t *testing.T) {
   args: {}`
 
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Results, 2)
 
-	if len(result.Results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(result.Results))
-	}
-
-	if yamlGetTextContent(result.Results[0].Result) != "search result" {
-		t.Errorf("unexpected first result: %v", result.Results[0].Result)
-	}
-
-	if yamlGetTextContent(result.Results[1].Result) != "calendar result" {
-		t.Errorf("unexpected second result: %v", result.Results[1].Result)
-	}
+	assert.Equal(t, "search result", yamlGetTextContent(result.Results[0].Result))
+	assert.Equal(t, "calendar result", yamlGetTextContent(result.Results[1].Result))
 }
 
 func TestYAML_ParseSection_MultilineStringArgs(t *testing.T) {
@@ -338,34 +287,23 @@ args:
     spans multiple lines.`
 
 	result, err := tc.ParseSection(content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	calls := result.([]*gent.ToolCall)
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
+	require.Len(t, calls, 1)
 
 	argContent, ok := calls[0].Args["content"].(string)
-	if !ok {
-		t.Fatal("expected content to be string")
-	}
-
-	if !containsYAML(argContent, "multi-line") {
-		t.Error("expected multi-line content to be preserved")
-	}
-
-	if !containsYAML(argContent, "spans multiple lines") {
-		t.Error("expected full content to be preserved")
-	}
+	require.True(t, ok, "expected content to be string")
+	assert.True(t, strings.Contains(argContent, "multi-line"),
+		"expected multi-line content to be preserved")
+	assert.True(t, strings.Contains(argContent, "spans multiple lines"),
+		"expected full content to be preserved")
 }
 
 func TestYAML_Execute_SchemaValidation_Success(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool with a schema requiring "query" string field
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"search",
 		"Search the web",
 		map[string]any{
@@ -386,28 +324,17 @@ func TestYAML_Execute_SchemaValidation_Success(t *testing.T) {
 args:
   query: weather`
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if result.Errors[0] != nil {
-		t.Errorf("expected no error, got: %v", result.Errors[0])
-	}
-
-	if result.Results[0] == nil {
-		t.Fatal("expected non-nil result")
-	}
-
-	if yamlGetTextContent(result.Results[0].Result) != "Results for: weather" {
-		t.Errorf("unexpected result: %v", result.Results[0].Result)
-	}
+	assert.NoError(t, result.Errors[0])
+	require.NotNil(t, result.Results[0])
+	assert.Equal(t, "Results for: weather", yamlGetTextContent(result.Results[0].Result))
 }
 
 func TestYAML_Execute_SchemaValidation_MissingRequired(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool with a schema requiring "query" string field
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"search",
 		"Search the web",
 		map[string]any{
@@ -424,33 +351,21 @@ func TestYAML_Execute_SchemaValidation_MissingRequired(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	// Missing required "query" field
 	content := `tool: search
 args: {}`
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if result.Errors[0] == nil {
-		t.Fatal("expected validation error")
-	}
-
-	if !containsYAML(result.Errors[0].Error(), "schema validation failed") {
-		t.Errorf("expected schema validation error, got: %v", result.Errors[0])
-	}
-
-	// Tool should not have been called
-	if result.Results[0] != nil {
-		t.Errorf("expected nil result when validation fails, got: %v", result.Results[0])
-	}
+	require.Error(t, result.Errors[0])
+	assert.True(t, strings.Contains(result.Errors[0].Error(), "schema validation failed"),
+		"expected schema validation error, got: %v", result.Errors[0])
+	assert.Nil(t, result.Results[0])
 }
 
 func TestYAML_Execute_SchemaValidation_WrongType(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool with a schema requiring "count" integer field
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"counter",
 		"Count things",
 		map[string]any{
@@ -467,37 +382,25 @@ func TestYAML_Execute_SchemaValidation_WrongType(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	// Wrong type: "count" should be integer but we pass string
 	content := `tool: counter
 args:
   count: not a number`
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if result.Errors[0] == nil {
-		t.Fatal("expected validation error for wrong type")
-	}
-
-	if !containsYAML(result.Errors[0].Error(), "schema validation failed") {
-		t.Errorf("expected schema validation error, got: %v", result.Errors[0])
-	}
-
-	// Tool should not have been called
-	if result.Results[0] != nil {
-		t.Errorf("expected nil result when validation fails, got: %v", result.Results[0])
-	}
+	require.Error(t, result.Errors[0])
+	assert.True(t, strings.Contains(result.Errors[0].Error(), "schema validation failed"),
+		"expected schema validation error, got: %v", result.Errors[0])
+	assert.Nil(t, result.Results[0])
 }
 
 func TestYAML_Execute_NoSchema_NoValidation(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool without schema - should accept any args
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"flexible",
 		"A flexible tool",
-		nil, // No schema
+		nil,
 		func(ctx context.Context, args map[string]any) (string, error) {
 			return "success", nil
 		},
@@ -505,30 +408,21 @@ func TestYAML_Execute_NoSchema_NoValidation(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	// Any args should work
 	content := `tool: flexible
 args:
   anything: works
   numbers: 123`
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if result.Errors[0] != nil {
-		t.Errorf("expected no error for tool without schema, got: %v", result.Errors[0])
-	}
-
-	if yamlGetTextContent(result.Results[0].Result) != "success" {
-		t.Errorf("unexpected result: %v", result.Results[0].Result)
-	}
+	assert.NoError(t, result.Errors[0])
+	assert.Equal(t, "success", yamlGetTextContent(result.Results[0].Result))
 }
 
 func TestYAML_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool with multiple required properties
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"booking",
 		"Book a flight",
 		map[string]any{
@@ -547,43 +441,32 @@ func TestYAML_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	// Valid args
-	content := `tool: booking
+	t.Run("valid args", func(t *testing.T) {
+		content := `tool: booking
 args:
   origin: NYC
   destination: LAX
   passengers: 2`
-	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+		result, err := tc.Execute(context.Background(), nil, content)
+		require.NoError(t, err)
+		assert.NoError(t, result.Errors[0])
+	})
 
-	if result.Errors[0] != nil {
-		t.Errorf("expected no error, got: %v", result.Errors[0])
-	}
-
-	// Missing one required field
-	content = `tool: booking
+	t.Run("missing required field", func(t *testing.T) {
+		content := `tool: booking
 args:
   origin: NYC
   destination: LAX`
-	result, err = tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.Errors[0] == nil {
-		t.Fatal("expected validation error for missing required field")
-	}
+		result, err := tc.Execute(context.Background(), nil, content)
+		require.NoError(t, err)
+		require.Error(t, result.Errors[0])
+	})
 }
 
-// TestYAML_ParseSection_DateAsString tests that date-like values (e.g., 2026-01-20)
-// are parsed as strings when the schema expects a string type, not as time.Time.
 func TestYAML_ParseSection_DateAsString(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool with schema expecting "date" as a string
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"search_flights",
 		"Search flights",
 		map[string]any{
@@ -602,7 +485,6 @@ func TestYAML_ParseSection_DateAsString(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	// YAML with a date-like value that would normally be parsed as time.Time
 	content := `tool: search_flights
 args:
   origin: JFK
@@ -610,79 +492,69 @@ args:
   date: 2026-01-20`
 
 	result, err := tc.ParseSection(content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	calls := result.([]*gent.ToolCall)
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
+	require.Len(t, calls, 1)
 
-	// The date should be a string, not time.Time
 	dateVal := calls[0].Args["date"]
 	dateStr, ok := dateVal.(string)
-	if !ok {
-		t.Fatalf("expected date to be string, got %T: %v", dateVal, dateVal)
-	}
+	require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
+	assert.Equal(t, "2026-01-20", dateStr)
 
-	if dateStr != "2026-01-20" {
-		t.Errorf("expected date '2026-01-20', got '%s'", dateStr)
-	}
-
-	// Also test that schema validation passes
 	execResult, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if execResult.Errors[0] != nil {
-		t.Errorf("expected no validation error, got: %v", execResult.Errors[0])
-	}
+	require.NoError(t, err)
+	assert.NoError(t, execResult.Errors[0])
 }
 
-// TestYAML_ParseSection_TimeFormatsAsString tests that various time-related formats
-// are preserved as strings when the schema expects string type.
 func TestYAML_ParseSection_TimeFormatsAsString(t *testing.T) {
+	type input struct {
+		yamlVal string
+	}
+
+	type expected struct {
+		value string
+	}
+
 	tests := []struct {
 		name     string
-		yamlVal  string
-		expected string
+		input    input
+		expected expected
 	}{
 		{
 			name:     "date only",
-			yamlVal:  "2026-01-20",
-			expected: "2026-01-20",
+			input:    input{yamlVal: "2026-01-20"},
+			expected: expected{value: "2026-01-20"},
 		},
 		{
 			name:     "datetime with T",
-			yamlVal:  "2026-01-20T10:30:00Z",
-			expected: "2026-01-20T10:30:00Z",
+			input:    input{yamlVal: "2026-01-20T10:30:00Z"},
+			expected: expected{value: "2026-01-20T10:30:00Z"},
 		},
 		{
 			name:     "datetime with space",
-			yamlVal:  "2026-01-20 10:30:00",
-			expected: "2026-01-20 10:30:00",
+			input:    input{yamlVal: "2026-01-20 10:30:00"},
+			expected: expected{value: "2026-01-20 10:30:00"},
 		},
 		{
 			name:     "time only",
-			yamlVal:  "10:30:00",
-			expected: "10:30:00",
+			input:    input{yamlVal: "10:30:00"},
+			expected: expected{value: "10:30:00"},
 		},
 		{
 			name:     "duration string",
-			yamlVal:  "1h30m",
-			expected: "1h30m",
+			input:    input{yamlVal: "1h30m"},
+			expected: expected{value: "1h30m"},
 		},
 		{
 			name:     "duration with seconds",
-			yamlVal:  "2h45m30s",
-			expected: "2h45m30s",
+			input:    input{yamlVal: "2h45m30s"},
+			expected: expected{value: "2h45m30s"},
 		},
 		{
 			name:     "ISO 8601 duration",
-			yamlVal:  "PT1H30M",
-			expected: "PT1H30M",
+			input:    input{yamlVal: "PT1H30M"},
+			expected: expected{value: "PT1H30M"},
 		},
 	}
 
@@ -690,7 +562,7 @@ func TestYAML_ParseSection_TimeFormatsAsString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := NewYAML()
 
-			tool := gent.NewToolFunc[map[string]any, string](
+			tool := gent.NewToolFunc(
 				"test_tool",
 				"Test tool",
 				map[string]any{
@@ -709,46 +581,31 @@ func TestYAML_ParseSection_TimeFormatsAsString(t *testing.T) {
 
 			content := fmt.Sprintf(`tool: test_tool
 args:
-  value: %s`, tt.yamlVal)
+  value: %s`, tt.input.yamlVal)
 
 			result, err := tc.ParseSection(content)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 
 			calls := result.([]*gent.ToolCall)
 			val := calls[0].Args["value"]
 			strVal, ok := val.(string)
-			if !ok {
-				t.Fatalf("expected string, got %T: %v", val, val)
-			}
+			require.True(t, ok, "expected string, got %T: %v", val, val)
+			assert.Equal(t, tt.expected.value, strVal)
 
-			if strVal != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, strVal)
-			}
-
-			// Verify schema validation passes
 			execResult, err := tc.Execute(context.Background(), nil, content)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if execResult.Errors[0] != nil {
-				t.Errorf("expected no validation error, got: %v", execResult.Errors[0])
-			}
+			require.NoError(t, err)
+			assert.NoError(t, execResult.Errors[0])
 		})
 	}
 }
 
-// TestYAML_ParseSection_NoSchemaLetsYAMLDecide tests that without a schema,
-// YAML's natural type detection is used (dates become time.Time).
 func TestYAML_ParseSection_NoSchemaLetsYAMLDecide(t *testing.T) {
 	tc := NewYAML()
 
-	// Tool WITHOUT schema - YAML will parse dates as time.Time
-	tool := gent.NewToolFunc[map[string]any, string](
+	tool := gent.NewToolFunc(
 		"untyped_tool",
 		"Tool without schema",
-		nil, // No schema
+		nil,
 		func(ctx context.Context, args map[string]any) (string, error) {
 			return "ok", nil
 		},
@@ -761,28 +618,16 @@ args:
   date: 2026-01-20`
 
 	result, err := tc.ParseSection(content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	calls := result.([]*gent.ToolCall)
 	val := calls[0].Args["date"]
 
-	// Without schema guidance, YAML parses dates as time.Time
-	// This is YAML's natural behavior
 	_, isTime := val.(time.Time)
 	_, isString := val.(string)
 
-	// It could be either depending on YAML parser behavior
-	// The key point is we don't force it to string without schema
-	if !isTime && !isString {
-		t.Errorf("expected time.Time or string, got %T", val)
-	}
+	assert.True(t, isTime || isString, "expected time.Time or string, got %T", val)
 }
-
-// -----------------------------------------------------------------------------
-// Integration tests for full toolchain flow with type conversions
-// -----------------------------------------------------------------------------
 
 // TimeTypedInput is used to test automatic type conversion to time.Time
 type TimeTypedInput struct {
@@ -795,8 +640,6 @@ type DurationTypedInput struct {
 	Duration time.Duration `json:"duration"`
 }
 
-// TestYAML_Execute_TimeConversion tests that string dates in YAML are converted
-// to time.Time when the Go input struct expects time.Time.
 func TestYAML_Execute_TimeConversion(t *testing.T) {
 	tc := NewYAML()
 
@@ -812,7 +655,6 @@ func TestYAML_Execute_TimeConversion(t *testing.T) {
 			"required": []any{"date", "timestamp"},
 		},
 		func(ctx context.Context, input TimeTypedInput) (string, error) {
-			// Verify that both fields were converted to time.Time
 			return input.Date.Format("2006-01-02") + "|" +
 				input.Timestamp.Format(time.RFC3339), nil
 		},
@@ -820,87 +662,90 @@ func TestYAML_Execute_TimeConversion(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	// Date-only and RFC3339 timestamp
 	content := `tool: time_tool
 args:
   date: 2026-01-20
   timestamp: 2026-01-20T10:30:00Z`
 
 	result, err := tc.Execute(context.Background(), nil, content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.Errors[0] != nil {
-		t.Fatalf("unexpected tool error: %v", result.Errors[0])
-	}
+	require.NoError(t, err)
+	require.NoError(t, result.Errors[0])
 
 	expected := "2026-01-20|2026-01-20T10:30:00Z"
 	output := yamlGetTextContent(result.Results[0].Result)
-	if output != expected {
-		t.Errorf("expected '%s', got '%s'", expected, output)
-	}
+	assert.Equal(t, expected, output)
 }
 
-// TestYAML_Execute_DurationConversion tests that duration strings in YAML are
-// converted to time.Duration when the Go input struct expects time.Duration.
 func TestYAML_Execute_DurationConversion(t *testing.T) {
-	tc := NewYAML()
+	type input struct {
+		duration string
+	}
 
-	tool := gent.NewToolFunc(
-		"duration_tool",
-		"Tool with time.Duration input",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"duration": map[string]any{"type": "string"},
-			},
-			"required": []any{"duration"},
-		},
-		func(ctx context.Context, input DurationTypedInput) (string, error) {
-			return input.Duration.String(), nil
-		},
-		yamlTextFormatter,
-	)
-	tc.RegisterTool(tool)
+	type expected struct {
+		output string
+	}
 
 	tests := []struct {
 		name     string
-		duration string
-		expected string
+		input    input
+		expected expected
 	}{
-		{"hours and minutes", "1h30m", "1h30m0s"},
-		{"just minutes", "45m", "45m0s"},
-		{"with seconds", "2h15m30s", "2h15m30s"},
-		{"milliseconds", "500ms", "500ms"},
+		{
+			name:     "hours and minutes",
+			input:    input{duration: "1h30m"},
+			expected: expected{output: "1h30m0s"},
+		},
+		{
+			name:     "just minutes",
+			input:    input{duration: "45m"},
+			expected: expected{output: "45m0s"},
+		},
+		{
+			name:     "with seconds",
+			input:    input{duration: "2h15m30s"},
+			expected: expected{output: "2h15m30s"},
+		},
+		{
+			name:     "milliseconds",
+			input:    input{duration: "500ms"},
+			expected: expected{output: "500ms"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+
+			tool := gent.NewToolFunc(
+				"duration_tool",
+				"Tool with time.Duration input",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"duration": map[string]any{"type": "string"},
+					},
+					"required": []any{"duration"},
+				},
+				func(ctx context.Context, input DurationTypedInput) (string, error) {
+					return input.Duration.String(), nil
+				},
+				yamlTextFormatter,
+			)
+			tc.RegisterTool(tool)
+
 			content := fmt.Sprintf(`tool: duration_tool
 args:
-  duration: %s`, tt.duration)
+  duration: %s`, tt.input.duration)
 
 			result, err := tc.Execute(context.Background(), nil, content)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if result.Errors[0] != nil {
-				t.Fatalf("unexpected tool error: %v", result.Errors[0])
-			}
+			require.NoError(t, err)
+			require.NoError(t, result.Errors[0])
 
 			output := yamlGetTextContent(result.Results[0].Result)
-			if output != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, output)
-			}
+			assert.Equal(t, tt.expected.output, output)
 		})
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Comprehensive Prompt() Tests
-// -----------------------------------------------------------------------------
 
 func TestYAML_Prompt_SchemaWithDescriptions(t *testing.T) {
 	tc := NewYAML()
@@ -921,29 +766,18 @@ func TestYAML_Prompt_SchemaWithDescriptions(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify tool name and description
-	if !containsYAML(prompt, "search_flights") {
-		t.Error("expected tool name 'search_flights' in prompt")
-	}
-	if !containsYAML(prompt, "Search for available flights") {
-		t.Error("expected tool description in prompt")
-	}
-
-	// Verify field descriptions are present
-	if !containsYAML(prompt, "Origin airport code (IATA)") {
-		t.Error("expected 'origin' field description in prompt")
-	}
-	if !containsYAML(prompt, "Destination airport code (IATA)") {
-		t.Error("expected 'destination' field description in prompt")
-	}
-	if !containsYAML(prompt, "Departure date in YYYY-MM-DD format") {
-		t.Error("expected 'date' field description in prompt")
-	}
-
-	// Verify type information
-	if !containsYAML(prompt, "type: string") {
-		t.Error("expected type information in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "search_flights"),
+		"expected tool name 'search_flights' in prompt")
+	assert.True(t, strings.Contains(prompt, "Search for available flights"),
+		"expected tool description in prompt")
+	assert.True(t, strings.Contains(prompt, "Origin airport code (IATA)"),
+		"expected 'origin' field description in prompt")
+	assert.True(t, strings.Contains(prompt, "Destination airport code (IATA)"),
+		"expected 'destination' field description in prompt")
+	assert.True(t, strings.Contains(prompt, "Departure date in YYYY-MM-DD format"),
+		"expected 'date' field description in prompt")
+	assert.True(t, strings.Contains(prompt, "type: string"),
+		"expected type information in prompt")
 }
 
 func TestYAML_Prompt_SchemaWithRequiredFields(t *testing.T) {
@@ -955,7 +789,7 @@ func TestYAML_Prompt_SchemaWithRequiredFields(t *testing.T) {
 			"name":  schema.String("User's full name"),
 			"email": schema.String("User's email address"),
 			"phone": schema.String("User's phone number"),
-		}, "name", "email"), // name and email are required
+		}, "name", "email"),
 		func(ctx context.Context, input map[string]any) (string, error) {
 			return "ok", nil
 		},
@@ -965,16 +799,9 @@ func TestYAML_Prompt_SchemaWithRequiredFields(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify required fields are listed
-	if !containsYAML(prompt, "required:") {
-		t.Error("expected 'required' section in prompt")
-	}
-	if !containsYAML(prompt, "- name") {
-		t.Error("expected 'name' in required list")
-	}
-	if !containsYAML(prompt, "- email") {
-		t.Error("expected 'email' in required list")
-	}
+	assert.True(t, strings.Contains(prompt, "required:"), "expected 'required' section in prompt")
+	assert.True(t, strings.Contains(prompt, "- name"), "expected 'name' in required list")
+	assert.True(t, strings.Contains(prompt, "- email"), "expected 'email' in required list")
 }
 
 func TestYAML_Prompt_SchemaWithEnumValues(t *testing.T) {
@@ -994,19 +821,10 @@ func TestYAML_Prompt_SchemaWithEnumValues(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify enum values are listed
-	if !containsYAML(prompt, "enum:") {
-		t.Error("expected 'enum' section in prompt")
-	}
-	if !containsYAML(prompt, "- economy") {
-		t.Error("expected 'economy' in enum list")
-	}
-	if !containsYAML(prompt, "- business") {
-		t.Error("expected 'business' in enum list")
-	}
-	if !containsYAML(prompt, "- first") {
-		t.Error("expected 'first' in enum list")
-	}
+	assert.True(t, strings.Contains(prompt, "enum:"), "expected 'enum' section in prompt")
+	assert.True(t, strings.Contains(prompt, "- economy"), "expected 'economy' in enum list")
+	assert.True(t, strings.Contains(prompt, "- business"), "expected 'business' in enum list")
+	assert.True(t, strings.Contains(prompt, "- first"), "expected 'first' in enum list")
 }
 
 func TestYAML_Prompt_SchemaWithMinMax(t *testing.T) {
@@ -1026,16 +844,9 @@ func TestYAML_Prompt_SchemaWithMinMax(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify min/max constraints
-	if !containsYAML(prompt, "minimum: 1") {
-		t.Error("expected 'minimum: 1' in prompt")
-	}
-	if !containsYAML(prompt, "maximum: 100") {
-		t.Error("expected 'maximum: 100' in prompt")
-	}
-	if !containsYAML(prompt, "type: integer") {
-		t.Error("expected 'type: integer' in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "minimum: 1"), "expected 'minimum: 1' in prompt")
+	assert.True(t, strings.Contains(prompt, "maximum: 100"), "expected 'maximum: 100' in prompt")
+	assert.True(t, strings.Contains(prompt, "type: integer"), "expected 'type: integer' in prompt")
 }
 
 func TestYAML_Prompt_SchemaWithDefaultValues(t *testing.T) {
@@ -1056,10 +867,7 @@ func TestYAML_Prompt_SchemaWithDefaultValues(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify default value
-	if !containsYAML(prompt, "default: 10") {
-		t.Error("expected 'default: 10' in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "default: 10"), "expected 'default: 10' in prompt")
 }
 
 func TestYAML_Prompt_SchemaWithMultipleTypes(t *testing.T) {
@@ -1068,11 +876,11 @@ func TestYAML_Prompt_SchemaWithMultipleTypes(t *testing.T) {
 		"complex_tool",
 		"A tool with multiple types",
 		schema.Object(map[string]*schema.Property{
-			"name":     schema.String("Name of the item"),
-			"count":    schema.Integer("Number of items"),
-			"price":    schema.Number("Price in dollars"),
-			"active":   schema.Boolean("Whether the item is active"),
-			"tags":     schema.Array("List of tags", map[string]any{"type": "string"}),
+			"name":   schema.String("Name of the item"),
+			"count":  schema.Integer("Number of items"),
+			"price":  schema.Number("Price in dollars"),
+			"active": schema.Boolean("Whether the item is active"),
+			"tags":   schema.Array("List of tags", map[string]any{"type": "string"}),
 		}, "name"),
 		func(ctx context.Context, input map[string]any) (string, error) {
 			return "ok", nil
@@ -1083,39 +891,21 @@ func TestYAML_Prompt_SchemaWithMultipleTypes(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify all type information
-	if !containsYAML(prompt, "type: string") {
-		t.Error("expected 'type: string' in prompt")
-	}
-	if !containsYAML(prompt, "type: integer") {
-		t.Error("expected 'type: integer' in prompt")
-	}
-	if !containsYAML(prompt, "type: number") {
-		t.Error("expected 'type: number' in prompt")
-	}
-	if !containsYAML(prompt, "type: boolean") {
-		t.Error("expected 'type: boolean' in prompt")
-	}
-	if !containsYAML(prompt, "type: array") {
-		t.Error("expected 'type: array' in prompt")
-	}
-
-	// Verify descriptions
-	if !containsYAML(prompt, "Name of the item") {
-		t.Error("expected string description in prompt")
-	}
-	if !containsYAML(prompt, "Number of items") {
-		t.Error("expected integer description in prompt")
-	}
-	if !containsYAML(prompt, "Price in dollars") {
-		t.Error("expected number description in prompt")
-	}
-	if !containsYAML(prompt, "Whether the item is active") {
-		t.Error("expected boolean description in prompt")
-	}
-	if !containsYAML(prompt, "List of tags") {
-		t.Error("expected array description in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "type: string"), "expected 'type: string' in prompt")
+	assert.True(t, strings.Contains(prompt, "type: integer"), "expected 'type: integer' in prompt")
+	assert.True(t, strings.Contains(prompt, "type: number"), "expected 'type: number' in prompt")
+	assert.True(t, strings.Contains(prompt, "type: boolean"), "expected 'type: boolean' in prompt")
+	assert.True(t, strings.Contains(prompt, "type: array"), "expected 'type: array' in prompt")
+	assert.True(t, strings.Contains(prompt, "Name of the item"),
+		"expected string description in prompt")
+	assert.True(t, strings.Contains(prompt, "Number of items"),
+		"expected integer description in prompt")
+	assert.True(t, strings.Contains(prompt, "Price in dollars"),
+		"expected number description in prompt")
+	assert.True(t, strings.Contains(prompt, "Whether the item is active"),
+		"expected boolean description in prompt")
+	assert.True(t, strings.Contains(prompt, "List of tags"),
+		"expected array description in prompt")
 }
 
 func TestYAML_Prompt_MultipleTools(t *testing.T) {
@@ -1150,25 +940,16 @@ func TestYAML_Prompt_MultipleTools(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify both tools are present
-	if !containsYAML(prompt, "- search:") {
-		t.Error("expected 'search' tool in prompt")
-	}
-	if !containsYAML(prompt, "- calculate:") {
-		t.Error("expected 'calculate' tool in prompt")
-	}
-	if !containsYAML(prompt, "Search for information") {
-		t.Error("expected 'search' tool description in prompt")
-	}
-	if !containsYAML(prompt, "Perform calculations") {
-		t.Error("expected 'calculate' tool description in prompt")
-	}
-	if !containsYAML(prompt, "Search query") {
-		t.Error("expected 'query' field description in prompt")
-	}
-	if !containsYAML(prompt, "Mathematical expression") {
-		t.Error("expected 'expression' field description in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "- search:"), "expected 'search' tool in prompt")
+	assert.True(t, strings.Contains(prompt, "- calculate:"), "expected 'calculate' tool in prompt")
+	assert.True(t, strings.Contains(prompt, "Search for information"),
+		"expected 'search' tool description in prompt")
+	assert.True(t, strings.Contains(prompt, "Perform calculations"),
+		"expected 'calculate' tool description in prompt")
+	assert.True(t, strings.Contains(prompt, "Search query"),
+		"expected 'query' field description in prompt")
+	assert.True(t, strings.Contains(prompt, "Mathematical expression"),
+		"expected 'expression' field description in prompt")
 }
 
 func TestYAML_Prompt_ToolWithNoSchema(t *testing.T) {
@@ -1176,7 +957,7 @@ func TestYAML_Prompt_ToolWithNoSchema(t *testing.T) {
 	tool := gent.NewToolFunc(
 		"simple_tool",
 		"A simple tool without schema",
-		nil, // No schema
+		nil,
 		func(ctx context.Context, input map[string]any) (string, error) {
 			return "ok", nil
 		},
@@ -1186,16 +967,10 @@ func TestYAML_Prompt_ToolWithNoSchema(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify tool name and description are present
-	if !containsYAML(prompt, "simple_tool") {
-		t.Error("expected tool name 'simple_tool' in prompt")
-	}
-	if !containsYAML(prompt, "A simple tool without schema") {
-		t.Error("expected tool description in prompt")
-	}
-
-	// Should not have Parameters section since no schema
-	// Note: We only check that it doesn't error; the exact format may vary
+	assert.True(t, strings.Contains(prompt, "simple_tool"),
+		"expected tool name 'simple_tool' in prompt")
+	assert.True(t, strings.Contains(prompt, "A simple tool without schema"),
+		"expected tool description in prompt")
 }
 
 func TestYAML_Prompt_SchemaWithStringConstraints(t *testing.T) {
@@ -1217,19 +992,10 @@ func TestYAML_Prompt_SchemaWithStringConstraints(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify string constraints
-	if !containsYAML(prompt, "minLength: 3") {
-		t.Error("expected 'minLength: 3' in prompt")
-	}
-	if !containsYAML(prompt, "maxLength: 20") {
-		t.Error("expected 'maxLength: 20' in prompt")
-	}
-	if !containsYAML(prompt, "format: email") {
-		t.Error("expected 'format: email' in prompt")
-	}
-	if !containsYAML(prompt, "pattern:") {
-		t.Error("expected 'pattern' in prompt")
-	}
+	assert.True(t, strings.Contains(prompt, "minLength: 3"), "expected 'minLength: 3' in prompt")
+	assert.True(t, strings.Contains(prompt, "maxLength: 20"), "expected 'maxLength: 20' in prompt")
+	assert.True(t, strings.Contains(prompt, "format: email"), "expected 'format: email' in prompt")
+	assert.True(t, strings.Contains(prompt, "pattern:"), "expected 'pattern' in prompt")
 }
 
 func TestYAML_Prompt_FormatInstructions(t *testing.T) {
@@ -1247,35 +1013,15 @@ func TestYAML_Prompt_FormatInstructions(t *testing.T) {
 
 	prompt := tc.Prompt()
 
-	// Verify YAML format instructions
-	if !containsYAML(prompt, "tool: tool_name") {
-		t.Error("expected single tool format instruction")
-	}
-	if !containsYAML(prompt, "args:") {
-		t.Error("expected 'args:' in format instruction")
-	}
-	if !containsYAML(prompt, "param: value") {
-		t.Error("expected 'param: value' in format instruction")
-	}
-	if !containsYAML(prompt, "- tool: tool1") {
-		t.Error("expected array format instruction for parallel calls")
-	}
-	if !containsYAML(prompt, "Available tools:") {
-		t.Error("expected 'Available tools:' header")
-	}
-}
-
-// -----------------------------------------------------------------------------
-// Helper functions
-// -----------------------------------------------------------------------------
-
-func containsYAML(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	assert.True(t, strings.Contains(prompt, "tool: tool_name"),
+		"expected single tool format instruction")
+	assert.True(t, strings.Contains(prompt, "args:"), "expected 'args:' in format instruction")
+	assert.True(t, strings.Contains(prompt, "param: value"),
+		"expected 'param: value' in format instruction")
+	assert.True(t, strings.Contains(prompt, "- tool: tool1"),
+		"expected array format instruction for parallel calls")
+	assert.True(t, strings.Contains(prompt, "Available tools:"),
+		"expected 'Available tools:' header")
 }
 
 // yamlTextFormatter converts a string to []gent.ContentPart.

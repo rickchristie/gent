@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStreamHub_SubscribeAll_ReceivesAllChunks(t *testing.T) {
@@ -12,7 +14,6 @@ func TestStreamHub_SubscribeAll_ReceivesAllChunks(t *testing.T) {
 	ch, unsub := hub.subscribeAll()
 	defer unsub()
 
-	// Emit chunks
 	go func() {
 		hub.emit(StreamChunk{Content: "hello"})
 		hub.emit(StreamChunk{Content: "world", StreamId: "s1"})
@@ -20,68 +21,123 @@ func TestStreamHub_SubscribeAll_ReceivesAllChunks(t *testing.T) {
 		hub.close()
 	}()
 
-	// Collect chunks
 	var chunks []StreamChunk
 	for chunk := range ch {
 		chunks = append(chunks, chunk)
 	}
 
-	if len(chunks) != 3 {
-		t.Errorf("expected 3 chunks, got %d", len(chunks))
-	}
+	assert.Len(t, chunks, 3)
 }
 
 func TestStreamHub_SubscribeToStream_FiltersCorrectly(t *testing.T) {
-	hub := newStreamHub()
-
-	ch, unsub := hub.subscribeToStream("target-stream")
-	defer unsub()
-
-	go func() {
-		hub.emit(StreamChunk{Content: "skip", StreamId: "other-stream"})
-		hub.emit(StreamChunk{Content: "hello", StreamId: "target-stream"})
-		hub.emit(StreamChunk{Content: "skip again"})
-		hub.emit(StreamChunk{Content: "world", StreamId: "target-stream"})
-		hub.close()
-	}()
-
-	var chunks []StreamChunk
-	for chunk := range ch {
-		chunks = append(chunks, chunk)
+	type input struct {
+		streamID string
+		chunks   []StreamChunk
 	}
 
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks, got %d", len(chunks))
+	type expected struct {
+		contents []string
 	}
-	if chunks[0].Content != "hello" || chunks[1].Content != "world" {
-		t.Errorf("unexpected chunks: %+v", chunks)
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "filters to target stream only",
+			input: input{
+				streamID: "target-stream",
+				chunks: []StreamChunk{
+					{Content: "skip", StreamId: "other-stream"},
+					{Content: "hello", StreamId: "target-stream"},
+					{Content: "skip again"},
+					{Content: "world", StreamId: "target-stream"},
+				},
+			},
+			expected: expected{
+				contents: []string{"hello", "world"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := newStreamHub()
+
+			ch, unsub := hub.subscribeToStream(tt.input.streamID)
+			defer unsub()
+
+			go func() {
+				for _, chunk := range tt.input.chunks {
+					hub.emit(chunk)
+				}
+				hub.close()
+			}()
+
+			var contents []string
+			for chunk := range ch {
+				contents = append(contents, chunk.Content)
+			}
+
+			assert.Equal(t, tt.expected.contents, contents)
+		})
 	}
 }
 
 func TestStreamHub_SubscribeToTopic_FiltersCorrectly(t *testing.T) {
-	hub := newStreamHub()
-
-	ch, unsub := hub.subscribeToTopic("my-topic")
-	defer unsub()
-
-	go func() {
-		hub.emit(StreamChunk{Content: "skip", StreamTopicId: "other-topic"})
-		hub.emit(StreamChunk{Content: "hello", StreamTopicId: "my-topic"})
-		hub.emit(StreamChunk{Content: "skip again"})
-		hub.emit(StreamChunk{Content: "world", StreamTopicId: "my-topic"})
-		hub.close()
-	}()
-
-	var chunks []StreamChunk
-	for chunk := range ch {
-		chunks = append(chunks, chunk)
+	type input struct {
+		topicID string
+		chunks  []StreamChunk
 	}
 
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks, got %d", len(chunks))
+	type expected struct {
+		contents []string
 	}
-	if chunks[0].Content != "hello" || chunks[1].Content != "world" {
-		t.Errorf("unexpected chunks: %+v", chunks)
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "filters to target topic only",
+			input: input{
+				topicID: "my-topic",
+				chunks: []StreamChunk{
+					{Content: "skip", StreamTopicId: "other-topic"},
+					{Content: "hello", StreamTopicId: "my-topic"},
+					{Content: "skip again"},
+					{Content: "world", StreamTopicId: "my-topic"},
+				},
+			},
+			expected: expected{
+				contents: []string{"hello", "world"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := newStreamHub()
+
+			ch, unsub := hub.subscribeToTopic(tt.input.topicID)
+			defer unsub()
+
+			go func() {
+				for _, chunk := range tt.input.chunks {
+					hub.emit(chunk)
+				}
+				hub.close()
+			}()
+
+			var contents []string
+			for chunk := range ch {
+				contents = append(contents, chunk.Content)
+			}
+
+			assert.Equal(t, tt.expected.contents, contents)
+		})
 	}
 }
 
@@ -89,14 +145,12 @@ func TestStreamHub_EmptyIdReturnsNil(t *testing.T) {
 	hub := newStreamHub()
 
 	ch1, unsub1 := hub.subscribeToStream("")
-	if ch1 != nil || unsub1 != nil {
-		t.Error("expected nil for empty stream ID")
-	}
+	assert.Nil(t, ch1)
+	assert.Nil(t, unsub1)
 
 	ch2, unsub2 := hub.subscribeToTopic("")
-	if ch2 != nil || unsub2 != nil {
-		t.Error("expected nil for empty topic ID")
-	}
+	assert.Nil(t, ch2)
+	assert.Nil(t, unsub2)
 }
 
 func TestStreamHub_Unsubscribe(t *testing.T) {
@@ -104,19 +158,13 @@ func TestStreamHub_Unsubscribe(t *testing.T) {
 
 	ch, unsub := hub.subscribeAll()
 
-	// Send one chunk
 	hub.emit(StreamChunk{Content: "first"})
 
-	// Unsubscribe
 	unsub()
 
-	// Channel should close after unsubscribe
 	select {
 	case _, ok := <-ch:
-		// We may or may not receive the first chunk depending on timing
-		// But eventually the channel should close
 		if ok {
-			// Drain any remaining
 			for range ch {
 			}
 		}
@@ -143,13 +191,11 @@ func TestStreamHub_MultipleSubscribers(t *testing.T) {
 		hub.close()
 	}()
 
-	// Both subscribers should receive the chunk
 	chunk1 := <-ch1
 	chunk2 := <-ch2
 
-	if chunk1.Content != "hello" || chunk2.Content != "hello" {
-		t.Errorf("expected both to receive 'hello', got %q and %q", chunk1.Content, chunk2.Content)
-	}
+	assert.Equal(t, "hello", chunk1.Content)
+	assert.Equal(t, "hello", chunk2.Content)
 }
 
 func TestStreamHub_ConcurrentEmit(t *testing.T) {
@@ -187,9 +233,7 @@ func TestStreamHub_ConcurrentEmit(t *testing.T) {
 	}
 
 	expected := numEmitters * chunksPerEmitter
-	if count != expected {
-		t.Errorf("expected %d chunks, got %d", expected, count)
-	}
+	assert.Equal(t, expected, count)
 }
 
 func TestStreamHub_CloseAfterClose(t *testing.T) {
@@ -203,16 +247,11 @@ func TestStreamHub_SubscribeAfterClose(t *testing.T) {
 	hub.close()
 
 	ch, unsub := hub.subscribeAll()
-	if unsub == nil {
-		t.Error("expected non-nil unsubscribe function")
-	}
+	assert.NotNil(t, unsub, "expected non-nil unsubscribe function")
 
-	// Channel should be closed
 	select {
 	case _, ok := <-ch:
-		if ok {
-			t.Error("expected closed channel")
-		}
+		assert.False(t, ok, "expected closed channel")
 	case <-time.After(time.Second):
 		t.Error("timed out waiting for closed channel")
 	}
@@ -227,12 +266,9 @@ func TestStreamHub_EmitAfterClose(t *testing.T) {
 	hub.close()
 	hub.emit(StreamChunk{Content: "should be ignored"}) // Should not panic
 
-	// Channel should be closed with no chunks
 	count := 0
 	for range ch {
 		count++
 	}
-	if count != 0 {
-		t.Errorf("expected 0 chunks after close, got %d", count)
-	}
+	assert.Equal(t, 0, count)
 }

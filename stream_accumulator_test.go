@@ -3,66 +3,130 @@ package gent
 import (
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStreamAccumulator_BasicAccumulation(t *testing.T) {
-	acc := NewStreamAccumulator()
+	type input struct {
+		chunks []StreamChunk
+	}
 
-	acc.Add(StreamChunk{Content: "Hello"})
-	acc.Add(StreamChunk{Content: " "})
-	acc.Add(StreamChunk{Content: "World"})
+	type expected struct {
+		content string
+	}
 
-	if acc.Content() != "Hello World" {
-		t.Errorf("expected 'Hello World', got %q", acc.Content())
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "accumulates multiple chunks",
+			input: input{
+				chunks: []StreamChunk{
+					{Content: "Hello"},
+					{Content: " "},
+					{Content: "World"},
+				},
+			},
+			expected: expected{content: "Hello World"},
+		},
+		{
+			name: "empty chunks",
+			input: input{
+				chunks: []StreamChunk{
+					{},
+					{Content: ""},
+					{ReasoningContent: ""},
+				},
+			},
+			expected: expected{content: ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acc := NewStreamAccumulator()
+
+			for _, chunk := range tt.input.chunks {
+				acc.Add(chunk)
+			}
+
+			assert.Equal(t, tt.expected.content, acc.Content())
+		})
 	}
 }
 
 func TestStreamAccumulator_ReasoningContent(t *testing.T) {
-	acc := NewStreamAccumulator()
-
-	acc.Add(StreamChunk{ReasoningContent: "Let me think..."})
-	acc.Add(StreamChunk{ReasoningContent: " Step 1."})
-	acc.Add(StreamChunk{Content: "The answer is 42."})
-
-	if acc.ReasoningContent() != "Let me think... Step 1." {
-		t.Errorf("expected reasoning content, got %q", acc.ReasoningContent())
+	type input struct {
+		chunks []StreamChunk
 	}
-	if acc.Content() != "The answer is 42." {
-		t.Errorf("expected content, got %q", acc.Content())
+
+	type expected struct {
+		reasoningContent string
+		content          string
 	}
-}
 
-func TestStreamAccumulator_MixedChunks(t *testing.T) {
-	acc := NewStreamAccumulator()
-
-	// Simulate interleaved reasoning and content
-	acc.Add(StreamChunk{ReasoningContent: "thinking..."})
-	acc.Add(StreamChunk{Content: "Hello"})
-	acc.Add(StreamChunk{ReasoningContent: "more thinking"})
-	acc.Add(StreamChunk{Content: " World"})
-
-	if acc.Content() != "Hello World" {
-		t.Errorf("expected 'Hello World', got %q", acc.Content())
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "accumulates reasoning and content separately",
+			input: input{
+				chunks: []StreamChunk{
+					{ReasoningContent: "Let me think..."},
+					{ReasoningContent: " Step 1."},
+					{Content: "The answer is 42."},
+				},
+			},
+			expected: expected{
+				reasoningContent: "Let me think... Step 1.",
+				content:          "The answer is 42.",
+			},
+		},
+		{
+			name: "interleaved reasoning and content",
+			input: input{
+				chunks: []StreamChunk{
+					{ReasoningContent: "thinking..."},
+					{Content: "Hello"},
+					{ReasoningContent: "more thinking"},
+					{Content: " World"},
+				},
+			},
+			expected: expected{
+				reasoningContent: "thinking...more thinking",
+				content:          "Hello World",
+			},
+		},
 	}
-	if acc.ReasoningContent() != "thinking...more thinking" {
-		t.Errorf("expected reasoning, got %q", acc.ReasoningContent())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acc := NewStreamAccumulator()
+
+			for _, chunk := range tt.input.chunks {
+				acc.Add(chunk)
+			}
+
+			assert.Equal(t, tt.expected.reasoningContent, acc.ReasoningContent())
+			assert.Equal(t, tt.expected.content, acc.Content())
+		})
 	}
 }
 
 func TestStreamAccumulator_Error(t *testing.T) {
+	expectedErr := errors.New("stream error")
 	acc := NewStreamAccumulator()
 
-	expectedErr := errors.New("stream error")
 	acc.Add(StreamChunk{Content: "partial"})
 	acc.Add(StreamChunk{Err: expectedErr})
 
-	if acc.Error() != expectedErr {
-		t.Errorf("expected error %v, got %v", expectedErr, acc.Error())
-	}
-	// Content should still be accumulated up to the error
-	if acc.Content() != "partial" {
-		t.Errorf("expected 'partial', got %q", acc.Content())
-	}
+	assert.Equal(t, expectedErr, acc.Error())
+	assert.Equal(t, "partial", acc.Content())
 }
 
 func TestStreamAccumulator_Response(t *testing.T) {
@@ -73,57 +137,80 @@ func TestStreamAccumulator_Response(t *testing.T) {
 
 	response := acc.Response()
 
-	if len(response.Choices) != 1 {
-		t.Fatalf("expected 1 choice, got %d", len(response.Choices))
-	}
-	if response.Choices[0].Content != "Hello World" {
-		t.Errorf("expected content, got %q", response.Choices[0].Content)
-	}
-	if response.Choices[0].ReasoningContent != "I thought about it" {
-		t.Errorf("expected reasoning, got %q", response.Choices[0].ReasoningContent)
-	}
+	assert.Len(t, response.Choices, 1)
+	assert.Equal(t, "Hello World", response.Choices[0].Content)
+	assert.Equal(t, "I thought about it", response.Choices[0].ReasoningContent)
 }
 
 func TestStreamAccumulator_ResponseWithInfo(t *testing.T) {
-	acc := NewStreamAccumulator()
+	type input struct {
+		chunks         []StreamChunk
+		streamResponse *ContentResponse
+	}
 
-	acc.Add(StreamChunk{Content: "Hello"})
+	type expected struct {
+		content      string
+		inputTokens  int
+		outputTokens int
+		infoIsNil    bool
+	}
 
-	streamResponse := &ContentResponse{
-		Info: &GenerationInfo{
-			InputTokens:  10,
-			OutputTokens: 5,
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "with valid info",
+			input: input{
+				chunks: []StreamChunk{{Content: "Hello"}},
+				streamResponse: &ContentResponse{
+					Info: &GenerationInfo{
+						InputTokens:  10,
+						OutputTokens: 5,
+					},
+				},
+			},
+			expected: expected{
+				content:      "Hello",
+				inputTokens:  10,
+				outputTokens: 5,
+				infoIsNil:    false,
+			},
+		},
+		{
+			name: "with nil response",
+			input: input{
+				chunks:         []StreamChunk{{Content: "Hello"}},
+				streamResponse: nil,
+			},
+			expected: expected{
+				content:   "Hello",
+				infoIsNil: true,
+			},
 		},
 	}
 
-	response := acc.ResponseWithInfo(streamResponse)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acc := NewStreamAccumulator()
 
-	if response.Choices[0].Content != "Hello" {
-		t.Errorf("expected content, got %q", response.Choices[0].Content)
-	}
-	if response.Info == nil {
-		t.Fatal("expected info to be set")
-	}
-	if response.Info.InputTokens != 10 {
-		t.Errorf("expected 10 input tokens, got %d", response.Info.InputTokens)
-	}
-	if response.Info.OutputTokens != 5 {
-		t.Errorf("expected 5 output tokens, got %d", response.Info.OutputTokens)
-	}
-}
+			for _, chunk := range tt.input.chunks {
+				acc.Add(chunk)
+			}
 
-func TestStreamAccumulator_ResponseWithInfo_NilInfo(t *testing.T) {
-	acc := NewStreamAccumulator()
+			response := acc.ResponseWithInfo(tt.input.streamResponse)
 
-	acc.Add(StreamChunk{Content: "Hello"})
+			assert.Equal(t, tt.expected.content, response.Choices[0].Content)
 
-	response := acc.ResponseWithInfo(nil)
-
-	if response.Choices[0].Content != "Hello" {
-		t.Errorf("expected content, got %q", response.Choices[0].Content)
-	}
-	if response.Info != nil {
-		t.Error("expected nil info")
+			if tt.expected.infoIsNil {
+				assert.Nil(t, response.Info)
+			} else {
+				assert.NotNil(t, response.Info)
+				assert.Equal(t, tt.expected.inputTokens, response.Info.InputTokens)
+				assert.Equal(t, tt.expected.outputTokens, response.Info.OutputTokens)
+			}
+		})
 	}
 }
 
@@ -136,26 +223,7 @@ func TestStreamAccumulator_Reset(t *testing.T) {
 
 	acc.Reset()
 
-	if acc.Content() != "" {
-		t.Errorf("expected empty content after reset, got %q", acc.Content())
-	}
-	if acc.ReasoningContent() != "" {
-		t.Errorf("expected empty reasoning after reset, got %q", acc.ReasoningContent())
-	}
-	if acc.Error() != nil {
-		t.Errorf("expected nil error after reset, got %v", acc.Error())
-	}
-}
-
-func TestStreamAccumulator_EmptyChunks(t *testing.T) {
-	acc := NewStreamAccumulator()
-
-	// Empty chunks should be handled gracefully
-	acc.Add(StreamChunk{})
-	acc.Add(StreamChunk{Content: ""})
-	acc.Add(StreamChunk{ReasoningContent: ""})
-
-	if acc.Content() != "" {
-		t.Errorf("expected empty content, got %q", acc.Content())
-	}
+	assert.Equal(t, "", acc.Content())
+	assert.Equal(t, "", acc.ReasoningContent())
+	assert.Nil(t, acc.Error())
 }

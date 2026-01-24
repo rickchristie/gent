@@ -193,32 +193,51 @@ func newTestExecCtx(data gent.LoopData) *gent.ExecutionContext {
 // ----------------------------------------------------------------------------
 
 func TestLoopData_GetTask(t *testing.T) {
-	input := []gent.ContentPart{llms.TextContent{Text: "test input"}}
-	data := NewLoopData(input...)
-
-	result := data.GetTask()
-	if len(result) != 1 {
-		t.Fatalf("expected 1 part, got %d", len(result))
+	type input struct {
+		taskParts []gent.ContentPart
 	}
 
-	tc, ok := result[0].(llms.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result[0])
+	type expected struct {
+		partsCount int
+		text       string
 	}
-	if tc.Text != "test input" {
-		t.Errorf("expected 'test input', got %q", tc.Text)
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "single text part",
+			input: input{
+				taskParts: []gent.ContentPart{llms.TextContent{Text: "test input"}},
+			},
+			expected: expected{
+				partsCount: 1,
+				text:       "test input",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := NewLoopData(tt.input.taskParts...)
+
+			result := data.GetTask()
+
+			assert.Len(t, result, tt.expected.partsCount)
+			tc, ok := result[0].(llms.TextContent)
+			assert.True(t, ok, "expected TextContent, got %T", result[0])
+			assert.Equal(t, tt.expected.text, tc.Text)
+		})
 	}
 }
 
 func TestLoopData_IterationHistory(t *testing.T) {
 	data := NewLoopData()
 
-	// Initially empty
-	if len(data.GetIterationHistory()) != 0 {
-		t.Fatalf("expected empty history, got %d", len(data.GetIterationHistory()))
-	}
+	assert.Empty(t, data.GetIterationHistory(), "expected empty history initially")
 
-	// Add iteration
 	iter := &gent.Iteration{
 		Messages: []gent.MessageContent{
 			{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}},
@@ -227,23 +246,15 @@ func TestLoopData_IterationHistory(t *testing.T) {
 	data.AddIterationHistory(iter)
 
 	history := data.GetIterationHistory()
-	if len(history) != 1 {
-		t.Fatalf("expected 1 history entry, got %d", len(history))
-	}
-	if len(history[0].Messages) != 1 {
-		t.Fatalf("expected 1 message in iteration, got %d", len(history[0].Messages))
-	}
+	assert.Len(t, history, 1)
+	assert.Len(t, history[0].Messages, 1)
 }
 
 func TestLoopData_ScratchPad(t *testing.T) {
 	data := NewLoopData()
 
-	// Initially empty
-	if len(data.GetScratchPad()) != 0 {
-		t.Fatalf("expected empty scratchpad, got %d", len(data.GetScratchPad()))
-	}
+	assert.Empty(t, data.GetScratchPad(), "expected empty scratchpad initially")
 
-	// Set scratchpad
 	iter := &gent.Iteration{
 		Messages: []gent.MessageContent{
 			{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{llms.TextContent{Text: "test"}}},
@@ -252,9 +263,7 @@ func TestLoopData_ScratchPad(t *testing.T) {
 	data.SetScratchPad([]*gent.Iteration{iter})
 
 	scratchpad := data.GetScratchPad()
-	if len(scratchpad) != 1 {
-		t.Fatalf("expected 1 iteration in scratchpad, got %d", len(scratchpad))
-	}
+	assert.Len(t, scratchpad, 1)
 }
 
 // ----------------------------------------------------------------------------
@@ -262,24 +271,49 @@ func TestLoopData_ScratchPad(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestAgent_BuildOutputSections(t *testing.T) {
-	model := newMockModel()
-	tc := newMockToolChain()
-	term := newMockTermination()
-
-	loop := NewAgent(model).
-		WithToolChain(tc).
-		WithTermination(term)
-
-	sections := loop.buildOutputSections()
-	if len(sections) != 2 {
-		t.Fatalf("expected 2 sections (toolchain, termination), got %d", len(sections))
+	type input struct {
+		withThinking bool
 	}
 
-	// With thinking
-	loop.WithThinking("Think step by step")
-	sections = loop.buildOutputSections()
-	if len(sections) != 3 {
-		t.Fatalf("expected 3 sections (thinking, toolchain, termination), got %d", len(sections))
+	type expected struct {
+		sectionCount int
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "without thinking",
+			input:    input{withThinking: false},
+			expected: expected{sectionCount: 2},
+		},
+		{
+			name:     "with thinking",
+			input:    input{withThinking: true},
+			expected: expected{sectionCount: 3},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := newMockModel()
+			tc := newMockToolChain()
+			term := newMockTermination()
+
+			loop := NewAgent(model).
+				WithToolChain(tc).
+				WithTermination(term)
+
+			if tt.input.withThinking {
+				loop.WithThinking("Think step by step")
+			}
+
+			sections := loop.buildOutputSections()
+
+			assert.Len(t, sections, tt.expected.sectionCount)
+		})
 	}
 }
 
@@ -299,20 +333,9 @@ func TestAgent_BuildMessages(t *testing.T) {
 
 	messages := loop.buildMessages(data, "output prompt", "tools prompt")
 
-	// Should have system message + user message
-	if len(messages) < 2 {
-		t.Fatalf("expected at least 2 messages, got %d", len(messages))
-	}
-
-	// Check system message
-	if messages[0].Role != llms.ChatMessageTypeSystem {
-		t.Errorf("expected system role, got %v", messages[0].Role)
-	}
-
-	// Check user message
-	if messages[1].Role != llms.ChatMessageTypeHuman {
-		t.Errorf("expected human role, got %v", messages[1].Role)
-	}
+	require.GreaterOrEqual(t, len(messages), 2, "expected at least 2 messages")
+	assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
+	assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role)
 }
 
 func TestAgent_Next_Termination(t *testing.T) {
@@ -335,25 +358,14 @@ func TestAgent_Next_Termination(t *testing.T) {
 	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(context.Background(), execCtx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	if result.Action != gent.LATerminate {
-		t.Errorf("expected LATerminate, got %v", result.Action)
-	}
-
-	if len(result.Result) != 1 {
-		t.Fatalf("expected 1 result part, got %d", len(result.Result))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, gent.LATerminate, result.Action)
+	require.Len(t, result.Result, 1)
 
 	tc2, ok := result.Result[0].(llms.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Result[0])
-	}
-	if tc2.Text != "The answer is 42" {
-		t.Errorf("expected 'The answer is 42', got %q", tc2.Text)
-	}
+	require.True(t, ok, "expected TextContent, got %T", result.Result[0])
+	assert.Equal(t, "The answer is 42", tc2.Text)
 }
 
 func TestAgent_Next_ToolExecution(t *testing.T) {
@@ -383,22 +395,11 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 	data := NewLoopData(llms.TextContent{Text: "Search for test"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(context.Background(), execCtx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	if result.Action != gent.LAContinue {
-		t.Errorf("expected LAContinue, got %v", result.Action)
-	}
-
-	if result.NextPrompt == "" {
-		t.Error("expected NextPrompt to be set")
-	}
-
-	// Check that iteration was added to scratchpad
-	if len(data.GetScratchPad()) != 1 {
-		t.Errorf("expected 1 iteration in scratchpad, got %d", len(data.GetScratchPad()))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, gent.LAContinue, result.Action)
+	assert.NotEmpty(t, result.NextPrompt)
+	assert.Len(t, data.GetScratchPad(), 1)
 }
 
 func TestAgent_Next_ToolError(t *testing.T) {
@@ -425,17 +426,10 @@ func TestAgent_Next_ToolError(t *testing.T) {
 	data := NewLoopData(llms.TextContent{Text: "Use broken tool"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(context.Background(), execCtx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	if result.Action != gent.LAContinue {
-		t.Errorf("expected LAContinue, got %v", result.Action)
-	}
-
-	if result.NextPrompt == "" {
-		t.Error("expected NextPrompt with error info")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, gent.LAContinue, result.Action)
+	assert.NotEmpty(t, result.NextPrompt)
 }
 
 func TestAgent_Next_ModelError(t *testing.T) {
@@ -453,13 +447,9 @@ func TestAgent_Next_ModelError(t *testing.T) {
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(context.Background(), execCtx)
 
-	// Should return an error when model fails
-	if err == nil {
-		t.Fatal("expected error from model failure, got nil")
-	}
-	if !strings.Contains(err.Error(), "model failed") {
-		t.Errorf("expected error to contain 'model failed', got %q", err.Error())
-	}
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "model failed"),
+		"expected error to contain 'model failed', got %q", err.Error())
 }
 
 func TestAgent_Next_ParseError(t *testing.T) {
@@ -470,7 +460,6 @@ func TestAgent_Next_ParseError(t *testing.T) {
 
 	format := newMockFormat().WithParseError(gent.ErrNoSectionsFound)
 	tc := newMockToolChain()
-	// Termination that doesn't accept raw content
 	term := &mockTermination{name: "answer", prompt: "answer"}
 
 	loop := NewAgent(model).
@@ -482,10 +471,7 @@ func TestAgent_Next_ParseError(t *testing.T) {
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(context.Background(), execCtx)
 
-	// Should return an error since parse failed
-	if err == nil {
-		t.Error("expected error from parse failure, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestAgent_Next_ParseError_FallbackToTermination(t *testing.T) {
@@ -508,10 +494,7 @@ func TestAgent_Next_ParseError_FallbackToTermination(t *testing.T) {
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(context.Background(), execCtx)
 
-	// Should return an error since parse failed (no fallback anymore)
-	if err == nil {
-		t.Error("expected error from parse failure, got nil")
-	}
+	assert.Error(t, err, "expected error from parse failure (no fallback)")
 }
 
 func TestAgent_Next_MultipleTools(t *testing.T) {
@@ -552,53 +535,36 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 	data := NewLoopData(llms.TextContent{Text: "Use tools a and b"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(context.Background(), execCtx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	if result.Action != gent.LAContinue {
-		t.Errorf("expected LAContinue, got %v", result.Action)
-	}
-
-	// Should have results from both tools in the observation
-	if result.NextPrompt == "" {
-		t.Error("expected NextPrompt to be set")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, gent.LAContinue, result.Action)
+	assert.NotEmpty(t, result.NextPrompt)
 }
 
-// TestAgent_Next_ActionTakesPriorityOverTermination verifies that when the LLM outputs both
-// an action (tool call) and an answer (termination) in the same response, the action takes
-// priority. The agent should execute the tool calls and continue the loop, discarding the
-// answer for that iteration.
-//
-// This behavior is critical because:
-// 1. Tool calls may fail, and the answer might be premature
-// 2. The answer should only be given after observing actual tool results
 func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
+	type input struct {
+		responseContent string
+		parsedSections  map[string][]string
+		toolResult      *gent.ToolChainResult
+	}
+
+	type expected struct {
+		action           gent.LoopAction
+		shouldHavePrompt bool
+		promptContains   string
+		scratchpadLen    int
+		toolChainCalled  bool
+		shouldNotBeFinal bool
+	}
+
 	tests := []struct {
-		name  string
-		input struct {
-			responseContent string
-			parsedSections  map[string][]string
-			toolResult      *gent.ToolChainResult
-		}
-		expected struct {
-			action           gent.LoopAction
-			shouldHavePrompt bool
-			promptContains   string
-			scratchpadLen    int
-			toolChainCalled  bool
-			terminationUsed  bool
-			shouldNotBeFinal bool
-		}
+		name     string
+		input    input
+		expected expected
 	}{
 		{
 			name: "action and answer both present - action takes priority",
-			input: struct {
-				responseContent string
-				parsedSections  map[string][]string
-				toolResult      *gent.ToolChainResult
-			}{
+			input: input{
 				responseContent: `<thinking>I'll reschedule and confirm</thinking>
 <action>
 - tool: reschedule_booking
@@ -621,62 +587,36 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 					Errors: []error{nil},
 				},
 			},
-			expected: struct {
-				action           gent.LoopAction
-				shouldHavePrompt bool
-				promptContains   string
-				scratchpadLen    int
-				toolChainCalled  bool
-				terminationUsed  bool
-				shouldNotBeFinal bool
-			}{
+			expected: expected{
 				action:           gent.LAContinue,
 				shouldHavePrompt: true,
 				promptContains:   "reschedule_booking",
 				scratchpadLen:    1,
 				toolChainCalled:  true,
-				terminationUsed:  false,
 				shouldNotBeFinal: true,
 			},
 		},
 		{
 			name: "only answer present - should terminate",
-			input: struct {
-				responseContent string
-				parsedSections  map[string][]string
-				toolResult      *gent.ToolChainResult
-			}{
+			input: input{
 				responseContent: "<answer>The final answer is 42</answer>",
 				parsedSections: map[string][]string{
 					"answer": {"The final answer is 42"},
 				},
 				toolResult: nil,
 			},
-			expected: struct {
-				action           gent.LoopAction
-				shouldHavePrompt bool
-				promptContains   string
-				scratchpadLen    int
-				toolChainCalled  bool
-				terminationUsed  bool
-				shouldNotBeFinal bool
-			}{
+			expected: expected{
 				action:           gent.LATerminate,
 				shouldHavePrompt: false,
 				promptContains:   "",
 				scratchpadLen:    0,
 				toolChainCalled:  false,
-				terminationUsed:  true,
 				shouldNotBeFinal: false,
 			},
 		},
 		{
 			name: "only action present - should continue",
-			input: struct {
-				responseContent string
-				parsedSections  map[string][]string
-				toolResult      *gent.ToolChainResult
-			}{
+			input: input{
 				responseContent: "<action>- tool: search\n  args:\n    q: test</action>",
 				parsedSections: map[string][]string{
 					"action": {"- tool: search\n  args:\n    q: test"},
@@ -690,31 +630,18 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 					Errors: []error{nil},
 				},
 			},
-			expected: struct {
-				action           gent.LoopAction
-				shouldHavePrompt bool
-				promptContains   string
-				scratchpadLen    int
-				toolChainCalled  bool
-				terminationUsed  bool
-				shouldNotBeFinal bool
-			}{
+			expected: expected{
 				action:           gent.LAContinue,
 				shouldHavePrompt: true,
 				promptContains:   "search",
 				scratchpadLen:    1,
 				toolChainCalled:  true,
-				terminationUsed:  false,
 				shouldNotBeFinal: true,
 			},
 		},
 		{
 			name: "action with tool error and answer - action still takes priority",
-			input: struct {
-				responseContent string
-				parsedSections  map[string][]string
-				toolResult      *gent.ToolChainResult
-			}{
+			input: input{
 				responseContent: `<action>- tool: failing_tool</action>
 <answer>I completed the task!</answer>`,
 				parsedSections: map[string][]string{
@@ -727,21 +654,12 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 					Errors:  []error{errors.New("tool execution failed")},
 				},
 			},
-			expected: struct {
-				action           gent.LoopAction
-				shouldHavePrompt bool
-				promptContains   string
-				scratchpadLen    int
-				toolChainCalled  bool
-				terminationUsed  bool
-				shouldNotBeFinal bool
-			}{
+			expected: expected{
 				action:           gent.LAContinue,
 				shouldHavePrompt: true,
 				promptContains:   "Error",
 				scratchpadLen:    1,
 				toolChainCalled:  true,
-				terminationUsed:  false,
 				shouldNotBeFinal: true,
 			},
 		},
@@ -749,7 +667,6 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup mocks
 			response := &gent.ContentResponse{
 				Choices: []*gent.ContentChoice{{Content: tt.input.responseContent}},
 			}
@@ -772,34 +689,30 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 			data := NewLoopData(llms.TextContent{Text: "Execute the task"})
 			execCtx := newTestExecCtx(data)
 
-			// Execute
 			result, err := loop.Next(context.Background(), execCtx)
 
-			// Assert
-			require.NoError(t, err, "Next() should not return an error")
-			assert.Equal(t, tt.expected.action, result.Action, "unexpected loop action")
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected.action, result.Action)
 
 			if tt.expected.shouldHavePrompt {
-				assert.NotEmpty(t, result.NextPrompt, "expected NextPrompt to be set")
-				assert.Contains(t, result.NextPrompt, tt.expected.promptContains,
-					"NextPrompt should contain expected content")
+				assert.NotEmpty(t, result.NextPrompt)
+				assert.Contains(t, result.NextPrompt, tt.expected.promptContains)
 			}
 
-			assert.Equal(t, tt.expected.scratchpadLen, len(data.GetScratchPad()),
-				"unexpected scratchpad length")
+			assert.Equal(t, tt.expected.scratchpadLen, len(data.GetScratchPad()))
 
 			if tt.expected.toolChainCalled {
-				assert.Equal(t, 1, tc.callCount, "tool chain should have been called")
+				assert.Equal(t, 1, tc.callCount)
 			} else {
-				assert.Equal(t, 0, tc.callCount, "tool chain should not have been called")
+				assert.Equal(t, 0, tc.callCount)
 			}
 
 			if tt.expected.shouldNotBeFinal {
-				assert.Nil(t, result.Result, "result should be nil when continuing")
+				assert.Nil(t, result.Result)
 			}
 
 			if tt.expected.action == gent.LATerminate {
-				assert.NotNil(t, result.Result, "result should be set when terminating")
+				assert.NotNil(t, result.Result)
 			}
 		})
 	}
@@ -811,56 +724,31 @@ func TestAgent_RegisterTool(t *testing.T) {
 
 	loop := NewAgent(model).WithToolChain(tc)
 
-	// Should be able to chain RegisterTool
 	result := loop.RegisterTool("dummy")
-	if result != loop {
-		t.Error("expected RegisterTool to return same loop for chaining")
-	}
+	assert.Equal(t, loop, result, "expected RegisterTool to return same loop for chaining")
 }
 
 func TestSimpleSection(t *testing.T) {
 	s := &simpleSection{name: "thinking", prompt: "Think step by step"}
 
-	if s.Name() != "thinking" {
-		t.Errorf("expected 'thinking', got %q", s.Name())
-	}
-
-	if s.Prompt() != "Think step by step" {
-		t.Errorf("expected 'Think step by step', got %q", s.Prompt())
-	}
+	assert.Equal(t, "thinking", s.Name())
+	assert.Equal(t, "Think step by step", s.Prompt())
 
 	parsed, err := s.ParseSection("some content")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if parsed != "some content" {
-		t.Errorf("expected 'some content', got %v", parsed)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "some content", parsed)
 }
 
 func TestNewAgent_Defaults(t *testing.T) {
 	model := newMockModel()
 	loop := NewAgent(model)
 
-	// Verify defaults are set
-	if loop.format == nil {
-		t.Error("expected default format to be set")
-	}
-	if loop.toolChain == nil {
-		t.Error("expected default toolChain to be set")
-	}
-	if loop.termination == nil {
-		t.Error("expected default termination to be set")
-	}
-	if loop.timeProvider == nil {
-		t.Error("expected default timeProvider to be set")
-	}
-	if loop.systemTemplate == nil {
-		t.Error("expected default systemTemplate to be set")
-	}
-	if loop.taskTemplate == nil {
-		t.Error("expected default taskTemplate to be set")
-	}
+	assert.NotNil(t, loop.format, "expected default format to be set")
+	assert.NotNil(t, loop.toolChain, "expected default toolChain to be set")
+	assert.NotNil(t, loop.termination, "expected default termination to be set")
+	assert.NotNil(t, loop.timeProvider, "expected default timeProvider to be set")
+	assert.NotNil(t, loop.systemTemplate, "expected default systemTemplate to be set")
+	assert.NotNil(t, loop.taskTemplate, "expected default taskTemplate to be set")
 }
 
 func TestAgent_WithTimeProvider(t *testing.T) {
@@ -869,96 +757,84 @@ func TestAgent_WithTimeProvider(t *testing.T) {
 
 	loop := NewAgent(model).WithTimeProvider(mockTime)
 
-	if loop.TimeProvider() != mockTime {
-		t.Error("expected custom time provider to be set")
-	}
-
-	// Verify the mock time is used
-	tp := loop.TimeProvider()
-	if tp.Today() != "2025-06-15" {
-		t.Errorf("TimeProvider().Today() = %q, want %q", tp.Today(), "2025-06-15")
-	}
-	if tp.Weekday() != "Sunday" {
-		t.Errorf("TimeProvider().Weekday() = %q, want %q", tp.Weekday(), "Sunday")
-	}
+	assert.Equal(t, mockTime, loop.TimeProvider())
+	assert.Equal(t, "2025-06-15", loop.TimeProvider().Today())
+	assert.Equal(t, "Sunday", loop.TimeProvider().Weekday())
 }
 
-func TestAgent_ProcessTemplateString_ExpandsTemplateVariables(t *testing.T) {
-	model := newMockModel()
-	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
-
-	loop := NewAgent(model).
-		WithTimeProvider(mockTime)
-
-	// Call processTemplateString to expand template variables
-	result := loop.processTemplateString("Today is {{.Time.Today}} ({{.Time.Weekday}}).")
-
-	expected := "Today is 2025-06-15 (Sunday)."
-	if result != expected {
-		t.Errorf("processTemplateString() = %q, want %q", result, expected)
+func TestAgent_ProcessTemplateString(t *testing.T) {
+	type input struct {
+		template string
+		mockTime time.Time
 	}
-}
 
-func TestAgent_ProcessTemplateString_NoTemplateVariables(t *testing.T) {
-	model := newMockModel()
-
-	loop := NewAgent(model)
-
-	result := loop.processTemplateString("You are a helpful assistant.")
-
-	expected := "You are a helpful assistant."
-	if result != expected {
-		t.Errorf("processTemplateString() = %q, want %q", result, expected)
+	type expected struct {
+		result string
 	}
-}
 
-func TestAgent_ProcessTemplateString_EmptyInput(t *testing.T) {
-	model := newMockModel()
-
-	loop := NewAgent(model)
-
-	result := loop.processTemplateString("")
-
-	if result != "" {
-		t.Errorf("processTemplateString() = %q, want empty string", result)
-	}
-}
-
-func TestAgent_ProcessTemplateString_InvalidTemplate(t *testing.T) {
-	model := newMockModel()
-
-	// Invalid template syntax should return original string
-	loop := NewAgent(model)
-
-	result := loop.processTemplateString("This has {{ invalid syntax")
-
-	// Should return original string when parsing fails
-	expected := "This has {{ invalid syntax"
-	if result != expected {
-		t.Errorf("processTemplateString() = %q, want %q", result, expected)
-	}
-}
-
-func TestAgent_ProcessTemplateString_MultipleVariables(t *testing.T) {
-	model := newMockModel()
-	mockTime := gent.NewMockTimeProvider(time.Date(2024, 12, 25, 10, 0, 0, 0, time.UTC))
-
-	prompt := `## Task
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "expands template variables",
+			input: input{
+				template: "Today is {{.Time.Today}} ({{.Time.Weekday}}).",
+				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
+			},
+			expected: expected{result: "Today is 2025-06-15 (Sunday)."},
+		},
+		{
+			name: "no template variables",
+			input: input{
+				template: "You are a helpful assistant.",
+				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
+			},
+			expected: expected{result: "You are a helpful assistant."},
+		},
+		{
+			name: "empty input",
+			input: input{
+				template: "",
+				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
+			},
+			expected: expected{result: ""},
+		},
+		{
+			name: "invalid template returns original",
+			input: input{
+				template: "This has {{ invalid syntax",
+				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
+			},
+			expected: expected{result: "This has {{ invalid syntax"},
+		},
+		{
+			name: "multiple variables",
+			input: input{
+				template: `## Task
 You are helping on {{.Time.Today}}.
 It's a {{.Time.Weekday}}.
-Current time: {{.Time.Format "15:04"}}`
-
-	loop := NewAgent(model).
-		WithTimeProvider(mockTime)
-
-	result := loop.processTemplateString(prompt)
-
-	expected := `## Task
+Current time: {{.Time.Format "15:04"}}`,
+				mockTime: time.Date(2024, 12, 25, 10, 0, 0, 0, time.UTC),
+			},
+			expected: expected{result: `## Task
 You are helping on 2024-12-25.
 It's a Wednesday.
-Current time: 10:00`
+Current time: 10:00`},
+		},
+	}
 
-	if result != expected {
-		t.Errorf("processTemplateString() = %q, want %q", result, expected)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := newMockModel()
+			mockTimeProvider := gent.NewMockTimeProvider(tt.input.mockTime)
+
+			loop := NewAgent(model).WithTimeProvider(mockTimeProvider)
+
+			result := loop.processTemplateString(tt.input.template)
+
+			assert.Equal(t, tt.expected.result, result)
+		})
 	}
 }

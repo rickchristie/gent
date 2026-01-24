@@ -3,147 +3,202 @@ package termination
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/tmc/langchaingo/llms"
 )
 
 func TestText_Name(t *testing.T) {
-	term := NewText()
-	if term.Name() != "answer" {
-		t.Errorf("expected default name 'answer', got '%s'", term.Name())
+	type input struct {
+		sectionName string
 	}
 
-	term.WithSectionName("result")
-	if term.Name() != "result" {
-		t.Errorf("expected name 'result', got '%s'", term.Name())
+	type expected struct {
+		name string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "default name",
+			input:    input{sectionName: ""},
+			expected: expected{name: "answer"},
+		},
+		{
+			name:     "custom name",
+			input:    input{sectionName: "result"},
+			expected: expected{name: "result"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := NewText()
+			if tt.input.sectionName != "" {
+				term.WithSectionName(tt.input.sectionName)
+			}
+
+			assert.Equal(t, tt.expected.name, term.Name())
+		})
 	}
 }
 
 func TestText_Prompt(t *testing.T) {
-	term := NewText()
-	if term.Prompt() != "Write your final answer here." {
-		t.Errorf("unexpected default prompt: %s", term.Prompt())
+	type input struct {
+		customPrompt string
 	}
 
-	term.WithPrompt("Custom prompt")
-	if term.Prompt() != "Custom prompt" {
-		t.Errorf("expected custom prompt, got: %s", term.Prompt())
+	type expected struct {
+		prompt string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "default prompt",
+			input:    input{customPrompt: ""},
+			expected: expected{prompt: "Write your final answer here."},
+		},
+		{
+			name:     "custom prompt",
+			input:    input{customPrompt: "Custom prompt"},
+			expected: expected{prompt: "Custom prompt"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := NewText()
+			if tt.input.customPrompt != "" {
+				term.WithPrompt(tt.input.customPrompt)
+			}
+
+			assert.Equal(t, tt.expected.prompt, term.Prompt())
+		})
 	}
 }
 
 func TestText_ParseSection(t *testing.T) {
-	term := NewText()
-
-	result, err := term.ParseSection("The weather is sunny today.")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	type input struct {
+		content string
 	}
 
-	str, ok := result.(string)
-	if !ok {
-		t.Fatalf("expected string result, got %T", result)
+	type expected struct {
+		result string
+		err    error
 	}
 
-	if str != "The weather is sunny today." {
-		t.Errorf("unexpected result: %s", str)
-	}
-}
-
-func TestText_ParseSection_Trimming(t *testing.T) {
-	term := NewText()
-
-	result, err := term.ParseSection("   Content with whitespace   ")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	str := result.(string)
-	if str != "Content with whitespace" {
-		t.Errorf("whitespace not trimmed: '%s'", str)
-	}
-}
-
-func TestText_ParseSection_Empty(t *testing.T) {
-	term := NewText()
-
-	result, err := term.ParseSection("")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	str := result.(string)
-	if str != "" {
-		t.Errorf("expected empty string, got: '%s'", str)
-	}
-}
-
-func TestText_ParseSection_Multiline(t *testing.T) {
-	term := NewText()
-
-	content := `Line 1
-Line 2
-Line 3`
-
-	result, err := term.ParseSection(content)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:     "simple content",
+			input:    input{content: "The weather is sunny today."},
+			expected: expected{result: "The weather is sunny today.", err: nil},
+		},
+		{
+			name:     "content with whitespace trimming",
+			input:    input{content: "   Content with whitespace   "},
+			expected: expected{result: "Content with whitespace", err: nil},
+		},
+		{
+			name:     "empty content",
+			input:    input{content: ""},
+			expected: expected{result: "", err: nil},
+		},
+		{
+			name:  "multiline content",
+			input: input{content: "Line 1\nLine 2\nLine 3"},
+			expected: expected{
+				result: "Line 1\nLine 2\nLine 3",
+				err:    nil,
+			},
+		},
 	}
 
-	str := result.(string)
-	if str != content {
-		t.Errorf("multiline content not preserved: '%s'", str)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := NewText()
+
+			result, err := term.ParseSection(tt.input.content)
+
+			assert.ErrorIs(t, err, tt.expected.err)
+			assert.Equal(t, tt.expected.result, result)
+		})
 	}
 }
 
-func TestText_ShouldTerminate_WithContent(t *testing.T) {
-	term := NewText()
-
-	result := term.ShouldTerminate("The final answer.")
-	if result == nil {
-		t.Fatal("expected non-nil result for non-empty content")
+func TestText_ShouldTerminate(t *testing.T) {
+	type input struct {
+		content string
 	}
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 content part, got %d", len(result))
+	type expected struct {
+		shouldTerminate bool
+		resultText      string
 	}
 
-	tc, ok := result[0].(llms.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result[0])
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name:  "non-empty content terminates",
+			input: input{content: "The final answer."},
+			expected: expected{
+				shouldTerminate: true,
+				resultText:      "The final answer.",
+			},
+		},
+		{
+			name:  "empty content does not terminate",
+			input: input{content: ""},
+			expected: expected{
+				shouldTerminate: false,
+				resultText:      "",
+			},
+		},
+		{
+			name:  "whitespace only does not terminate",
+			input: input{content: "   "},
+			expected: expected{
+				shouldTerminate: false,
+				resultText:      "",
+			},
+		},
+		{
+			name:  "content with surrounding whitespace is trimmed",
+			input: input{content: "  trimmed content  "},
+			expected: expected{
+				shouldTerminate: true,
+				resultText:      "trimmed content",
+			},
+		},
 	}
 
-	if tc.Text != "The final answer." {
-		t.Errorf("unexpected text: %s", tc.Text)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := NewText()
 
-func TestText_ShouldTerminate_EmptyContent(t *testing.T) {
-	term := NewText()
+			result := term.ShouldTerminate(tt.input.content)
 
-	result := term.ShouldTerminate("")
-	if result != nil {
-		t.Error("expected nil result for empty content")
-	}
-}
-
-func TestText_ShouldTerminate_WhitespaceOnly(t *testing.T) {
-	term := NewText()
-
-	result := term.ShouldTerminate("   ")
-	if result != nil {
-		t.Error("expected nil result for whitespace-only content")
-	}
-}
-
-func TestText_ShouldTerminate_TrimsWhitespace(t *testing.T) {
-	term := NewText()
-
-	result := term.ShouldTerminate("  trimmed content  ")
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-
-	tc := result[0].(llms.TextContent)
-	if tc.Text != "trimmed content" {
-		t.Errorf("expected trimmed content, got: '%s'", tc.Text)
+			if tt.expected.shouldTerminate {
+				assert.NotNil(t, result)
+				assert.Len(t, result, 1)
+				tc, ok := result[0].(llms.TextContent)
+				assert.True(t, ok, "expected TextContent, got %T", result[0])
+				assert.Equal(t, tt.expected.resultText, tc.Text)
+			} else {
+				assert.Nil(t, result)
+			}
+		})
 	}
 }

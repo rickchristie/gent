@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
 )
@@ -14,7 +16,7 @@ import (
 func TestHelloGrok(t *testing.T) {
 	apiKey := os.Getenv("GENT_TEST_XAI_KEY")
 	if apiKey == "" {
-		t.Fatal("GENT_TEST_XAI_KEY not set")
+		t.Skip("GENT_TEST_XAI_KEY not set")
 	}
 
 	ctx := context.Background()
@@ -24,23 +26,22 @@ func TestHelloGrok(t *testing.T) {
 		openai.WithBaseURL("https://api.x.ai/v1"),
 		openai.WithModel("grok-4-1-fast-reasoning"),
 	)
-	if err != nil {
-		t.Fatalf("failed to create xAI LLM: %v", err)
-	}
+	require.NoError(t, err, "failed to create xAI LLM")
 
 	model := NewLCGWrapper(llm)
 
 	response, err := model.GenerateContent(ctx, nil, "", "", []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeHuman, "Hello Grok! Nice to meet you!"),
 	})
+	require.NoError(t, err, "failed to generate response")
+
+	responseJSON, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
-		t.Fatalf("failed to generate response: %v", err)
+		log.Printf("Error marshaling response: %v", err)
+	} else {
+		log.Printf("Response:\n%s", responseJSON)
 	}
 
-	responseJSON, _ := json.MarshalIndent(response, "", "  ")
-	log.Printf("Response:\n%s", responseJSON)
-
-	if len(response.Choices) == 0 || response.Choices[0].Content == "" {
-		t.Error("expected non-empty response")
-	}
+	assert.NotEmpty(t, response.Choices, "expected non-empty choices")
+	assert.NotEmpty(t, response.Choices[0].Content, "expected non-empty response content")
 }

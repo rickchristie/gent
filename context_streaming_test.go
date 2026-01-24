@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // testLoopData is a simple LoopData implementation for testing.
@@ -32,100 +34,183 @@ func TestExecutionContext_SubscribeAll(t *testing.T) {
 		chunks = append(chunks, chunk)
 	}
 
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks, got %d", len(chunks))
-	}
+	assert.Len(t, chunks, 2)
 }
 
 func TestExecutionContext_SubscribeToStream(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
-
-	ch, unsub := ctx.SubscribeToStream("my-stream")
-	defer unsub()
-
-	go func() {
-		ctx.EmitChunk(StreamChunk{Content: "skip", StreamId: "other"})
-		ctx.EmitChunk(StreamChunk{Content: "hello", StreamId: "my-stream"})
-		ctx.EmitChunk(StreamChunk{Content: "world", StreamId: "my-stream"})
-		ctx.CloseStreams()
-	}()
-
-	var chunks []StreamChunk
-	for chunk := range ch {
-		chunks = append(chunks, chunk)
+	type input struct {
+		streamID string
+		chunks   []StreamChunk
 	}
 
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks, got %d", len(chunks))
+	type expected struct {
+		count int
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "filters to target stream",
+			input: input{
+				streamID: "my-stream",
+				chunks: []StreamChunk{
+					{Content: "skip", StreamId: "other"},
+					{Content: "hello", StreamId: "my-stream"},
+					{Content: "world", StreamId: "my-stream"},
+				},
+			},
+			expected: expected{count: 2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := NewExecutionContext("test", &testLoopData{})
+
+			ch, unsub := ctx.SubscribeToStream(tt.input.streamID)
+			defer unsub()
+
+			go func() {
+				for _, chunk := range tt.input.chunks {
+					ctx.EmitChunk(chunk)
+				}
+				ctx.CloseStreams()
+			}()
+
+			var chunks []StreamChunk
+			for chunk := range ch {
+				chunks = append(chunks, chunk)
+			}
+
+			assert.Len(t, chunks, tt.expected.count)
+		})
 	}
 }
 
 func TestExecutionContext_SubscribeToTopic(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
-
-	ch, unsub := ctx.SubscribeToTopic("llm-response")
-	defer unsub()
-
-	go func() {
-		ctx.EmitChunk(StreamChunk{Content: "skip", StreamTopicId: "other"})
-		ctx.EmitChunk(StreamChunk{Content: "hello", StreamTopicId: "llm-response"})
-		ctx.EmitChunk(StreamChunk{Content: "world", StreamTopicId: "llm-response"})
-		ctx.CloseStreams()
-	}()
-
-	var chunks []StreamChunk
-	for chunk := range ch {
-		chunks = append(chunks, chunk)
+	type input struct {
+		topicID string
+		chunks  []StreamChunk
 	}
 
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks, got %d", len(chunks))
+	type expected struct {
+		count int
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "filters to target topic",
+			input: input{
+				topicID: "llm-response",
+				chunks: []StreamChunk{
+					{Content: "skip", StreamTopicId: "other"},
+					{Content: "hello", StreamTopicId: "llm-response"},
+					{Content: "world", StreamTopicId: "llm-response"},
+				},
+			},
+			expected: expected{count: 2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := NewExecutionContext("test", &testLoopData{})
+
+			ch, unsub := ctx.SubscribeToTopic(tt.input.topicID)
+			defer unsub()
+
+			go func() {
+				for _, chunk := range tt.input.chunks {
+					ctx.EmitChunk(chunk)
+				}
+				ctx.CloseStreams()
+			}()
+
+			var chunks []StreamChunk
+			for chunk := range ch {
+				chunks = append(chunks, chunk)
+			}
+
+			assert.Len(t, chunks, tt.expected.count)
+		})
 	}
 }
 
-func TestExecutionContext_BuildSourcePath_Root(t *testing.T) {
-	ctx := NewExecutionContext("main", &testLoopData{})
-	ctx.StartIteration()
-
-	path := ctx.BuildSourcePath()
-	expected := "main/1"
-	if path != expected {
-		t.Errorf("expected %q, got %q", expected, path)
+func TestExecutionContext_BuildSourcePath(t *testing.T) {
+	type input struct {
+		setupFn func() *ExecutionContext
 	}
-}
 
-func TestExecutionContext_BuildSourcePath_Child(t *testing.T) {
-	parent := NewExecutionContext("main", &testLoopData{})
-	parent.StartIteration()
-	parent.StartIteration() // iteration 2
-
-	child := parent.SpawnChild("research", &testLoopData{})
-	child.StartIteration()
-
-	path := child.BuildSourcePath()
-	expected := "main/2/research/1"
-	if path != expected {
-		t.Errorf("expected %q, got %q", expected, path)
+	type expected struct {
+		path string
 	}
-}
 
-func TestExecutionContext_BuildSourcePath_DeepNesting(t *testing.T) {
-	root := NewExecutionContext("main", &testLoopData{})
-	root.StartIteration()
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "root context with single iteration",
+			input: input{
+				setupFn: func() *ExecutionContext {
+					ctx := NewExecutionContext("main", &testLoopData{})
+					ctx.StartIteration()
+					return ctx
+				},
+			},
+			expected: expected{path: "main/1"},
+		},
+		{
+			name: "child context",
+			input: input{
+				setupFn: func() *ExecutionContext {
+					parent := NewExecutionContext("main", &testLoopData{})
+					parent.StartIteration()
+					parent.StartIteration() // iteration 2
 
-	child1 := root.SpawnChild("orchestrator", &testLoopData{})
-	child1.StartIteration()
-	child1.StartIteration()
-	child1.StartIteration() // iteration 3
+					child := parent.SpawnChild("research", &testLoopData{})
+					child.StartIteration()
+					return child
+				},
+			},
+			expected: expected{path: "main/2/research/1"},
+		},
+		{
+			name: "deeply nested context",
+			input: input{
+				setupFn: func() *ExecutionContext {
+					root := NewExecutionContext("main", &testLoopData{})
+					root.StartIteration()
 
-	child2 := child1.SpawnChild("worker", &testLoopData{})
-	child2.StartIteration()
-	child2.StartIteration() // iteration 2
+					child1 := root.SpawnChild("orchestrator", &testLoopData{})
+					child1.StartIteration()
+					child1.StartIteration()
+					child1.StartIteration() // iteration 3
 
-	path := child2.BuildSourcePath()
-	expected := "main/1/orchestrator/3/worker/2"
-	if path != expected {
-		t.Errorf("expected %q, got %q", expected, path)
+					child2 := child1.SpawnChild("worker", &testLoopData{})
+					child2.StartIteration()
+					child2.StartIteration() // iteration 2
+					return child2
+				},
+			},
+			expected: expected{path: "main/1/orchestrator/3/worker/2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := tt.input.setupFn()
+			path := ctx.BuildSourcePath()
+			assert.Equal(t, tt.expected.path, path)
+		})
 	}
 }
 
@@ -142,10 +227,7 @@ func TestExecutionContext_EmitChunk_AutoPopulatesSource(t *testing.T) {
 	}()
 
 	chunk := <-ch
-	expected := "test/1"
-	if chunk.Source != expected {
-		t.Errorf("expected source %q, got %q", expected, chunk.Source)
-	}
+	assert.Equal(t, "test/1", chunk.Source)
 }
 
 func TestExecutionContext_EmitChunk_PreservesExistingSource(t *testing.T) {
@@ -161,9 +243,7 @@ func TestExecutionContext_EmitChunk_PreservesExistingSource(t *testing.T) {
 	}()
 
 	chunk := <-ch
-	if chunk.Source != "custom/path" {
-		t.Errorf("expected source %q, got %q", "custom/path", chunk.Source)
-	}
+	assert.Equal(t, "custom/path", chunk.Source)
 }
 
 func TestExecutionContext_ParentPropagation(t *testing.T) {
@@ -173,25 +253,18 @@ func TestExecutionContext_ParentPropagation(t *testing.T) {
 	child := parent.SpawnChild("child", &testLoopData{})
 	child.StartIteration()
 
-	// Subscribe at parent level
 	parentCh, parentUnsub := parent.SubscribeAll()
 	defer parentUnsub()
 
-	// Emit from child
 	go func() {
 		child.EmitChunk(StreamChunk{Content: "from child"})
 		parent.CloseStreams()
 		child.CloseStreams()
 	}()
 
-	// Parent should receive chunk from child
 	chunk := <-parentCh
-	if chunk.Content != "from child" {
-		t.Errorf("expected 'from child', got %q", chunk.Content)
-	}
-	if chunk.Source != "parent/1/child/1" {
-		t.Errorf("expected source 'parent/1/child/1', got %q", chunk.Source)
-	}
+	assert.Equal(t, "from child", chunk.Content)
+	assert.Equal(t, "parent/1/child/1", chunk.Source)
 }
 
 func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
@@ -204,11 +277,9 @@ func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
 	grandchild := child.SpawnChild("grandchild", &testLoopData{})
 	grandchild.StartIteration()
 
-	// Subscribe at root level
 	rootCh, rootUnsub := root.SubscribeAll()
 	defer rootUnsub()
 
-	// Emit from grandchild
 	go func() {
 		grandchild.EmitChunk(StreamChunk{Content: "from grandchild"})
 		root.CloseStreams()
@@ -216,14 +287,9 @@ func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
 		grandchild.CloseStreams()
 	}()
 
-	// Root should receive chunk from grandchild
 	chunk := <-rootCh
-	if chunk.Content != "from grandchild" {
-		t.Errorf("expected 'from grandchild', got %q", chunk.Content)
-	}
-	if chunk.Source != "root/1/child/1/grandchild/1" {
-		t.Errorf("expected source 'root/1/child/1/grandchild/1', got %q", chunk.Source)
-	}
+	assert.Equal(t, "from grandchild", chunk.Content)
+	assert.Equal(t, "root/1/child/1/grandchild/1", chunk.Source)
 }
 
 func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
@@ -239,14 +305,12 @@ func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
 		children[i].StartIteration()
 	}
 
-	// Subscribe at root
 	rootCh, rootUnsub := root.SubscribeAll()
 	defer rootUnsub()
 
 	var wg sync.WaitGroup
 	wg.Add(numChildren)
 
-	// Emit concurrently from all children
 	for i, child := range children {
 		go func(childID int, c *ExecutionContext) {
 			defer wg.Done()
@@ -267,16 +331,13 @@ func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
 		}
 	}()
 
-	// Count received chunks
 	count := 0
 	for range rootCh {
 		count++
 	}
 
 	expected := numChildren * chunksPerChild
-	if count != expected {
-		t.Errorf("expected %d chunks, got %d", expected, count)
-	}
+	assert.Equal(t, expected, count)
 }
 
 func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
@@ -284,7 +345,6 @@ func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
 
 	ch, unsub := ctx.SubscribeAll()
 
-	// Emit some chunks
 	go func() {
 		for i := range 100 {
 			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
@@ -293,7 +353,6 @@ func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
 		ctx.CloseStreams()
 	}()
 
-	// Read a few then unsubscribe
 	count := 0
 	for range ch {
 		count++
@@ -303,16 +362,11 @@ func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
 		}
 	}
 
-	// Channel should be closed after unsubscribe
-	// Wait a bit to ensure no more chunks arrive
 	time.Sleep(50 * time.Millisecond)
 
-	// The channel should be closed now
 	select {
 	case _, ok := <-ch:
-		if ok {
-			t.Error("expected channel to be closed after unsubscribe")
-		}
+		assert.False(t, ok, "expected channel to be closed after unsubscribe")
 	default:
 		// Channel closed, good
 	}
@@ -337,19 +391,16 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 		ctx.CloseStreams()
 	}()
 
-	// Both should receive the chunk
 	chunk1 := <-ch1
 	chunk2 := <-ch2
 
-	if chunk1.Content != "hello" || chunk2.Content != "hello" {
-		t.Errorf("expected both to receive 'hello'")
-	}
+	assert.Equal(t, "hello", chunk1.Content)
+	assert.Equal(t, "hello", chunk2.Content)
 }
 
 func TestExecutionContext_NoListener_EmitDoesNotBlock(t *testing.T) {
 	ctx := NewExecutionContext("test", &testLoopData{})
 
-	// No subscribers - emit should complete instantly without blocking
 	const numChunks = 1000
 	start := time.Now()
 
@@ -360,11 +411,8 @@ func TestExecutionContext_NoListener_EmitDoesNotBlock(t *testing.T) {
 	elapsed := time.Since(start)
 	ctx.CloseStreams()
 
-	// Emitting 1000 chunks with no listeners should be nearly instant (< 100ms)
-	// If it blocks, it would timeout or take much longer
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("EmitChunk blocked without listeners: took %v", elapsed)
-	}
+	assert.Less(t, elapsed, 100*time.Millisecond,
+		"EmitChunk blocked without listeners: took %v", elapsed)
 }
 
 func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
@@ -376,7 +424,6 @@ func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
 	const numChunks = 100
 	emitDone := make(chan time.Duration, 1)
 
-	// Emitter: emit chunks as fast as possible
 	go func() {
 		start := time.Now()
 		for i := range numChunks {
@@ -386,24 +433,17 @@ func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
 		ctx.CloseStreams()
 	}()
 
-	// Slow listener: process each chunk with 10ms delay
 	var received int
 	for range ch {
 		received++
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Check that all chunks were received
-	if received != numChunks {
-		t.Errorf("expected %d chunks, got %d", numChunks, received)
-	}
+	assert.Equal(t, numChunks, received)
 
-	// Check that emitter was not blocked by slow listener
-	// Emitting 100 chunks should complete in < 50ms even if listener is slow
 	emitElapsed := <-emitDone
-	if emitElapsed > 50*time.Millisecond {
-		t.Errorf("EmitChunk was blocked by slow listener: emit took %v", emitElapsed)
-	}
+	assert.Less(t, emitElapsed, 50*time.Millisecond,
+		"EmitChunk was blocked by slow listener: emit took %v", emitElapsed)
 }
 
 func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
@@ -418,7 +458,6 @@ func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
 	fastDone := make(chan time.Duration, 1)
 	slowDone := make(chan int, 1)
 
-	// Emit chunks
 	go func() {
 		for i := range numChunks {
 			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
@@ -426,7 +465,6 @@ func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
 		ctx.CloseStreams()
 	}()
 
-	// Slow listener: 20ms per chunk
 	go func() {
 		count := 0
 		for range slowCh {
@@ -436,7 +474,6 @@ func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
 		slowDone <- count
 	}()
 
-	// Fast listener: process immediately
 	go func() {
 		start := time.Now()
 		for range fastCh {
@@ -445,17 +482,12 @@ func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
 		fastDone <- time.Since(start)
 	}()
 
-	// Fast listener should finish quickly (< 50ms), not waiting for slow listener
 	fastElapsed := <-fastDone
-	if fastElapsed > 50*time.Millisecond {
-		t.Errorf("fast listener was blocked by slow listener: took %v", fastElapsed)
-	}
+	assert.Less(t, fastElapsed, 50*time.Millisecond,
+		"fast listener was blocked by slow listener: took %v", fastElapsed)
 
-	// Slow listener should still receive all chunks
 	slowReceived := <-slowDone
-	if slowReceived != numChunks {
-		t.Errorf("slow listener expected %d chunks, got %d", numChunks, slowReceived)
-	}
+	assert.Equal(t, numChunks, slowReceived)
 }
 
 func TestExecutionContext_SlowListener_ParentPropagation_DoesNotBlockChild(t *testing.T) {
@@ -465,14 +497,12 @@ func TestExecutionContext_SlowListener_ParentPropagation_DoesNotBlockChild(t *te
 	child := parent.SpawnChild("child", &testLoopData{})
 	child.StartIteration()
 
-	// Subscribe at parent level with slow processing
 	parentCh, parentUnsub := parent.SubscribeAll()
 	defer parentUnsub()
 
 	const numChunks = 100
 	emitDone := make(chan time.Duration, 1)
 
-	// Child emits chunks - should not be blocked by slow parent listener
 	go func() {
 		start := time.Now()
 		for i := range numChunks {
@@ -483,21 +513,15 @@ func TestExecutionContext_SlowListener_ParentPropagation_DoesNotBlockChild(t *te
 		child.CloseStreams()
 	}()
 
-	// Slow parent listener: 10ms per chunk
 	var received int
 	for range parentCh {
 		received++
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Verify child emit was not blocked
 	emitElapsed := <-emitDone
-	if emitElapsed > 50*time.Millisecond {
-		t.Errorf("child EmitChunk was blocked by slow parent listener: took %v", emitElapsed)
-	}
+	assert.Less(t, emitElapsed, 50*time.Millisecond,
+		"child EmitChunk was blocked by slow parent listener: took %v", emitElapsed)
 
-	// Verify all chunks received
-	if received != numChunks {
-		t.Errorf("expected %d chunks, got %d", numChunks, received)
-	}
+	assert.Equal(t, numChunks, received)
 }
