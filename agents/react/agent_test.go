@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -561,6 +563,245 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 	// Should have results from both tools in the observation
 	if result.NextPrompt == "" {
 		t.Error("expected NextPrompt to be set")
+	}
+}
+
+// TestAgent_Next_ActionTakesPriorityOverTermination verifies that when the LLM outputs both
+// an action (tool call) and an answer (termination) in the same response, the action takes
+// priority. The agent should execute the tool calls and continue the loop, discarding the
+// answer for that iteration.
+//
+// This behavior is critical because:
+// 1. Tool calls may fail, and the answer might be premature
+// 2. The answer should only be given after observing actual tool results
+func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
+	tests := []struct {
+		name  string
+		input struct {
+			responseContent string
+			parsedSections  map[string][]string
+			toolResult      *gent.ToolChainResult
+		}
+		expected struct {
+			action           gent.LoopAction
+			shouldHavePrompt bool
+			promptContains   string
+			scratchpadLen    int
+			toolChainCalled  bool
+			terminationUsed  bool
+			shouldNotBeFinal bool
+		}
+	}{
+		{
+			name: "action and answer both present - action takes priority",
+			input: struct {
+				responseContent string
+				parsedSections  map[string][]string
+				toolResult      *gent.ToolChainResult
+			}{
+				responseContent: `<thinking>I'll reschedule and confirm</thinking>
+<action>
+- tool: reschedule_booking
+  args:
+    booking_id: BK001
+</action>
+<answer>Your booking has been rescheduled successfully!</answer>`,
+				parsedSections: map[string][]string{
+					"action": {"- tool: reschedule_booking\n  args:\n    booking_id: BK001"},
+					"answer": {"Your booking has been rescheduled successfully!"},
+				},
+				toolResult: &gent.ToolChainResult{
+					Calls: []*gent.ToolCall{{Name: "reschedule_booking", Args: map[string]any{
+						"booking_id": "BK001",
+					}}},
+					Results: []*gent.ToolCallResult{{
+						Name:   "reschedule_booking",
+						Result: []gent.ContentPart{llms.TextContent{Text: "Booking rescheduled"}},
+					}},
+					Errors: []error{nil},
+				},
+			},
+			expected: struct {
+				action           gent.LoopAction
+				shouldHavePrompt bool
+				promptContains   string
+				scratchpadLen    int
+				toolChainCalled  bool
+				terminationUsed  bool
+				shouldNotBeFinal bool
+			}{
+				action:           gent.LAContinue,
+				shouldHavePrompt: true,
+				promptContains:   "reschedule_booking",
+				scratchpadLen:    1,
+				toolChainCalled:  true,
+				terminationUsed:  false,
+				shouldNotBeFinal: true,
+			},
+		},
+		{
+			name: "only answer present - should terminate",
+			input: struct {
+				responseContent string
+				parsedSections  map[string][]string
+				toolResult      *gent.ToolChainResult
+			}{
+				responseContent: "<answer>The final answer is 42</answer>",
+				parsedSections: map[string][]string{
+					"answer": {"The final answer is 42"},
+				},
+				toolResult: nil,
+			},
+			expected: struct {
+				action           gent.LoopAction
+				shouldHavePrompt bool
+				promptContains   string
+				scratchpadLen    int
+				toolChainCalled  bool
+				terminationUsed  bool
+				shouldNotBeFinal bool
+			}{
+				action:           gent.LATerminate,
+				shouldHavePrompt: false,
+				promptContains:   "",
+				scratchpadLen:    0,
+				toolChainCalled:  false,
+				terminationUsed:  true,
+				shouldNotBeFinal: false,
+			},
+		},
+		{
+			name: "only action present - should continue",
+			input: struct {
+				responseContent string
+				parsedSections  map[string][]string
+				toolResult      *gent.ToolChainResult
+			}{
+				responseContent: "<action>- tool: search\n  args:\n    q: test</action>",
+				parsedSections: map[string][]string{
+					"action": {"- tool: search\n  args:\n    q: test"},
+				},
+				toolResult: &gent.ToolChainResult{
+					Calls: []*gent.ToolCall{{Name: "search", Args: map[string]any{"q": "test"}}},
+					Results: []*gent.ToolCallResult{{
+						Name:   "search",
+						Result: []gent.ContentPart{llms.TextContent{Text: "search results"}},
+					}},
+					Errors: []error{nil},
+				},
+			},
+			expected: struct {
+				action           gent.LoopAction
+				shouldHavePrompt bool
+				promptContains   string
+				scratchpadLen    int
+				toolChainCalled  bool
+				terminationUsed  bool
+				shouldNotBeFinal bool
+			}{
+				action:           gent.LAContinue,
+				shouldHavePrompt: true,
+				promptContains:   "search",
+				scratchpadLen:    1,
+				toolChainCalled:  true,
+				terminationUsed:  false,
+				shouldNotBeFinal: true,
+			},
+		},
+		{
+			name: "action with tool error and answer - action still takes priority",
+			input: struct {
+				responseContent string
+				parsedSections  map[string][]string
+				toolResult      *gent.ToolChainResult
+			}{
+				responseContent: `<action>- tool: failing_tool</action>
+<answer>I completed the task!</answer>`,
+				parsedSections: map[string][]string{
+					"action": {"- tool: failing_tool"},
+					"answer": {"I completed the task!"},
+				},
+				toolResult: &gent.ToolChainResult{
+					Calls:   []*gent.ToolCall{{Name: "failing_tool", Args: nil}},
+					Results: []*gent.ToolCallResult{nil},
+					Errors:  []error{errors.New("tool execution failed")},
+				},
+			},
+			expected: struct {
+				action           gent.LoopAction
+				shouldHavePrompt bool
+				promptContains   string
+				scratchpadLen    int
+				toolChainCalled  bool
+				terminationUsed  bool
+				shouldNotBeFinal bool
+			}{
+				action:           gent.LAContinue,
+				shouldHavePrompt: true,
+				promptContains:   "Error",
+				scratchpadLen:    1,
+				toolChainCalled:  true,
+				terminationUsed:  false,
+				shouldNotBeFinal: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mocks
+			response := &gent.ContentResponse{
+				Choices: []*gent.ContentChoice{{Content: tt.input.responseContent}},
+			}
+			model := newMockModel(response)
+
+			format := newMockFormat().WithParseResult(tt.input.parsedSections)
+
+			tc := newMockToolChain()
+			if tt.input.toolResult != nil {
+				tc = tc.WithResults(tt.input.toolResult)
+			}
+
+			term := newMockTermination()
+
+			loop := NewAgent(model).
+				WithFormat(format).
+				WithToolChain(tc).
+				WithTermination(term)
+
+			data := NewLoopData(llms.TextContent{Text: "Execute the task"})
+			execCtx := newTestExecCtx(data)
+
+			// Execute
+			result, err := loop.Next(context.Background(), execCtx)
+
+			// Assert
+			require.NoError(t, err, "Next() should not return an error")
+			assert.Equal(t, tt.expected.action, result.Action, "unexpected loop action")
+
+			if tt.expected.shouldHavePrompt {
+				assert.NotEmpty(t, result.NextPrompt, "expected NextPrompt to be set")
+				assert.Contains(t, result.NextPrompt, tt.expected.promptContains,
+					"NextPrompt should contain expected content")
+			}
+
+			assert.Equal(t, tt.expected.scratchpadLen, len(data.GetScratchPad()),
+				"unexpected scratchpad length")
+
+			if tt.expected.toolChainCalled {
+				assert.Equal(t, 1, tc.callCount, "tool chain should have been called")
+			} else {
+				assert.Equal(t, 0, tc.callCount, "tool chain should not have been called")
+			}
+
+			if tt.expected.shouldNotBeFinal {
+				assert.Nil(t, result.Result, "result should be nil when continuing")
+			}
+
+			if tt.expected.action == gent.LATerminate {
+				assert.NotNil(t, result.Result, "result should be set when terminating")
+			}
+		})
 	}
 }
 

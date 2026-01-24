@@ -262,6 +262,16 @@ func (r *Agent) RegisterTool(tool any) *Agent {
 }
 
 // Next executes one iteration of the ReAct loop.
+//
+// The method follows a specific order of operations:
+//  1. Build prompts and call the model
+//  2. Parse the complete response to identify all sections
+//  3. Check for action (tool calls) section - if present, execute tools and continue the loop
+//  4. Check for termination (answer) section - only terminate if no actions were present
+//
+// This order ensures that tool calls are always executed before termination. If the model
+// outputs both an action and an answer in the same response, the action takes priority.
+// This prevents premature termination when tools might fail or produce unexpected results.
 func (r *Agent) Next(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
@@ -292,10 +302,33 @@ func (r *Agent) Next(
 		responseContent = response.Choices[0].Content
 	}
 
-	// Parse response
+	// Parse complete response to identify all available sections
 	parsed, parseErr := r.format.Parse(responseContent)
 
-	// Check termination first
+	// Check for action (tool calls) section first - actions take priority over termination
+	// This ensures tools are executed even if the model also outputs an answer
+	actionName := r.toolChain.Name()
+	actionContents, hasActions := parsed[actionName]
+	if hasActions && len(actionContents) > 0 {
+		// Execute tool calls (automatically traced via execCtx)
+		observation := r.executeToolCalls(ctx, execCtx, actionContents)
+
+		// Build iteration and update data
+		iter := r.buildIteration(responseContent, observation)
+		data.AddIterationHistory(iter)
+
+		// Add to scratchpad for next call
+		scratchpad := data.GetScratchPad()
+		scratchpad = append(scratchpad, iter)
+		data.SetScratchPad(scratchpad)
+
+		return &gent.AgentLoopResult{
+			Action:     gent.LAContinue,
+			NextPrompt: observation,
+		}, nil
+	}
+
+	// No actions present - check for termination
 	terminationName := r.termination.Name()
 	if terminationContents, ok := parsed[terminationName]; ok && len(terminationContents) > 0 {
 		for _, content := range terminationContents {
@@ -311,30 +344,24 @@ func (r *Agent) Next(
 		}
 	}
 
-	// Handle parse error after termination check - no fallback, bubble up the error
+	// Handle parse error - no fallback, bubble up the error
 	if parseErr != nil {
-		return nil, fmt.Errorf("failed to parse LLM response: %w\nRaw response: %s", parseErr, responseContent)
+		return nil, fmt.Errorf("failed to parse LLM response: %w\nRaw response: %s",
+			parseErr, responseContent)
 	}
 
-	// Execute tool calls if action section is present (automatically traced via execCtx)
-	actionName := r.toolChain.Name()
-	observation := ""
-	if actionContents, ok := parsed[actionName]; ok && len(actionContents) > 0 {
-		observation = r.executeToolCalls(ctx, execCtx, actionContents)
-	}
-
-	// Build iteration and update data
-	iter := r.buildIteration(responseContent, observation)
+	// No actions and no valid termination - continue loop with empty observation
+	// This handles edge cases where the model didn't output a properly formatted response
+	iter := r.buildIteration(responseContent, "")
 	data.AddIterationHistory(iter)
 
-	// Add to scratchpad for next call
 	scratchpad := data.GetScratchPad()
 	scratchpad = append(scratchpad, iter)
 	data.SetScratchPad(scratchpad)
 
 	return &gent.AgentLoopResult{
 		Action:     gent.LAContinue,
-		NextPrompt: observation,
+		NextPrompt: "",
 	}, nil
 }
 
@@ -501,7 +528,7 @@ func (r *Agent) executeToolCalls(
 			if toolResult != nil {
 				// Format tool result
 				var resultText strings.Builder
-				resultText.WriteString(fmt.Sprintf("[%s] ", toolResult.Name))
+				fmt.Fprintf(&resultText, "[%s] ", toolResult.Name)
 				for _, part := range toolResult.Result {
 					if tc, ok := part.(llms.TextContent); ok {
 						resultText.WriteString(tc.Text)
