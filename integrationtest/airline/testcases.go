@@ -20,8 +20,19 @@ import (
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
+// ToolChainType specifies which toolchain format to use.
+type ToolChainType string
+
+const (
+	ToolChainYAML ToolChainType = "yaml"
+	ToolChainJSON ToolChainType = "json"
+)
+
 // AirlineTestConfig configures how airline test output is displayed.
 type AirlineTestConfig struct {
+	// ToolChain specifies which toolchain format to use (yaml or json).
+	// Defaults to yaml if not specified.
+	ToolChain ToolChainType
 	// UseStreaming enables streaming mode for LLM calls.
 	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
@@ -33,21 +44,53 @@ type AirlineTestConfig struct {
 	LogWriter io.Writer
 }
 
-// TestConfig returns a config suitable for go test.
+// TestConfig returns a config suitable for go test with YAML toolchain.
 func TestConfig() AirlineTestConfig {
 	return AirlineTestConfig{
+		ToolChain:            ToolChainYAML,
 		UseStreaming:         false,
 		ShowIterationHistory: true,
 		ShowTraceEvents:      true,
 	}
 }
 
-// InteractiveConfig returns a config for interactive CLI with streaming.
+// TestConfigJSON returns a config suitable for go test with JSON toolchain.
+func TestConfigJSON() AirlineTestConfig {
+	return AirlineTestConfig{
+		ToolChain:            ToolChainJSON,
+		UseStreaming:         false,
+		ShowIterationHistory: true,
+		ShowTraceEvents:      true,
+	}
+}
+
+// InteractiveConfig returns a config for interactive CLI with streaming and YAML toolchain.
 func InteractiveConfig() AirlineTestConfig {
 	return AirlineTestConfig{
+		ToolChain:            ToolChainYAML,
 		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowTraceEvents:      false,
+	}
+}
+
+// InteractiveConfigJSON returns a config for interactive CLI with streaming and JSON toolchain.
+func InteractiveConfigJSON() AirlineTestConfig {
+	return AirlineTestConfig{
+		ToolChain:            ToolChainJSON,
+		UseStreaming:         true,
+		ShowIterationHistory: false,
+		ShowTraceEvents:      false,
+	}
+}
+
+// createToolChain creates the appropriate toolchain based on configuration.
+func createToolChain(config AirlineTestConfig) gent.ToolChain {
+	switch config.ToolChain {
+	case ToolChainJSON:
+		return toolchain.NewJSON()
+	default:
+		return toolchain.NewYAML()
 	}
 }
 
@@ -58,12 +101,23 @@ type AirlineTestCase struct {
 	Run         func(ctx context.Context, w io.Writer, config AirlineTestConfig) error
 }
 
-// GetAirlineTestCases returns all available airline test cases.
+// GetAirlineTestCases returns all available airline test cases for YAML toolchain.
 func GetAirlineTestCases() []AirlineTestCase {
 	return []AirlineTestCase{
 		{
-			Name:        "Reschedule",
-			Description: "Customer requests flight reschedule to a later time",
+			Name:        "Reschedule (YAML)",
+			Description: "Customer requests flight reschedule to a later time (YAML toolchain)",
+			Run:         RunRescheduleScenario,
+		},
+	}
+}
+
+// GetAirlineTestCasesJSON returns all available airline test cases for JSON toolchain.
+func GetAirlineTestCasesJSON() []AirlineTestCase {
+	return []AirlineTestCase{
+		{
+			Name:        "Reschedule (JSON)",
+			Description: "Customer requests flight reschedule to a later time (JSON toolchain)",
 			Run:         RunRescheduleScenario,
 		},
 	}
@@ -114,7 +168,7 @@ func RunRescheduleScenario(ctx context.Context, w io.Writer, config AirlineTestC
 	fixture := NewAirlineFixture(nil)
 
 	// Create toolchain and register all airline tools
-	tc := toolchain.NewYAML()
+	tc := createToolChain(config)
 	fixture.RegisterAllTools(tc)
 
 	// Create the ReAct loop
@@ -465,7 +519,7 @@ func (s *InteractiveChatState) SendMessage(ctx context.Context, userMessage stri
 	})
 
 	// Create toolchain and register all airline tools
-	tc := toolchain.NewYAML()
+	tc := createToolChain(s.Config)
 	s.Fixture.RegisterAllTools(tc)
 
 	// Create the ReAct loop

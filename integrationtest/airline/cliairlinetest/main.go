@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -42,8 +43,6 @@ func main() {
 }
 
 func run() error {
-	testCases := airline.GetAirlineTestCases()
-
 	// Create log directory and file
 	logDir := ".logs"
 	if err := os.MkdirAll(logDir, 0755); err != nil {
@@ -57,7 +56,7 @@ func run() error {
 	defer logFile.Close()
 
 	// Create readline instance for menu
-	rl, err := readline.New(colorCyan + "Enter test number (or 'q' to quit): " + colorReset)
+	rl, err := readline.New(colorCyan + "Enter selection (or 'q' to quit): " + colorReset)
 	if err != nil {
 		return fmt.Errorf("failed to create readline: %w", err)
 	}
@@ -72,18 +71,59 @@ func run() error {
 		fmt.Fprintln(os.Stderr)
 	}
 
+	// Build menu items
+	type menuItem struct {
+		name        string
+		description string
+		run         func(ctx context.Context, w io.Writer, config airline.AirlineTestConfig) error
+		configFn    func() airline.AirlineTestConfig
+		isChat      bool
+	}
+
+	var menuItems []menuItem
+
+	// Add YAML test cases
+	for _, tc := range airline.GetAirlineTestCases() {
+		menuItems = append(menuItems, menuItem{
+			name:        tc.Name,
+			description: tc.Description,
+			run:         tc.Run,
+			configFn:    airline.InteractiveConfig,
+		})
+	}
+
+	// Add JSON test cases
+	for _, tc := range airline.GetAirlineTestCasesJSON() {
+		menuItems = append(menuItems, menuItem{
+			name:        tc.Name,
+			description: tc.Description,
+			run:         tc.Run,
+			configFn:    airline.InteractiveConfigJSON,
+		})
+	}
+
+	// Add interactive chat options
+	menuItems = append(menuItems, menuItem{
+		name:        "Interactive Chat (YAML)",
+		description: "Chat with the airline agent using YAML toolchain",
+		configFn:    airline.InteractiveConfig,
+		isChat:      true,
+	})
+	menuItems = append(menuItems, menuItem{
+		name:        "Interactive Chat (JSON)",
+		description: "Chat with the airline agent using JSON toolchain",
+		configFn:    airline.InteractiveConfigJSON,
+		isChat:      true,
+	})
+
 	fmt.Printf("%s%sAvailable Airline Tests:%s\n", colorBold, colorYellow, colorReset)
 	fmt.Printf("%s%s%s\n", colorYellow, strings.Repeat("=", 24), colorReset)
-	for i, tc := range testCases {
+	for i, item := range menuItems {
 		fmt.Printf("  %s%d.%s %s%s%s - %s\n",
 			colorCyan, i+1, colorReset,
-			colorWhite, tc.Name, colorReset,
-			tc.Description)
+			colorWhite, item.name, colorReset,
+			item.description)
 	}
-	fmt.Printf("  %s%d.%s %s%s%s - %s\n",
-		colorCyan, len(testCases)+1, colorReset,
-		colorWhite, "Interactive Chat", colorReset,
-		"Chat with the airline agent")
 	fmt.Println()
 
 	for {
@@ -103,9 +143,9 @@ func run() error {
 		}
 
 		num, err := strconv.Atoi(input)
-		if err != nil || num < 1 || num > len(testCases)+1 {
+		if err != nil || num < 1 || num > len(menuItems) {
 			fmt.Printf("%sInvalid selection. Please enter a number between 1 and %d.%s\n\n",
-				colorRed, len(testCases)+1, colorReset)
+				colorRed, len(menuItems), colorReset)
 			continue
 		}
 
@@ -119,16 +159,17 @@ func run() error {
 			cancel()
 		}()
 
-		config := airline.InteractiveConfig()
+		item := menuItems[num-1]
+		config := item.configFn()
 		config.LogWriter = logFile
-		if num == len(testCases)+1 {
+
+		if item.isChat {
 			if err := runInteractiveChat(ctx, config); err != nil {
 				fmt.Fprintf(os.Stderr, "%sError: %v%s\n", colorRed, err, colorReset)
 			}
 		} else {
-			tc := testCases[num-1]
-			fmt.Printf("\n%sRunning test: %s%s\n", colorGreen, tc.Name, colorReset)
-			if err := tc.Run(ctx, os.Stdout, config); err != nil {
+			fmt.Printf("\n%sRunning test: %s%s\n", colorGreen, item.name, colorReset)
+			if err := item.run(ctx, os.Stdout, config); err != nil {
 				fmt.Fprintf(os.Stderr, "%sError: %v%s\n", colorRed, err, colorReset)
 			}
 		}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,356 +53,682 @@ func TestJSON_Name(t *testing.T) {
 }
 
 func TestJSON_RegisterTool(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"test",
-		"A test tool",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "result", nil
+	type input struct {
+		toolName string
+		content  string
+	}
+
+	type expected struct {
+		callCount int
+		callName  string
+		err       error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "register and execute tool",
+			input: input{
+				toolName: "test",
+				content:  `{"tool": "test", "args": {}}`,
+			},
+			expected: expected{
+				callCount: 1,
+				callName:  "test",
+				err:       nil,
+			},
 		},
-		textFormatter,
-	)
+	}
 
-	tc.RegisterTool(tool)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tool := gent.NewToolFunc(
+				tt.input.toolName,
+				"A test tool",
+				nil,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return "result", nil
+				},
+				textFormatter,
+			)
 
-	content := `{"tool": "test", "args": {}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.Len(t, result.Calls, 1)
-	assert.Equal(t, "test", result.Calls[0].Name)
+			tc.RegisterTool(tool)
+
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+
+			if tt.expected.err != nil {
+				assert.ErrorIs(t, err, tt.expected.err)
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, result.Calls, tt.expected.callCount)
+				assert.Equal(t, tt.expected.callName, result.Calls[0].Name)
+			}
+		})
+	}
 }
 
 func TestJSON_Prompt(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+	type input struct {
+		toolName        string
+		toolDescription string
+		toolSchema      map[string]any
+	}
+
+	type expected struct {
+		prompt string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "tool with schema",
+			input: input{
+				toolName:        "search",
+				toolDescription: "Search the web",
+				toolSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"query": map[string]any{"type": "string"},
+					},
+				},
+			},
+			expected: expected{
+				prompt: `Call tools using JSON format:
+{"tool": "tool_name", "args": {...}}
+
+For multiple parallel calls, use an array:
+[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]
+
+Available tools:
+
+- search: Search the web
+  Parameters: {
+    "properties": {
+      "query": {
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+`,
 			},
 		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "", nil
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tool := gent.NewToolFunc(
+				tt.input.toolName,
+				tt.input.toolDescription,
+				tt.input.toolSchema,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return "", nil
+				},
+				nil,
+			)
+			tc.RegisterTool(tool)
+
+			prompt := tc.Prompt()
+
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
+}
+
+func TestJSON_ParseSection(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		calls []*gent.ToolCall
+		err   error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "single call",
+			input: input{
+				content: `{"tool": "search", "args": {"query": "weather"}}`,
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{
+					{Name: "search", Args: map[string]any{"query": "weather"}},
+				},
+				err: nil,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "search"), "expected tool name in prompt")
-	assert.True(t, strings.Contains(prompt, "Search the web"),
-		"expected tool description in prompt")
-	assert.True(t, strings.Contains(prompt, `"tool"`), "expected JSON format instruction in prompt")
-}
-
-func TestJSON_ParseSection_SingleCall(t *testing.T) {
-	tc := NewJSON()
-
-	content := `{"tool": "search", "args": {"query": "weather"}}`
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 1)
-	assert.Equal(t, "search", calls[0].Name)
-	assert.Equal(t, "weather", calls[0].Args["query"])
-}
-
-func TestJSON_ParseSection_MultipleCall(t *testing.T) {
-	tc := NewJSON()
-
-	content := `[
+		{
+			name: "multiple calls",
+			input: input{
+				content: `[
 		{"tool": "search", "args": {"query": "weather"}},
 		{"tool": "calendar", "args": {"date": "today"}}
-	]`
-
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 2)
-	assert.Equal(t, "search", calls[0].Name)
-	assert.Equal(t, "calendar", calls[1].Name)
-}
-
-func TestJSON_ParseSection_EmptyContent(t *testing.T) {
-	tc := NewJSON()
-
-	result, err := tc.ParseSection("")
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	assert.Empty(t, calls)
-}
-
-func TestJSON_ParseSection_InvalidJSON(t *testing.T) {
-	tc := NewJSON()
-
-	content := `{invalid json}`
-	_, err := tc.ParseSection(content)
-	assert.ErrorIs(t, err, gent.ErrInvalidJSON)
-}
-
-func TestJSON_ParseSection_MissingToolName(t *testing.T) {
-	tc := NewJSON()
-
-	content := `{"args": {"query": "weather"}}`
-	_, err := tc.ParseSection(content)
-	assert.ErrorIs(t, err, gent.ErrMissingToolName)
-}
-
-func TestJSON_ParseSection_MissingToolNameInArray(t *testing.T) {
-	tc := NewJSON()
-
-	content := `[{"tool": "search", "args": {}}, {"args": {}}]`
-	_, err := tc.ParseSection(content)
-	assert.ErrorIs(t, err, gent.ErrMissingToolName)
-}
-
-func TestJSON_Execute_Success(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			query := args["query"].(string)
-			return fmt.Sprintf("Results for: %s", query), nil
+	]`,
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{
+					{Name: "search", Args: map[string]any{"query": "weather"}},
+					{Name: "calendar", Args: map[string]any{"date": "today"}},
+				},
+				err: nil,
+			},
 		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
+		{
+			name: "empty content",
+			input: input{
+				content: "",
+			},
+			expected: expected{
+				calls: []*gent.ToolCall{},
+				err:   nil,
+			},
+		},
+		{
+			name: "invalid JSON",
+			input: input{
+				content: `{invalid json}`,
+			},
+			expected: expected{
+				calls: nil,
+				err:   gent.ErrInvalidJSON,
+			},
+		},
+		{
+			name: "missing tool name",
+			input: input{
+				content: `{"args": {"query": "weather"}}`,
+			},
+			expected: expected{
+				calls: nil,
+				err:   gent.ErrMissingToolName,
+			},
+		},
+		{
+			name: "missing tool name in array",
+			input: input{
+				content: `[{"tool": "search", "args": {}}, {"args": {}}]`,
+			},
+			expected: expected{
+				calls: nil,
+				err:   gent.ErrMissingToolName,
+			},
+		},
+	}
 
-	content := `{"tool": "search", "args": {"query": "weather"}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.Len(t, result.Calls, 1)
-	require.NotNil(t, result.Results[0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
 
-	assert.Equal(t, "Results for: weather", getTextContent(result.Results[0].Result))
-	assert.NoError(t, result.Errors[0])
+			result, err := tc.ParseSection(tt.input.content)
+
+			if tt.expected.err != nil {
+				assert.ErrorIs(t, err, tt.expected.err)
+				return
+			}
+
+			require.NoError(t, err)
+			calls := result.([]*gent.ToolCall)
+			assert.Len(t, calls, len(tt.expected.calls))
+
+			for i, expectedCall := range tt.expected.calls {
+				assert.Equal(t, expectedCall.Name, calls[i].Name)
+				assert.Equal(t, expectedCall.Args, calls[i].Args)
+			}
+		})
+	}
 }
 
-func TestJSON_Execute_UnknownTool(t *testing.T) {
-	tc := NewJSON()
+func TestJSON_Execute(t *testing.T) {
+	type mockTool struct {
+		name        string
+		description string
+		schema      map[string]any
+		fn          func(ctx context.Context, args map[string]any) (string, error)
+	}
 
-	content := `{"tool": "unknown", "args": {}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	assert.ErrorIs(t, result.Errors[0], gent.ErrUnknownTool)
-}
+	type input struct {
+		content string
+	}
 
-func TestJSON_Execute_ToolError(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"failing",
-		"A failing tool",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "", errors.New("tool execution failed")
+	type expected struct {
+		callCount   int
+		results     []string
+		errors      []error
+		executeErr  error
+		resultNames []string
+	}
+
+	tests := []struct {
+		name     string
+		mocks    []mockTool
+		input    input
+		expected expected
+	}{
+		{
+			name: "success",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search the web",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						query := args["query"].(string)
+						return fmt.Sprintf("Results for: %s", query), nil
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "search", "args": {"query": "weather"}}`,
+			},
+			expected: expected{
+				callCount:   1,
+				results:     []string{"Results for: weather"},
+				errors:      []error{nil},
+				resultNames: []string{"search"},
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	content := `{"tool": "failing", "args": {}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	require.Error(t, result.Errors[0])
-	assert.Equal(t, "tool execution failed", result.Errors[0].Error())
-}
-
-func TestJSON_Execute_MultipleTools(t *testing.T) {
-	tc := NewJSON()
-
-	searchTool := gent.NewToolFunc(
-		"search",
-		"Search",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "search result", nil
+		{
+			name:  "unknown tool",
+			mocks: []mockTool{},
+			input: input{
+				content: `{"tool": "unknown", "args": {}}`,
+			},
+			expected: expected{
+				callCount: 1,
+				results:   []string{""},
+				errors:    []error{gent.ErrUnknownTool},
+			},
 		},
-		textFormatter,
-	)
-
-	calendarTool := gent.NewToolFunc(
-		"calendar",
-		"Calendar",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "calendar result", nil
+		{
+			name: "tool error",
+			mocks: []mockTool{
+				{
+					name:        "failing",
+					description: "A failing tool",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "", errors.New("tool execution failed")
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "failing", "args": {}}`,
+			},
+			expected: expected{
+				callCount: 1,
+				results:   []string{""},
+				errors:    []error{errors.New("tool execution failed")},
+			},
 		},
-		textFormatter,
-	)
-
-	tc.RegisterTool(searchTool)
-	tc.RegisterTool(calendarTool)
-
-	content := `[
+		{
+			name: "multiple tools",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "search result", nil
+					},
+				},
+				{
+					name:        "calendar",
+					description: "Calendar",
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "calendar result", nil
+					},
+				},
+			},
+			input: input{
+				content: `[
 		{"tool": "search", "args": {}},
 		{"tool": "calendar", "args": {}}
-	]`
-
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.Len(t, result.Results, 2)
-
-	assert.Equal(t, "search result", getTextContent(result.Results[0].Result))
-	assert.Equal(t, "calendar result", getTextContent(result.Results[1].Result))
-}
-
-func TestJSON_Execute_SchemaValidation_Success(t *testing.T) {
-	tc := NewJSON()
-
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+	]`,
 			},
-			"required": []any{"query"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return fmt.Sprintf("Results for: %s", args["query"]), nil
-		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `{"tool": "search", "args": {"query": "weather"}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	assert.NoError(t, result.Errors[0])
-	require.NotNil(t, result.Results[0])
-	assert.Equal(t, "Results for: weather", getTextContent(result.Results[0].Result))
-}
-
-func TestJSON_Execute_SchemaValidation_MissingRequired(t *testing.T) {
-	tc := NewJSON()
-
-	tool := gent.NewToolFunc(
-		"search",
-		"Search the web",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
+			expected: expected{
+				callCount:   2,
+				results:     []string{"search result", "calendar result"},
+				errors:      []error{nil, nil},
+				resultNames: []string{"search", "calendar"},
 			},
-			"required": []any{"query"},
 		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "should not reach here", nil
-		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
+	}
 
-	content := `{"tool": "search", "args": {}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			for _, mock := range tt.mocks {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					mock.fn,
+					textFormatter,
+				)
+				tc.RegisterTool(tool)
+			}
 
-	require.Error(t, result.Errors[0])
-	assert.True(t, strings.Contains(result.Errors[0].Error(), "schema validation failed"),
-		"expected schema validation error, got: %v", result.Errors[0])
-	assert.Nil(t, result.Results[0])
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+
+			if tt.expected.executeErr != nil {
+				assert.ErrorIs(t, err, tt.expected.executeErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Len(t, result.Calls, tt.expected.callCount)
+
+			for i, expectedResult := range tt.expected.results {
+				if tt.expected.errors[i] != nil {
+					assert.Error(t, result.Errors[i])
+					if errors.Is(tt.expected.errors[i], gent.ErrUnknownTool) {
+						assert.ErrorIs(t, result.Errors[i], gent.ErrUnknownTool)
+					} else {
+						assert.Equal(t, tt.expected.errors[i].Error(), result.Errors[i].Error())
+					}
+				} else {
+					assert.NoError(t, result.Errors[i])
+					assert.Equal(t, expectedResult, getTextContent(result.Results[i].Result))
+					if len(tt.expected.resultNames) > i {
+						assert.Equal(t, tt.expected.resultNames[i], result.Results[i].Name)
+					}
+				}
+			}
+		})
+	}
 }
 
-func TestJSON_Execute_SchemaValidation_WrongType(t *testing.T) {
-	tc := NewJSON()
+func TestJSON_Execute_SchemaValidation(t *testing.T) {
+	type mockTool struct {
+		name        string
+		description string
+		schema      map[string]any
+		fn          func(ctx context.Context, args map[string]any) (string, error)
+	}
 
-	tool := gent.NewToolFunc(
-		"counter",
-		"Count things",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"count": map[string]any{"type": "integer"},
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		result      string
+		errContains string
+		resultIsNil bool
+		noToolError bool
+	}
+
+	tests := []struct {
+		name     string
+		mocks    []mockTool
+		input    input
+		expected expected
+	}{
+		{
+			name: "valid args",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search the web",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{"type": "string"},
+						},
+						"required": []any{"query"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return fmt.Sprintf("Results for: %s", args["query"]), nil
+					},
+				},
 			},
-			"required": []any{"count"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "should not reach here", nil
-		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `{"tool": "counter", "args": {"count": "not a number"}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	require.Error(t, result.Errors[0])
-	assert.True(t, strings.Contains(result.Errors[0].Error(), "schema validation failed"),
-		"expected schema validation error, got: %v", result.Errors[0])
-	assert.Nil(t, result.Results[0])
-}
-
-func TestJSON_Execute_NoSchema_NoValidation(t *testing.T) {
-	tc := NewJSON()
-
-	tool := gent.NewToolFunc(
-		"flexible",
-		"A flexible tool",
-		nil,
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "success", nil
-		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `{"tool": "flexible", "args": {"anything": "works", "numbers": 123}}`
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-
-	assert.NoError(t, result.Errors[0])
-	assert.Equal(t, "success", getTextContent(result.Results[0].Result))
-}
-
-func TestJSON_Execute_SchemaValidation_MultipleProperties(t *testing.T) {
-	tc := NewJSON()
-
-	tool := gent.NewToolFunc(
-		"booking",
-		"Book a flight",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"origin":      map[string]any{"type": "string"},
-				"destination": map[string]any{"type": "string"},
-				"passengers":  map[string]any{"type": "integer"},
+			input: input{
+				content: `{"tool": "search", "args": {"query": "weather"}}`,
 			},
-			"required": []any{"origin", "destination", "passengers"},
+			expected: expected{
+				result:      "Results for: weather",
+				noToolError: true,
+			},
 		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return "booked", nil
+		{
+			name: "missing required field",
+			mocks: []mockTool{
+				{
+					name:        "search",
+					description: "Search the web",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{"type": "string"},
+						},
+						"required": []any{"query"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "should not reach here", nil
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "search", "args": {}}`,
+			},
+			expected: expected{
+				errContains: "schema validation failed",
+				resultIsNil: true,
+			},
 		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
+		{
+			name: "wrong type",
+			mocks: []mockTool{
+				{
+					name:        "counter",
+					description: "Count things",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"count": map[string]any{"type": "integer"},
+						},
+						"required": []any{"count"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "should not reach here", nil
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "counter", "args": {"count": "not a number"}}`,
+			},
+			expected: expected{
+				errContains: "schema validation failed",
+				resultIsNil: true,
+			},
+		},
+		{
+			name: "no schema allows any args",
+			mocks: []mockTool{
+				{
+					name:        "flexible",
+					description: "A flexible tool",
+					schema:      nil,
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "success", nil
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "flexible", "args": {"anything": "works", "numbers": 123}}`,
+			},
+			expected: expected{
+				result:      "success",
+				noToolError: true,
+			},
+		},
+		{
+			name: "multiple properties valid",
+			mocks: []mockTool{
+				{
+					name:        "booking",
+					description: "Book a flight",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"origin":      map[string]any{"type": "string"},
+							"destination": map[string]any{"type": "string"},
+							"passengers":  map[string]any{"type": "integer"},
+						},
+						"required": []any{"origin", "destination", "passengers"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "booked", nil
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "booking", "args": {"origin": "NYC", "destination": "LAX", ` +
+					`"passengers": 2}}`,
+			},
+			expected: expected{
+				result:      "booked",
+				noToolError: true,
+			},
+		},
+		{
+			name: "multiple properties missing required",
+			mocks: []mockTool{
+				{
+					name:        "booking",
+					description: "Book a flight",
+					schema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"origin":      map[string]any{"type": "string"},
+							"destination": map[string]any{"type": "string"},
+							"passengers":  map[string]any{"type": "integer"},
+						},
+						"required": []any{"origin", "destination", "passengers"},
+					},
+					fn: func(ctx context.Context, args map[string]any) (string, error) {
+						return "booked", nil
+					},
+				},
+			},
+			input: input{
+				content: `{"tool": "booking", "args": {"origin": "NYC", "destination": "LAX"}}`,
+			},
+			expected: expected{
+				errContains: "schema validation failed",
+				resultIsNil: true,
+			},
+		},
+	}
 
-	t.Run("valid args", func(t *testing.T) {
-		content := `{"tool": "booking", "args": {"origin": "NYC", "destination": "LAX", ` +
-			`"passengers": 2}}`
-		result, err := tc.Execute(context.Background(), nil, content)
-		require.NoError(t, err)
-		assert.NoError(t, result.Errors[0])
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			for _, mock := range tt.mocks {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					mock.fn,
+					textFormatter,
+				)
+				tc.RegisterTool(tool)
+			}
 
-	t.Run("missing required field", func(t *testing.T) {
-		content := `{"tool": "booking", "args": {"origin": "NYC", "destination": "LAX"}}`
-		result, err := tc.Execute(context.Background(), nil, content)
-		require.NoError(t, err)
-		require.Error(t, result.Errors[0])
-	})
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			require.NoError(t, err)
+
+			if tt.expected.noToolError {
+				assert.NoError(t, result.Errors[0])
+				require.NotNil(t, result.Results[0])
+				assert.Equal(t, tt.expected.result, getTextContent(result.Results[0].Result))
+			} else {
+				require.Error(t, result.Errors[0])
+				assert.Contains(t, result.Errors[0].Error(), tt.expected.errContains)
+				if tt.expected.resultIsNil {
+					assert.Nil(t, result.Results[0])
+				}
+			}
+		})
+	}
+}
+
+func TestJSON_ParseSection_DateAsString(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		dateValue string
+		execErr   error
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "date preserved as string",
+			input: input{
+				content: `{"tool": "search_flights", "args": {"origin": "JFK", ` +
+					`"destination": "LAX", "date": "2026-01-20"}}`,
+			},
+			expected: expected{
+				dateValue: "2026-01-20",
+				execErr:   nil,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+
+			tool := gent.NewToolFunc(
+				"search_flights",
+				"Search flights",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"origin":      map[string]any{"type": "string"},
+						"destination": map[string]any{"type": "string"},
+						"date":        map[string]any{"type": "string"},
+					},
+					"required": []any{"origin", "destination", "date"},
+				},
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return fmt.Sprintf("searching for %s", args["date"]), nil
+				},
+				textFormatter,
+			)
+			tc.RegisterTool(tool)
+
+			result, err := tc.ParseSection(tt.input.content)
+			require.NoError(t, err)
+
+			calls := result.([]*gent.ToolCall)
+			require.Len(t, calls, 1)
+
+			dateVal := calls[0].Args["date"]
+			dateStr, ok := dateVal.(string)
+			require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
+			assert.Equal(t, tt.expected.dateValue, dateStr)
+
+			execResult, err := tc.Execute(context.Background(), nil, tt.input.content)
+			require.NoError(t, err)
+			assert.NoError(t, execResult.Errors[0])
+		})
+	}
 }
 
 func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
@@ -496,47 +821,6 @@ func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
 	}
 }
 
-func TestJSON_ParseSection_DateAsString(t *testing.T) {
-	tc := NewJSON()
-
-	tool := gent.NewToolFunc(
-		"search_flights",
-		"Search flights",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"origin":      map[string]any{"type": "string"},
-				"destination": map[string]any{"type": "string"},
-				"date":        map[string]any{"type": "string"},
-			},
-			"required": []any{"origin", "destination", "date"},
-		},
-		func(ctx context.Context, args map[string]any) (string, error) {
-			return fmt.Sprintf("searching for %s", args["date"]), nil
-		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
-
-	content := `{"tool": "search_flights", "args": {"origin": "JFK", ` +
-		`"destination": "LAX", "date": "2026-01-20"}}`
-
-	result, err := tc.ParseSection(content)
-	require.NoError(t, err)
-
-	calls := result.([]*gent.ToolCall)
-	require.Len(t, calls, 1)
-
-	dateVal := calls[0].Args["date"]
-	dateStr, ok := dateVal.(string)
-	require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
-	assert.Equal(t, "2026-01-20", dateStr)
-
-	execResult, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	assert.NoError(t, execResult.Errors[0])
-}
-
 // JSONTimeTypedInput is used to test automatic type conversion to time.Time
 type JSONTimeTypedInput struct {
 	Date      time.Time `json:"date"`
@@ -549,37 +833,62 @@ type JSONDurationTypedInput struct {
 }
 
 func TestJSON_Execute_TimeConversion(t *testing.T) {
-	tc := NewJSON()
+	type input struct {
+		content string
+	}
 
-	tool := gent.NewToolFunc(
-		"time_tool",
-		"Tool with time.Time input",
-		map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"date":      map[string]any{"type": "string"},
-				"timestamp": map[string]any{"type": "string"},
+	type expected struct {
+		output string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "time values converted correctly",
+			input: input{
+				content: `{"tool": "time_tool", "args": {"date": "2026-01-20", ` +
+					`"timestamp": "2026-01-20T10:30:00Z"}}`,
 			},
-			"required": []any{"date", "timestamp"},
+			expected: expected{
+				output: "2026-01-20|2026-01-20T10:30:00Z",
+			},
 		},
-		func(ctx context.Context, input JSONTimeTypedInput) (string, error) {
-			return input.Date.Format("2006-01-02") + "|" +
-				input.Timestamp.Format(time.RFC3339), nil
-		},
-		textFormatter,
-	)
-	tc.RegisterTool(tool)
+	}
 
-	content := `{"tool": "time_tool", "args": {"date": "2026-01-20", ` +
-		`"timestamp": "2026-01-20T10:30:00Z"}}`
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
 
-	result, err := tc.Execute(context.Background(), nil, content)
-	require.NoError(t, err)
-	require.NoError(t, result.Errors[0])
+			tool := gent.NewToolFunc(
+				"time_tool",
+				"Tool with time.Time input",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"date":      map[string]any{"type": "string"},
+						"timestamp": map[string]any{"type": "string"},
+					},
+					"required": []any{"date", "timestamp"},
+				},
+				func(ctx context.Context, input JSONTimeTypedInput) (string, error) {
+					return input.Date.Format("2006-01-02") + "|" +
+						input.Timestamp.Format(time.RFC3339), nil
+				},
+				textFormatter,
+			)
+			tc.RegisterTool(tool)
 
-	expected := "2026-01-20|2026-01-20T10:30:00Z"
-	output := getTextContent(result.Results[0].Result)
-	assert.Equal(t, expected, output)
+			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			require.NoError(t, err)
+			require.NoError(t, result.Errors[0])
+
+			output := getTextContent(result.Results[0].Result)
+			assert.Equal(t, tt.expected.output, output)
+		})
+	}
 }
 
 func TestJSON_Execute_DurationConversion(t *testing.T) {
@@ -654,291 +963,478 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 	}
 }
 
-func TestJSON_Prompt_SchemaWithDescriptions(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"search_flights",
-		"Search for available flights",
-		schema.Object(map[string]*schema.Property{
-			"origin":      schema.String("Origin airport code (IATA)"),
-			"destination": schema.String("Destination airport code (IATA)"),
-			"date":        schema.String("Departure date in YYYY-MM-DD format"),
-		}, "origin", "destination", "date"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+func TestJSON_Prompt_SchemaFeatures(t *testing.T) {
+	type input struct {
+		toolName        string
+		toolDescription string
+		schema          map[string]any
+	}
+
+	type expected struct {
+		prompt string
+	}
+
+	basePromptPrefix := `Call tools using JSON format:
+{"tool": "tool_name", "args": {...}}
+
+For multiple parallel calls, use an array:
+[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]
+
+Available tools:
+`
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "schema with descriptions",
+			input: input{
+				toolName:        "search_flights",
+				toolDescription: "Search for available flights",
+				schema: schema.Object(map[string]*schema.Property{
+					"origin":      schema.String("Origin airport code (IATA)"),
+					"destination": schema.String("Destination airport code (IATA)"),
+					"date":        schema.String("Departure date in YYYY-MM-DD format"),
+				}, "origin", "destination", "date"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- search_flights: Search for available flights
+  Parameters: {
+    "properties": {
+      "date": {
+        "description": "Departure date in YYYY-MM-DD format",
+        "type": "string"
+      },
+      "destination": {
+        "description": "Destination airport code (IATA)",
+        "type": "string"
+      },
+      "origin": {
+        "description": "Origin airport code (IATA)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "origin",
+      "destination",
+      "date"
+    ],
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "search_flights"),
-		"expected tool name 'search_flights' in prompt")
-	assert.True(t, strings.Contains(prompt, "Search for available flights"),
-		"expected tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "Origin airport code (IATA)"),
-		"expected 'origin' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "Destination airport code (IATA)"),
-		"expected 'destination' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "Departure date in YYYY-MM-DD format"),
-		"expected 'date' field description in prompt")
-	assert.True(t, strings.Contains(prompt, `"type": "string"`),
-		"expected type information in prompt")
-}
-
-func TestJSON_Prompt_SchemaWithRequiredFields(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"create_user",
-		"Create a new user",
-		schema.Object(map[string]*schema.Property{
-			"name":  schema.String("User's full name"),
-			"email": schema.String("User's email address"),
-			"phone": schema.String("User's phone number"),
-		}, "name", "email"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with required fields",
+			input: input{
+				toolName:        "create_user",
+				toolDescription: "Create a new user",
+				schema: schema.Object(map[string]*schema.Property{
+					"name":  schema.String("User's full name"),
+					"email": schema.String("User's email address"),
+					"phone": schema.String("User's phone number"),
+				}, "name", "email"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- create_user: Create a new user
+  Parameters: {
+    "properties": {
+      "email": {
+        "description": "User's email address",
+        "type": "string"
+      },
+      "name": {
+        "description": "User's full name",
+        "type": "string"
+      },
+      "phone": {
+        "description": "User's phone number",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "email"
+    ],
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, `"required"`), "expected 'required' section in prompt")
-	assert.True(t, strings.Contains(prompt, `"name"`), "expected 'name' in required list")
-	assert.True(t, strings.Contains(prompt, `"email"`), "expected 'email' in required list")
-}
-
-func TestJSON_Prompt_SchemaWithEnumValues(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"book_flight",
-		"Book a flight",
-		schema.Object(map[string]*schema.Property{
-			"class": schema.String("Travel class").Enum("economy", "business", "first"),
-		}),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with enum values",
+			input: input{
+				toolName:        "book_flight",
+				toolDescription: "Book a flight",
+				schema: schema.Object(map[string]*schema.Property{
+					"class": schema.String("Travel class").Enum("economy", "business", "first"),
+				}),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- book_flight: Book a flight
+  Parameters: {
+    "properties": {
+      "class": {
+        "description": "Travel class",
+        "enum": [
+          "economy",
+          "business",
+          "first"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, `"enum"`), "expected 'enum' section in prompt")
-	assert.True(t, strings.Contains(prompt, `"economy"`), "expected 'economy' in enum list")
-	assert.True(t, strings.Contains(prompt, `"business"`), "expected 'business' in enum list")
-	assert.True(t, strings.Contains(prompt, `"first"`), "expected 'first' in enum list")
-}
-
-func TestJSON_Prompt_SchemaWithMinMax(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"set_quantity",
-		"Set item quantity",
-		schema.Object(map[string]*schema.Property{
-			"quantity": schema.Integer("Number of items").Min(1).Max(100),
-		}, "quantity"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with min max",
+			input: input{
+				toolName:        "set_quantity",
+				toolDescription: "Set item quantity",
+				schema: schema.Object(map[string]*schema.Property{
+					"quantity": schema.Integer("Number of items").Min(1).Max(100),
+				}, "quantity"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- set_quantity: Set item quantity
+  Parameters: {
+    "properties": {
+      "quantity": {
+        "description": "Number of items",
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "quantity"
+    ],
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, `"minimum": 1`),
-		"expected '\"minimum\": 1' in prompt")
-	assert.True(t, strings.Contains(prompt, `"maximum": 100`),
-		"expected '\"maximum\": 100' in prompt")
-	assert.True(t, strings.Contains(prompt, `"type": "integer"`),
-		"expected '\"type\": \"integer\"' in prompt")
-}
-
-func TestJSON_Prompt_SchemaWithDefaultValues(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"search",
-		"Search for items",
-		schema.Object(map[string]*schema.Property{
-			"query": schema.String("Search query"),
-			"limit": schema.Integer("Maximum results").Default(10),
-		}, "query"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with default values",
+			input: input{
+				toolName:        "search",
+				toolDescription: "Search for items",
+				schema: schema.Object(map[string]*schema.Property{
+					"query": schema.String("Search query"),
+					"limit": schema.Integer("Maximum results").Default(10),
+				}, "query"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- search: Search for items
+  Parameters: {
+    "properties": {
+      "limit": {
+        "default": 10,
+        "description": "Maximum results",
+        "type": "integer"
+      },
+      "query": {
+        "description": "Search query",
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, `"default": 10`),
-		"expected '\"default\": 10' in prompt")
-}
-
-func TestJSON_Prompt_SchemaWithMultipleTypes(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"complex_tool",
-		"A tool with multiple types",
-		schema.Object(map[string]*schema.Property{
-			"name":   schema.String("Name of the item"),
-			"count":  schema.Integer("Number of items"),
-			"price":  schema.Number("Price in dollars"),
-			"active": schema.Boolean("Whether the item is active"),
-			"tags":   schema.Array("List of tags", map[string]any{"type": "string"}),
-		}, "name"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+		{
+			name: "schema with multiple types",
+			input: input{
+				toolName:        "complex_tool",
+				toolDescription: "A tool with multiple types",
+				schema: schema.Object(map[string]*schema.Property{
+					"name":   schema.String("Name of the item"),
+					"count":  schema.Integer("Number of items"),
+					"price":  schema.Number("Price in dollars"),
+					"active": schema.Boolean("Whether the item is active"),
+					"tags":   schema.Array("List of tags", map[string]any{"type": "string"}),
+				}, "name"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- complex_tool: A tool with multiple types
+  Parameters: {
+    "properties": {
+      "active": {
+        "description": "Whether the item is active",
+        "type": "boolean"
+      },
+      "count": {
+        "description": "Number of items",
+        "type": "integer"
+      },
+      "name": {
+        "description": "Name of the item",
+        "type": "string"
+      },
+      "price": {
+        "description": "Price in dollars",
+        "type": "number"
+      },
+      "tags": {
+        "description": "List of tags",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
+		{
+			name: "tool with no schema",
+			input: input{
+				toolName:        "simple_tool",
+				toolDescription: "A simple tool without schema",
+				schema:          nil,
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- simple_tool: A simple tool without schema
+`,
+			},
+		},
+		{
+			name: "schema with string constraints",
+			input: input{
+				toolName:        "validate_input",
+				toolDescription: "Validate user input",
+				schema: schema.Object(map[string]*schema.Property{
+					"username": schema.String("Username").MinLength(3).MaxLength(20),
+					"email":    schema.String("Email address").Format("email"),
+					"code":     schema.String("Verification code").Pattern(`^[A-Z]{2}[0-9]{4}$`),
+				}, "username", "email"),
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- validate_input: Validate user input
+  Parameters: {
+    "properties": {
+      "code": {
+        "description": "Verification code",
+        "pattern": "^[A-Z]{2}[0-9]{4}$",
+        "type": "string"
+      },
+      "email": {
+        "description": "Email address",
+        "format": "email",
+        "type": "string"
+      },
+      "username": {
+        "description": "Username",
+        "maxLength": 20,
+        "minLength": 3,
+        "type": "string"
+      }
+    },
+    "required": [
+      "username",
+      "email"
+    ],
+    "type": "object"
+  }
+`,
+			},
+		},
+	}
 
-	prompt := tc.Prompt()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tool := gent.NewToolFunc(
+				tt.input.toolName,
+				tt.input.toolDescription,
+				tt.input.schema,
+				func(ctx context.Context, input map[string]any) (string, error) {
+					return "ok", nil
+				},
+				nil,
+			)
+			tc.RegisterTool(tool)
 
-	assert.True(t, strings.Contains(prompt, `"type": "string"`),
-		"expected '\"type\": \"string\"' in prompt")
-	assert.True(t, strings.Contains(prompt, `"type": "integer"`),
-		"expected '\"type\": \"integer\"' in prompt")
-	assert.True(t, strings.Contains(prompt, `"type": "number"`),
-		"expected '\"type\": \"number\"' in prompt")
-	assert.True(t, strings.Contains(prompt, `"type": "boolean"`),
-		"expected '\"type\": \"boolean\"' in prompt")
-	assert.True(t, strings.Contains(prompt, `"type": "array"`),
-		"expected '\"type\": \"array\"' in prompt")
-	assert.True(t, strings.Contains(prompt, "Name of the item"),
-		"expected string description in prompt")
-	assert.True(t, strings.Contains(prompt, "Number of items"),
-		"expected integer description in prompt")
-	assert.True(t, strings.Contains(prompt, "Price in dollars"),
-		"expected number description in prompt")
-	assert.True(t, strings.Contains(prompt, "Whether the item is active"),
-		"expected boolean description in prompt")
-	assert.True(t, strings.Contains(prompt, "List of tags"),
-		"expected array description in prompt")
+			prompt := tc.Prompt()
+
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
 func TestJSON_Prompt_MultipleTools(t *testing.T) {
-	tc := NewJSON()
+	type mockTool struct {
+		name        string
+		description string
+		schema      map[string]any
+	}
 
-	tool1 := gent.NewToolFunc(
-		"search",
-		"Search for information",
-		schema.Object(map[string]*schema.Property{
-			"query": schema.String("Search query"),
-		}, "query"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+	type input struct {
+		tools []mockTool
+	}
+
+	type expected struct {
+		prompt string
+	}
+
+	basePromptPrefix := `Call tools using JSON format:
+{"tool": "tool_name", "args": {...}}
+
+For multiple parallel calls, use an array:
+[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]
+
+Available tools:
+`
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "two tools",
+			input: input{
+				tools: []mockTool{
+					{
+						name:        "search",
+						description: "Search for information",
+						schema: schema.Object(map[string]*schema.Property{
+							"query": schema.String("Search query"),
+						}, "query"),
+					},
+					{
+						name:        "calculate",
+						description: "Perform calculations",
+						schema: schema.Object(map[string]*schema.Property{
+							"expression": schema.String("Mathematical expression"),
+						}, "expression"),
+					},
+				},
+			},
+			expected: expected{
+				prompt: basePromptPrefix + `
+- search: Search for information
+  Parameters: {
+    "properties": {
+      "query": {
+        "description": "Search query",
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  }
+
+- calculate: Perform calculations
+  Parameters: {
+    "properties": {
+      "expression": {
+        "description": "Mathematical expression",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expression"
+    ],
+    "type": "object"
+  }
+`,
+			},
 		},
-		nil,
-	)
+	}
 
-	tool2 := gent.NewToolFunc(
-		"calculate",
-		"Perform calculations",
-		schema.Object(map[string]*schema.Property{
-			"expression": schema.String("Mathematical expression"),
-		}, "expression"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
-		},
-		nil,
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			for _, mock := range tt.input.tools {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					func(ctx context.Context, input map[string]any) (string, error) {
+						return "ok", nil
+					},
+					nil,
+				)
+				tc.RegisterTool(tool)
+			}
 
-	tc.RegisterTool(tool1)
-	tc.RegisterTool(tool2)
+			prompt := tc.Prompt()
 
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "- search:"), "expected 'search' tool in prompt")
-	assert.True(t, strings.Contains(prompt, "- calculate:"), "expected 'calculate' tool in prompt")
-	assert.True(t, strings.Contains(prompt, "Search for information"),
-		"expected 'search' tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "Perform calculations"),
-		"expected 'calculate' tool description in prompt")
-	assert.True(t, strings.Contains(prompt, "Search query"),
-		"expected 'query' field description in prompt")
-	assert.True(t, strings.Contains(prompt, "Mathematical expression"),
-		"expected 'expression' field description in prompt")
-}
-
-func TestJSON_Prompt_ToolWithNoSchema(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"simple_tool",
-		"A simple tool without schema",
-		nil,
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
-		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, "simple_tool"),
-		"expected tool name 'simple_tool' in prompt")
-	assert.True(t, strings.Contains(prompt, "A simple tool without schema"),
-		"expected tool description in prompt")
-}
-
-func TestJSON_Prompt_SchemaWithStringConstraints(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"validate_input",
-		"Validate user input",
-		schema.Object(map[string]*schema.Property{
-			"username": schema.String("Username").MinLength(3).MaxLength(20),
-			"email":    schema.String("Email address").Format("email"),
-			"code":     schema.String("Verification code").Pattern(`^[A-Z]{2}[0-9]{4}$`),
-		}, "username", "email"),
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
-		},
-		nil,
-	)
-	tc.RegisterTool(tool)
-
-	prompt := tc.Prompt()
-
-	assert.True(t, strings.Contains(prompt, `"minLength": 3`),
-		"expected '\"minLength\": 3' in prompt")
-	assert.True(t, strings.Contains(prompt, `"maxLength": 20`),
-		"expected '\"maxLength\": 20' in prompt")
-	assert.True(t, strings.Contains(prompt, `"format": "email"`),
-		"expected '\"format\": \"email\"' in prompt")
-	assert.True(t, strings.Contains(prompt, `"pattern"`), "expected 'pattern' in prompt")
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
 func TestJSON_Prompt_FormatInstructions(t *testing.T) {
-	tc := NewJSON()
-	tool := gent.NewToolFunc(
-		"test",
-		"Test tool",
-		nil,
-		func(ctx context.Context, input map[string]any) (string, error) {
-			return "ok", nil
+	type expected struct {
+		prompt string
+	}
+
+	tests := []struct {
+		name     string
+		expected expected
+	}{
+		{
+			name: "format instructions present",
+			expected: expected{
+				prompt: `Call tools using JSON format:
+{"tool": "tool_name", "args": {...}}
+
+For multiple parallel calls, use an array:
+[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]
+
+Available tools:
+
+- test: Test tool
+`,
+			},
 		},
-		nil,
-	)
-	tc.RegisterTool(tool)
+	}
 
-	prompt := tc.Prompt()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tool := gent.NewToolFunc(
+				"test",
+				"Test tool",
+				nil,
+				func(ctx context.Context, input map[string]any) (string, error) {
+					return "ok", nil
+				},
+				nil,
+			)
+			tc.RegisterTool(tool)
 
-	assert.True(t, strings.Contains(prompt, `{"tool": "tool_name", "args": {...}}`),
-		"expected single tool format instruction")
-	assert.True(t, strings.Contains(prompt,
-		`[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]`),
-		"expected array format instruction for parallel calls")
-	assert.True(t, strings.Contains(prompt, "Available tools:"),
-		"expected 'Available tools:' header")
+			prompt := tc.Prompt()
+
+			assert.Equal(t, tt.expected.prompt, prompt)
+		})
+	}
 }
 
 // textFormatter converts a string to []gent.ContentPart.
