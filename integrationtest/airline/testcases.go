@@ -28,6 +28,9 @@ type AirlineTestConfig struct {
 	ShowIterationHistory bool
 	// ShowTraceEvents prints all trace events at the end.
 	ShowTraceEvents bool
+	// LogWriter is an optional writer for full debug logging (like test mode).
+	// When set, logs are written here in addition to normal output.
+	LogWriter io.Writer
 }
 
 // TestConfig returns a config suitable for go test.
@@ -176,6 +179,12 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 		// Test mode: use logger hook for full debugging output
 		loggerHook := loggers.NewLoggerHookWithWriter(w)
 		hookRegistry.Register(loggerHook)
+	}
+
+	// If LogWriter is set, also register a logger hook for file logging
+	if config.LogWriter != nil {
+		fileLoggerHook := loggers.NewLoggerHookWithWriter(config.LogWriter)
+		hookRegistry.Register(fileLoggerHook)
 	}
 
 	// Create executor
@@ -498,6 +507,12 @@ Always be polite and professional. When rescheduling, make sure to:
 	var streamWg sync.WaitGroup
 	streamingHook := newStreamingOutputHook(s.Writer)
 	hookRegistry.Register(streamingHook)
+
+	// If LogWriter is set, also register a logger hook for file logging
+	if s.Config.LogWriter != nil {
+		fileLoggerHook := loggers.NewLoggerHookWithWriter(s.Config.LogWriter)
+		hookRegistry.Register(fileLoggerHook)
+	}
 
 	// Subscribe to LLM response stream
 	chunks, unsubscribe := execCtx.SubscribeToTopic("llm-response")

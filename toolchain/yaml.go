@@ -71,6 +71,13 @@ func (c *YAML) Prompt() string {
 	sb.WriteString("- tool: tool2\n")
 	sb.WriteString("  args:\n")
 	sb.WriteString("    param: value\n")
+	sb.WriteString("\nFor long or multi-line strings, use YAML block scalar style:\n")
+	sb.WriteString("- tool: send_message\n")
+	sb.WriteString("  args:\n")
+	sb.WriteString("    message: |\n")
+	sb.WriteString("      This is a long message that spans\n")
+	sb.WriteString("      multiple lines. Each line is preserved\n")
+	sb.WriteString("      exactly as written.\n")
 	sb.WriteString("\nAvailable tools:\n")
 
 	for _, tool := range c.tools {

@@ -23,3 +23,6 @@ Thumbs.db
 # Test builds
 /clistreamtest
 /cliairlinetest
+
+# Log files
+.logs/

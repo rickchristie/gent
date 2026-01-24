@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -42,6 +43,18 @@ func main() {
 
 func run() error {
 	testCases := airline.GetAirlineTestCases()
+
+	// Create log directory and file
+	logDir := ".logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	logFile, err := os.Create(filepath.Join(logDir, "cli_airline.log"))
+	if err != nil {
+		return fmt.Errorf("failed to create log file: %w", err)
+	}
+	defer logFile.Close()
 
 	// Create readline instance for menu
 	rl, err := readline.New(colorCyan + "Enter test number (or 'q' to quit): " + colorReset)
@@ -107,6 +120,7 @@ func run() error {
 		}()
 
 		config := airline.InteractiveConfig()
+		config.LogWriter = logFile
 		if num == len(testCases)+1 {
 			if err := runInteractiveChat(ctx, config); err != nil {
 				fmt.Fprintf(os.Stderr, "%sError: %v%s\n", colorRed, err, colorReset)
