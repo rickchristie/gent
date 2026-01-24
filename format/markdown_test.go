@@ -19,41 +19,9 @@ func (m *mockSection) ParseSection(content string) (any, error) {
 	return content, nil
 }
 
-func TestMarkdown_Describe(t *testing.T) {
-	format := NewMarkdown()
-
-	sections := []gent.TextOutputSection{
-		&mockSection{name: "Thinking", prompt: "Write your reasoning here."},
-		&mockSection{name: "Action", prompt: "Write your tool call here."},
-	}
-
-	result := format.Describe(sections)
-
-	if !contains(result, "# Thinking") {
-		t.Error("expected Thinking header in describe output")
-	}
-	if !contains(result, "# Action") {
-		t.Error("expected Action header in describe output")
-	}
-	if !contains(result, "Write your reasoning here.") {
-		t.Error("expected Thinking prompt in describe output")
-	}
-	if !contains(result, "Write your tool call here.") {
-		t.Error("expected Action prompt in describe output")
-	}
-}
-
-func TestMarkdown_Describe_Empty(t *testing.T) {
-	format := NewMarkdown()
-	result := format.Describe(nil)
-	if result != "" {
-		t.Errorf("expected empty string for nil sections, got: %s", result)
-	}
-}
-
 func TestMarkdown_Parse_SingleSection(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Answer", prompt: ""},
 	})
 
@@ -76,7 +44,7 @@ The weather is sunny today.`
 
 func TestMarkdown_Parse_MultipleSections(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Thinking", prompt: ""},
 		&mockSection{name: "Action", prompt: ""},
 		&mockSection{name: "Answer", prompt: ""},
@@ -116,7 +84,7 @@ The weather is sunny.`
 
 func TestMarkdown_Parse_MultipleSameSection(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Action", prompt: ""},
 	})
 
@@ -146,7 +114,7 @@ Second action content.`
 
 func TestMarkdown_Parse_CaseInsensitive(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Thinking", prompt: ""},
 	})
 
@@ -165,7 +133,7 @@ Case insensitive content.`
 
 func TestMarkdown_Parse_ContentBeforeFirstHeader(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Answer", prompt: ""},
 	})
 
@@ -190,7 +158,7 @@ The actual answer.`
 
 func TestMarkdown_Parse_EmptySection(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Thinking", prompt: ""},
 		&mockSection{name: "Answer", prompt: ""},
 	})
@@ -216,7 +184,7 @@ The answer.`
 
 func TestMarkdown_Parse_WhitespaceTrimming(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Answer", prompt: ""},
 	})
 
@@ -238,7 +206,7 @@ func TestMarkdown_Parse_WhitespaceTrimming(t *testing.T) {
 
 func TestMarkdown_Parse_NoRecognizedSections(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Answer", prompt: ""},
 	})
 
@@ -253,7 +221,7 @@ Some content.`
 
 func TestMarkdown_Parse_NoHeaders(t *testing.T) {
 	format := NewMarkdown()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "Answer", prompt: ""},
 	})
 

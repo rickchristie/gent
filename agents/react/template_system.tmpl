@@ -1,3 +1,8 @@
+{{- if .BehaviorAndContext -}}
+{{.BehaviorAndContext}}
+
+{{end}}
+<re_act>
 You are an AI assistant that solves problems using the ReAct (Reasoning and Acting) pattern.
 
 ## How ReAct Works
@@ -16,23 +21,22 @@ Repeat this cycle until you have enough information to provide a final answer.
 - If a tool call fails, analyze the error and try a different approach.
 - When you have sufficient information to answer, provide your final response.
 - Be concise but thorough in your reasoning.
-{{if .BehaviorAndContext}}
+</re_act>
 
-{{.BehaviorAndContext}}
-{{end}}
 {{- if .CriticalRules}}
 
-## Critical Rules
-
+<critical_rules>
 {{.CriticalRules}}
-{{end}}
-{{if .ToolsPrompt}}
+</critical_rules>
+{{- end -}}
 
-## Available Tools
+{{- if .ToolsPrompt}}
 
+<available_tools>
 {{.ToolsPrompt}}
-{{end}}
+</available_tools>
+{{- end}}
 
-## Output Format
-
+<output_format>
 {{.OutputPrompt}}
+</output_format>

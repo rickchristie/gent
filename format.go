@@ -7,14 +7,10 @@ import "errors"
 //
 // See: [TextOutputSection] for section definitions.
 type TextOutputFormat interface {
-	// Describe generates the prompt section explaining the output format.
-	// It combines section prompts with format-specific structure instructions.
-	Describe(sections []TextOutputSection) string
-
-	// DescribeStructure generates the prompt explaining only the format structure.
-	// Unlike Describe, it does not include detailed section prompts - just the tag
-	// structure and brief descriptions. Use this when section prompts (like tool
-	// descriptions) should be placed elsewhere in the system prompt.
+	// DescribeStructure generates the prompt explaining the output format structure.
+	// It shows the tag/header format with brief placeholders, without including
+	// detailed section prompts. Use this when section prompts (like tool descriptions)
+	// should be placed elsewhere in the system prompt.
 	DescribeStructure(sections []TextOutputSection) string
 
 	// Parse extracts raw content for each section from the LLM output.

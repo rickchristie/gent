@@ -42,29 +42,6 @@ func (f *XML) WithStrict(strict bool) *XML {
 	return f
 }
 
-// Describe generates the prompt section explaining the output format.
-func (f *XML) Describe(sections []gent.TextOutputSection) string {
-	if len(sections) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString("Format your response using XML-style tags for each section:\n\n")
-
-	for _, section := range sections {
-		name := section.Name()
-		f.knownSections[strings.ToLower(name)] = true
-		fmt.Fprintf(&sb, "<%s>\n", name)
-		if prompt := section.Prompt(); prompt != "" {
-			sb.WriteString(prompt)
-			sb.WriteString("\n")
-		}
-		fmt.Fprintf(&sb, "</%s>\n", name)
-	}
-
-	return sb.String()
-}
-
 // DescribeStructure generates the prompt explaining only the format structure.
 // It shows the tag format with brief placeholders, without including detailed section prompts.
 func (f *XML) DescribeStructure(sections []gent.TextOutputSection) string {

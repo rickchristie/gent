@@ -7,44 +7,9 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-func TestXML_Describe(t *testing.T) {
-	format := NewXML()
-
-	sections := []gent.TextOutputSection{
-		&mockSection{name: "thinking", prompt: "Write your reasoning here."},
-		&mockSection{name: "action", prompt: "Write your tool call here."},
-	}
-
-	result := format.Describe(sections)
-
-	if !contains(result, "<thinking>") {
-		t.Error("expected <thinking> tag in describe output")
-	}
-	if !contains(result, "</thinking>") {
-		t.Error("expected </thinking> tag in describe output")
-	}
-	if !contains(result, "<action>") {
-		t.Error("expected <action> tag in describe output")
-	}
-	if !contains(result, "</action>") {
-		t.Error("expected </action> tag in describe output")
-	}
-	if !contains(result, "Write your reasoning here.") {
-		t.Error("expected thinking prompt in describe output")
-	}
-}
-
-func TestXML_Describe_Empty(t *testing.T) {
-	format := NewXML()
-	result := format.Describe(nil)
-	if result != "" {
-		t.Errorf("expected empty string for nil sections, got: %s", result)
-	}
-}
-
 func TestXML_Parse_SingleSection(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "answer", prompt: ""},
 	})
 
@@ -68,7 +33,7 @@ The weather is sunny today.
 
 func TestXML_Parse_MultipleSections(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "thinking", prompt: ""},
 		&mockSection{name: "action", prompt: ""},
 		&mockSection{name: "answer", prompt: ""},
@@ -111,7 +76,7 @@ The weather is sunny.
 
 func TestXML_Parse_MultipleSameSection(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "action", prompt: ""},
 	})
 
@@ -143,7 +108,7 @@ Second action content.
 
 func TestXML_Parse_CaseInsensitive(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "thinking", prompt: ""},
 	})
 
@@ -167,7 +132,7 @@ Case insensitive content.
 
 func TestXML_Parse_ContentOutsideTags(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "answer", prompt: ""},
 	})
 
@@ -195,7 +160,7 @@ Some content after tags.`
 
 func TestXML_Parse_EmptySection(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "thinking", prompt: ""},
 		&mockSection{name: "answer", prompt: ""},
 	})
@@ -219,7 +184,7 @@ func TestXML_Parse_EmptySection(t *testing.T) {
 
 func TestXML_Parse_SameLineTag(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "answer", prompt: ""},
 	})
 
@@ -237,7 +202,7 @@ func TestXML_Parse_SameLineTag(t *testing.T) {
 
 func TestXML_Parse_WhitespaceTrimming(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "answer", prompt: ""},
 	})
 
@@ -259,7 +224,7 @@ func TestXML_Parse_WhitespaceTrimming(t *testing.T) {
 
 func TestXML_Parse_NoRecognizedTags(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "answer", prompt: ""},
 	})
 
@@ -273,7 +238,7 @@ func TestXML_Parse_NoRecognizedTags(t *testing.T) {
 
 func TestXML_Parse_NoTags(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "answer", prompt: ""},
 	})
 
@@ -287,7 +252,7 @@ func TestXML_Parse_NoTags(t *testing.T) {
 
 func TestXML_Parse_NestedContent(t *testing.T) {
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "code", prompt: ""},
 	})
 
@@ -316,7 +281,7 @@ func TestXML_Parse_LLMWritesObservationSection(t *testing.T) {
 	// outside of tags before the final answer. This tests that each section parses
 	// correctly without capturing content from other sections.
 	format := NewXML()
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "thinking", prompt: ""},
 		&mockSection{name: "action", prompt: ""},
 		&mockSection{name: "answer", prompt: ""},
@@ -419,7 +384,7 @@ func TestXML_Parse_StrictMode_ReturnsErrorOnAmbiguity(t *testing.T) {
 	// In strict mode, if a section's content contains another section's tags,
 	// Parse should return an error.
 	format := NewXML().WithStrict(true)
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "thinking", prompt: ""},
 		&mockSection{name: "answer", prompt: ""},
 	})
@@ -446,7 +411,7 @@ func TestXML_Parse_NonStrictMode_HandlesAmbiguity(t *testing.T) {
 	// In non-strict mode (default), Parse should still work by finding the LAST
 	// opening tag before each closing tag.
 	format := NewXML() // strict=false by default
-	format.Describe([]gent.TextOutputSection{
+	format.DescribeStructure([]gent.TextOutputSection{
 		&mockSection{name: "thinking", prompt: ""},
 		&mockSection{name: "answer", prompt: ""},
 	})

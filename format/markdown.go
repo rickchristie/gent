@@ -28,8 +28,9 @@ func NewMarkdown() *Markdown {
 	}
 }
 
-// Describe generates the prompt section explaining the output format.
-func (f *Markdown) Describe(sections []gent.TextOutputSection) string {
+// DescribeStructure generates the prompt explaining only the format structure.
+// It shows the header format with brief placeholders, without including detailed section prompts.
+func (f *Markdown) DescribeStructure(sections []gent.TextOutputSection) string {
 	if len(sections) == 0 {
 		return ""
 	}
@@ -38,13 +39,10 @@ func (f *Markdown) Describe(sections []gent.TextOutputSection) string {
 	sb.WriteString("Format your response using markdown headers for each section:\n\n")
 
 	for _, section := range sections {
-		f.knownSections[strings.ToLower(section.Name())] = true
-		fmt.Fprintf(&sb, "# %s\n", section.Name())
-		if prompt := section.Prompt(); prompt != "" {
-			sb.WriteString(prompt)
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
+		name := section.Name()
+		f.knownSections[strings.ToLower(name)] = true
+		fmt.Fprintf(&sb, "# %s\n", name)
+		fmt.Fprintf(&sb, "... %s content here ...\n\n", name)
 	}
 
 	return sb.String()
