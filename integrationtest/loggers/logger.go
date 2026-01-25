@@ -60,7 +60,7 @@ func (h *LoggerHook) OnBeforeExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.BeforeExecutionEvent,
-) error {
+) {
 	h.logEvent("BeforeExecution")
 	h.log("================================================================================")
 	h.log("EXECUTION STARTED")
@@ -81,7 +81,6 @@ func (h *LoggerHook) OnBeforeExecution(
 			}
 		}
 	}
-	return nil
 }
 
 // OnAfterExecution logs execution completion with final stats.
@@ -89,7 +88,7 @@ func (h *LoggerHook) OnAfterExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.AfterExecutionEvent,
-) error {
+) {
 	h.logEvent("AfterExecution")
 	h.log("================================================================================")
 	h.log("EXECUTION COMPLETED")
@@ -117,8 +116,6 @@ func (h *LoggerHook) OnAfterExecution(
 		"gauges":              stats.Gauges(),
 	}
 	h.logYAML(statsData)
-
-	return nil
 }
 
 // OnBeforeIteration logs iteration start.
@@ -126,12 +123,11 @@ func (h *LoggerHook) OnBeforeIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.BeforeIterationEvent,
-) error {
+) {
 	h.logEvent(fmt.Sprintf("BeforeIteration %d", event.Iteration))
 	h.log("--------------------------------------------------------------------------------")
 	h.log("ITERATION %d START", event.Iteration)
 	h.log("--------------------------------------------------------------------------------")
-	return nil
 }
 
 // OnAfterIteration logs iteration end with the AgentLoopResult.
@@ -139,7 +135,7 @@ func (h *LoggerHook) OnAfterIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.AfterIterationEvent,
-) error {
+) {
 	h.logEvent(fmt.Sprintf("AfterIteration %d", event.Iteration))
 	h.log("--------------------------------------------------------------------------------")
 	h.log("ITERATION %d END", event.Iteration)
@@ -168,8 +164,6 @@ func (h *LoggerHook) OnAfterIteration(
 		}
 	}
 	h.logYAML(resultData)
-
-	return nil
 }
 
 // OnError logs errors that occur during execution.
@@ -254,11 +248,10 @@ func (h *LoggerHook) OnBeforeToolCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
-) error {
+) {
 	h.logEvent(fmt.Sprintf("BeforeToolCall: %s", event.ToolName))
 	h.log("Args:")
 	h.logYAML(event.Args)
-	return nil
 }
 
 // OnAfterToolCall logs the tool call result after execution.

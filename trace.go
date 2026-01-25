@@ -21,9 +21,6 @@ const (
 	// TerminationContextCanceled means the context was canceled.
 	TerminationContextCanceled TerminationReason = "context_canceled"
 
-	// TerminationHookAbort means a hook returned an error.
-	TerminationHookAbort TerminationReason = "hook_abort"
-
 	// TerminationLimitExceeded means a configured limit was exceeded.
 	// Inspect ExecutionResult.ExceededLimit for details about which limit was hit.
 	TerminationLimitExceeded TerminationReason = "limit_exceeded"

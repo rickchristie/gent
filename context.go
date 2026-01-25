@@ -15,11 +15,7 @@ type HookFirer interface {
 	FireAfterModelCall(ctx context.Context, execCtx *ExecutionContext, event AfterModelCallEvent)
 
 	// Tool call hooks
-	FireBeforeToolCall(
-		ctx context.Context,
-		execCtx *ExecutionContext,
-		event *BeforeToolCallEvent,
-	) error
+	FireBeforeToolCall(ctx context.Context, execCtx *ExecutionContext, event *BeforeToolCallEvent)
 	FireAfterToolCall(ctx context.Context, execCtx *ExecutionContext, event AfterToolCallEvent)
 }
 
@@ -306,19 +302,17 @@ func (ctx *ExecutionContext) FireAfterModelCall(
 }
 
 // FireBeforeToolCall fires the BeforeToolCall hook if a hook firer is set.
-// Returns an error if a hook aborts the tool call.
 func (ctx *ExecutionContext) FireBeforeToolCall(
 	goCtx context.Context,
 	event *BeforeToolCallEvent,
-) error {
+) {
 	ctx.mu.RLock()
 	firer := ctx.hookFirer
 	ctx.mu.RUnlock()
 
 	if firer != nil {
-		return firer.FireBeforeToolCall(goCtx, ctx, event)
+		firer.FireBeforeToolCall(goCtx, ctx, event)
 	}
-	return nil
 }
 
 // FireAfterToolCall fires the AfterToolCall hook if a hook firer is set.

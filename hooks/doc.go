@@ -1,8 +1,15 @@
 // Package hooks provides a registry for managing execution lifecycle hooks.
 //
-// Hooks allow you to observe and intercept events during agent execution.
+// Hooks allow you to observe events during agent execution.
 // Each hook interface corresponds to a specific event type - implement only
 // the interfaces you need.
+//
+// # Panic Handling
+//
+// If a hook panics, the panic will propagate and stop execution. Hooks are
+// responsible for implementing proper error recovery if they need to handle
+// errors gracefully. Use defer/recover in your hook implementations if you
+// need to prevent panics from stopping execution.
 //
 // # Hook Interfaces
 //

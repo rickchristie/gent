@@ -19,7 +19,7 @@ import (
 //	type MyHook struct{}
 //	func (h *MyHook) OnBeforeExecution(
 //	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.BeforeExecutionEvent,
-//	) error {
+//	) {
 //	    data := execCtx.Data().(MyLoopData)
 //	    ...
 //	}
@@ -48,75 +48,58 @@ func (r *Registry) Register(hook any) *Registry {
 
 // FireBeforeExecution dispatches a BeforeExecutionEvent to all registered
 // BeforeExecutionHook implementations.
-// Returns the first error encountered, or nil if all hooks succeed.
 func (r *Registry) FireBeforeExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.BeforeExecutionEvent,
-) error {
+) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeExecutionHook); ok {
-			if err := hook.OnBeforeExecution(ctx, execCtx, event); err != nil {
-				return err
-			}
+			hook.OnBeforeExecution(ctx, execCtx, event)
 		}
 	}
-	return nil
 }
 
 // FireAfterExecution dispatches an AfterExecutionEvent to all registered
 // AfterExecutionHook implementations.
-// All hooks are called even if some return errors. Returns the first error encountered.
 func (r *Registry) FireAfterExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.AfterExecutionEvent,
-) error {
-	var firstErr error
+) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterExecutionHook); ok {
-			if err := hook.OnAfterExecution(ctx, execCtx, event); err != nil && firstErr == nil {
-				firstErr = err
-			}
+			hook.OnAfterExecution(ctx, execCtx, event)
 		}
 	}
-	return firstErr
 }
 
 // FireBeforeIteration dispatches a BeforeIterationEvent to all registered
 // BeforeIterationHook implementations.
-// Returns the first error encountered, or nil if all hooks succeed.
 func (r *Registry) FireBeforeIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.BeforeIterationEvent,
-) error {
+) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeIterationHook); ok {
-			if err := hook.OnBeforeIteration(ctx, execCtx, event); err != nil {
-				return err
-			}
+			hook.OnBeforeIteration(ctx, execCtx, event)
 		}
 	}
-	return nil
 }
 
 // FireAfterIteration dispatches an AfterIterationEvent to all registered
 // AfterIterationHook implementations.
-// Returns the first error encountered, or nil if all hooks succeed.
 func (r *Registry) FireAfterIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event gent.AfterIterationEvent,
-) error {
+) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterIterationHook); ok {
-			if err := hook.OnAfterIteration(ctx, execCtx, event); err != nil {
-				return err
-			}
+			hook.OnAfterIteration(ctx, execCtx, event)
 		}
 	}
-	return nil
 }
 
 // FireError dispatches an ErrorEvent to all registered ErrorHook implementations.
@@ -161,21 +144,17 @@ func (r *Registry) FireAfterModelCall(
 
 // FireBeforeToolCall dispatches a BeforeToolCallEvent to all registered
 // BeforeToolCallHook implementations.
-// Returns the first error encountered, which should abort the tool call.
 // Hooks can modify event.Args to change the tool input.
 func (r *Registry) FireBeforeToolCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
-) error {
+) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeToolCallHook); ok {
-			if err := hook.OnBeforeToolCall(ctx, execCtx, event); err != nil {
-				return err
-			}
+			hook.OnBeforeToolCall(ctx, execCtx, event)
 		}
 	}
-	return nil
 }
 
 // FireAfterToolCall dispatches an AfterToolCallEvent to all registered

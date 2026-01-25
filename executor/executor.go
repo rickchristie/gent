@@ -109,27 +109,19 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 		execCtx.SetHookFirer(e.hooks)
 	}
 
-	// Ensure streams are closed and AfterExecution is always called if BeforeExecution succeeded
+	// Ensure streams are closed and AfterExecution is always called if BeforeExecution was called
 	beforeExecutionCalled := false
 	defer func() {
 		// Always close streams when execution ends
 		execCtx.CloseStreams()
 
 		if beforeExecutionCalled && e.hooks != nil {
-			// AfterExecution errors are logged but don't change the result
 			event := gent.AfterExecutionEvent{
 				TerminationReason: execCtx.TerminationReason(),
 				Error:             execCtx.Error(),
 			}
 			ctx := execCtx.Context()
-			if hookErr := e.hooks.FireAfterExecution(ctx, execCtx, event); hookErr != nil {
-				// The AfterExecution error doesn't override existing errors
-				// but should be available for logging
-				e.hooks.FireError(ctx, execCtx, gent.ErrorEvent{
-					Iteration: execCtx.Iteration(),
-					Err:       fmt.Errorf("AfterExecution hook: %w", hookErr),
-				})
-			}
+			e.hooks.FireAfterExecution(ctx, execCtx, event)
 		}
 	}()
 
@@ -137,11 +129,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 	ctx := execCtx.Context()
 	if e.hooks != nil {
 		event := gent.BeforeExecutionEvent{}
-		if err := e.hooks.FireBeforeExecution(ctx, execCtx, event); err != nil {
-			execErr := fmt.Errorf("BeforeExecution hook: %w", err)
-			execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
-			return
-		}
+		e.hooks.FireBeforeExecution(ctx, execCtx, event)
 	}
 	beforeExecutionCalled = true
 
@@ -171,16 +159,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 		// BeforeIteration hook
 		if e.hooks != nil {
 			event := gent.BeforeIterationEvent{Iteration: execCtx.Iteration()}
-			if err := e.hooks.FireBeforeIteration(ctx, execCtx, event); err != nil {
-				execCtx.EndIteration(gent.LATerminate, time.Since(iterStart))
-				execErr := fmt.Errorf(
-					"BeforeIteration hook (iteration %d): %w",
-					execCtx.Iteration(),
-					err,
-				)
-				execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
-				return
-			}
+			e.hooks.FireBeforeIteration(ctx, execCtx, event)
 		}
 
 		// Execute the AgentLoop iteration
@@ -219,15 +198,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 				Result:    loopResult,
 				Duration:  iterDuration,
 			}
-			if err := e.hooks.FireAfterIteration(ctx, execCtx, event); err != nil {
-				execErr := fmt.Errorf(
-					"AfterIteration hook (iteration %d): %w",
-					execCtx.Iteration(),
-					err,
-				)
-				execCtx.SetTermination(gent.TerminationHookAbort, nil, execErr)
-				return
-			}
+			e.hooks.FireAfterIteration(ctx, execCtx, event)
 		}
 
 		// Check for termination
