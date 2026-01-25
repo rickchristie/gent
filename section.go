@@ -24,6 +24,7 @@ package gent
 //   - Stats are auto-updated when ParseErrorTrace is traced
 //
 // Supported ErrorTypes and their corresponding keys:
+//   - "section": KeySectionParseErrorConsecutive (for generic output sections)
 //   - "toolchain": KeyToolchainParseErrorConsecutive (for tool call parsing)
 //   - "termination": KeyTerminationParseErrorConsecutive (for termination parsing)
 //
@@ -32,14 +33,14 @@ package gent
 //
 // Sections that never fail parsing (e.g., simple text passthrough) may skip tracing.
 //
-// Example (for a toolchain section):
+// Example (for a generic section):
 //
 //	func (s *MySection) ParseSection(execCtx *ExecutionContext, content string) (any, error) {
 //	    result, err := s.doParse(content)
 //	    if err != nil {
 //	        if execCtx != nil {
 //	            execCtx.Trace(ParseErrorTrace{
-//	                ErrorType:  "toolchain",
+//	                ErrorType:  "section",
 //	                RawContent: content,
 //	                Error:      err,
 //	            })
@@ -47,10 +48,15 @@ package gent
 //	        return nil, err
 //	    }
 //	    if execCtx != nil {
-//	        execCtx.Stats().ResetCounter(KeyToolchainParseErrorConsecutive)
+//	        execCtx.Stats().ResetCounter(KeySectionParseErrorConsecutive)
 //	    }
 //	    return result, nil
 //	}
+//
+// The section package provides ready-to-use implementations:
+//   - section.Text: Simple passthrough section (never fails)
+//   - section.JSON[T]: Parses JSON into type T with schema generation
+//   - section.YAML[T]: Parses YAML into type T with schema generation
 type TextOutputSection interface {
 	// Name returns the section identifier (e.g., "thinking", "action", "answer")
 	Name() string

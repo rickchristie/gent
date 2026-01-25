@@ -51,6 +51,13 @@ const (
 	KeyTerminationParseErrorConsecutive = "gent:termination_parse_error_consecutive"
 )
 
+// Section parse error tracking keys (errors parsing generic output sections).
+const (
+	KeySectionParseErrorTotal       = "gent:section_parse_error_total"
+	KeySectionParseErrorAt          = "gent:section_parse_error:"             // + iteration
+	KeySectionParseErrorConsecutive = "gent:section_parse_error_consecutive"
+)
+
 // protectedKeys contains keys that cannot be modified by user code.
 var protectedKeys = map[string]bool{
 	KeyIterations: true,

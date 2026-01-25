@@ -440,6 +440,10 @@ func (ctx *ExecutionContext) traceEventLocked(event TraceEvent) {
 			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorTotal, 1)
 			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorAt+iteration, 1)
 			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorConsecutive, 1)
+		case "section":
+			ctx.stats.incrCounterNoLimitCheck(KeySectionParseErrorTotal, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeySectionParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeySectionParseErrorConsecutive, 1)
 		}
 	}
 

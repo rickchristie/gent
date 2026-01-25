@@ -36,5 +36,8 @@ func DefaultLimits() []Limit {
 
 		// Stop after 3 consecutive toolchain parse errors
 		{Type: LimitExactKey, Key: KeyToolchainParseErrorConsecutive, MaxValue: 3},
+
+		// Stop after 3 consecutive section parse errors
+		{Type: LimitExactKey, Key: KeySectionParseErrorConsecutive, MaxValue: 3},
 	}
 }
