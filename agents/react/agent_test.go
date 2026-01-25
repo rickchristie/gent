@@ -752,17 +752,6 @@ func TestAgent_RegisterTool(t *testing.T) {
 	assert.Equal(t, loop, result, "expected RegisterTool to return same loop for chaining")
 }
 
-func TestSimpleSection(t *testing.T) {
-	s := &simpleSection{name: "thinking", prompt: "Think step by step"}
-
-	assert.Equal(t, "thinking", s.Name())
-	assert.Equal(t, "Think step by step", s.Prompt())
-
-	parsed, err := s.ParseSection(nil, "some content")
-	require.NoError(t, err)
-	assert.Equal(t, "some content", parsed)
-}
-
 func TestNewAgent_Defaults(t *testing.T) {
 	model := newMockModel()
 	loop := NewAgent(model)

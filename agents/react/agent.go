@@ -7,6 +7,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
+	"github.com/rickchristie/gent/section"
 	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/tmc/langchaingo/llms"
@@ -55,28 +56,6 @@ func (d *LoopData) SetScratchPad(iterations []*gent.Iteration) {
 
 // Compile-time check that LoopData implements gent.LoopData.
 var _ gent.LoopData = (*LoopData)(nil)
-
-// ----------------------------------------------------------------------------
-// simpleSection - for thinking section
-// ----------------------------------------------------------------------------
-
-// simpleSection is a simple TextOutputSection implementation for sections like thinking.
-type simpleSection struct {
-	name   string
-	prompt string
-}
-
-// Name returns the section identifier.
-func (s *simpleSection) Name() string { return s.name }
-
-// Prompt returns the instructions for this section.
-func (s *simpleSection) Prompt() string { return s.prompt }
-
-// ParseSection returns the content as-is.
-// Simple sections don't parse, so no tracing is performed.
-func (s *simpleSection) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
-	return content, nil
-}
 
 // ----------------------------------------------------------------------------
 // Agent - ReAct AgentLoop Implementation
@@ -231,10 +210,9 @@ func (r *Agent) TimeProvider() gent.TimeProvider {
 
 // WithThinking enables the thinking section with the given prompt.
 func (r *Agent) WithThinking(prompt string) *Agent {
-	r.thinkingSection = &simpleSection{
-		name:   "thinking",
-		prompt: prompt,
-	}
+	r.thinkingSection = section.NewText().
+		WithSectionName("thinking").
+		WithPrompt(prompt)
 	return r
 }
 
