@@ -83,7 +83,7 @@ func (m *mockToolChain) WithErrors(errs ...error) *mockToolChain {
 func (m *mockToolChain) Name() string   { return m.name }
 func (m *mockToolChain) Prompt() string { return m.prompt }
 
-func (m *mockToolChain) ParseSection(content string) (any, error) {
+func (m *mockToolChain) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil
 }
 
@@ -132,7 +132,7 @@ func (m *mockTermination) WithTerminationResult(parts ...gent.ContentPart) *mock
 func (m *mockTermination) Name() string   { return m.name }
 func (m *mockTermination) Prompt() string { return m.prompt }
 
-func (m *mockTermination) ParseSection(content string) (any, error) {
+func (m *mockTermination) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil
 }
 
@@ -173,9 +173,21 @@ func (m *mockFormat) DescribeStructure(sections []gent.TextOutputSection) string
 	return "mock format structure"
 }
 
-func (m *mockFormat) Parse(_ string) (map[string][]string, error) {
+func (m *mockFormat) Parse(execCtx *gent.ExecutionContext, output string) (map[string][]string, error) {
 	if m.parseErr != nil {
+		// Trace parse error (following the interface contract)
+		if execCtx != nil {
+			execCtx.Trace(gent.ParseErrorTrace{
+				ErrorType:  "format",
+				RawContent: output,
+				Error:      m.parseErr,
+			})
+		}
 		return nil, m.parseErr
+	}
+	// Reset consecutive counter on success
+	if execCtx != nil {
+		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
 	}
 	return m.parseResult, nil
 }
@@ -452,7 +464,9 @@ func TestAgent_Next_ModelError(t *testing.T) {
 		"expected error to contain 'model failed', got %q", err.Error())
 }
 
-func TestAgent_Next_ParseError(t *testing.T) {
+func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
+	// When format parsing fails, the agent should continue with the error fed back
+	// as an observation, allowing the model to recover in the next iteration.
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "invalid response"}},
 	}
@@ -469,32 +483,44 @@ func TestAgent_Next_ParseError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
-	_, err := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(context.Background(), execCtx)
 
-	assert.Error(t, err)
+	// Should not return error - instead feeds back as observation
+	assert.NoError(t, err)
+	assert.Equal(t, gent.LAContinue, result.Action)
+	assert.Contains(t, result.NextPrompt, "Format parse error")
+	assert.Contains(t, result.NextPrompt, "invalid response")
+
+	// Scratchpad should have the iteration with error feedback
+	assert.Len(t, data.GetScratchPad(), 1)
 }
 
-func TestAgent_Next_ParseError_FallbackToTermination(t *testing.T) {
+func TestAgent_Next_ParseError_TracesError(t *testing.T) {
+	// Parse errors should be traced for stats tracking
 	response := &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: "The answer is 42"}},
+		Choices: []*gent.ContentChoice{{Content: "unparseable content"}},
 	}
 	model := newMockModel(response)
 
 	format := newMockFormat().WithParseError(gent.ErrNoSectionsFound)
 	tc := newMockToolChain()
-	term := newMockTermination().
-		WithTerminationResult(llms.TextContent{Text: "The answer is 42"})
+	term := newMockTermination()
 
 	loop := NewAgent(model).
 		WithFormat(format).
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
+	data := NewLoopData(llms.TextContent{Text: "Test"})
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(context.Background(), execCtx)
 
-	assert.Error(t, err, "expected error from parse failure (no fallback)")
+	assert.NoError(t, err)
+
+	// Verify parse error was traced (stats updated)
+	stats := execCtx.Stats()
+	assert.Equal(t, int64(1), stats.GetCounter(gent.KeyFormatParseErrorTotal))
+	assert.Equal(t, int64(1), stats.GetCounter(gent.KeyFormatParseErrorConsecutive))
 }
 
 func TestAgent_Next_MultipleTools(t *testing.T) {
@@ -734,7 +760,7 @@ func TestSimpleSection(t *testing.T) {
 	assert.Equal(t, "thinking", s.Name())
 	assert.Equal(t, "Think step by step", s.Prompt())
 
-	parsed, err := s.ParseSection("some content")
+	parsed, err := s.ParseSection(nil, "some content")
 	require.NoError(t, err)
 	assert.Equal(t, "some content", parsed)
 }

@@ -80,7 +80,30 @@ func (c *JSON) Prompt() string {
 }
 
 // ParseSection parses the raw text content and returns []*gent.ToolCall.
-func (c *JSON) ParseSection(content string) (any, error) {
+func (c *JSON) ParseSection(execCtx *gent.ExecutionContext, content string) (any, error) {
+	result, err := c.doParse(content)
+	if err != nil {
+		// Trace parse error (auto-updates stats)
+		if execCtx != nil {
+			execCtx.Trace(gent.ParseErrorTrace{
+				ErrorType:  "toolchain",
+				RawContent: content,
+				Error:      err,
+			})
+		}
+		return nil, err
+	}
+
+	// Successful parse - reset consecutive error counter
+	if execCtx != nil {
+		execCtx.Stats().ResetCounter(gent.KeyToolchainParseErrorConsecutive)
+	}
+
+	return result, nil
+}
+
+// doParse performs the actual parsing logic.
+func (c *JSON) doParse(content string) ([]*gent.ToolCall, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return []*gent.ToolCall{}, nil
@@ -150,7 +173,8 @@ func (c *JSON) Execute(
 	execCtx *gent.ExecutionContext,
 	content string,
 ) (*gent.ToolChainResult, error) {
-	parsed, err := c.ParseSection(content)
+	// ParseSection handles tracing of parse errors
+	parsed, err := c.ParseSection(execCtx, content)
 	if err != nil {
 		return nil, err
 	}

@@ -584,7 +584,7 @@ executor.New(loop, executor.Config{
 
 ## Migration Notes
 
-### Files to Modify
+### Files Modified
 
 1. **gent/stats.go** (new file)
    - Define `ExecutionStats` struct with mutex and parent reference
@@ -595,7 +595,19 @@ executor.New(loop, executor.Config{
 2. **gent/stats_keys.go** (new file)
    - Define all standard key constants
 
-3. **gent/context.go**
+3. **gent/limit.go** (new file)
+   - Define `LimitType`, `Limit` types
+   - Implement `DefaultLimits()`
+
+4. **gent/format.go**
+   - Update `TextOutputFormat.Parse()` signature to include `*ExecutionContext`
+   - Add documentation for tracing requirements
+
+5. **gent/section.go**
+   - Update `TextOutputSection.ParseSection()` signature to include `*ExecutionContext`
+   - Add documentation for tracing requirements
+
+6. **gent/context.go**
    - Remove old `ExecutionStats` struct
    - Update `NewExecutionContext` to initialize new stats
    - Update `SpawnChild` to set parent reference on child stats
@@ -603,34 +615,30 @@ executor.New(loop, executor.Config{
    - Update `Stats()` to return `*ExecutionStats`
    - Keep `Iteration()` as separate method
 
-4. **gent/trace.go**
+7. **gent/trace.go**
    - Add `ParseErrorTrace` event type
+   - Add `ExceededLimit *Limit` field to `ExecutionResult`
    - Update `traceEventLocked` to auto-aggregate stats based on event type
 
-5. **gent/types.go**
-   - Update `TerminationReason` constants (remove specific ones, keep generic)
-   - Update `ExecutionResult` to add `ExceededLimit *Limit` field
-
-6. **executor/executor.go**
+8. **executor/executor.go**
    - Replace `MaxIterations` with `Limits` system
-   - Add `LimitType`, `Limit` types
-   - Add `DefaultLimits()` helper
    - Add limit checking after each iteration
    - Update termination to set `ExceededLimit` on result
 
-7. **executor/limit.go** (new file)
-   - Define `LimitType`, `Limit` types
-   - Implement `checkLimits`, `checkExactKeyLimit`, `checkPrefixLimit`
-   - Implement `DefaultLimits()`
-
-8. **agents/react/agent.go**
+9. **format/xml.go** and **format/markdown.go**
+   - Update `Parse()` to accept `*ExecutionContext`
    - Add format parse error tracing
-   - Feed parse errors back as observations
    - Reset consecutive counter on success
 
-9. **toolchain/yaml.go** and **toolchain/json.go**
-   - Add toolchain parse error tracing
-   - Reset consecutive counter on success
+10. **agents/react/agent.go**
+    - Update to pass `execCtx` to format.Parse()
+    - Feed parse errors back as observations (loop continues instead of erroring)
 
-10. **models/*.go**
-    - Verify Trace calls include all required fields for auto-aggregation
+11. **toolchain/yaml.go** and **toolchain/json.go**
+    - Update `ParseSection()` to accept `*ExecutionContext`
+    - Add toolchain parse error tracing
+    - Reset consecutive counter on success
+
+12. **termination/text.go** and **termination/json.go**
+    - Update `ParseSection()` to accept `*ExecutionContext`
+    - Termination sections don't trace (simple parsing that rarely fails)

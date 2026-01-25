@@ -241,9 +241,12 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 		hookRegistry.Register(fileLoggerHook)
 	}
 
-	// Create executor
-	exec := executor.New[*react.LoopData](loop, executor.Config{MaxIterations: 15}).
-		WithHooks(hookRegistry)
+	// Create executor with iteration limit
+	exec := executor.New[*react.LoopData](loop, executor.Config{
+		Limits: []gent.Limit{
+			{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
+		},
+	}).WithHooks(hookRegistry)
 
 	// Print header
 	printHeader(w, "AIRLINE RESCHEDULE SCENARIO")
@@ -282,9 +285,9 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	printSection(w, "Execution Stats")
 	stats := execCtx.Stats()
 	fmt.Fprintf(w, "Total iterations: %d\n", execCtx.Iteration())
-	fmt.Fprintf(w, "Total input tokens: %d\n", stats.TotalInputTokens)
-	fmt.Fprintf(w, "Total output tokens: %d\n", stats.TotalOutputTokens)
-	fmt.Fprintf(w, "Total tool calls: %d\n", stats.ToolCallCount)
+	fmt.Fprintf(w, "Total input tokens: %d\n", stats.GetTotalInputTokens())
+	fmt.Fprintf(w, "Total output tokens: %d\n", stats.GetTotalOutputTokens())
+	fmt.Fprintf(w, "Total tool calls: %d\n", stats.GetToolCallCount())
 	fmt.Fprintf(w, "Duration: %v\n", execCtx.Duration())
 
 	// Print iteration history if configured
@@ -582,9 +585,12 @@ Always be polite and professional. When rescheduling, make sure to:
 		streamWg.Wait()
 	}()
 
-	// Create executor
-	exec := executor.New[*react.LoopData](loop, executor.Config{MaxIterations: 15}).
-		WithHooks(hookRegistry)
+	// Create executor with iteration limit
+	exec := executor.New[*react.LoopData](loop, executor.Config{
+		Limits: []gent.Limit{
+			{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
+		},
+	}).WithHooks(hookRegistry)
 
 	// Print user input
 	fmt.Fprintln(s.Writer)
@@ -602,7 +608,8 @@ Always be polite and professional. When rescheduling, make sure to:
 	fmt.Fprintln(s.Writer)
 	stats := execCtx.Stats()
 	fmt.Fprintf(s.Writer, "[Stats: %d iterations, %d input tokens, %d output tokens, %v]\n",
-		execCtx.Iteration(), stats.TotalInputTokens, stats.TotalOutputTokens, execCtx.Duration())
+		execCtx.Iteration(), stats.GetTotalInputTokens(), stats.GetTotalOutputTokens(),
+		execCtx.Duration())
 
 	// Extract agent response
 	if err != nil {

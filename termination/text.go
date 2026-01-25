@@ -44,7 +44,8 @@ func (t *Text) Prompt() string {
 }
 
 // ParseSection returns the trimmed content as a string.
-func (t *Text) ParseSection(content string) (any, error) {
+// Text termination never fails parsing, so no tracing is performed.
+func (t *Text) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return strings.TrimSpace(content), nil
 }
 

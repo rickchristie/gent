@@ -49,7 +49,33 @@ func (f *Markdown) DescribeStructure(sections []gent.TextOutputSection) string {
 }
 
 // Parse extracts raw content for each section from the LLM output.
-func (f *Markdown) Parse(output string) (map[string][]string, error) {
+func (f *Markdown) Parse(
+	execCtx *gent.ExecutionContext,
+	output string,
+) (map[string][]string, error) {
+	result, err := f.doParse(output)
+	if err != nil {
+		// Trace parse error (auto-updates stats)
+		if execCtx != nil {
+			execCtx.Trace(gent.ParseErrorTrace{
+				ErrorType:  "format",
+				RawContent: output,
+				Error:      err,
+			})
+		}
+		return nil, err
+	}
+
+	// Successful parse - reset consecutive error counter
+	if execCtx != nil {
+		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+	}
+
+	return result, nil
+}
+
+// doParse performs the actual parsing logic.
+func (f *Markdown) doParse(output string) (map[string][]string, error) {
 	result := make(map[string][]string)
 
 	// Match markdown headers: # SectionName

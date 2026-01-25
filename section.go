@@ -13,6 +13,44 @@ package gent
 // to compose complex outputs from the LLM.
 //
 // See: [TextOutputFormat] for how sections are structured in the overall output.
+//
+// # Tracing Requirements for Implementors
+//
+// Implementations MUST handle the following tracing responsibilities:
+//
+// On parse error:
+//   - Trace a ParseErrorTrace with the appropriate ErrorType for your section
+//   - The RawContent should contain the content that failed to parse
+//   - Stats are auto-updated when ParseErrorTrace is traced
+//
+// Supported ErrorTypes and their corresponding keys:
+//   - "toolchain": KeyToolchainParseErrorConsecutive (for tool call parsing)
+//   - "termination": KeyTerminationParseErrorConsecutive (for termination parsing)
+//
+// On successful parse:
+//   - Call execCtx.Stats().ResetCounter() for the appropriate consecutive error key
+//
+// Sections that never fail parsing (e.g., simple text passthrough) may skip tracing.
+//
+// Example (for a toolchain section):
+//
+//	func (s *MySection) ParseSection(execCtx *ExecutionContext, content string) (any, error) {
+//	    result, err := s.doParse(content)
+//	    if err != nil {
+//	        if execCtx != nil {
+//	            execCtx.Trace(ParseErrorTrace{
+//	                ErrorType:  "toolchain",
+//	                RawContent: content,
+//	                Error:      err,
+//	            })
+//	        }
+//	        return nil, err
+//	    }
+//	    if execCtx != nil {
+//	        execCtx.Stats().ResetCounter(KeyToolchainParseErrorConsecutive)
+//	    }
+//	    return result, nil
+//	}
 type TextOutputSection interface {
 	// Name returns the section identifier (e.g., "thinking", "action", "answer")
 	Name() string
@@ -23,5 +61,8 @@ type TextOutputSection interface {
 
 	// ParseSection parses the raw text content extracted for this section.
 	// Returns the parsed result or an error if parsing fails.
-	ParseSection(content string) (any, error)
+	//
+	// The execCtx parameter may be nil (e.g., in unit tests). Implementations should
+	// check for nil before tracing or updating stats.
+	ParseSection(execCtx *ExecutionContext, content string) (any, error)
 }

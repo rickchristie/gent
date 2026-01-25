@@ -15,9 +15,6 @@ const (
 	// TerminationSuccess means the AgentLoop returned LATerminate.
 	TerminationSuccess TerminationReason = "success"
 
-	// TerminationMaxIterations means max iterations was exceeded.
-	TerminationMaxIterations TerminationReason = "max_iterations"
-
 	// TerminationError means an error occurred.
 	TerminationError TerminationReason = "error"
 
@@ -26,6 +23,10 @@ const (
 
 	// TerminationHookAbort means a hook returned an error.
 	TerminationHookAbort TerminationReason = "hook_abort"
+
+	// TerminationLimitExceeded means a configured limit was exceeded.
+	// Inspect ExecutionResult.ExceededLimit for details about which limit was hit.
+	TerminationLimitExceeded TerminationReason = "limit_exceeded"
 )
 
 // -----------------------------------------------------------------------------
@@ -169,6 +170,23 @@ type CustomTrace struct {
 
 func (CustomTrace) traceEvent() {}
 
+// ParseErrorTrace records a parse error (format or toolchain).
+// When traced, auto-updates parse error counters based on ErrorType.
+type ParseErrorTrace struct {
+	BaseTrace
+
+	// ErrorType is "format" for format parse errors or "toolchain" for toolchain parse errors.
+	ErrorType string
+
+	// RawContent is the content that failed to parse (no truncation).
+	RawContent string
+
+	// Error is the parse error that occurred.
+	Error error
+}
+
+func (ParseErrorTrace) traceEvent() {}
+
 // -----------------------------------------------------------------------------
 // Execution Result
 // -----------------------------------------------------------------------------
@@ -181,4 +199,8 @@ type ExecutionResult struct {
 
 	// Context is the ExecutionContext with full trace data.
 	Context *ExecutionContext
+
+	// ExceededLimit is non-nil if execution terminated due to a limit being exceeded.
+	// Inspect this to determine which limit was hit and its threshold.
+	ExceededLimit *Limit
 }

@@ -404,7 +404,7 @@ The actual answer.
 			}
 			format.DescribeStructure(sections)
 
-			result, err := format.Parse(tt.input.output)
+			result, err := format.Parse(nil, tt.input.output)
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			assert.Equal(t, tt.expected.sections, result)
@@ -479,6 +479,88 @@ func TestXML_DescribeStructure(t *testing.T) {
 			result := format.DescribeStructure(sections)
 
 			assert.Equal(t, tt.expected.output, result)
+		})
+	}
+}
+
+func TestXML_Parse_TracesErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected struct {
+			shouldError           bool
+			formatErrorTotal      int64
+			formatErrorConsec     int64
+			formatErrorAtIter     int64
+		}
+	}{
+		{
+			name:  "parse error traces ParseErrorTrace",
+			input: "no sections here",
+			expected: struct {
+				shouldError           bool
+				formatErrorTotal      int64
+				formatErrorConsec     int64
+				formatErrorAtIter     int64
+			}{
+				shouldError:       true,
+				formatErrorTotal:  1,
+				formatErrorConsec: 1,
+				formatErrorAtIter: 1,
+			},
+		},
+		{
+			name:  "successful parse resets consecutive counter",
+			input: "<answer>hello</answer>",
+			expected: struct {
+				shouldError           bool
+				formatErrorTotal      int64
+				formatErrorConsec     int64
+				formatErrorAtIter     int64
+			}{
+				shouldError:       false,
+				formatErrorTotal:  0,
+				formatErrorConsec: 0,
+				formatErrorAtIter: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := NewXML()
+			sections := []gent.TextOutputSection{
+				&mockSection{name: "answer", prompt: "Answer here"},
+			}
+			format.DescribeStructure(sections)
+
+			// Create execution context with iteration 1
+			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx.StartIteration()
+
+			// If we expect success, first set consecutive to 1 to verify reset
+			if !tt.expected.shouldError {
+				execCtx.Stats().IncrCounter(gent.KeyFormatParseErrorConsecutive, 1)
+			}
+
+			_, err := format.Parse(execCtx, tt.input)
+
+			if tt.expected.shouldError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			stats := execCtx.Stats()
+			assert.Equal(t, tt.expected.formatErrorTotal,
+				stats.GetCounter(gent.KeyFormatParseErrorTotal),
+				"format error total mismatch")
+			assert.Equal(t, tt.expected.formatErrorConsec,
+				stats.GetCounter(gent.KeyFormatParseErrorConsecutive),
+				"format error consecutive mismatch")
+			assert.Equal(t, tt.expected.formatErrorAtIter,
+				stats.GetCounter(gent.KeyFormatParseErrorAt+"1"),
+				"format error at iteration mismatch")
 		})
 	}
 }

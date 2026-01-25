@@ -272,7 +272,7 @@ func TestJSON_ParseSection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := NewJSON()
 
-			result, err := tc.ParseSection(tt.input.content)
+			result, err := tc.ParseSection(nil, tt.input.content)
 
 			if tt.expected.err != nil {
 				assert.ErrorIs(t, err, tt.expected.err)
@@ -713,7 +713,7 @@ func TestJSON_ParseSection_DateAsString(t *testing.T) {
 			)
 			tc.RegisterTool(tool)
 
-			result, err := tc.ParseSection(tt.input.content)
+			result, err := tc.ParseSection(nil, tt.input.content)
 			require.NoError(t, err)
 
 			calls := result.([]*gent.ToolCall)
@@ -805,7 +805,7 @@ func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
 
 			content := fmt.Sprintf(`{"tool": "test_tool", "args": {"value": %s}}`, tt.input.jsonVal)
 
-			result, err := tc.ParseSection(content)
+			result, err := tc.ParseSection(nil, content)
 			require.NoError(t, err)
 
 			calls := result.([]*gent.ToolCall)
@@ -1451,4 +1451,82 @@ func getTextContent(parts []gent.ContentPart) string {
 		return tc.Text
 	}
 	return ""
+}
+
+func TestJSON_ParseSection_TracesErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected struct {
+			shouldError              bool
+			toolchainErrorTotal      int64
+			toolchainErrorConsec     int64
+			toolchainErrorAtIter     int64
+		}
+	}{
+		{
+			name:  "parse error traces ParseErrorTrace",
+			input: "{invalid json",
+			expected: struct {
+				shouldError              bool
+				toolchainErrorTotal      int64
+				toolchainErrorConsec     int64
+				toolchainErrorAtIter     int64
+			}{
+				shouldError:          true,
+				toolchainErrorTotal:  1,
+				toolchainErrorConsec: 1,
+				toolchainErrorAtIter: 1,
+			},
+		},
+		{
+			name:  "successful parse resets consecutive counter",
+			input: `{"tool": "test", "args": {"query": "hello"}}`,
+			expected: struct {
+				shouldError              bool
+				toolchainErrorTotal      int64
+				toolchainErrorConsec     int64
+				toolchainErrorAtIter     int64
+			}{
+				shouldError:          false,
+				toolchainErrorTotal:  0,
+				toolchainErrorConsec: 0,
+				toolchainErrorAtIter: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+
+			// Create execution context with iteration 1
+			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx.StartIteration()
+
+			// If we expect success, first set consecutive to 1 to verify reset
+			if !tt.expected.shouldError {
+				execCtx.Stats().IncrCounter(gent.KeyToolchainParseErrorConsecutive, 1)
+			}
+
+			_, err := tc.ParseSection(execCtx, tt.input)
+
+			if tt.expected.shouldError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			stats := execCtx.Stats()
+			assert.Equal(t, tt.expected.toolchainErrorTotal,
+				stats.GetCounter(gent.KeyToolchainParseErrorTotal),
+				"toolchain error total mismatch")
+			assert.Equal(t, tt.expected.toolchainErrorConsec,
+				stats.GetCounter(gent.KeyToolchainParseErrorConsecutive),
+				"toolchain error consecutive mismatch")
+			assert.Equal(t, tt.expected.toolchainErrorAtIter,
+				stats.GetCounter(gent.KeyToolchainParseErrorAt+"1"),
+				"toolchain error at iteration mismatch")
+		})
+	}
 }

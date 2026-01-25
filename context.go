@@ -45,7 +45,7 @@ type ExecutionContext struct {
 	events []TraceEvent
 
 	// Aggregates (auto-updated when certain events are traced)
-	stats ExecutionStats
+	stats *ExecutionStats
 
 	// Nesting support
 	parent   *ExecutionContext
@@ -67,18 +67,6 @@ type ExecutionContext struct {
 	streamHub *streamHub
 }
 
-// ExecutionStats contains auto-aggregated metrics from trace events.
-type ExecutionStats struct {
-	TotalInputTokens    int
-	TotalOutputTokens   int
-	TotalCost           float64
-	InputTokensByModel  map[string]int
-	OutputTokensByModel map[string]int
-	CostByModel         map[string]float64
-	ToolCallCount       int
-	ToolCallsByName     map[string]int
-}
-
 // NewExecutionContext creates a new root ExecutionContext with the given name and data.
 func NewExecutionContext(name string, data LoopData) *ExecutionContext {
 	return &ExecutionContext{
@@ -87,12 +75,7 @@ func NewExecutionContext(name string, data LoopData) *ExecutionContext {
 		depth:     0,
 		events:    make([]TraceEvent, 0),
 		startTime: time.Now(),
-		stats: ExecutionStats{
-			InputTokensByModel:  make(map[string]int),
-			OutputTokensByModel: make(map[string]int),
-			CostByModel:         make(map[string]float64),
-			ToolCallsByName:     make(map[string]int),
-		},
+		stats:     NewExecutionStats(),
 		streamHub: newStreamHub(),
 	}
 }
@@ -243,21 +226,37 @@ func (ctx *ExecutionContext) traceEventLocked(event TraceEvent) {
 	// Update BaseTrace fields if the event has them
 	event = ctx.populateBaseTrace(event)
 
-	// Update stats based on event type
+	// Update stats based on event type (auto-aggregation)
 	switch e := event.(type) {
 	case ModelCallTrace:
-		ctx.stats.TotalInputTokens += e.InputTokens
-		ctx.stats.TotalOutputTokens += e.OutputTokens
-		ctx.stats.TotalCost += e.Cost
+		ctx.stats.incrCounterInternal(KeyInputTokens, int64(e.InputTokens))
+		ctx.stats.incrCounterInternal(KeyOutputTokens, int64(e.OutputTokens))
+		ctx.stats.IncrGauge(KeyCost, e.Cost)
 		if e.Model != "" {
-			ctx.stats.InputTokensByModel[e.Model] += e.InputTokens
-			ctx.stats.OutputTokensByModel[e.Model] += e.OutputTokens
-			ctx.stats.CostByModel[e.Model] += e.Cost
+			ctx.stats.incrCounterInternal(KeyInputTokensFor+e.Model, int64(e.InputTokens))
+			ctx.stats.incrCounterInternal(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
+			ctx.stats.IncrGauge(KeyCostFor+e.Model, e.Cost)
 		}
 	case ToolCallTrace:
-		ctx.stats.ToolCallCount++
+		ctx.stats.incrCounterInternal(KeyToolCalls, 1)
 		if e.ToolName != "" {
-			ctx.stats.ToolCallsByName[e.ToolName]++
+			ctx.stats.incrCounterInternal(KeyToolCallsFor+e.ToolName, 1)
+		}
+	case ParseErrorTrace:
+		iteration := fmt.Sprintf("%d", ctx.iteration)
+		switch e.ErrorType {
+		case "format":
+			ctx.stats.IncrCounter(KeyFormatParseErrorTotal, 1)
+			ctx.stats.IncrCounter(KeyFormatParseErrorAt+iteration, 1)
+			ctx.stats.IncrCounter(KeyFormatParseErrorConsecutive, 1)
+		case "toolchain":
+			ctx.stats.IncrCounter(KeyToolchainParseErrorTotal, 1)
+			ctx.stats.IncrCounter(KeyToolchainParseErrorAt+iteration, 1)
+			ctx.stats.IncrCounter(KeyToolchainParseErrorConsecutive, 1)
+		case "termination":
+			ctx.stats.IncrCounter(KeyTerminationParseErrorTotal, 1)
+			ctx.stats.IncrCounter(KeyTerminationParseErrorAt+iteration, 1)
+			ctx.stats.IncrCounter(KeyTerminationParseErrorConsecutive, 1)
 		}
 	}
 
@@ -327,34 +326,16 @@ func (ctx *ExecutionContext) Events() []TraceEvent {
 	return result
 }
 
-// Stats returns a copy of the current aggregated stats.
-func (ctx *ExecutionContext) Stats() ExecutionStats {
+// Stats returns the execution stats for this context.
+//
+// Thread Safety:
+//   - Safe to call from any goroutine
+//   - All ExecutionStats methods handle their own locking
+//   - Safe to read during hook execution (hooks run synchronously)
+func (ctx *ExecutionContext) Stats() *ExecutionStats {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
-	// Deep copy maps
-	stats := ExecutionStats{
-		TotalInputTokens:    ctx.stats.TotalInputTokens,
-		TotalOutputTokens:   ctx.stats.TotalOutputTokens,
-		TotalCost:           ctx.stats.TotalCost,
-		ToolCallCount:       ctx.stats.ToolCallCount,
-		InputTokensByModel:  make(map[string]int),
-		OutputTokensByModel: make(map[string]int),
-		CostByModel:         make(map[string]float64),
-		ToolCallsByName:     make(map[string]int),
-	}
-	for k, v := range ctx.stats.InputTokensByModel {
-		stats.InputTokensByModel[k] = v
-	}
-	for k, v := range ctx.stats.OutputTokensByModel {
-		stats.OutputTokensByModel[k] = v
-	}
-	for k, v := range ctx.stats.CostByModel {
-		stats.CostByModel[k] = v
-	}
-	for k, v := range ctx.stats.ToolCallsByName {
-		stats.ToolCallsByName[k] = v
-	}
-	return stats
+	return ctx.stats
 }
 
 // -----------------------------------------------------------------------------
@@ -363,6 +344,7 @@ func (ctx *ExecutionContext) Stats() ExecutionStats {
 
 // SpawnChild creates a child ExecutionContext for nested agent loops.
 // The child is automatically linked to the parent and a ChildSpawnTrace is recorded.
+// The child's stats are linked to the parent's stats for real-time aggregation.
 func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionContext {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
@@ -374,12 +356,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 		parent:    ctx,
 		events:    make([]TraceEvent, 0),
 		startTime: time.Now(),
-		stats: ExecutionStats{
-			InputTokensByModel:  make(map[string]int),
-			OutputTokensByModel: make(map[string]int),
-			CostByModel:         make(map[string]float64),
-			ToolCallsByName:     make(map[string]int),
-		},
+		stats:     newExecutionStatsWithParent(ctx.stats),
 		streamHub: newStreamHub(),
 	}
 
@@ -394,6 +371,9 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 
 // CompleteChild finalizes a child context and records completion.
 // This should be called via defer after SpawnChild.
+//
+// Note: Stats aggregation happens in real-time via parent reference,
+// so this method only records the completion trace event.
 func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
@@ -410,25 +390,6 @@ func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
 		TerminationReason: childReason,
 		Duration:          childDuration,
 	})
-
-	// Aggregate child stats into parent
-	childStats := child.Stats()
-	ctx.stats.TotalInputTokens += childStats.TotalInputTokens
-	ctx.stats.TotalOutputTokens += childStats.TotalOutputTokens
-	ctx.stats.TotalCost += childStats.TotalCost
-	ctx.stats.ToolCallCount += childStats.ToolCallCount
-	for k, v := range childStats.InputTokensByModel {
-		ctx.stats.InputTokensByModel[k] += v
-	}
-	for k, v := range childStats.OutputTokensByModel {
-		ctx.stats.OutputTokensByModel[k] += v
-	}
-	for k, v := range childStats.CostByModel {
-		ctx.stats.CostByModel[k] += v
-	}
-	for k, v := range childStats.ToolCallsByName {
-		ctx.stats.ToolCallsByName[k] += v
-	}
 }
 
 // Parent returns the parent context, or nil if this is the root.

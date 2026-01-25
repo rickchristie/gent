@@ -4,26 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/hooks"
 )
 
-// ErrMaxIterationsExceeded is returned when the executor exceeds the configured maximum iterations.
-var ErrMaxIterationsExceeded = errors.New("gent: maximum iterations exceeded")
+// ErrLimitExceeded is returned when a configured limit is exceeded.
+var ErrLimitExceeded = errors.New("gent: limit exceeded")
 
 // Config holds configuration options for the Executor.
 type Config struct {
-	// MaxIterations is the maximum number of loop iterations before termination with error.
-	// Set to 0 for unlimited iterations.
-	MaxIterations int
+	// Limits defines thresholds that trigger execution termination.
+	// Limits are checked after each iteration in order.
+	// The first limit exceeded determines which limit is reported.
+	Limits []gent.Limit
 }
 
 // DefaultConfig returns a config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxIterations: 100,
+		Limits: gent.DefaultLimits(),
 	}
 }
 
@@ -134,14 +136,16 @@ func (e *Executor[Data]) Execute(ctx context.Context, data Data) (*gent.Executio
 			return result, execErr
 		}
 
-		// Check max iterations
-		if e.config.MaxIterations > 0 && execCtx.Iteration() >= e.config.MaxIterations {
+		// Check limits before starting new iteration
+		if limit := e.checkLimits(execCtx); limit != nil {
 			execErr = fmt.Errorf(
-				"%w: exceeded %d iterations",
-				ErrMaxIterationsExceeded,
-				e.config.MaxIterations,
+				"%w: key=%s, max=%v",
+				ErrLimitExceeded,
+				limit.Key,
+				limit.MaxValue,
 			)
-			execCtx.SetTermination(gent.TerminationMaxIterations, nil, execErr)
+			result.ExceededLimit = limit
+			execCtx.SetTermination(gent.TerminationLimitExceeded, nil, execErr)
 			return result, execErr
 		}
 
@@ -264,13 +268,16 @@ func (e *Executor[Data]) ExecuteWithContext(
 			return result, execErr
 		}
 
-		if e.config.MaxIterations > 0 && execCtx.Iteration() >= e.config.MaxIterations {
+		// Check limits before starting new iteration
+		if limit := e.checkLimits(execCtx); limit != nil {
 			execErr = fmt.Errorf(
-				"%w: exceeded %d iterations",
-				ErrMaxIterationsExceeded,
-				e.config.MaxIterations,
+				"%w: key=%s, max=%v",
+				ErrLimitExceeded,
+				limit.Key,
+				limit.MaxValue,
 			)
-			execCtx.SetTermination(gent.TerminationMaxIterations, nil, execErr)
+			result.ExceededLimit = limit
+			execCtx.SetTermination(gent.TerminationLimitExceeded, nil, execErr)
 			return result, execErr
 		}
 
@@ -327,4 +334,60 @@ func (e *Executor[Data]) ExecuteWithContext(
 			return result, nil
 		}
 	}
+}
+
+// checkLimits evaluates all configured limits against current stats.
+// Returns the exceeded limit if any, or nil if all limits are within bounds.
+// Limits are checked in order; first match wins.
+func (e *Executor[Data]) checkLimits(execCtx *gent.ExecutionContext) *gent.Limit {
+	stats := execCtx.Stats()
+
+	for i := range e.config.Limits {
+		limit := &e.config.Limits[i]
+		switch limit.Type {
+		case gent.LimitExactKey:
+			if e.checkExactKeyLimit(stats, limit) {
+				return limit
+			}
+
+		case gent.LimitKeyPrefix:
+			if e.checkPrefixLimit(stats, limit) {
+				return limit
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Executor[Data]) checkExactKeyLimit(
+	stats *gent.ExecutionStats,
+	limit *gent.Limit,
+) bool {
+	// Check counters
+	if val := stats.GetCounter(limit.Key); val > 0 {
+		if float64(val) > limit.MaxValue {
+			return true
+		}
+	}
+	// Check gauges
+	if val := stats.GetGauge(limit.Key); val > 0 {
+		if val > limit.MaxValue {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Executor[Data]) checkPrefixLimit(stats *gent.ExecutionStats, limit *gent.Limit) bool {
+	for key, val := range stats.Counters() {
+		if strings.HasPrefix(key, limit.Key) && float64(val) > limit.MaxValue {
+			return true
+		}
+	}
+	for key, val := range stats.Gauges() {
+		if strings.HasPrefix(key, limit.Key) && val > limit.MaxValue {
+			return true
+		}
+	}
+	return false
 }

@@ -108,14 +108,13 @@ func (h *LoggerHook) OnAfterExecution(
 	h.log("Stats:")
 	stats := execCtx.Stats()
 	statsData := map[string]any{
-		"total_iterations":       execCtx.Iteration(),
-		"total_input_tokens":     stats.TotalInputTokens,
-		"total_output_tokens":    stats.TotalOutputTokens,
-		"total_cost":             stats.TotalCost,
-		"total_tool_calls":       stats.ToolCallCount,
-		"input_tokens_by_model":  stats.InputTokensByModel,
-		"output_tokens_by_model": stats.OutputTokensByModel,
-		"tool_calls_by_name":     stats.ToolCallsByName,
+		"total_iterations":    execCtx.Iteration(),
+		"total_input_tokens":  stats.GetTotalInputTokens(),
+		"total_output_tokens": stats.GetTotalOutputTokens(),
+		"total_cost":          stats.GetTotalCost(),
+		"total_tool_calls":    stats.GetToolCallCount(),
+		"counters":            stats.Counters(),
+		"gauges":              stats.Gauges(),
 	}
 	h.logYAML(statsData)
 

@@ -124,7 +124,7 @@ func TestJSON_ParseSection_Primitives(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				term := NewJSON[string]()
 
-				result, err := term.ParseSection(tt.input.content)
+				result, err := term.ParseSection(nil, tt.input.content)
 
 				assert.ErrorIs(t, err, tt.expected.err)
 				str, ok := result.(string)
@@ -137,7 +137,7 @@ func TestJSON_ParseSection_Primitives(t *testing.T) {
 	t.Run("int", func(t *testing.T) {
 		term := NewJSON[int]()
 
-		result, err := term.ParseSection(`42`)
+		result, err := term.ParseSection(nil, `42`)
 
 		assert.NoError(t, err)
 		num, ok := result.(int)
@@ -148,7 +148,7 @@ func TestJSON_ParseSection_Primitives(t *testing.T) {
 	t.Run("bool", func(t *testing.T) {
 		term := NewJSON[bool]()
 
-		result, err := term.ParseSection(`true`)
+		result, err := term.ParseSection(nil, `true`)
 
 		assert.NoError(t, err)
 		b, ok := result.(bool)
@@ -211,7 +211,7 @@ func TestJSON_ParseSection_Struct(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewJSON[SimpleStruct]()
 
-			result, err := term.ParseSection(tt.input.content)
+			result, err := term.ParseSection(nil, tt.input.content)
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			s, ok := result.(SimpleStruct)
@@ -224,7 +224,7 @@ func TestJSON_ParseSection_Struct(t *testing.T) {
 func TestJSON_ParseSection_NestedStruct(t *testing.T) {
 	term := NewJSON[NestedStruct]()
 
-	result, err := term.ParseSection(`{"inner": {"name": "nested", "value": 1}, "count": 5}`)
+	result, err := term.ParseSection(nil, `{"inner": {"name": "nested", "value": 1}, "count": 5}`)
 
 	assert.NoError(t, err)
 	s, ok := result.(NestedStruct)
@@ -277,7 +277,7 @@ func TestJSON_ParseSection_PointerFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewJSON[PointerStruct]()
 
-			result, err := term.ParseSection(tt.input.content)
+			result, err := term.ParseSection(nil, tt.input.content)
 
 			assert.NoError(t, err)
 			s := result.(PointerStruct)
@@ -300,7 +300,7 @@ func TestJSON_ParseSection_PointerFields(t *testing.T) {
 func TestJSON_ParseSection_TimeFields(t *testing.T) {
 	term := NewJSON[TimeStruct]()
 
-	result, err := term.ParseSection(`{"created": "2024-01-15T10:30:00Z", "ttl": 3600000000000}`)
+	result, err := term.ParseSection(nil, `{"created": "2024-01-15T10:30:00Z", "ttl": 3600000000000}`)
 
 	assert.NoError(t, err)
 	s := result.(TimeStruct)
@@ -313,7 +313,7 @@ func TestJSON_ParseSection_TimeFields(t *testing.T) {
 func TestJSON_ParseSection_Slice(t *testing.T) {
 	term := NewJSON[[]string]()
 
-	result, err := term.ParseSection(`["one", "two", "three"]`)
+	result, err := term.ParseSection(nil, `["one", "two", "three"]`)
 
 	assert.NoError(t, err)
 	slice, ok := result.([]string)
@@ -324,7 +324,7 @@ func TestJSON_ParseSection_Slice(t *testing.T) {
 func TestJSON_ParseSection_Map(t *testing.T) {
 	term := NewJSON[map[string]int]()
 
-	result, err := term.ParseSection(`{"a": 1, "b": 2}`)
+	result, err := term.ParseSection(nil, `{"a": 1, "b": 2}`)
 
 	assert.NoError(t, err)
 	m, ok := result.(map[string]int)
@@ -335,7 +335,7 @@ func TestJSON_ParseSection_Map(t *testing.T) {
 func TestJSON_ParseSection_InvalidJSON(t *testing.T) {
 	term := NewJSON[string]()
 
-	_, err := term.ParseSection(`{invalid json}`)
+	_, err := term.ParseSection(nil, `{invalid json}`)
 
 	assert.ErrorIs(t, err, gent.ErrInvalidJSON)
 }
@@ -343,7 +343,7 @@ func TestJSON_ParseSection_InvalidJSON(t *testing.T) {
 func TestJSON_ParseSection_SliceOfStructs(t *testing.T) {
 	term := NewJSON[SliceStruct]()
 
-	result, err := term.ParseSection(`{
+	result, err := term.ParseSection(nil, `{
 		"items": [
 			{"name": "first", "value": 1},
 			{"name": "second", "value": 2}
@@ -478,6 +478,84 @@ func TestJSON_ShouldTerminate(t *testing.T) {
 			} else {
 				assert.Nil(t, result)
 			}
+		})
+	}
+}
+
+func TestJSON_ParseSection_TracesErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected struct {
+			shouldError                 bool
+			terminationErrorTotal       int64
+			terminationErrorConsec      int64
+			terminationErrorAtIter      int64
+		}
+	}{
+		{
+			name:  "parse error traces ParseErrorTrace",
+			input: "{invalid json",
+			expected: struct {
+				shouldError                 bool
+				terminationErrorTotal       int64
+				terminationErrorConsec      int64
+				terminationErrorAtIter      int64
+			}{
+				shouldError:            true,
+				terminationErrorTotal:  1,
+				terminationErrorConsec: 1,
+				terminationErrorAtIter: 1,
+			},
+		},
+		{
+			name:  "successful parse resets consecutive counter",
+			input: `{"name": "test", "value": 42}`,
+			expected: struct {
+				shouldError                 bool
+				terminationErrorTotal       int64
+				terminationErrorConsec      int64
+				terminationErrorAtIter      int64
+			}{
+				shouldError:            false,
+				terminationErrorTotal:  0,
+				terminationErrorConsec: 0,
+				terminationErrorAtIter: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := NewJSON[SimpleStruct]()
+
+			// Create execution context with iteration 1
+			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx.StartIteration()
+
+			// If we expect success, first set consecutive to 1 to verify reset
+			if !tt.expected.shouldError {
+				execCtx.Stats().IncrCounter(gent.KeyTerminationParseErrorConsecutive, 1)
+			}
+
+			_, err := term.ParseSection(execCtx, tt.input)
+
+			if tt.expected.shouldError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			stats := execCtx.Stats()
+			assert.Equal(t, tt.expected.terminationErrorTotal,
+				stats.GetCounter(gent.KeyTerminationParseErrorTotal),
+				"termination error total mismatch")
+			assert.Equal(t, tt.expected.terminationErrorConsec,
+				stats.GetCounter(gent.KeyTerminationParseErrorConsecutive),
+				"termination error consecutive mismatch")
+			assert.Equal(t, tt.expected.terminationErrorAtIter,
+				stats.GetCounter(gent.KeyTerminationParseErrorAt+"1"),
+				"termination error at iteration mismatch")
 		})
 	}
 }

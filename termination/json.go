@@ -80,7 +80,7 @@ func (t *JSON[T]) Prompt() string {
 }
 
 // ParseSection parses the JSON content into type T.
-func (t *JSON[T]) ParseSection(content string) (any, error) {
+func (t *JSON[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (any, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		var zero T
@@ -89,7 +89,21 @@ func (t *JSON[T]) ParseSection(content string) (any, error) {
 
 	var result T
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("%w: %v", gent.ErrInvalidJSON, err)
+		parseErr := fmt.Errorf("%w: %v", gent.ErrInvalidJSON, err)
+		// Trace parse error (auto-updates stats)
+		if execCtx != nil {
+			execCtx.Trace(gent.ParseErrorTrace{
+				ErrorType:  "termination",
+				RawContent: content,
+				Error:      parseErr,
+			})
+		}
+		return nil, parseErr
+	}
+
+	// Successful parse - reset consecutive error counter
+	if execCtx != nil {
+		execCtx.Stats().ResetCounter(gent.KeyTerminationParseErrorConsecutive)
 	}
 
 	return result, nil

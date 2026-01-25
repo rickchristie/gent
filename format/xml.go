@@ -64,7 +64,30 @@ func (f *XML) DescribeStructure(sections []gent.TextOutputSection) string {
 }
 
 // Parse extracts raw content for each section from the LLM output.
-func (f *XML) Parse(output string) (map[string][]string, error) {
+func (f *XML) Parse(execCtx *gent.ExecutionContext, output string) (map[string][]string, error) {
+	result, err := f.doParse(output)
+	if err != nil {
+		// Trace parse error (auto-updates stats)
+		if execCtx != nil {
+			execCtx.Trace(gent.ParseErrorTrace{
+				ErrorType:  "format",
+				RawContent: output,
+				Error:      err,
+			})
+		}
+		return nil, err
+	}
+
+	// Successful parse - reset consecutive error counter
+	if execCtx != nil {
+		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+	}
+
+	return result, nil
+}
+
+// doParse performs the actual parsing logic.
+func (f *XML) doParse(output string) (map[string][]string, error) {
 	result := make(map[string][]string)
 
 	// For each known section, find matches by pairing closing tags with their nearest

@@ -127,7 +127,7 @@ func TestText_ParseSection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewText()
 
-			result, err := term.ParseSection(tt.input.content)
+			result, err := term.ParseSection(nil, tt.input.content)
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			assert.Equal(t, tt.expected.result, result)

@@ -74,7 +74,8 @@ func (s *simpleSection) Name() string { return s.name }
 func (s *simpleSection) Prompt() string { return s.prompt }
 
 // ParseSection returns the content as-is.
-func (s *simpleSection) ParseSection(content string) (any, error) {
+// Simple sections don't parse, so no tracing is performed.
+func (s *simpleSection) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil
 }
 
@@ -303,7 +304,8 @@ func (r *Agent) Next(
 	}
 
 	// Parse complete response to identify all available sections
-	parsed, parseErr := r.format.Parse(responseContent)
+	// The format handles tracing of parse errors and resetting consecutive counter
+	parsed, parseErr := r.format.Parse(execCtx, responseContent)
 
 	// Check for action (tool calls) section first - actions take priority over termination
 	// This ensures tools are executed even if the model also outputs an answer
@@ -344,10 +346,31 @@ func (r *Agent) Next(
 		}
 	}
 
-	// Handle parse error - no fallback, bubble up the error
+	// Handle parse error - feed back to agent as observation to allow recovery
 	if parseErr != nil {
-		return nil, fmt.Errorf("failed to parse LLM response: %w\nRaw response: %s",
-			parseErr, responseContent)
+		observation := fmt.Sprintf(`<observation>
+Format parse error: %v
+
+Your response could not be parsed. Please ensure your response follows the expected format.
+
+Your raw response was:
+%s
+
+Please try again with proper formatting.
+</observation>`, parseErr, responseContent)
+
+		// Build iteration with parse error feedback
+		iter := r.buildIteration(responseContent, observation)
+		data.AddIterationHistory(iter)
+
+		scratchpad := data.GetScratchPad()
+		scratchpad = append(scratchpad, iter)
+		data.SetScratchPad(scratchpad)
+
+		return &gent.AgentLoopResult{
+			Action:     gent.LAContinue,
+			NextPrompt: observation,
+		}, nil
 	}
 
 	// No actions and no valid termination - continue loop with empty observation
