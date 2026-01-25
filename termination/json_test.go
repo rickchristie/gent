@@ -1,6 +1,7 @@
 package termination
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -530,7 +531,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			term := NewJSON[SimpleStruct]()
 
 			// Create execution context with iteration 1
-			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 			execCtx.StartIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset

@@ -1,9 +1,5 @@
 package gent
 
-import (
-	"context"
-)
-
 // ToolCall represents a parsed tool invocation from LLM output.
 type ToolCall struct {
 	Name string
@@ -32,6 +28,7 @@ type ToolChainResult struct {
 // The ToolChain uses reflection to call tools at runtime.
 //
 // When an ExecutionContext is provided, tool executions are automatically traced.
+// Use execCtx.Context() for any operations that require context.Context.
 type ToolChain interface {
 	TextOutputSection
 
@@ -42,6 +39,7 @@ type ToolChain interface {
 	// Execute parses tool calls from content and executes them.
 	// Returns results for each tool call.
 	//
-	// The execCtx parameter enables automatic tracing. Pass nil to skip tracing.
-	Execute(ctx context.Context, execCtx *ExecutionContext, content string) (*ToolChainResult, error)
+	// The execCtx parameter enables automatic tracing and provides context for
+	// tool execution. Use execCtx.Context() for operations requiring context.Context.
+	Execute(execCtx *ExecutionContext, content string) (*ToolChainResult, error)
 }

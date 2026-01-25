@@ -1,7 +1,6 @@
 package gent
 
 import (
-	"context"
 	"time"
 
 	"github.com/tmc/langchaingo/llms"
@@ -20,18 +19,20 @@ type Model interface {
 	// token counts that work across all providers.
 	//
 	// Parameters:
-	//   - ctx: Go context for cancellation
-	//   - execCtx: ExecutionContext for tracing and stream fan-in (may be nil)
+	//   - execCtx: ExecutionContext for tracing, cancellation, and stream fan-in
 	//   - streamId: Unique identifier for this call (caller-provided)
 	//   - streamTopicId: Topic for grouping related calls (caller-provided)
 	//   - messages: Input messages
 	//   - options: LLM call options
 	//
+	// Cancellation:
+	// The implementation should use execCtx.Context() for HTTP client calls.
+	// This context is cancelled when limits are exceeded or the execution is stopped.
+	//
 	// Stream Emission Requirement:
-	// When execCtx is provided, implementations MUST call execCtx.EmitChunk()
-	// with the complete response content as a single chunk. This ensures
-	// subscribers receive content regardless of whether the underlying model
-	// supports streaming.
+	// Implementations MUST call execCtx.EmitChunk() with the complete response
+	// content as a single chunk. This ensures subscribers receive content
+	// regardless of whether the underlying model supports streaming.
 	//
 	// The emitted chunk should have:
 	//   - Content: The full response text
@@ -42,7 +43,6 @@ type Model interface {
 	// The streamId should be unique across concurrent calls. If empty, chunks
 	// are still emitted but cannot be filtered by stream ID.
 	GenerateContent(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		streamId string,
 		streamTopicId string,
@@ -132,17 +132,20 @@ type StreamingModel interface {
 	// It returns a Stream that provides chunks as they arrive from the model.
 	//
 	// Parameters:
-	//   - ctx: Go context for cancellation
-	//   - execCtx: ExecutionContext for tracing and stream fan-in (may be nil)
+	//   - execCtx: ExecutionContext for tracing, cancellation, and stream fan-in
 	//   - streamId: Unique identifier for this stream (caller-provided)
 	//   - streamTopicId: Topic for grouping related streams (caller-provided)
 	//   - messages: Input messages
 	//   - options: LLM call options
 	//
+	// Cancellation:
+	// The implementation should use execCtx.Context() for HTTP client calls.
+	// This context is cancelled when limits are exceeded or the execution is stopped.
+	//
 	// Stream Emission Requirement:
-	// When execCtx is provided, implementations MUST call execCtx.EmitChunk()
-	// for each chunk as it arrives from the LLM. This enables real-time
-	// observation of responses across the execution tree.
+	// Implementations MUST call execCtx.EmitChunk() for each chunk as it
+	// arrives from the LLM. This enables real-time observation of responses
+	// across the execution tree.
 	//
 	// Each emitted chunk should have:
 	//   - Content/ReasoningContent: The chunk's content delta
@@ -156,7 +159,7 @@ type StreamingModel interface {
 	//
 	// Usage:
 	//
-	//	stream, err := model.GenerateContentStream(ctx, execCtx, "req-123", "llm", msgs)
+	//	stream, err := model.GenerateContentStream(execCtx, "req-123", "llm", msgs)
 	//	if err != nil {
 	//	    return err
 	//	}
@@ -168,7 +171,6 @@ type StreamingModel interface {
 	//	}
 	//	response, err := stream.Response()
 	GenerateContentStream(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		streamId string,
 		streamTopicId string,

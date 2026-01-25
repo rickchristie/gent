@@ -302,11 +302,17 @@ func (c *YAML) RegisterTool(tool any) gent.ToolChain {
 
 // Execute parses tool calls from content and executes them.
 // When execCtx is provided, each tool call is automatically traced.
+// If execCtx is nil, tools are executed without tracing using context.Background().
 func (c *YAML) Execute(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	content string,
 ) (*gent.ToolChainResult, error) {
+	var ctx context.Context
+	if execCtx != nil {
+		ctx = execCtx.Context()
+	} else {
+		ctx = context.Background()
+	}
 	// ParseSection handles tracing of parse errors
 	parsed, err := c.ParseSection(execCtx, content)
 	if err != nil {

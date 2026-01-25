@@ -1,8 +1,6 @@
 package gent
 
 import (
-	"context"
-
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -18,13 +16,18 @@ import (
 // The executor will call [AgentLoop.Next] repeatedly until it returns [LATerminate] result.
 type AgentLoop[Data LoopData] interface {
 	// Next performs one iteration of the agent loop.
-	// The ExecutionContext provides access to LoopData via execCtx.Data() and enables automatic
-	// tracing. All framework components (Model, ToolChain) will trace automatically when given
-	// the ExecutionContext.
+	//
+	// The ExecutionContext provides:
+	//   - Access to LoopData via execCtx.Data()
+	//   - Automatic tracing for all framework components
+	//   - Context for cancellation via execCtx.Context()
+	//
+	// Use execCtx.Context() when calling external APIs that require context.Context.
+	// The context is cancelled when limits are exceeded or the parent context is cancelled.
 	//
 	// Returns an error if the iteration fails (e.g., LLM call failure, parse error).
 	// The executor will handle the error appropriately.
-	Next(ctx context.Context, execCtx *ExecutionContext) (*AgentLoopResult, error)
+	Next(execCtx *ExecutionContext) (*AgentLoopResult, error)
 }
 
 // LoopData is the data that is being passed through each [AgentLoop] execution. Each [AgentLoop]

@@ -11,6 +11,10 @@ import "sync"
 // ensures limits on parent contexts are enforced correctly even with nested or
 // parallel agent loops.
 //
+// Limit checking is triggered automatically when stats are modified. The check
+// happens on the root ExecutionContext which has the aggregated stats from all
+// children.
+//
 // Thread Safety:
 // - All methods are safe for concurrent use
 // - When multiple child contexts run in parallel, all propagate to the parent
@@ -19,10 +23,13 @@ type ExecutionStats struct {
 	mu       sync.RWMutex
 	counters map[string]int64
 	gauges   map[string]float64
-	parent   *ExecutionStats // nil for root context
+	parent   *ExecutionStats      // nil for root context
+	execCtx  *ExecutionContext    // back-reference for limit checking (nil if standalone)
+	rootCtx  *ExecutionContext    // root context for limit checking (cached)
 }
 
-// NewExecutionStats creates a new ExecutionStats instance.
+// NewExecutionStats creates a new ExecutionStats instance without context association.
+// Use this for standalone stats that don't need limit checking.
 func NewExecutionStats() *ExecutionStats {
 	return &ExecutionStats{
 		counters: make(map[string]int64),
@@ -30,8 +37,37 @@ func NewExecutionStats() *ExecutionStats {
 	}
 }
 
+// newExecutionStatsWithContext creates a new ExecutionStats with a back-reference
+// to the ExecutionContext for limit checking.
+func newExecutionStatsWithContext(ctx *ExecutionContext) *ExecutionStats {
+	return &ExecutionStats{
+		counters: make(map[string]int64),
+		gauges:   make(map[string]float64),
+		execCtx:  ctx,
+		rootCtx:  ctx, // root context is itself
+	}
+}
+
+// newExecutionStatsWithContextAndParent creates a new ExecutionStats with both
+// a parent for hierarchical aggregation and a context back-reference.
+func newExecutionStatsWithContextAndParent(ctx *ExecutionContext, parent *ExecutionStats) *ExecutionStats {
+	// Find root context by traversing parent chain
+	rootCtx := ctx
+	for rootCtx.parent != nil {
+		rootCtx = rootCtx.parent
+	}
+
+	return &ExecutionStats{
+		counters: make(map[string]int64),
+		gauges:   make(map[string]float64),
+		parent:   parent,
+		execCtx:  ctx,
+		rootCtx:  rootCtx,
+	}
+}
+
 // newExecutionStatsWithParent creates a new ExecutionStats with a parent reference
-// for hierarchical aggregation.
+// for hierarchical aggregation (without context association).
 func newExecutionStatsWithParent(parent *ExecutionStats) *ExecutionStats {
 	return &ExecutionStats{
 		counters: make(map[string]int64),
@@ -51,6 +87,20 @@ func (s *ExecutionStats) IncrCounter(key string, delta int64) {
 	s.incrCounterInternal(key, delta)
 }
 
+// incrCounterNoLimitCheck increments a counter without triggering limit checks.
+// Used internally when limit checks will be triggered separately (e.g., from Trace).
+func (s *ExecutionStats) incrCounterNoLimitCheck(key string, delta int64) {
+	s.mu.Lock()
+	s.counters[key] += delta
+	s.mu.Unlock()
+
+	// Propagate to parent in real-time
+	if s.parent != nil {
+		s.parent.incrCounterNoLimitCheck(key, delta)
+	}
+	// Note: limit check NOT triggered here
+}
+
 // incrCounterInternal increments a counter without protection checks.
 // Used internally by the executor for protected keys like iterations.
 func (s *ExecutionStats) incrCounterInternal(key string, delta int64) {
@@ -61,6 +111,11 @@ func (s *ExecutionStats) incrCounterInternal(key string, delta int64) {
 	// Propagate to parent in real-time
 	if s.parent != nil {
 		s.parent.incrCounterInternal(key, delta)
+	}
+
+	// Trigger limit check on root context
+	if s.rootCtx != nil {
+		s.rootCtx.checkLimitsIfRoot()
 	}
 }
 
@@ -104,13 +159,39 @@ func (s *ExecutionStats) IncrGauge(key string, delta float64) {
 	if s.parent != nil {
 		s.parent.IncrGauge(key, delta)
 	}
+
+	// Trigger limit check on root context
+	if s.rootCtx != nil {
+		s.rootCtx.checkLimitsIfRoot()
+	}
+}
+
+// incrGaugeNoLimitCheck increments a gauge without triggering limit checks.
+// Used internally when limit checks will be triggered separately (e.g., from Trace).
+func (s *ExecutionStats) incrGaugeNoLimitCheck(key string, delta float64) {
+	s.mu.Lock()
+	s.gauges[key] += delta
+	s.mu.Unlock()
+
+	// Propagate to parent in real-time
+	if s.parent != nil {
+		s.parent.incrGaugeNoLimitCheck(key, delta)
+	}
+	// Note: limit check NOT triggered here
 }
 
 // SetGauge sets a gauge to a specific value.
+// Note: SetGauge does NOT propagate to parent (unlike IncrGauge).
+// Use IncrGauge for values that should aggregate hierarchically.
 func (s *ExecutionStats) SetGauge(key string, value float64) {
 	s.mu.Lock()
 	s.gauges[key] = value
 	s.mu.Unlock()
+
+	// Trigger limit check on root context
+	if s.rootCtx != nil {
+		s.rootCtx.checkLimitsIfRoot()
+	}
 }
 
 // GetGauge returns the current value of a gauge, or 0.0 if not set.

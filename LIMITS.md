@@ -321,31 +321,37 @@ type ExecutionResult struct {
 ### Example Usage
 
 ```go
-exec := executor.New(loop, executor.Config{
-    Limits: []executor.Limit{
-        // Stop after 100 iterations
-        {Type: executor.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+exec := executor.New(loop, executor.DefaultConfig())
 
-        // Stop after 3 consecutive format parse errors
-        {Type: executor.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 3},
+ctx := context.Background()
+execCtx := gent.NewExecutionContext(ctx, "main", data)
 
-        // Stop after 3 consecutive toolchain parse errors
-        {Type: executor.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 3},
+// Configure limits on ExecutionContext
+execCtx.SetLimits([]gent.Limit{
+    // Stop after 100 iterations
+    {Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
 
-        // Stop if total input tokens exceed 100k
-        {Type: executor.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 100000},
+    // Stop after 3 consecutive format parse errors
+    {Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 3},
 
-        // Stop if ANY single model exceeds 50k input tokens
-        {Type: executor.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 50000},
+    // Stop after 3 consecutive toolchain parse errors
+    {Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 3},
 
-        // Stop if total cost exceeds $10
-        {Type: executor.LimitExactKey, Key: gent.KeyCost, MaxValue: 10.0},
-    },
+    // Stop if total input tokens exceed 100k
+    {Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 100000},
+
+    // Stop if ANY single model exceeds 50k input tokens
+    {Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 50000},
+
+    // Stop if total cost exceeds $10
+    {Type: gent.LimitExactKey, Key: gent.KeyCost, MaxValue: 10.0},
 })
 
-result, err := exec.Execute(ctx, data)
-if err != nil {
-    if result.Context.TerminationReason() == gent.TerminationLimitExceeded {
+exec.Execute(execCtx)
+
+result := execCtx.Result()
+if result.Error != nil {
+    if result.TerminationReason == gent.TerminationLimitExceeded {
         limit := result.ExceededLimit
         fmt.Printf("Limit exceeded: key=%s, max=%f\n", limit.Key, limit.MaxValue)
     }
@@ -354,55 +360,60 @@ if err != nil {
 
 ### Limit Checking Implementation
 
+Limit checking is performed in ExecutionContext whenever stats are updated. The check happens
+on the root context which has the aggregated stats from all children.
+
 ```go
-// checkLimits evaluates all configured limits against current stats.
-// Returns the exceeded limit if any, or nil if all limits are within bounds.
-// Limits are checked in order; first match wins.
-func (e *Executor) checkLimits(execCtx *ExecutionContext) *Limit {
-    stats := execCtx.Stats()
+// checkLimitsIfRoot checks limits only on the root context.
+// This is called by ExecutionStats when counters/gauges are updated.
+func (ctx *ExecutionContext) checkLimitsIfRoot() {
+    if ctx.parent != nil {
+        return // Only check on root
+    }
 
-    for i := range e.config.Limits {
-        limit := &e.config.Limits[i]
-        switch limit.Type {
-        case LimitExactKey:
-            if e.checkExactKeyLimit(stats, limit) {
-                return limit
-            }
+    ctx.mu.Lock()
+    defer ctx.mu.Unlock()
 
-        case LimitKeyPrefix:
-            if e.checkPrefixLimit(stats, limit) {
-                return limit
-            }
+    if ctx.exceededLimit != nil {
+        return // Already exceeded
+    }
+
+    // Evaluate all limits in order
+    for i := range ctx.limits {
+        limit := &ctx.limits[i]
+        if ctx.isLimitExceededLocked(limit) {
+            ctx.exceededLimit = limit
+            ctx.cancel(fmt.Errorf("limit exceeded: %s > %v", limit.Key, limit.MaxValue))
+            return
         }
     }
-    return nil
 }
 
-func (e *Executor) checkExactKeyLimit(stats *gent.ExecutionStats, limit *Limit) bool {
+func (ctx *ExecutionContext) checkExactKeyLimit(limit *Limit) bool {
     // Check counters
-    if val := stats.GetCounter(limit.Key); val > 0 {
-        if float64(val) > limit.MaxValue {
-            return true
-        }
+    if val := ctx.stats.GetCounter(limit.Key); float64(val) > limit.MaxValue {
+        return true
     }
     // Check gauges
-    if val := stats.GetGauge(limit.Key); val > 0 {
-        if val > limit.MaxValue {
-            return true
-        }
+    if val := ctx.stats.GetGauge(limit.Key); val > limit.MaxValue {
+        return true
     }
     return false
 }
 
-func (e *Executor) checkPrefixLimit(stats *gent.ExecutionStats, limit *Limit) bool {
-    for key, val := range stats.Counters() {
-        if strings.HasPrefix(key, limit.Key) && float64(val) > limit.MaxValue {
-            return true
+func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
+    for key, val := range ctx.stats.Counters() {
+        if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
+            if float64(val) > limit.MaxValue {
+                return true
+            }
         }
     }
-    for key, val := range stats.Gauges() {
-        if strings.HasPrefix(key, limit.Key) && val > limit.MaxValue {
-            return true
+    for key, val := range ctx.stats.Gauges() {
+        if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
+            if val > limit.MaxValue {
+                return true
+            }
         }
     }
     return false
@@ -574,11 +585,11 @@ Users can define their own metrics using any key that doesn't start with `gent:`
 execCtx.Stats().IncrCounter("myapp:retries", 1)
 execCtx.Stats().SetGauge("myapp:confidence", 0.95)
 
-// With limits
-executor.New(loop, executor.Config{
-    Limits: []executor.Limit{
-        {Type: executor.LimitExactKey, Key: "myapp:retries", MaxValue: 5},
-    },
+// Configure limits on ExecutionContext
+execCtx.SetLimits([]gent.Limit{
+    {Type: gent.LimitExactKey, Key: "myapp:retries", MaxValue: 5},
+    // Include default limits as well
+    {Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
 })
 ```
 

@@ -28,8 +28,23 @@ type HookFirer interface {
 //
 // All framework components (Model, ToolChain, Hooks, AgentLoop) receive ExecutionContext,
 // enabling automatic trace collection without manual wiring.
+//
+// ExecutionContext embeds a context.Context for cancellation propagation. When limits
+// are exceeded, the context is cancelled, which propagates to all child contexts and
+// ongoing operations (like model calls).
 type ExecutionContext struct {
 	mu sync.RWMutex
+
+	// Go context for cancellation (created via context.WithCancelCause)
+	goCtx  context.Context
+	cancel context.CancelCauseFunc
+
+	// Limits that trigger execution termination
+	limits        []Limit
+	exceededLimit *Limit // set when a limit is exceeded
+
+	// Execution result (populated on termination)
+	result *ExecutionResult
 
 	// User's custom loop data (retained as interface for extensibility)
 	data LoopData
@@ -68,16 +83,28 @@ type ExecutionContext struct {
 }
 
 // NewExecutionContext creates a new root ExecutionContext with the given name and data.
-func NewExecutionContext(name string, data LoopData) *ExecutionContext {
-	return &ExecutionContext{
+//
+// The provided context.Context is used for cancellation propagation. When limits are
+// exceeded, the context is cancelled via context.WithCancelCause, which propagates
+// to all child contexts and ongoing operations.
+//
+// Default limits are applied automatically. Use SetLimits to customize.
+func NewExecutionContext(ctx context.Context, name string, data LoopData) *ExecutionContext {
+	ctx, cancel := context.WithCancelCause(ctx)
+	execCtx := &ExecutionContext{
+		goCtx:     ctx,
+		cancel:    cancel,
+		limits:    DefaultLimits(),
 		name:      name,
 		data:      data,
 		depth:     0,
 		events:    make([]TraceEvent, 0),
 		startTime: time.Now(),
-		stats:     NewExecutionStats(),
 		streamHub: newStreamHub(),
 	}
+	// Create stats with back-reference for limit checking
+	execCtx.stats = newExecutionStatsWithContext(execCtx)
+	return execCtx
 }
 
 // -----------------------------------------------------------------------------
@@ -104,6 +131,150 @@ func (ctx *ExecutionContext) SetHookFirer(firer HookFirer) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 	ctx.hookFirer = firer
+}
+
+// -----------------------------------------------------------------------------
+// Context and Limits
+// -----------------------------------------------------------------------------
+
+// Context returns the underlying context.Context for this execution.
+// Use this when calling external APIs that require context.Context.
+//
+// The context is cancelled when:
+//   - A configured limit is exceeded
+//   - The parent context is cancelled
+//   - The execution terminates
+func (ctx *ExecutionContext) Context() context.Context {
+	return ctx.goCtx
+}
+
+// SetLimits configures the limits for this execution.
+// Replaces any previously set limits, including defaults.
+//
+// Limits are evaluated on every stat update. When a limit is exceeded,
+// the context is cancelled and ExceededLimit() returns the exceeded limit.
+//
+// Must be called before execution starts.
+func (ctx *ExecutionContext) SetLimits(limits []Limit) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.limits = limits
+}
+
+// Limits returns the configured limits.
+func (ctx *ExecutionContext) Limits() []Limit {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	result := make([]Limit, len(ctx.limits))
+	copy(result, ctx.limits)
+	return result
+}
+
+// ExceededLimit returns the limit that was exceeded, or nil if no limit was exceeded.
+func (ctx *ExecutionContext) ExceededLimit() *Limit {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.exceededLimit
+}
+
+// Result returns the execution result. Only valid after execution completes.
+// Returns nil if execution has not completed.
+func (ctx *ExecutionContext) Result() *ExecutionResult {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.result
+}
+
+// -----------------------------------------------------------------------------
+// Limit Checking (internal)
+// -----------------------------------------------------------------------------
+
+// checkLimitsIfRoot checks limits only on the root context.
+// This is called by ExecutionStats when counters/gauges are updated.
+// Limit checking happens on the root because it has the aggregated stats from all children.
+func (ctx *ExecutionContext) checkLimitsIfRoot() {
+	// Only check on root context (has aggregated stats)
+	if ctx.parent != nil {
+		return
+	}
+
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	// Already exceeded, don't check again
+	if ctx.exceededLimit != nil {
+		return
+	}
+
+	// Check all limits
+	if limit := ctx.evaluateLimitsLocked(); limit != nil {
+		ctx.exceededLimit = limit
+		ctx.cancel(fmt.Errorf("limit exceeded: %s > %v", limit.Key, limit.MaxValue))
+	}
+}
+
+// evaluateLimitsLocked evaluates all limits against current stats.
+// Returns the first exceeded limit, or nil if all limits are within bounds.
+// Must be called with lock held.
+func (ctx *ExecutionContext) evaluateLimitsLocked() *Limit {
+	for i := range ctx.limits {
+		limit := &ctx.limits[i]
+		if ctx.isLimitExceededLocked(limit) {
+			return limit
+		}
+	}
+	return nil
+}
+
+// isLimitExceededLocked checks if a single limit is exceeded.
+// Must be called with lock held.
+func (ctx *ExecutionContext) isLimitExceededLocked(limit *Limit) bool {
+	switch limit.Type {
+	case LimitExactKey:
+		return ctx.checkExactKeyLimit(limit)
+	case LimitKeyPrefix:
+		return ctx.checkPrefixLimit(limit)
+	default:
+		return false
+	}
+}
+
+// checkExactKeyLimit checks if an exact key limit is exceeded.
+func (ctx *ExecutionContext) checkExactKeyLimit(limit *Limit) bool {
+	// Check counters first
+	if val := ctx.stats.GetCounter(limit.Key); val > 0 {
+		if float64(val) > limit.MaxValue {
+			return true
+		}
+	}
+	// Check gauges
+	if val := ctx.stats.GetGauge(limit.Key); val > 0 {
+		if val > limit.MaxValue {
+			return true
+		}
+	}
+	return false
+}
+
+// checkPrefixLimit checks if any key with the given prefix exceeds the limit.
+func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
+	// Check all counters with matching prefix
+	for key, val := range ctx.stats.Counters() {
+		if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
+			if float64(val) > limit.MaxValue {
+				return true
+			}
+		}
+	}
+	// Check all gauges with matching prefix
+	for key, val := range ctx.stats.Gauges() {
+		if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
+			if val > limit.MaxValue {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // FireBeforeModelCall fires the BeforeModelCall hook if a hook firer is set.
@@ -178,13 +349,19 @@ func (ctx *ExecutionContext) Iteration() int {
 
 // StartIteration begins a new iteration, recording an IterationStartTrace.
 // Called by the Executor at the start of each iteration.
+// This also updates the protected KeyIterations stat counter for limit checking.
 func (ctx *ExecutionContext) StartIteration() {
 	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
 	ctx.iteration++
+	// Increment the protected iteration counter in stats (using no-limit-check to avoid deadlock)
+	ctx.stats.incrCounterNoLimitCheck(KeyIterations, 1)
 	ctx.appendEventLocked(IterationStartTrace{
 		BaseTrace: ctx.baseTraceLocked(),
 	})
+	ctx.mu.Unlock()
+
+	// Trigger limit check after releasing lock to avoid deadlock
+	ctx.checkLimitsIfRoot()
 }
 
 // EndIteration completes the current iteration, recording an IterationEndTrace.
@@ -206,8 +383,11 @@ func (ctx *ExecutionContext) EndIteration(action LoopAction, duration time.Durat
 // Trace records a trace event and auto-updates aggregates based on event type.
 func (ctx *ExecutionContext) Trace(event TraceEvent) {
 	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
 	ctx.traceEventLocked(event)
+	ctx.mu.Unlock()
+
+	// Trigger limit check after releasing lock to avoid deadlock
+	ctx.checkLimitsIfRoot()
 }
 
 // TraceCustom is a convenience method for recording custom trace events.
@@ -222,41 +402,44 @@ func (ctx *ExecutionContext) TraceCustom(name string, data map[string]any) {
 }
 
 // traceEventLocked records an event and updates stats. Must be called with lock held.
+// Note: Uses internal no-limit-check versions to avoid deadlock. Caller must trigger
+// limit checks after releasing the lock.
 func (ctx *ExecutionContext) traceEventLocked(event TraceEvent) {
 	// Update BaseTrace fields if the event has them
 	event = ctx.populateBaseTrace(event)
 
 	// Update stats based on event type (auto-aggregation)
+	// Use no-limit-check versions to avoid deadlock (limit check done after lock release)
 	switch e := event.(type) {
 	case ModelCallTrace:
-		ctx.stats.incrCounterInternal(KeyInputTokens, int64(e.InputTokens))
-		ctx.stats.incrCounterInternal(KeyOutputTokens, int64(e.OutputTokens))
-		ctx.stats.IncrGauge(KeyCost, e.Cost)
+		ctx.stats.incrCounterNoLimitCheck(KeyInputTokens, int64(e.InputTokens))
+		ctx.stats.incrCounterNoLimitCheck(KeyOutputTokens, int64(e.OutputTokens))
+		ctx.stats.incrGaugeNoLimitCheck(KeyCost, e.Cost)
 		if e.Model != "" {
-			ctx.stats.incrCounterInternal(KeyInputTokensFor+e.Model, int64(e.InputTokens))
-			ctx.stats.incrCounterInternal(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
-			ctx.stats.IncrGauge(KeyCostFor+e.Model, e.Cost)
+			ctx.stats.incrCounterNoLimitCheck(KeyInputTokensFor+e.Model, int64(e.InputTokens))
+			ctx.stats.incrCounterNoLimitCheck(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
+			ctx.stats.incrGaugeNoLimitCheck(KeyCostFor+e.Model, e.Cost)
 		}
 	case ToolCallTrace:
-		ctx.stats.incrCounterInternal(KeyToolCalls, 1)
+		ctx.stats.incrCounterNoLimitCheck(KeyToolCalls, 1)
 		if e.ToolName != "" {
-			ctx.stats.incrCounterInternal(KeyToolCallsFor+e.ToolName, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsFor+e.ToolName, 1)
 		}
 	case ParseErrorTrace:
 		iteration := fmt.Sprintf("%d", ctx.iteration)
 		switch e.ErrorType {
 		case "format":
-			ctx.stats.IncrCounter(KeyFormatParseErrorTotal, 1)
-			ctx.stats.IncrCounter(KeyFormatParseErrorAt+iteration, 1)
-			ctx.stats.IncrCounter(KeyFormatParseErrorConsecutive, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyFormatParseErrorTotal, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyFormatParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyFormatParseErrorConsecutive, 1)
 		case "toolchain":
-			ctx.stats.IncrCounter(KeyToolchainParseErrorTotal, 1)
-			ctx.stats.IncrCounter(KeyToolchainParseErrorAt+iteration, 1)
-			ctx.stats.IncrCounter(KeyToolchainParseErrorConsecutive, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyToolchainParseErrorTotal, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyToolchainParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyToolchainParseErrorConsecutive, 1)
 		case "termination":
-			ctx.stats.IncrCounter(KeyTerminationParseErrorTotal, 1)
-			ctx.stats.IncrCounter(KeyTerminationParseErrorAt+iteration, 1)
-			ctx.stats.IncrCounter(KeyTerminationParseErrorConsecutive, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorTotal, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorConsecutive, 1)
 		}
 	}
 
@@ -345,20 +528,31 @@ func (ctx *ExecutionContext) Stats() *ExecutionStats {
 // SpawnChild creates a child ExecutionContext for nested agent loops.
 // The child is automatically linked to the parent and a ChildSpawnTrace is recorded.
 // The child's stats are linked to the parent's stats for real-time aggregation.
+//
+// The child context inherits the parent's context.Context, so cancelling the parent
+// (e.g., due to limit exceeded) automatically cancels all children.
 func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionContext {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 
+	// Create child context that is cancelled when parent is cancelled
+	childGoCtx, childCancel := context.WithCancelCause(ctx.goCtx)
+
 	child := &ExecutionContext{
+		goCtx:     childGoCtx,
+		cancel:    childCancel,
+		limits:    ctx.limits, // Inherit parent limits
 		name:      name,
 		data:      data,
 		depth:     ctx.depth + 1,
 		parent:    ctx,
 		events:    make([]TraceEvent, 0),
 		startTime: time.Now(),
-		stats:     newExecutionStatsWithParent(ctx.stats),
 		streamHub: newStreamHub(),
 	}
+	// Create stats with back-reference to child for limit checking
+	// Stats also link to parent stats for real-time aggregation
+	child.stats = newExecutionStatsWithContextAndParent(child, ctx.stats)
 
 	ctx.children = append(ctx.children, child)
 	ctx.appendEventLocked(ChildSpawnTrace{
@@ -421,6 +615,9 @@ func (ctx *ExecutionContext) Depth() int {
 
 // SetTermination sets the termination reason and final result.
 // Called by the Executor when execution ends.
+//
+// This also populates the Result() field with an ExecutionResult containing
+// all termination information.
 func (ctx *ExecutionContext) SetTermination(reason TerminationReason, result []ContentPart, err error) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
@@ -428,6 +625,14 @@ func (ctx *ExecutionContext) SetTermination(reason TerminationReason, result []C
 	ctx.finalResult = result
 	ctx.err = err
 	ctx.endTime = time.Now()
+
+	// Populate the result for easy access via Result()
+	ctx.result = &ExecutionResult{
+		TerminationReason: reason,
+		Output:            result,
+		Error:             err,
+		ExceededLimit:     ctx.exceededLimit,
+	}
 }
 
 // TerminationReason returns why execution terminated.

@@ -99,7 +99,7 @@ args: {}`,
 
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 
 			if tt.expected.err != nil {
 				assert.ErrorIs(t, err, tt.expected.err)
@@ -465,7 +465,7 @@ args: {}`,
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 
 			if tt.expected.executeErr != nil {
 				assert.ErrorIs(t, err, tt.expected.executeErr)
@@ -705,7 +705,7 @@ args:
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 			require.NoError(t, err)
 
 			if tt.expected.noToolError {
@@ -788,7 +788,7 @@ args:
 			require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
 			assert.Equal(t, tt.expected.dateValue, dateStr)
 
-			execResult, err := tc.Execute(context.Background(), nil, tt.input.content)
+			execResult, err := tc.Execute(nil, tt.input.content)
 			require.NoError(t, err)
 			assert.NoError(t, execResult.Errors[0])
 		})
@@ -880,7 +880,7 @@ args:
 			require.True(t, ok, "expected string, got %T: %v", val, val)
 			assert.Equal(t, tt.expected.value, strVal)
 
-			execResult, err := tc.Execute(context.Background(), nil, content)
+			execResult, err := tc.Execute(nil, content)
 			require.NoError(t, err)
 			assert.NoError(t, execResult.Errors[0])
 		})
@@ -1006,7 +1006,7 @@ args:
 			)
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 			require.NoError(t, err)
 			require.NoError(t, result.Errors[0])
 
@@ -1077,7 +1077,7 @@ func TestYAML_Execute_DurationConversion(t *testing.T) {
 args:
   duration: %s`, tt.input.duration)
 
-			result, err := tc.Execute(context.Background(), nil, content)
+			result, err := tc.Execute(nil, content)
 			require.NoError(t, err)
 			require.NoError(t, result.Errors[0])
 
@@ -1616,7 +1616,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 			tc := NewYAML()
 
 			// Create execution context with iteration 1
-			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 			execCtx.StartIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset

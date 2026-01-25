@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
@@ -30,7 +31,8 @@ func TestHelloGrok(t *testing.T) {
 
 	model := NewLCGWrapper(llm)
 
-	response, err := model.GenerateContent(ctx, nil, "", "", []llms.MessageContent{
+	execCtx := gent.NewExecutionContext(ctx, "test", nil)
+	response, err := model.GenerateContent(execCtx, "", "", []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeHuman, "Hello Grok! Nice to meet you!"),
 	})
 	require.NoError(t, err, "failed to generate response")

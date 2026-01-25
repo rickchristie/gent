@@ -51,20 +51,19 @@ func (m *LCGWrapper) Unwrap() llms.Model {
 // and a chunk is emitted for streaming subscribers.
 // Token usage is automatically normalized across providers.
 func (m *LCGWrapper) GenerateContent(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	streamId string,
 	streamTopicId string,
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
+	ctx := execCtx.Context()
+
 	// Fire BeforeModelCall hook
-	if execCtx != nil {
-		execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
-			Model:   m.modelName,
-			Request: messages,
-		})
-	}
+	execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
+		Model:   m.modelName,
+		Request: messages,
+	})
 
 	// Call the underlying model
 	startTime := time.Now()
@@ -77,50 +76,47 @@ func (m *LCGWrapper) GenerateContent(
 		response = convertLCGResponse(lcgResponse, duration)
 	}
 
-	// Fire AfterModelCall hook, emit chunk, and trace
-	if execCtx != nil {
-		// Fire AfterModelCall hook first (for logging)
-		execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
-			Model:    m.modelName,
-			Request:  messages,
-			Response: response,
-			Duration: duration,
-			Error:    err,
+	// Fire AfterModelCall hook first (for logging)
+	execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
+		Model:    m.modelName,
+		Request:  messages,
+		Response: response,
+		Duration: duration,
+		Error:    err,
+	})
+
+	// Emit chunk for streaming subscribers (single chunk with complete content)
+	if response != nil && len(response.Choices) > 0 {
+		execCtx.EmitChunk(gent.StreamChunk{
+			Content:          response.Choices[0].Content,
+			ReasoningContent: response.Choices[0].ReasoningContent,
+			StreamId:         streamId,
+			StreamTopicId:    streamTopicId,
+			Err:              err,
 		})
-
-		// Emit chunk for streaming subscribers (single chunk with complete content)
-		if response != nil && len(response.Choices) > 0 {
-			execCtx.EmitChunk(gent.StreamChunk{
-				Content:          response.Choices[0].Content,
-				ReasoningContent: response.Choices[0].ReasoningContent,
-				StreamId:         streamId,
-				StreamTopicId:    streamTopicId,
-				Err:              err,
-			})
-		} else if err != nil {
-			// Emit error chunk even if no response
-			execCtx.EmitChunk(gent.StreamChunk{
-				StreamId:      streamId,
-				StreamTopicId: streamTopicId,
-				Err:           err,
-			})
-		}
-
-		// Then trace for aggregation
-		trace := gent.ModelCallTrace{
-			Model:    m.modelName,
-			Request:  messages,
-			Response: response,
-			Duration: duration,
-			Error:    err,
-		}
-		if response != nil && response.Info != nil {
-			trace.InputTokens = response.Info.InputTokens
-			trace.OutputTokens = response.Info.OutputTokens
-			// Cost calculation can be added here based on model pricing
-		}
-		execCtx.Trace(trace)
+	} else if err != nil {
+		// Emit error chunk even if no response
+		execCtx.EmitChunk(gent.StreamChunk{
+			StreamId:      streamId,
+			StreamTopicId: streamTopicId,
+			Err:           err,
+		})
 	}
+
+	// Then trace for aggregation
+	trace := gent.ModelCallTrace{
+		Model:    m.modelName,
+		Request:  messages,
+		Response: response,
+		Duration: duration,
+		Error:    err,
+	}
+	if response != nil && response.Info != nil {
+		trace.InputTokens = response.Info.InputTokens
+		trace.OutputTokens = response.Info.OutputTokens
+		// Cost calculation can be added here based on model pricing
+	}
+	execCtx.Trace(trace)
 
 	return response, err
 }
@@ -277,20 +273,19 @@ func getIntFromMap(m map[string]any, key string) int {
 //
 // When execCtx is provided, chunks are also emitted to streaming subscribers via EmitChunk.
 func (m *LCGWrapper) GenerateContentStream(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	streamId string,
 	streamTopicId string,
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (gent.Stream, error) {
+	ctx := execCtx.Context()
+
 	// Fire BeforeModelCall hook
-	if execCtx != nil {
-		execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
-			Model:   m.modelName,
-			Request: messages,
-		})
-	}
+	execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
+		Model:   m.modelName,
+		Request: messages,
+	})
 
 	// Create stream with duration tracking
 	stream := gent.NewStreamWithDuration()
@@ -303,24 +298,20 @@ func (m *LCGWrapper) GenerateContentStream(
 			if len(reasoningChunk) > 0 {
 				stream.SendReasoning(string(reasoningChunk))
 				// Emit reasoning chunk to execCtx subscribers
-				if execCtx != nil {
-					execCtx.EmitChunk(gent.StreamChunk{
-						ReasoningContent: string(reasoningChunk),
-						StreamId:         streamId,
-						StreamTopicId:    streamTopicId,
-					})
-				}
+				execCtx.EmitChunk(gent.StreamChunk{
+					ReasoningContent: string(reasoningChunk),
+					StreamId:         streamId,
+					StreamTopicId:    streamTopicId,
+				})
 			}
 			if len(contentChunk) > 0 {
 				stream.SendContent(string(contentChunk))
 				// Emit content chunk to execCtx subscribers
-				if execCtx != nil {
-					execCtx.EmitChunk(gent.StreamChunk{
-						Content:       string(contentChunk),
-						StreamId:      streamId,
-						StreamTopicId: streamTopicId,
-					})
-				}
+				execCtx.EmitChunk(gent.StreamChunk{
+					Content:       string(contentChunk),
+					StreamId:      streamId,
+					StreamTopicId: streamTopicId,
+				})
 			}
 			return nil
 		},
@@ -357,37 +348,35 @@ func (m *LCGWrapper) GenerateContentStream(
 		}
 
 		// Fire AfterModelCall hook and trace
-		if execCtx != nil {
-			execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
-				Model:    m.modelName,
-				Request:  messages,
-				Response: response,
-				Duration: duration,
-				Error:    err,
+		execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
+			Model:    m.modelName,
+			Request:  messages,
+			Response: response,
+			Duration: duration,
+			Error:    err,
+		})
+
+		// Emit error chunk if error occurred
+		if err != nil {
+			execCtx.EmitChunk(gent.StreamChunk{
+				StreamId:      streamId,
+				StreamTopicId: streamTopicId,
+				Err:           err,
 			})
-
-			// Emit error chunk if error occurred
-			if err != nil {
-				execCtx.EmitChunk(gent.StreamChunk{
-					StreamId:      streamId,
-					StreamTopicId: streamTopicId,
-					Err:           err,
-				})
-			}
-
-			trace := gent.ModelCallTrace{
-				Model:    m.modelName,
-				Request:  messages,
-				Response: response,
-				Duration: duration,
-				Error:    err,
-			}
-			if response != nil && response.Info != nil {
-				trace.InputTokens = response.Info.InputTokens
-				trace.OutputTokens = response.Info.OutputTokens
-			}
-			execCtx.Trace(trace)
 		}
+
+		trace := gent.ModelCallTrace{
+			Model:    m.modelName,
+			Request:  messages,
+			Response: response,
+			Duration: duration,
+			Error:    err,
+		}
+		if response != nil && response.Info != nil {
+			trace.InputTokens = response.Info.InputTokens
+			trace.OutputTokens = response.Info.OutputTokens
+		}
+		execCtx.Trace(trace)
 
 		// Complete the stream
 		stream.Complete(response, err)

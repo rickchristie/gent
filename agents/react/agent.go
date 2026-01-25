@@ -1,7 +1,6 @@
 package react
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"text/template"
@@ -273,10 +272,7 @@ func (r *Agent) RegisterTool(tool any) *Agent {
 // This order ensures that tool calls are always executed before termination. If the model
 // outputs both an action and an answer in the same response, the action takes priority.
 // This prevents premature termination when tools might fail or produce unexpected results.
-func (r *Agent) Next(
-	ctx context.Context,
-	execCtx *gent.ExecutionContext,
-) (*gent.AgentLoopResult, error) {
+func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 	data := execCtx.Data()
 
 	// Build output sections and generate prompts
@@ -292,7 +288,7 @@ func (r *Agent) Next(
 	streamTopicId := "llm-response"
 
 	// Call model - use streaming if enabled and model supports it
-	response, err := r.callModel(ctx, execCtx, streamId, streamTopicId, messages)
+	response, err := r.callModel(execCtx, streamId, streamTopicId, messages)
 	if err != nil {
 		return nil, fmt.Errorf("model call failed: %w", err)
 	}
@@ -313,7 +309,7 @@ func (r *Agent) Next(
 	actionContents, hasActions := parsed[actionName]
 	if hasActions && len(actionContents) > 0 {
 		// Execute tool calls (automatically traced via execCtx)
-		observation := r.executeToolCalls(ctx, execCtx, actionContents)
+		observation := r.executeToolCalls(execCtx, actionContents)
 
 		// Build iteration and update data
 		iter := r.buildIteration(responseContent, observation)
@@ -528,14 +524,13 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) string {
 
 // executeToolCalls executes tool calls from the parsed action contents.
 func (r *Agent) executeToolCalls(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	contents []string,
 ) string {
 	var observations []string
 
 	for _, content := range contents {
-		result, err := r.toolChain.Execute(ctx, execCtx, content)
+		result, err := r.toolChain.Execute(execCtx, content)
 		if err != nil {
 			observations = append(observations, fmt.Sprintf("Error: %v", err))
 			continue
@@ -596,7 +591,6 @@ func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 
 // callModel calls the model, using streaming if enabled and supported.
 func (r *Agent) callModel(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	streamId string,
 	streamTopicId string,
@@ -605,24 +599,23 @@ func (r *Agent) callModel(
 	// Check if streaming is enabled and model supports it
 	if r.useStreaming {
 		if streamingModel, ok := r.model.(gent.StreamingModel); ok {
-			return r.callModelStreaming(ctx, execCtx, streamingModel, streamId, streamTopicId, messages)
+			return r.callModelStreaming(execCtx, streamingModel, streamId, streamTopicId, messages)
 		}
 	}
 
 	// Fall back to non-streaming
-	return r.model.GenerateContent(ctx, execCtx, streamId, streamTopicId, messages)
+	return r.model.GenerateContent(execCtx, streamId, streamTopicId, messages)
 }
 
 // callModelStreaming calls the model with streaming and accumulates the response.
 func (r *Agent) callModelStreaming(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	model gent.StreamingModel,
 	streamId string,
 	streamTopicId string,
 	messages []llms.MessageContent,
 ) (*gent.ContentResponse, error) {
-	stream, err := model.GenerateContentStream(ctx, execCtx, streamId, streamTopicId, messages)
+	stream, err := model.GenerateContentStream(execCtx, streamId, streamTopicId, messages)
 	if err != nil {
 		return nil, err
 	}

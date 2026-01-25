@@ -1,6 +1,7 @@
 package gent
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func (d *testLoopData) GetScratchPad() []*Iteration          { return nil }
 func (d *testLoopData) SetScratchPad(iterations []*Iteration) {}
 
 func TestExecutionContext_SubscribeAll(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 	ch, unsub := ctx.SubscribeAll()
 	defer unsub()
@@ -68,7 +69,7 @@ func TestExecutionContext_SubscribeToStream(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := NewExecutionContext("test", &testLoopData{})
+			ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 			ch, unsub := ctx.SubscribeToStream(tt.input.streamID)
 			defer unsub()
@@ -121,7 +122,7 @@ func TestExecutionContext_SubscribeToTopic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := NewExecutionContext("test", &testLoopData{})
+			ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 			ch, unsub := ctx.SubscribeToTopic(tt.input.topicID)
 			defer unsub()
@@ -161,7 +162,7 @@ func TestExecutionContext_BuildSourcePath(t *testing.T) {
 			name: "root context with single iteration",
 			input: input{
 				setupFn: func() *ExecutionContext {
-					ctx := NewExecutionContext("main", &testLoopData{})
+					ctx := NewExecutionContext(context.Background(), "main", &testLoopData{})
 					ctx.StartIteration()
 					return ctx
 				},
@@ -172,7 +173,7 @@ func TestExecutionContext_BuildSourcePath(t *testing.T) {
 			name: "child context",
 			input: input{
 				setupFn: func() *ExecutionContext {
-					parent := NewExecutionContext("main", &testLoopData{})
+					parent := NewExecutionContext(context.Background(), "main", &testLoopData{})
 					parent.StartIteration()
 					parent.StartIteration() // iteration 2
 
@@ -187,7 +188,7 @@ func TestExecutionContext_BuildSourcePath(t *testing.T) {
 			name: "deeply nested context",
 			input: input{
 				setupFn: func() *ExecutionContext {
-					root := NewExecutionContext("main", &testLoopData{})
+					root := NewExecutionContext(context.Background(), "main", &testLoopData{})
 					root.StartIteration()
 
 					child1 := root.SpawnChild("orchestrator", &testLoopData{})
@@ -215,7 +216,7 @@ func TestExecutionContext_BuildSourcePath(t *testing.T) {
 }
 
 func TestExecutionContext_EmitChunk_AutoPopulatesSource(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 	ctx.StartIteration()
 
 	ch, unsub := ctx.SubscribeAll()
@@ -231,7 +232,7 @@ func TestExecutionContext_EmitChunk_AutoPopulatesSource(t *testing.T) {
 }
 
 func TestExecutionContext_EmitChunk_PreservesExistingSource(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 	ctx.StartIteration()
 
 	ch, unsub := ctx.SubscribeAll()
@@ -247,7 +248,7 @@ func TestExecutionContext_EmitChunk_PreservesExistingSource(t *testing.T) {
 }
 
 func TestExecutionContext_ParentPropagation(t *testing.T) {
-	parent := NewExecutionContext("parent", &testLoopData{})
+	parent := NewExecutionContext(context.Background(), "parent", &testLoopData{})
 	parent.StartIteration()
 
 	child := parent.SpawnChild("child", &testLoopData{})
@@ -268,7 +269,7 @@ func TestExecutionContext_ParentPropagation(t *testing.T) {
 }
 
 func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
-	root := NewExecutionContext("root", &testLoopData{})
+	root := NewExecutionContext(context.Background(), "root", &testLoopData{})
 	root.StartIteration()
 
 	child := root.SpawnChild("child", &testLoopData{})
@@ -293,7 +294,7 @@ func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
 }
 
 func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
-	root := NewExecutionContext("root", &testLoopData{})
+	root := NewExecutionContext(context.Background(), "root", &testLoopData{})
 	root.StartIteration()
 
 	const numChildren = 5
@@ -341,7 +342,7 @@ func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
 }
 
 func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 	ch, unsub := ctx.SubscribeAll()
 
@@ -373,13 +374,13 @@ func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
 }
 
 func TestExecutionContext_CloseStreams_MultipleCallsSafe(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 	ctx.CloseStreams()
 	ctx.CloseStreams() // Should not panic
 }
 
 func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 	ch1, unsub1 := ctx.SubscribeToTopic("topic")
 	ch2, unsub2 := ctx.SubscribeToTopic("topic")
@@ -399,7 +400,7 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 }
 
 func TestExecutionContext_NoListener_EmitDoesNotBlock(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 	const numChunks = 1000
 	start := time.Now()
@@ -416,7 +417,7 @@ func TestExecutionContext_NoListener_EmitDoesNotBlock(t *testing.T) {
 }
 
 func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 	ch, unsub := ctx.SubscribeAll()
 	defer unsub()
@@ -447,7 +448,7 @@ func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
 }
 
 func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
-	ctx := NewExecutionContext("test", &testLoopData{})
+	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 
 	slowCh, slowUnsub := ctx.SubscribeAll()
 	fastCh, fastUnsub := ctx.SubscribeAll()
@@ -491,7 +492,7 @@ func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
 }
 
 func TestExecutionContext_SlowListener_ParentPropagation_DoesNotBlockChild(t *testing.T) {
-	parent := NewExecutionContext("parent", &testLoopData{})
+	parent := NewExecutionContext(context.Background(), "parent", &testLoopData{})
 	parent.StartIteration()
 
 	child := parent.SpawnChild("child", &testLoopData{})

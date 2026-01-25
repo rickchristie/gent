@@ -192,13 +192,19 @@ func (ParseErrorTrace) traceEvent() {}
 // -----------------------------------------------------------------------------
 
 // ExecutionResult contains the final result of an execution run.
+// Access this via ExecutionContext.Result() after execution completes.
 type ExecutionResult struct {
-	// Result is the final output from the AgentLoop (set when terminated successfully).
-	// This is a slice of ContentPart to support multimodal outputs.
-	Result []ContentPart
+	// TerminationReason indicates how execution ended.
+	TerminationReason TerminationReason
 
-	// Context is the ExecutionContext with full trace data.
-	Context *ExecutionContext
+	// Output is the final output from the AgentLoop (set when terminated successfully).
+	// This is a slice of ContentPart to support multimodal outputs.
+	// Nil if terminated due to error, limit, or cancellation.
+	Output []ContentPart
+
+	// Error is the error that caused termination, if any.
+	// Nil for successful termination.
+	Error error
 
 	// ExceededLimit is non-nil if execution terminated due to a limit being exceeded.
 	// Inspect this to determine which limit was hit and its threshold.

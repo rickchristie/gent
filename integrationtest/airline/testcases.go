@@ -203,8 +203,11 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 
 	data := react.NewLoopData(llms.TextContent{Text: customerRequest})
 
-	// Create ExecutionContext
-	execCtx := gent.NewExecutionContext("airline-reschedule", data)
+	// Create ExecutionContext with iteration limit
+	execCtx := gent.NewExecutionContext(ctx, "airline-reschedule", data)
+	execCtx.SetLimits([]gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
+	})
 
 	// Create hook registry
 	hookRegistry := hooks.NewRegistry()
@@ -241,12 +244,8 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 		hookRegistry.Register(fileLoggerHook)
 	}
 
-	// Create executor with iteration limit
-	exec := executor.New[*react.LoopData](loop, executor.Config{
-		Limits: []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
-		},
-	}).WithHooks(hookRegistry)
+	// Create executor
+	exec := executor.New[*react.LoopData](loop, executor.Config{}).WithHooks(hookRegistry)
 
 	// Print header
 	printHeader(w, "AIRLINE RESCHEDULE SCENARIO")
@@ -261,7 +260,8 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	printSection(w, "Agent Execution")
 	fmt.Fprintln(w)
 
-	result, err := exec.ExecuteWithContext(ctx, execCtx)
+	exec.Execute(execCtx)
+	result := execCtx.Result()
 
 	// Print final summary
 	fmt.Fprintln(w)
@@ -269,11 +269,11 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	fmt.Fprintln(w)
 
 	// Print final result
-	if err != nil {
-		fmt.Fprintf(w, "Error: %v\n", err)
+	if result.Error != nil {
+		fmt.Fprintf(w, "Error: %v\n", result.Error)
 	} else {
 		printSection(w, "Final Response to Customer")
-		for _, part := range result.Result {
+		for _, part := range result.Output {
 			if tc, ok := part.(llms.TextContent); ok {
 				fmt.Fprintln(w, tc.Text)
 			}
@@ -350,7 +350,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	fmt.Fprintln(w)
 	printHeader(w, "TEST COMPLETE")
 
-	return err
+	return result.Error
 }
 
 // streamingOutputHook handles iteration and tool call output for streaming mode.
@@ -554,8 +554,11 @@ Always be polite and professional. When rescheduling, make sure to:
 	taskContent := s.formatMessageHistory()
 	data := react.NewLoopData(llms.TextContent{Text: taskContent})
 
-	// Create ExecutionContext
-	execCtx := gent.NewExecutionContext("airline-chat", data)
+	// Create ExecutionContext with iteration limit
+	execCtx := gent.NewExecutionContext(ctx, "airline-chat", data)
+	execCtx.SetLimits([]gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
+	})
 
 	// Create hook registry
 	hookRegistry := hooks.NewRegistry()
@@ -585,12 +588,8 @@ Always be polite and professional. When rescheduling, make sure to:
 		streamWg.Wait()
 	}()
 
-	// Create executor with iteration limit
-	exec := executor.New[*react.LoopData](loop, executor.Config{
-		Limits: []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
-		},
-	}).WithHooks(hookRegistry)
+	// Create executor
+	exec := executor.New[*react.LoopData](loop, executor.Config{}).WithHooks(hookRegistry)
 
 	// Print user input
 	fmt.Fprintln(s.Writer)
@@ -602,7 +601,8 @@ Always be polite and professional. When rescheduling, make sure to:
 	printSection(s.Writer, "Agent Processing")
 	fmt.Fprintln(s.Writer)
 
-	result, err := exec.ExecuteWithContext(ctx, execCtx)
+	exec.Execute(execCtx)
+	result := execCtx.Result()
 
 	// Print stats
 	fmt.Fprintln(s.Writer)
@@ -612,14 +612,14 @@ Always be polite and professional. When rescheduling, make sure to:
 		execCtx.Duration())
 
 	// Extract agent response
-	if err != nil {
-		fmt.Fprintf(s.Writer, "\nError: %v\n", err)
-		return err
+	if result.Error != nil {
+		fmt.Fprintf(s.Writer, "\nError: %v\n", result.Error)
+		return result.Error
 	}
 
 	// Get the final response text
 	var responseText string
-	for _, part := range result.Result {
+	for _, part := range result.Output {
 		if tc, ok := part.(llms.TextContent); ok {
 			responseText = tc.Text
 		}

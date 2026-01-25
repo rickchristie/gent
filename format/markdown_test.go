@@ -1,6 +1,7 @@
 package format
 
 import (
+	"context"
 	"testing"
 
 	"github.com/rickchristie/gent"
@@ -392,7 +393,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 			format.DescribeStructure(sections)
 
 			// Create execution context with iteration 1
-			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 			execCtx.StartIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset

@@ -98,7 +98,7 @@ func TestJSON_RegisterTool(t *testing.T) {
 
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 
 			if tt.expected.err != nil {
 				assert.ErrorIs(t, err, tt.expected.err)
@@ -418,7 +418,7 @@ func TestJSON_Execute(t *testing.T) {
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 
 			if tt.expected.executeErr != nil {
 				assert.ErrorIs(t, err, tt.expected.executeErr)
@@ -644,7 +644,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 			require.NoError(t, err)
 
 			if tt.expected.noToolError {
@@ -724,7 +724,7 @@ func TestJSON_ParseSection_DateAsString(t *testing.T) {
 			require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
 			assert.Equal(t, tt.expected.dateValue, dateStr)
 
-			execResult, err := tc.Execute(context.Background(), nil, tt.input.content)
+			execResult, err := tc.Execute(nil, tt.input.content)
 			require.NoError(t, err)
 			assert.NoError(t, execResult.Errors[0])
 		})
@@ -814,7 +814,7 @@ func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
 			require.True(t, ok, "expected string, got %T: %v", val, val)
 			assert.Equal(t, tt.expected.value, strVal)
 
-			execResult, err := tc.Execute(context.Background(), nil, content)
+			execResult, err := tc.Execute(nil, content)
 			require.NoError(t, err)
 			assert.NoError(t, execResult.Errors[0])
 		})
@@ -881,7 +881,7 @@ func TestJSON_Execute_TimeConversion(t *testing.T) {
 			)
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(context.Background(), nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content)
 			require.NoError(t, err)
 			require.NoError(t, result.Errors[0])
 
@@ -953,7 +953,7 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 				tt.input.duration,
 			)
 
-			result, err := tc.Execute(context.Background(), nil, content)
+			result, err := tc.Execute(nil, content)
 			require.NoError(t, err)
 			require.NoError(t, result.Errors[0])
 
@@ -1501,7 +1501,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			tc := NewJSON()
 
 			// Create execution context with iteration 1
-			execCtx := gent.NewExecutionContext("test", nil)
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 			execCtx.StartIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset

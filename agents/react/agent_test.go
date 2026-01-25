@@ -33,7 +33,6 @@ func (m *mockModel) WithErrors(errs ...error) *mockModel {
 }
 
 func (m *mockModel) GenerateContent(
-	_ context.Context,
 	_ *gent.ExecutionContext,
 	_ string,
 	_ string,
@@ -92,7 +91,6 @@ func (m *mockToolChain) RegisterTool(_ any) gent.ToolChain {
 }
 
 func (m *mockToolChain) Execute(
-	_ context.Context,
 	_ *gent.ExecutionContext,
 	_ string,
 ) (*gent.ToolChainResult, error) {
@@ -197,7 +195,7 @@ func (m *mockFormat) Parse(execCtx *gent.ExecutionContext, output string) (map[s
 // ----------------------------------------------------------------------------
 
 func newTestExecCtx(data gent.LoopData) *gent.ExecutionContext {
-	return gent.NewExecutionContext("test", data)
+	return gent.NewExecutionContext(context.Background(), "test", data)
 }
 
 // ----------------------------------------------------------------------------
@@ -369,7 +367,7 @@ func TestAgent_Next_Termination(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
-	result, err := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(execCtx)
 
 	require.NoError(t, err)
 	assert.Equal(t, gent.LATerminate, result.Action)
@@ -406,7 +404,7 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Search for test"})
 	execCtx := newTestExecCtx(data)
-	result, err := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(execCtx)
 
 	require.NoError(t, err)
 	assert.Equal(t, gent.LAContinue, result.Action)
@@ -437,7 +435,7 @@ func TestAgent_Next_ToolError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Use broken tool"})
 	execCtx := newTestExecCtx(data)
-	result, err := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(execCtx)
 
 	require.NoError(t, err)
 	assert.Equal(t, gent.LAContinue, result.Action)
@@ -457,7 +455,7 @@ func TestAgent_Next_ModelError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
-	_, err := loop.Next(context.Background(), execCtx)
+	_, err := loop.Next(execCtx)
 
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "model failed"),
@@ -483,7 +481,7 @@ func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
-	result, err := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(execCtx)
 
 	// Should not return error - instead feeds back as observation
 	assert.NoError(t, err)
@@ -513,7 +511,7 @@ func TestAgent_Next_ParseError_TracesError(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Test"})
 	execCtx := newTestExecCtx(data)
-	_, err := loop.Next(context.Background(), execCtx)
+	_, err := loop.Next(execCtx)
 
 	assert.NoError(t, err)
 
@@ -560,7 +558,7 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 
 	data := NewLoopData(llms.TextContent{Text: "Use tools a and b"})
 	execCtx := newTestExecCtx(data)
-	result, err := loop.Next(context.Background(), execCtx)
+	result, err := loop.Next(execCtx)
 
 	require.NoError(t, err)
 	assert.Equal(t, gent.LAContinue, result.Action)
@@ -715,7 +713,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 			data := NewLoopData(llms.TextContent{Text: "Execute the task"})
 			execCtx := newTestExecCtx(data)
 
-			result, err := loop.Next(context.Background(), execCtx)
+			result, err := loop.Next(execCtx)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected.action, result.Action)
