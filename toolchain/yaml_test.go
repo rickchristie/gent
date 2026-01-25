@@ -1556,6 +1556,7 @@ func yamlGetTextContent(parts []gent.ContentPart) string {
 // -----------------------------------------------------------------------------
 
 // yamlArgModifyHook is a test hook that modifies tool arguments.
+// For tools using map[string]any as input, Args is typed as map[string]any.
 type yamlArgModifyHook struct {
 	modifyFunc func(args map[string]any) map[string]any
 	called     bool
@@ -1568,12 +1569,17 @@ func (h *yamlArgModifyHook) OnBeforeToolCall(
 	event *gent.BeforeToolCallEvent,
 ) {
 	h.called = true
+	// Type-assert Args to map[string]any (the tool's input type)
+	args, ok := event.Args.(map[string]any)
+	if !ok {
+		return
+	}
 	h.seenArgs = make(map[string]any)
-	for k, v := range event.Args {
+	for k, v := range args {
 		h.seenArgs[k] = v
 	}
 	if h.modifyFunc != nil {
-		event.Args = h.modifyFunc(event.Args)
+		event.Args = h.modifyFunc(args)
 	}
 }
 
@@ -1807,6 +1813,7 @@ func TestYAML_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 }
 
 // yamlMultiToolHook is a test hook that modifies args based on tool name.
+// For tools using map[string]any as input, Args is typed as map[string]any.
 type yamlMultiToolHook struct {
 	modifyFunc func(toolName string, args map[string]any) map[string]any
 }
@@ -1817,7 +1824,12 @@ func (h *yamlMultiToolHook) OnBeforeToolCall(
 	event *gent.BeforeToolCallEvent,
 ) {
 	if h.modifyFunc != nil {
-		event.Args = h.modifyFunc(event.ToolName, event.Args)
+		// Type-assert Args to map[string]any (the tool's input type)
+		args, ok := event.Args.(map[string]any)
+		if !ok {
+			return
+		}
+		event.Args = h.modifyFunc(event.ToolName, args)
 	}
 }
 

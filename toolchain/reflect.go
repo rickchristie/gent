@@ -32,36 +32,26 @@ func (m *ToolMeta) Schema() map[string]any { return m.schema }
 // Tool returns the actual tool.
 func (m *ToolMeta) Tool() any { return m.tool }
 
-// CallToolReflect calls a generic Tool[I, O] using reflection.
+// TransformArgsReflect transforms raw args (map[string]any) to the tool's typed input.
 //
-// It converts args (map[string]any) to the tool's input type. The conversion handles
-// type coercion from JSON Schema intermediary types to Go types:
+// It converts args to the tool's input type. The conversion handles type coercion from
+// JSON Schema intermediary types to Go types:
 //   - string -> time.Time: Parses using common date/time formats (RFC3339, date-only, etc.)
 //   - string -> time.Duration: Parses using time.ParseDuration (e.g., "1h30m", "2h45m30s")
 //   - If target field is `any`, the intermediary value is used as-is
-func CallToolReflect(
-	ctx context.Context,
-	tool any,
-	args map[string]any,
-) (*gent.ToolCallResult, error) {
+//
+// Returns the typed input as `any`. The actual type is the tool's input type I.
+func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 	toolVal := reflect.ValueOf(tool)
 	if !toolVal.IsValid() {
 		return nil, errors.New("invalid tool value")
 	}
 
-	// Get the Call method
+	// Get the Call method to determine input type
 	callMethod := toolVal.MethodByName("Call")
 	if !callMethod.IsValid() {
 		return nil, errors.New("tool does not have Call method")
 	}
-
-	// Get Name method for result
-	nameMethod := toolVal.MethodByName("Name")
-	if !nameMethod.IsValid() {
-		return nil, errors.New("tool does not have Name method")
-	}
-	nameResult := nameMethod.Call(nil)
-	toolName := nameResult[0].String()
 
 	// Get the input type from Call method signature: Call(ctx, input I) (*ToolResult[O], error)
 	callType := callMethod.Type()
@@ -101,18 +91,45 @@ func CallToolReflect(
 		return nil, fmt.Errorf("failed to unmarshal args into input type: %w", err)
 	}
 
-	// Get the actual value to pass (pointer or value depending on input type)
-	var inputToPass reflect.Value
+	// Return the actual value (pointer or value depending on input type)
 	if inputType.Kind() == reflect.Ptr {
-		inputToPass = inputVal
-	} else {
-		inputToPass = inputVal.Elem()
+		return inputVal.Interface(), nil
 	}
+	return inputVal.Elem().Interface(), nil
+}
+
+// CallToolWithTypedInputReflect calls a generic Tool[I, O] with already-typed input.
+//
+// The typedInput must be the correct type for the tool's input type I.
+// Use TransformArgsReflect to convert map[string]any to the typed input first.
+func CallToolWithTypedInputReflect(
+	ctx context.Context,
+	tool any,
+	typedInput any,
+) (*gent.ToolCallResult, error) {
+	toolVal := reflect.ValueOf(tool)
+	if !toolVal.IsValid() {
+		return nil, errors.New("invalid tool value")
+	}
+
+	// Get the Call method
+	callMethod := toolVal.MethodByName("Call")
+	if !callMethod.IsValid() {
+		return nil, errors.New("tool does not have Call method")
+	}
+
+	// Get Name method for result
+	nameMethod := toolVal.MethodByName("Name")
+	if !nameMethod.IsValid() {
+		return nil, errors.New("tool does not have Name method")
+	}
+	nameResult := nameMethod.Call(nil)
+	toolName := nameResult[0].String()
 
 	// Call the method
 	results := callMethod.Call([]reflect.Value{
 		reflect.ValueOf(ctx),
-		inputToPass,
+		reflect.ValueOf(typedInput),
 	})
 
 	// Handle results: (*ToolResult[O], error)
@@ -138,6 +155,28 @@ func CallToolReflect(
 		Output: outputField.Interface(),
 		Result: resultField.Interface().([]gent.ContentPart),
 	}, nil
+}
+
+// CallToolReflect calls a generic Tool[I, O] using reflection.
+//
+// It converts args (map[string]any) to the tool's input type. The conversion handles
+// type coercion from JSON Schema intermediary types to Go types:
+//   - string -> time.Time: Parses using common date/time formats (RFC3339, date-only, etc.)
+//   - string -> time.Duration: Parses using time.ParseDuration (e.g., "1h30m", "2h45m30s")
+//   - If target field is `any`, the intermediary value is used as-is
+//
+// This is a convenience function that combines TransformArgsReflect and
+// CallToolWithTypedInputReflect.
+func CallToolReflect(
+	ctx context.Context,
+	tool any,
+	args map[string]any,
+) (*gent.ToolCallResult, error) {
+	typedInput, err := TransformArgsReflect(tool, args)
+	if err != nil {
+		return nil, err
+	}
+	return CallToolWithTypedInputReflect(ctx, tool, typedInput)
 }
 
 // convertArgsForType converts intermediary arg values to match the expected Go types

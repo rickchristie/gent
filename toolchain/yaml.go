@@ -342,27 +342,17 @@ func (c *YAML) Execute(
 			continue
 		}
 
-		// Fire BeforeToolCall hook (may modify args)
-		beforeEvent := &gent.BeforeToolCallEvent{
-			ToolName: call.Name,
-			Args:     call.Args,
-		}
-		if execCtx != nil {
-			execCtx.FireBeforeToolCall(ctx, beforeEvent)
-			// Use potentially modified args
-			call.Args = beforeEvent.Args
-		}
-
-		// Validate args against schema
+		// Validate args against schema before transformation
 		if compiledSchema, hasSchema := c.schemaMap[call.Name]; hasSchema {
 			if validationErr := compiledSchema.Validate(call.Args); validationErr != nil {
 				result.Errors[i] = validationErr
 
 				if execCtx != nil {
-					// Fire AfterToolCall with validation error
+					// Fire AfterToolCall with validation error (Args is nil since we
+					// couldn't transform)
 					execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
 						ToolName: call.Name,
-						Args:     call.Args,
+						Args:     nil,
 						Error:    validationErr,
 					})
 
@@ -377,8 +367,39 @@ func (c *YAML) Execute(
 			}
 		}
 
+		// Transform raw args to typed input
+		typedInput, transformErr := TransformArgsReflect(tool, call.Args)
+		if transformErr != nil {
+			result.Errors[i] = transformErr
+			if execCtx != nil {
+				execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+					ToolName: call.Name,
+					Args:     nil,
+					Error:    transformErr,
+				})
+				execCtx.Trace(gent.ToolCallTrace{
+					ToolName: call.Name,
+					Input:    call.Args,
+					Error:    transformErr,
+				})
+			}
+			continue
+		}
+
+		// Fire BeforeToolCall hook with typed input (may modify args)
+		beforeEvent := &gent.BeforeToolCallEvent{
+			ToolName: call.Name,
+			Args:     typedInput,
+		}
+		if execCtx != nil {
+			execCtx.FireBeforeToolCall(ctx, beforeEvent)
+		}
+
+		// Use potentially modified typed input
+		inputToUse := beforeEvent.Args
+
 		startTime := time.Now()
-		output, err := CallToolReflect(ctx, tool, call.Args)
+		output, err := CallToolWithTypedInputReflect(ctx, tool, inputToUse)
 		duration := time.Since(startTime)
 
 		if err != nil {
@@ -388,7 +409,7 @@ func (c *YAML) Execute(
 			result.Results[i] = c.formatOutput(output)
 		}
 
-		// Fire AfterToolCall hook
+		// Fire AfterToolCall hook with typed input
 		var outputVal any
 		if output != nil {
 			outputVal = output.Output
@@ -396,7 +417,7 @@ func (c *YAML) Execute(
 		if execCtx != nil {
 			execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
 				ToolName: call.Name,
-				Args:     call.Args,
+				Args:     inputToUse,
 				Output:   outputVal,
 				Duration: duration,
 				Error:    err,
@@ -405,7 +426,7 @@ func (c *YAML) Execute(
 			// Automatic tracing
 			execCtx.Trace(gent.ToolCallTrace{
 				ToolName: call.Name,
-				Input:    call.Args,
+				Input:    inputToUse,
 				Output:   outputVal,
 				Duration: duration,
 				Error:    err,

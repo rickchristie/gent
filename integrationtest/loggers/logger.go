@@ -188,17 +188,15 @@ func (h *LoggerHook) OnBeforeModelCall(
 	h.logEvent(fmt.Sprintf("BeforeModelCall: %s", event.Model))
 
 	// Log request messages
-	if event.Request != nil {
-		if messages, ok := event.Request.([]llms.MessageContent); ok {
-			h.log("Request:")
-			for i, msg := range messages {
-				h.log("  [%d] Role: %s", i, msg.Role)
-				for _, part := range msg.Parts {
-					if tc, ok := part.(llms.TextContent); ok {
-						h.log("      Content:")
-						for _, line := range strings.Split(tc.Text, "\n") {
-							h.log("        %s", line)
-						}
+	if len(event.Request) > 0 {
+		h.log("Request:")
+		for i, msg := range event.Request {
+			h.log("  [%d] Role: %s", i, msg.Role)
+			for _, part := range msg.Parts {
+				if tc, ok := part.(llms.TextContent); ok {
+					h.log("      Content:")
+					for _, line := range strings.Split(tc.Text, "\n") {
+						h.log("        %s", line)
 					}
 				}
 			}

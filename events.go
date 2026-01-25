@@ -1,6 +1,10 @@
 package gent
 
-import "time"
+import (
+	"time"
+
+	"github.com/tmc/langchaingo/llms"
+)
 
 // -----------------------------------------------------------------------------
 // Hook Event Interface
@@ -74,7 +78,7 @@ type BeforeModelCallEvent struct {
 	Model string
 
 	// Request contains the messages being sent to the model.
-	Request any
+	Request []llms.MessageContent
 }
 
 func (BeforeModelCallEvent) hookEvent() {}
@@ -85,7 +89,7 @@ type AfterModelCallEvent struct {
 	Model string
 
 	// Request contains the messages that were sent to the model.
-	Request any
+	Request []llms.MessageContent
 
 	// Response contains the full response from the model.
 	Response *ContentResponse
@@ -109,9 +113,10 @@ type BeforeToolCallEvent struct {
 	// ToolName is the name of the tool being called.
 	ToolName string
 
-	// Args contains the arguments that will be passed to the tool.
-	// Hooks can modify this map to change the arguments.
-	Args map[string]any
+	// Args contains the typed input that will be passed to the tool.
+	// This is the transformed input (type I), not the raw parsed map.
+	// Hooks can replace this with a modified value of the same type.
+	Args any
 }
 
 func (BeforeToolCallEvent) hookEvent() {}
@@ -121,10 +126,12 @@ type AfterToolCallEvent struct {
 	// ToolName is the name of the tool that was called.
 	ToolName string
 
-	// Args contains the arguments that were passed to the tool.
-	Args map[string]any
+	// Args contains the typed input that was passed to the tool.
+	// This is the transformed input (type I), not the raw parsed map.
+	Args any
 
 	// Output contains the tool's output (nil if error occurred).
+	// This is the typed output (type O).
 	Output any
 
 	// Duration is how long the tool call took.
