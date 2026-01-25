@@ -8,6 +8,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/schema"
+	"github.com/tmc/langchaingo/llms"
 	"gopkg.in/yaml.v3"
 )
 
@@ -401,7 +402,8 @@ func (c *YAML) Execute(
 		if err != nil {
 			result.Errors[i] = err
 		} else {
-			result.Results[i] = output
+			// Format output as YAML (toolchain owns formatting responsibility)
+			result.Results[i] = c.formatOutput(output)
 		}
 
 		// Fire AfterToolCall hook
@@ -430,6 +432,28 @@ func (c *YAML) Execute(
 	}
 
 	return result, nil
+}
+
+// formatOutput formats the tool output as YAML for LLM consumption.
+func (c *YAML) formatOutput(output *gent.ToolCallResult) *gent.ToolCallResult {
+	if output == nil {
+		return nil
+	}
+
+	data, err := yaml.Marshal(output.Output)
+	if err != nil {
+		return &gent.ToolCallResult{
+			Name:   output.Name,
+			Output: output.Output,
+			Result: []gent.ContentPart{llms.TextContent{Text: "error: failed to marshal output"}},
+		}
+	}
+
+	return &gent.ToolCallResult{
+		Name:   output.Name,
+		Output: output.Output,
+		Result: []gent.ContentPart{llms.TextContent{Text: string(data)}},
+	}
 }
 
 // Compile-time check that YAML implements gent.ToolChain.

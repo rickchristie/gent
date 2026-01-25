@@ -524,7 +524,7 @@ func (r *Agent) executeToolCalls(
 			if toolResult != nil {
 				// Format tool result
 				var resultText strings.Builder
-				fmt.Fprintf(&resultText, "[%s] ", toolResult.Name)
+				fmt.Fprintf(&resultText, "[%s]\n", toolResult.Name)
 				for _, part := range toolResult.Result {
 					if tc, ok := part.(llms.TextContent); ok {
 						resultText.WriteString(tc.Text)

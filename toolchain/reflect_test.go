@@ -8,7 +8,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // -----------------------------------------------------------------------------
@@ -77,7 +76,6 @@ func TestCallToolReflect_DateStringToTime(t *testing.T) {
 		func(ctx context.Context, input TimeInput) (string, error) {
 			return input.Date.Format("2006-01-02"), nil
 		},
-		reflectTextFormatter,
 	)
 
 	for _, tt := range tests {
@@ -146,7 +144,6 @@ func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
 		func(ctx context.Context, input TimeInput) (string, error) {
 			return input.Timestamp.Format(time.RFC3339), nil
 		},
-		reflectTextFormatter,
 	)
 
 	for _, tt := range tests {
@@ -224,7 +221,6 @@ func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
 		func(ctx context.Context, input DurationInput) (string, error) {
 			return input.Duration.String(), nil
 		},
-		reflectTextFormatter,
 	)
 
 	for _, tt := range tests {
@@ -258,7 +254,6 @@ func TestCallToolReflect_MixedTypes(t *testing.T) {
 				input.StartTime.Format("2006-01-02") + "|" +
 				input.Duration.String(), nil
 		},
-		reflectTextFormatter,
 	)
 
 	args := map[string]any{
@@ -293,7 +288,6 @@ func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 			}
 			return "is-a-string", nil
 		},
-		reflectTextFormatter,
 	)
 
 	args := map[string]any{
@@ -319,7 +313,6 @@ func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 		func(ctx context.Context, input TimeInput) (string, error) {
 			return input.Date.Format("2006-01-02"), nil
 		},
-		reflectTextFormatter,
 	)
 
 	parsedTime := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
@@ -336,10 +329,3 @@ func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 	assert.Equal(t, expected, output)
 }
 
-// -----------------------------------------------------------------------------
-// Helper functions
-// -----------------------------------------------------------------------------
-
-func reflectTextFormatter(s string) []gent.ContentPart {
-	return []gent.ContentPart{llms.TextContent{Text: s}}
-}

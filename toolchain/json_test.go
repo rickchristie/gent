@@ -93,7 +93,6 @@ func TestJSON_RegisterTool(t *testing.T) {
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "result", nil
 				},
-				textFormatter,
 			)
 
 			tc.RegisterTool(tool)
@@ -172,7 +171,6 @@ Available tools:
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "", nil
 				},
-				nil,
 			)
 			tc.RegisterTool(tool)
 
@@ -334,7 +332,7 @@ func TestJSON_Execute(t *testing.T) {
 			},
 			expected: expected{
 				callCount:   1,
-				results:     []string{"Results for: weather"},
+				results:     []string{`"Results for: weather"`},
 				errors:      []error{nil},
 				resultNames: []string{"search"},
 			},
@@ -397,7 +395,7 @@ func TestJSON_Execute(t *testing.T) {
 			},
 			expected: expected{
 				callCount:   2,
-				results:     []string{"search result", "calendar result"},
+				results:     []string{`"search result"`, `"calendar result"`},
 				errors:      []error{nil, nil},
 				resultNames: []string{"search", "calendar"},
 			},
@@ -413,7 +411,6 @@ func TestJSON_Execute(t *testing.T) {
 					mock.description,
 					mock.schema,
 					mock.fn,
-					textFormatter,
 				)
 				tc.RegisterTool(tool)
 			}
@@ -495,7 +492,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 				content: `{"tool": "search", "args": {"query": "weather"}}`,
 			},
 			expected: expected{
-				result:      "Results for: weather",
+				result:      `"Results for: weather"`,
 				noToolError: true,
 			},
 		},
@@ -567,7 +564,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 				content: `{"tool": "flexible", "args": {"anything": "works", "numbers": 123}}`,
 			},
 			expected: expected{
-				result:      "success",
+				result:      `"success"`,
 				noToolError: true,
 			},
 		},
@@ -596,7 +593,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 					`"passengers": 2}}`,
 			},
 			expected: expected{
-				result:      "booked",
+				result:      `"booked"`,
 				noToolError: true,
 			},
 		},
@@ -639,7 +636,6 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 					mock.description,
 					mock.schema,
 					mock.fn,
-					textFormatter,
 				)
 				tc.RegisterTool(tool)
 			}
@@ -709,7 +705,6 @@ func TestJSON_ParseSection_DateAsString(t *testing.T) {
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return fmt.Sprintf("searching for %s", args["date"]), nil
 				},
-				textFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -799,7 +794,6 @@ func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return args["value"].(string), nil
 				},
-				textFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -853,7 +847,7 @@ func TestJSON_Execute_TimeConversion(t *testing.T) {
 					`"timestamp": "2026-01-20T10:30:00Z"}}`,
 			},
 			expected: expected{
-				output: "2026-01-20|2026-01-20T10:30:00Z",
+				output: `"2026-01-20|2026-01-20T10:30:00Z"`,
 			},
 		},
 	}
@@ -877,7 +871,6 @@ func TestJSON_Execute_TimeConversion(t *testing.T) {
 					return input.Date.Format("2006-01-02") + "|" +
 						input.Timestamp.Format(time.RFC3339), nil
 				},
-				textFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -908,22 +901,22 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 		{
 			name:     "hours and minutes",
 			input:    input{duration: "1h30m"},
-			expected: expected{output: "1h30m0s"},
+			expected: expected{output: `"1h30m0s"`},
 		},
 		{
 			name:     "just minutes",
 			input:    input{duration: "45m"},
-			expected: expected{output: "45m0s"},
+			expected: expected{output: `"45m0s"`},
 		},
 		{
 			name:     "with seconds",
 			input:    input{duration: "2h15m30s"},
-			expected: expected{output: "2h15m30s"},
+			expected: expected{output: `"2h15m30s"`},
 		},
 		{
 			name:     "milliseconds",
 			input:    input{duration: "500ms"},
-			expected: expected{output: "500ms"},
+			expected: expected{output: `"500ms"`},
 		},
 	}
 
@@ -944,7 +937,6 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 				func(ctx context.Context, input JSONDurationTypedInput) (string, error) {
 					return input.Duration.String(), nil
 				},
-				textFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -1273,7 +1265,6 @@ Available tools:
 				func(ctx context.Context, input map[string]any) (string, error) {
 					return "ok", nil
 				},
-				nil,
 			)
 			tc.RegisterTool(tool)
 
@@ -1378,8 +1369,7 @@ Available tools:
 					func(ctx context.Context, input map[string]any) (string, error) {
 						return "ok", nil
 					},
-					nil,
-				)
+			)
 				tc.RegisterTool(tool)
 			}
 
@@ -1426,7 +1416,6 @@ Available tools:
 				func(ctx context.Context, input map[string]any) (string, error) {
 					return "ok", nil
 				},
-				nil,
 			)
 			tc.RegisterTool(tool)
 
@@ -1435,11 +1424,6 @@ Available tools:
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
 	}
-}
-
-// textFormatter converts a string to []gent.ContentPart.
-func textFormatter(s string) []gent.ContentPart {
-	return []gent.ContentPart{llms.TextContent{Text: s}}
 }
 
 // getTextContent extracts the text from a []gent.ContentPart (assumes single TextContent).

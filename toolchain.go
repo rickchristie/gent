@@ -11,7 +11,7 @@ type ToolCall struct {
 type ToolCallResult struct {
 	Name   string        // Name of the tool that was called
 	Output any           // Raw typed output (type-erased)
-	Result []ContentPart // Formatted result for LLM consumption
+	Result []ContentPart // Formatted result for LLM consumption (set by ToolChain)
 }
 
 // ToolChainResult is the result of parsing and optionally executing tool calls.
@@ -22,7 +22,16 @@ type ToolChainResult struct {
 }
 
 // ToolChain manages a collection of tools and implements TextOutputSection.
-// It handles describing tools to the LLM and parsing tool calls from output.
+//
+// Responsibilities:
+//   - Prompt: Describe available tools and input format to the LLM
+//   - Parse: Extract tool calls from LLM output
+//   - Execute: Call tools with parsed arguments
+//   - Format: Convert tool outputs to the appropriate format (JSON, YAML, etc.) for the LLM
+//
+// The ToolChain handles output formatting so tools can focus on business logic.
+// Different ToolChain implementations (JSON, YAML) use the same tools but format
+// outputs differently based on their format.
 //
 // Tools are stored as []any to support generic Tool[I, O] with different type parameters.
 // The ToolChain uses reflection to call tools at runtime.

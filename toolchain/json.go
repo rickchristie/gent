@@ -9,6 +9,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/schema"
+	"github.com/tmc/langchaingo/llms"
 )
 
 // JSON expects tool calls in JSON format.
@@ -267,7 +268,8 @@ func (c *JSON) Execute(
 		if err != nil {
 			result.Errors[i] = err
 		} else {
-			result.Results[i] = output
+			// Format output as JSON (toolchain owns formatting responsibility)
+			result.Results[i] = c.formatOutput(output)
 		}
 
 		// Fire AfterToolCall hook
@@ -296,6 +298,28 @@ func (c *JSON) Execute(
 	}
 
 	return result, nil
+}
+
+// formatOutput formats the tool output as JSON for LLM consumption.
+func (c *JSON) formatOutput(output *gent.ToolCallResult) *gent.ToolCallResult {
+	if output == nil {
+		return nil
+	}
+
+	data, err := json.Marshal(output.Output)
+	if err != nil {
+		return &gent.ToolCallResult{
+			Name:   output.Name,
+			Output: output.Output,
+			Result: []gent.ContentPart{llms.TextContent{Text: "error: failed to marshal output"}},
+		}
+	}
+
+	return &gent.ToolCallResult{
+		Name:   output.Name,
+		Output: output.Output,
+		Result: []gent.ContentPart{llms.TextContent{Text: string(data)}},
+	}
 }
 
 // Compile-time check that JSON implements gent.ToolChain.

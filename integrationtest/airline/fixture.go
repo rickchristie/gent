@@ -429,7 +429,6 @@ func (f *AirlineFixture) GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInp
 			}
 			return nil, fmt.Errorf("must provide either customer_id or email")
 		},
-		nil,
 	)
 }
 
@@ -450,7 +449,6 @@ func (f *AirlineFixture) GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput
 			}
 			return nil, fmt.Errorf("booking not found: %s", input.BookingID)
 		},
-		nil,
 	)
 }
 
@@ -471,7 +469,6 @@ func (f *AirlineFixture) GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, 
 			}
 			return nil, fmt.Errorf("flight not found: %s", input.FlightNumber)
 		},
-		nil,
 	)
 }
 
@@ -506,7 +503,6 @@ func (f *AirlineFixture) GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsI
 			}
 			return filtered, nil
 		},
-		nil,
 	)
 }
 
@@ -535,7 +531,6 @@ func (f *AirlineFixture) SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlineP
 			}
 			return results, nil
 		},
-		nil,
 	)
 }
 
@@ -575,7 +570,6 @@ func (f *AirlineFixture) SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightS
 			}
 			return results, nil
 		},
-		nil,
 	)
 }
 
@@ -662,7 +656,6 @@ func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookin
 					"Total charge: $%.2f", oldFlightNum, input.NewFlightNumber, changeFee+fareDiff),
 			}, nil
 		},
-		nil,
 	)
 }
 
@@ -702,7 +695,6 @@ func (f *AirlineFixture) CancelBookingTool() *gent.ToolFunc[CancelBookingInput, 
 					input.BookingID, refundAmount),
 			}, nil
 		},
-		nil,
 	)
 }
 
@@ -740,7 +732,6 @@ func (f *AirlineFixture) SendNotificationTool() *gent.ToolFunc[SendNotificationI
 					input.Method, destination, input.Message),
 			}, nil
 		},
-		nil,
 	)
 }
 

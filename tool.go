@@ -2,13 +2,17 @@ package gent
 
 import (
 	"context"
-	"encoding/json"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 // Tool represents a single callable tool with typed input and output.
 // The generic parameters allow for compile-time type safety when implementing tools.
+//
+// Responsibility design:
+//   - Tool: Accept typed input, execute logic, return raw typed output
+//   - ToolChain: Prompt LLM about format, parse tool calls, call tools, format output for LLM
+//
+// Tools should focus on business logic only. Output formatting (JSON, YAML, etc.)
+// is handled by the ToolChain, allowing the same tool to work with different formats.
 type Tool[I, O any] interface {
 	// Name returns the tool's identifier used in tool calls.
 	Name() string
@@ -21,14 +25,20 @@ type Tool[I, O any] interface {
 	ParameterSchema() map[string]any
 
 	// Call executes the tool with the given typed input.
-	// Returns a ToolResult containing the typed output and formatted ContentPart slice.
+	// Returns a ToolResult containing the typed output.
 	Call(ctx context.Context, input I) (*ToolResult[O], error)
 }
 
 // ToolResult is the result of calling a Tool with typed output.
 type ToolResult[O any] struct {
-	Output O             // The typed output from the tool
-	Result []ContentPart // Formatted result for LLM consumption
+	// Output is the raw typed output from the tool.
+	Output O
+
+	// Result is the formatted output for LLM consumption.
+	// This field is set by the ToolChain after calling the tool, not by the tool itself.
+	// Tools should leave this nil; the ToolChain handles formatting based on its format
+	// (e.g., JSON toolchain formats as JSON, YAML toolchain formats as YAML).
+	Result []ContentPart
 }
 
 // ToolFunc is a convenience type for creating tools from functions with typed I/O.
@@ -37,37 +47,21 @@ type ToolFunc[I, O any] struct {
 	description string
 	schema      map[string]any
 	fn          func(ctx context.Context, input I) (O, error)
-	formatter   func(O) []ContentPart
 }
 
 // NewToolFunc creates a new ToolFunc with typed input and output.
-// The formatter converts the output to ContentPart slice for LLM consumption.
-// If formatter is nil, a default JSON formatter is used.
+// Output formatting is handled by the ToolChain during execution.
 func NewToolFunc[I, O any](
 	name, description string,
 	schema map[string]any,
 	fn func(ctx context.Context, input I) (O, error),
-	formatter func(O) []ContentPart,
 ) *ToolFunc[I, O] {
-	if formatter == nil {
-		formatter = defaultFormatter[O]
-	}
 	return &ToolFunc[I, O]{
 		name:        name,
 		description: description,
 		schema:      schema,
 		fn:          fn,
-		formatter:   formatter,
 	}
-}
-
-// defaultFormatter converts output to JSON and wraps in TextContent.
-func defaultFormatter[O any](output O) []ContentPart {
-	data, err := json.Marshal(output)
-	if err != nil {
-		return []ContentPart{llms.TextContent{Text: "error: failed to marshal output"}}
-	}
-	return []ContentPart{llms.TextContent{Text: string(data)}}
 }
 
 // Name returns the tool's identifier.
@@ -86,6 +80,7 @@ func (t *ToolFunc[I, O]) ParameterSchema() map[string]any {
 }
 
 // Call executes the tool function with the given typed input.
+// The Result field is left nil as formatting is handled by the ToolChain.
 func (t *ToolFunc[I, O]) Call(ctx context.Context, input I) (*ToolResult[O], error) {
 	output, err := t.fn(ctx, input)
 	if err != nil {
@@ -93,6 +88,6 @@ func (t *ToolFunc[I, O]) Call(ctx context.Context, input I) (*ToolResult[O], err
 	}
 	return &ToolResult[O]{
 		Output: output,
-		Result: t.formatter(output),
+		Result: nil,
 	}, nil
 }

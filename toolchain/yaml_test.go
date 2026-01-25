@@ -94,7 +94,6 @@ args: {}`,
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "result", nil
 				},
-				yamlTextFormatter,
 			)
 
 			tc.RegisterTool(tool)
@@ -183,7 +182,6 @@ Available tools:
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "", nil
 				},
-				nil,
 			)
 			tc.RegisterTool(tool)
 
@@ -379,7 +377,7 @@ args:
 			},
 			expected: expected{
 				callCount:   1,
-				results:     []string{"Results for: weather"},
+				results:     []string{"'Results for: weather'\n"},
 				errors:      []error{nil},
 				resultNames: []string{"search"},
 			},
@@ -444,7 +442,7 @@ args: {}`,
 			},
 			expected: expected{
 				callCount:   2,
-				results:     []string{"search result", "calendar result"},
+				results:     []string{"search result\n", "calendar result\n"},
 				errors:      []error{nil, nil},
 				resultNames: []string{"search", "calendar"},
 			},
@@ -460,7 +458,6 @@ args: {}`,
 					mock.description,
 					mock.schema,
 					mock.fn,
-					yamlTextFormatter,
 				)
 				tc.RegisterTool(tool)
 			}
@@ -544,7 +541,7 @@ args:
   query: weather`,
 			},
 			expected: expected{
-				result:      "Results for: weather",
+				result:      "'Results for: weather'\n",
 				noToolError: true,
 			},
 		},
@@ -622,7 +619,7 @@ args:
   numbers: 123`,
 			},
 			expected: expected{
-				result:      "success",
+				result:      "success\n",
 				noToolError: true,
 			},
 		},
@@ -654,7 +651,7 @@ args:
   passengers: 2`,
 			},
 			expected: expected{
-				result:      "booked",
+				result:      "booked\n",
 				noToolError: true,
 			},
 		},
@@ -700,7 +697,6 @@ args:
 					mock.description,
 					mock.schema,
 					mock.fn,
-					yamlTextFormatter,
 				)
 				tc.RegisterTool(tool)
 			}
@@ -773,7 +769,6 @@ args:
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return fmt.Sprintf("searching for %s", args["date"]), nil
 				},
-				yamlTextFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -863,7 +858,6 @@ func TestYAML_ParseSection_TimeFormatsAsString(t *testing.T) {
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return args["value"].(string), nil
 				},
-				yamlTextFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -925,7 +919,6 @@ args:
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "ok", nil
 				},
-				yamlTextFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -978,7 +971,7 @@ args:
   timestamp: 2026-01-20T10:30:00Z`,
 			},
 			expected: expected{
-				output: "2026-01-20|2026-01-20T10:30:00Z",
+				output: "2026-01-20|2026-01-20T10:30:00Z\n",
 			},
 		},
 	}
@@ -1002,7 +995,6 @@ args:
 					return input.Date.Format("2006-01-02") + "|" +
 						input.Timestamp.Format(time.RFC3339), nil
 				},
-				yamlTextFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -1033,22 +1025,22 @@ func TestYAML_Execute_DurationConversion(t *testing.T) {
 		{
 			name:     "hours and minutes",
 			input:    input{duration: "1h30m"},
-			expected: expected{output: "1h30m0s"},
+			expected: expected{output: "1h30m0s\n"},
 		},
 		{
 			name:     "just minutes",
 			input:    input{duration: "45m"},
-			expected: expected{output: "45m0s"},
+			expected: expected{output: "45m0s\n"},
 		},
 		{
 			name:     "with seconds",
 			input:    input{duration: "2h15m30s"},
-			expected: expected{output: "2h15m30s"},
+			expected: expected{output: "2h15m30s\n"},
 		},
 		{
 			name:     "milliseconds",
 			input:    input{duration: "500ms"},
-			expected: expected{output: "500ms"},
+			expected: expected{output: "500ms\n"},
 		},
 	}
 
@@ -1069,7 +1061,6 @@ func TestYAML_Execute_DurationConversion(t *testing.T) {
 				func(ctx context.Context, input DurationTypedInput) (string, error) {
 					return input.Duration.String(), nil
 				},
-				yamlTextFormatter,
 			)
 			tc.RegisterTool(tool)
 
@@ -1370,7 +1361,6 @@ Available tools:
 				func(ctx context.Context, input map[string]any) (string, error) {
 					return "ok", nil
 				},
-				nil,
 			)
 			tc.RegisterTool(tool)
 
@@ -1480,7 +1470,6 @@ Available tools:
 					func(ctx context.Context, input map[string]any) (string, error) {
 						return "ok", nil
 					},
-					nil,
 				)
 				tc.RegisterTool(tool)
 			}
@@ -1541,7 +1530,6 @@ Available tools:
 				func(ctx context.Context, input map[string]any) (string, error) {
 					return "ok", nil
 				},
-				nil,
 			)
 			tc.RegisterTool(tool)
 
@@ -1550,11 +1538,6 @@ Available tools:
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
 	}
-}
-
-// yamlTextFormatter converts a string to []gent.ContentPart.
-func yamlTextFormatter(s string) []gent.ContentPart {
-	return []gent.ContentPart{llms.TextContent{Text: s}}
 }
 
 // yamlGetTextContent extracts the text from a []gent.ContentPart.
