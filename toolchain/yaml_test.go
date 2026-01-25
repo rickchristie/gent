@@ -1551,6 +1551,316 @@ func yamlGetTextContent(parts []gent.ContentPart) string {
 	return ""
 }
 
+// -----------------------------------------------------------------------------
+// BeforeToolCallHook Argument Modification Tests
+// -----------------------------------------------------------------------------
+
+// yamlArgModifyHook is a test hook that modifies tool arguments.
+type yamlArgModifyHook struct {
+	modifyFunc func(args map[string]any) map[string]any
+	called     bool
+	seenArgs   map[string]any
+}
+
+func (h *yamlArgModifyHook) OnBeforeToolCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event *gent.BeforeToolCallEvent,
+) {
+	h.called = true
+	h.seenArgs = make(map[string]any)
+	for k, v := range event.Args {
+		h.seenArgs[k] = v
+	}
+	if h.modifyFunc != nil {
+		event.Args = h.modifyFunc(event.Args)
+	}
+}
+
+func TestYAML_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
+	type input struct {
+		content    string
+		modifyFunc func(args map[string]any) map[string]any
+	}
+
+	type expected struct {
+		hookCalled   bool
+		originalArgs map[string]any
+		toolReceived map[string]any
+		result       string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "hook modifies args in place",
+			input: input{
+				content: `tool: test
+args:
+  value: original`,
+				modifyFunc: func(args map[string]any) map[string]any {
+					args["value"] = "modified"
+					return args
+				},
+			},
+			expected: expected{
+				hookCalled:   true,
+				originalArgs: map[string]any{"value": "original"},
+				toolReceived: map[string]any{"value": "modified"},
+				result:       "'received: modified'\n",
+			},
+		},
+		{
+			name: "hook replaces entire args map",
+			input: input{
+				content: `tool: test
+args:
+  value: original`,
+				modifyFunc: func(args map[string]any) map[string]any {
+					return map[string]any{"value": "completely new"}
+				},
+			},
+			expected: expected{
+				hookCalled:   true,
+				originalArgs: map[string]any{"value": "original"},
+				toolReceived: map[string]any{"value": "completely new"},
+				result:       "'received: completely new'\n",
+			},
+		},
+		{
+			name: "hook adds new args",
+			input: input{
+				content: `tool: test
+args:
+  value: original`,
+				modifyFunc: func(args map[string]any) map[string]any {
+					args["extra"] = "added"
+					return args
+				},
+			},
+			expected: expected{
+				hookCalled:   true,
+				originalArgs: map[string]any{"value": "original"},
+				toolReceived: map[string]any{"value": "original", "extra": "added"},
+				result:       "'received: original'\n",
+			},
+		},
+		{
+			name: "hook removes args",
+			input: input{
+				content: `tool: test
+args:
+  value: original
+  remove: this`,
+				modifyFunc: func(args map[string]any) map[string]any {
+					delete(args, "remove")
+					return args
+				},
+			},
+			expected: expected{
+				hookCalled:   true,
+				originalArgs: map[string]any{"value": "original", "remove": "this"},
+				toolReceived: map[string]any{"value": "original"},
+				result:       "'received: original'\n",
+			},
+		},
+		{
+			name: "hook does not modify args",
+			input: input{
+				content: `tool: test
+args:
+  value: unchanged`,
+				modifyFunc: nil,
+			},
+			expected: expected{
+				hookCalled:   true,
+				originalArgs: map[string]any{"value": "unchanged"},
+				toolReceived: map[string]any{"value": "unchanged"},
+				result:       "'received: unchanged'\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track what the tool actually received
+			var receivedArgs map[string]any
+
+			tc := NewYAML()
+			tool := gent.NewToolFunc(
+				"test",
+				"A test tool",
+				nil,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					receivedArgs = args
+					val, _ := args["value"].(string)
+					return fmt.Sprintf("received: %s", val), nil
+				},
+			)
+			tc.RegisterTool(tool)
+
+			// Create hook
+			hook := &yamlArgModifyHook{modifyFunc: tt.input.modifyFunc}
+
+			// Create execution context with hooks
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			registry := &yamlTestRegistry{hook: hook}
+			execCtx.SetHookFirer(registry)
+			execCtx.StartIteration()
+
+			// Execute
+			result, err := tc.Execute(execCtx, tt.input.content)
+
+			require.NoError(t, err)
+			assert.True(t, hook.called, "hook should have been called")
+			assert.Equal(t, tt.expected.originalArgs, hook.seenArgs,
+				"hook should have seen original args")
+			assert.Equal(t, tt.expected.toolReceived, receivedArgs,
+				"tool should have received modified args")
+			assert.NoError(t, result.Errors[0])
+			assert.Equal(t, tt.expected.result, yamlGetTextContent(result.Results[0].Result))
+		})
+	}
+}
+
+func TestYAML_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
+	type input struct {
+		content    string
+		modifyFunc func(toolName string, args map[string]any) map[string]any
+	}
+
+	type expected struct {
+		tool1Received map[string]any
+		tool2Received map[string]any
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "hook modifies args for each tool independently",
+			input: input{
+				content: `- tool: tool1
+  args:
+    value: first
+- tool: tool2
+  args:
+    value: second`,
+				modifyFunc: func(toolName string, args map[string]any) map[string]any {
+					args["modified_by"] = toolName + "_hook"
+					return args
+				},
+			},
+			expected: expected{
+				tool1Received: map[string]any{"value": "first", "modified_by": "tool1_hook"},
+				tool2Received: map[string]any{"value": "second", "modified_by": "tool2_hook"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var tool1Received, tool2Received map[string]any
+
+			tc := NewYAML()
+			tc.RegisterTool(gent.NewToolFunc(
+				"tool1",
+				"First tool",
+				nil,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					tool1Received = args
+					return "ok1", nil
+				},
+			))
+			tc.RegisterTool(gent.NewToolFunc(
+				"tool2",
+				"Second tool",
+				nil,
+				func(ctx context.Context, args map[string]any) (string, error) {
+					tool2Received = args
+					return "ok2", nil
+				},
+			))
+
+			// Create hook that tracks tool name
+			hook := &yamlMultiToolHook{modifyFunc: tt.input.modifyFunc}
+
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			registry := &yamlTestRegistry{multiHook: hook}
+			execCtx.SetHookFirer(registry)
+			execCtx.StartIteration()
+
+			result, err := tc.Execute(execCtx, tt.input.content)
+
+			require.NoError(t, err)
+			assert.NoError(t, result.Errors[0])
+			assert.NoError(t, result.Errors[1])
+			assert.Equal(t, tt.expected.tool1Received, tool1Received)
+			assert.Equal(t, tt.expected.tool2Received, tool2Received)
+		})
+	}
+}
+
+// yamlMultiToolHook is a test hook that modifies args based on tool name.
+type yamlMultiToolHook struct {
+	modifyFunc func(toolName string, args map[string]any) map[string]any
+}
+
+func (h *yamlMultiToolHook) OnBeforeToolCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event *gent.BeforeToolCallEvent,
+) {
+	if h.modifyFunc != nil {
+		event.Args = h.modifyFunc(event.ToolName, event.Args)
+	}
+}
+
+// yamlTestRegistry implements HookFirer for testing.
+type yamlTestRegistry struct {
+	hook      *yamlArgModifyHook
+	multiHook *yamlMultiToolHook
+}
+
+func (r *yamlTestRegistry) FireBeforeModelCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event gent.BeforeModelCallEvent,
+) {
+}
+
+func (r *yamlTestRegistry) FireAfterModelCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event gent.AfterModelCallEvent,
+) {
+}
+
+func (r *yamlTestRegistry) FireBeforeToolCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event *gent.BeforeToolCallEvent,
+) {
+	if r.hook != nil {
+		r.hook.OnBeforeToolCall(ctx, execCtx, event)
+	}
+	if r.multiHook != nil {
+		r.multiHook.OnBeforeToolCall(ctx, execCtx, event)
+	}
+}
+
+func (r *yamlTestRegistry) FireAfterToolCall(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event gent.AfterToolCallEvent,
+) {
+}
+
 func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 	tests := []struct {
 		name     string
