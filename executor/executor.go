@@ -45,15 +45,36 @@ func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor
 	}
 }
 
-// WithHooks sets the executor hook registry. Returns the executor for chaining.
+// WithHooks replaces the executor's hook registry with the provided one.
+// Use this when you need to share a registry across multiple executors.
+// Returns the executor for chaining.
+//
+// Example:
+//
+//	// Share hooks across multiple executors
+//	sharedRegistry := hooks.NewRegistry()
+//	sharedRegistry.Register(&MetricsHook{})
+//
+//	exec1 := executor.New(loop1, config).WithHooks(sharedRegistry)
+//	exec2 := executor.New(loop2, config).WithHooks(sharedRegistry)
 func (e *Executor[Data]) WithHooks(h *hooks.Registry) *Executor[Data] {
 	e.hooks = h
 	return e
 }
 
-// RegisterHook adds a hook to the executor's hook registry.
-// The hook can implement any combination of hook interfaces.
+// RegisterHook adds a hook to the executor's existing hook registry.
+// The hook can implement any combination of hook interfaces
+// (BeforeExecutionHook, AfterToolCallHook, etc.).
 // Returns the executor for chaining.
+//
+// This is the simpler option when you don't need to share hooks across executors.
+// For sharing hooks, use WithHooks instead.
+//
+// Example:
+//
+//	exec := executor.New(loop, config).
+//	    RegisterHook(&LoggerHook{}).
+//	    RegisterHook(&MetricsHook{})
 func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 	e.hooks.Register(hook)
 	return e
