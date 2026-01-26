@@ -84,14 +84,14 @@ type ToolChain interface {
 	// The textFormat parameter is used to format the results - it must not be nil.
 	//
 	// Returns a ToolChainResult with:
-	//   - Text: Formatted sections using textFormat.FormatSection, NOT wrapped
+	//   - Text: Formatted sections using textFormat.FormatSections, NOT wrapped
 	//   - Media: Any images/audio from tool results
 	//   - Raw: Original results for programmatic access
 	//
 	// The Text field contains formatted sections but is not wrapped in an observation
 	// section. Callers who want the result wrapped should use:
 	//
-	//	textFormat.FormatSection("observation", result.Text)
+	//	textFormat.FormatSections([]FormattedSection{{Name: "observation", Content: result.Text}})
 	//
 	// The execCtx parameter enables automatic tracing and provides context for
 	// tool execution. Use execCtx.Context() for operations requiring context.Context.

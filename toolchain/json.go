@@ -320,16 +320,14 @@ func (c *JSON) Execute(
 					Content: "error: failed to marshal output",
 				})
 			} else {
-				// If instructions present, create nested sections
+				// If instructions present, create nested sections as children
 				if output.Instructions != "" {
-					resultSection := textFormat.FormatSection("result", string(jsonData))
-					instructionsSection := textFormat.FormatSection(
-						"instructions",
-						output.Instructions,
-					)
 					sections = append(sections, gent.FormattedSection{
-						Name:    call.Name,
-						Content: resultSection + "\n" + instructionsSection,
+						Name: call.Name,
+						Children: []gent.FormattedSection{
+							{Name: "result", Content: string(jsonData)},
+							{Name: "instructions", Content: output.Instructions},
+						},
 					})
 				} else {
 					sections = append(sections, gent.FormattedSection{
@@ -371,16 +369,8 @@ func (c *JSON) Execute(
 	}
 
 	// Build formatted text using TextFormat
-	var textBuilder strings.Builder
-	for i, section := range sections {
-		if i > 0 {
-			textBuilder.WriteString("\n")
-		}
-		textBuilder.WriteString(textFormat.FormatSection(section.Name, section.Content))
-	}
-
 	return &gent.ToolChainResult{
-		Text:  textBuilder.String(),
+		Text:  textFormat.FormatSections(sections),
 		Media: allMedia,
 		Raw:   raw,
 	}, nil

@@ -1,8 +1,6 @@
 package react
 
 import (
-	"strings"
-
 	"github.com/rickchristie/gent"
 	"github.com/tmc/langchaingo/llms"
 )
@@ -56,32 +54,47 @@ Repeat this cycle until you have enough information to provide a final answer.
 // DefaultSystemPromptBuilder is the default builder for ReAct system prompts.
 // It formats all sections using the TextFormat for consistency.
 func DefaultSystemPromptBuilder(ctx SystemPromptContext) []gent.MessageContent {
-	var sections []string
+	var sections []gent.FormattedSection
 
 	// Behavior and context (if provided)
 	if ctx.BehaviorAndContext != "" {
-		sections = append(sections, ctx.Format.FormatSection("behavior", ctx.BehaviorAndContext))
+		sections = append(sections, gent.FormattedSection{
+			Name:    "behavior",
+			Content: ctx.BehaviorAndContext,
+		})
 	}
 
 	// ReAct explanation
-	sections = append(sections, ctx.Format.FormatSection("re_act", reactExplanation))
+	sections = append(sections, gent.FormattedSection{
+		Name:    "re_act",
+		Content: reactExplanation,
+	})
 
 	// Critical rules (if provided)
 	if ctx.CriticalRules != "" {
-		sections = append(sections, ctx.Format.FormatSection("critical_rules", ctx.CriticalRules))
+		sections = append(sections, gent.FormattedSection{
+			Name:    "critical_rules",
+			Content: ctx.CriticalRules,
+		})
 	}
 
 	// Available tools
 	if ctx.ToolsPrompt != "" {
-		sections = append(sections, ctx.Format.FormatSection("available_tools", ctx.ToolsPrompt))
+		sections = append(sections, gent.FormattedSection{
+			Name:    "available_tools",
+			Content: ctx.ToolsPrompt,
+		})
 	}
 
 	// Output format
 	if ctx.OutputPrompt != "" {
-		sections = append(sections, ctx.Format.FormatSection("output_format", ctx.OutputPrompt))
+		sections = append(sections, gent.FormattedSection{
+			Name:    "output_format",
+			Content: ctx.OutputPrompt,
+		})
 	}
 
-	systemContent := strings.Join(sections, "\n\n")
+	systemContent := ctx.Format.FormatSections(sections)
 
 	return []gent.MessageContent{
 		{

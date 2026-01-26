@@ -2,11 +2,14 @@ package gent
 
 import "errors"
 
-// FormattedSection represents a section with its name and formatted content.
-// Used when building observation output via TextFormat.FormatSections.
+// FormattedSection represents a section with its name, content, and optional children.
+// Used when building sectioned text via TextFormat.FormatSections.
+// Children are rendered recursively, with depth-aware formatting (e.g., Markdown uses
+// increasing header levels: #, ##, ###).
 type FormattedSection struct {
-	Name    string
-	Content string
+	Name     string
+	Content  string
+	Children []FormattedSection
 }
 
 // TextFormat defines how sections are structured in the LLM output and how to format
@@ -72,10 +75,14 @@ type TextFormat interface {
 	// check for nil before tracing or updating stats.
 	Parse(execCtx *ExecutionContext, output string) (map[string][]string, error)
 
-	// FormatSection formats a single section with its name and content.
-	// The format depends on the implementation (e.g., "# name\ncontent" for Markdown,
-	// "<name>\ncontent\n</name>" for XML).
-	FormatSection(name string, content string) string
+	// FormatSections formats sections recursively with their children.
+	// The format depends on the implementation:
+	//   - Markdown: Uses increasing header levels (# for depth 1, ## for depth 2, etc.)
+	//   - XML: Uses nested tags (<name>content<child>...</child></name>)
+	//
+	// Sections are joined with format-appropriate separators.
+	// For each section, Content is rendered first, then Children recursively.
+	FormatSections(sections []FormattedSection) string
 }
 
 // TextOutputFormat is an alias for TextFormat for backward compatibility.

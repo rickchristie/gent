@@ -199,8 +199,23 @@ func (m *mockFormat) Parse(
 	return m.parseResult, nil
 }
 
-func (m *mockFormat) FormatSection(name string, content string) string {
-	return "<" + name + ">\n" + content + "\n</" + name + ">"
+func (m *mockFormat) FormatSections(sections []gent.FormattedSection) string {
+	var parts []string
+	for _, section := range sections {
+		parts = append(parts, m.formatSection(section))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (m *mockFormat) formatSection(section gent.FormattedSection) string {
+	var inner []string
+	if section.Content != "" {
+		inner = append(inner, section.Content)
+	}
+	if len(section.Children) > 0 {
+		inner = append(inner, m.FormatSections(section.Children))
+	}
+	return "<" + section.Name + ">\n" + strings.Join(inner, "\n") + "\n</" + section.Name + ">"
 }
 
 // ----------------------------------------------------------------------------

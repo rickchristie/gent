@@ -394,7 +394,9 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) llms.MessageContent {
 
 	// Add formatted task text if present
 	if task.Text != "" {
-		formattedText := r.format.FormatSection("task", task.Text)
+		formattedText := r.format.FormatSections([]gent.FormattedSection{
+			{Name: "task", Content: task.Text},
+		})
 		parts = append(parts, llms.TextContent{Text: formattedText})
 	}
 
@@ -429,7 +431,9 @@ func (r *Agent) executeToolCalls(
 		result, err := r.toolChain.Execute(execCtx, content, r.format)
 		if err != nil {
 			// Format error using the text format
-			errorText := r.format.FormatSection("error", fmt.Sprintf("Error: %v", err))
+			errorText := r.format.FormatSections([]gent.FormattedSection{
+				{Name: "error", Content: fmt.Sprintf("Error: %v", err)},
+			})
 			allSections = append(allSections, errorText)
 			continue
 		}
@@ -447,7 +451,9 @@ func (r *Agent) executeToolCalls(
 	}
 
 	// Wrap all sections in a single observation
-	return r.format.FormatSection("observation", strings.Join(allSections, "\n"))
+	return r.format.FormatSections([]gent.FormattedSection{
+		{Name: "observation", Content: strings.Join(allSections, "\n")},
+	})
 }
 
 // buildIteration creates an Iteration from response and observation.

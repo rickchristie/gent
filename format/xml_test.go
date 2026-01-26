@@ -411,6 +411,140 @@ The actual answer.
 	}
 }
 
+func TestXML_FormatSections(t *testing.T) {
+	type input struct {
+		sections []gent.FormattedSection
+	}
+
+	type expected struct {
+		output string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "empty sections returns empty string",
+			input: input{
+				sections: nil,
+			},
+			expected: expected{
+				output: "",
+			},
+		},
+		{
+			name: "single section with content",
+			input: input{
+				sections: []gent.FormattedSection{
+					{Name: "task", Content: "Do something useful."},
+				},
+			},
+			expected: expected{
+				output: "<task>\nDo something useful.\n</task>",
+			},
+		},
+		{
+			name: "multiple flat sections",
+			input: input{
+				sections: []gent.FormattedSection{
+					{Name: "behavior", Content: "Be helpful."},
+					{Name: "rules", Content: "Follow the rules."},
+				},
+			},
+			expected: expected{
+				output: "<behavior>\nBe helpful.\n</behavior>\n<rules>\nFollow the rules.\n</rules>",
+			},
+		},
+		{
+			name: "section with children uses nested tags",
+			input: input{
+				sections: []gent.FormattedSection{
+					{
+						Name: "observation",
+						Children: []gent.FormattedSection{
+							{Name: "result", Content: `{"status": "ok"}`},
+							{Name: "instructions", Content: "Process the result."},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "<observation>\n<result>\n{\"status\": \"ok\"}\n</result>\n" +
+					"<instructions>\nProcess the result.\n</instructions>\n</observation>",
+			},
+		},
+		{
+			name: "section with both content and children",
+			input: input{
+				sections: []gent.FormattedSection{
+					{
+						Name:    "parent",
+						Content: "Parent content first.",
+						Children: []gent.FormattedSection{
+							{Name: "child", Content: "Child content."},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "<parent>\nParent content first.\n<child>\nChild content.\n</child>\n</parent>",
+			},
+		},
+		{
+			name: "deeply nested sections",
+			input: input{
+				sections: []gent.FormattedSection{
+					{
+						Name: "level1",
+						Children: []gent.FormattedSection{
+							{
+								Name: "level2",
+								Children: []gent.FormattedSection{
+									{Name: "level3", Content: "Deep content."},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "<level1>\n<level2>\n<level3>\nDeep content.\n</level3>\n</level2>\n</level1>",
+			},
+		},
+		{
+			name: "multiple sections with mixed nesting",
+			input: input{
+				sections: []gent.FormattedSection{
+					{Name: "intro", Content: "Introduction."},
+					{
+						Name: "tools",
+						Children: []gent.FormattedSection{
+							{Name: "search", Content: "Search result."},
+							{Name: "calculate", Content: "42"},
+						},
+					},
+					{Name: "conclusion", Content: "Done."},
+				},
+			},
+			expected: expected{
+				output: "<intro>\nIntroduction.\n</intro>\n" +
+					"<tools>\n<search>\nSearch result.\n</search>\n<calculate>\n42\n</calculate>\n</tools>\n" +
+					"<conclusion>\nDone.\n</conclusion>",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := NewXML()
+			result := format.FormatSections(tt.input.sections)
+			assert.Equal(t, tt.expected.output, result)
+		})
+	}
+}
+
 func TestXML_DescribeStructure(t *testing.T) {
 	type input struct {
 		name     string
