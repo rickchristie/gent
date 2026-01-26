@@ -10,7 +10,6 @@
 //	        "limit": schema.Integer("Max results").Min(1).Max(100).Default(10),
 //	    }, "query"), // "query" is required
 //	    searchFunc,
-//	    nil,
 //	)
 //
 // ToolChain automatically validates inputs against the schema before execution.

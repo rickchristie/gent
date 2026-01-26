@@ -12,13 +12,13 @@
 //
 // TimeProvider allows injecting time into prompts and enables deterministic testing:
 //
-//	// Use in templates
-//	loop := agents.NewReActLoop(model).
+//	// Use in templates via WithBehaviorAndContext
+//	agent := react.NewAgent(model).
 //	    WithBehaviorAndContext("Today is {{.Time.Today}} ({{.Time.Weekday}})")
 //
 //	// Mock time for testing
 //	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
-//	loop.WithTimeProvider(mockTime)
+//	agent.WithTimeProvider(mockTime)
 //
 // See [TimeProvider] for available methods and template usage.
 package gent

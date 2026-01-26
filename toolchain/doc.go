@@ -62,7 +62,6 @@
 //	        // input.Duration is time.Duration
 //	        return "scheduled", nil
 //	    },
-//	    nil,
 //	)
 //
 // The model provides string values, which are automatically converted:

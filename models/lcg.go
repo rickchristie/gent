@@ -17,11 +17,8 @@ import (
 //	llm, _ := openai.New(openai.WithToken(apiKey))
 //	model := models.NewLCGWrapper(llm).WithModelName("gpt-4")
 //
-//	// With ExecutionContext (automatic tracing)
-//	response, err := model.GenerateContent(ctx, execCtx, messages)
-//
-//	// Without ExecutionContext (no tracing)
-//	response, err := model.GenerateContent(ctx, nil, messages)
+//	// Generate content with tracing and streaming support
+//	response, err := model.GenerateContent(execCtx, "req-1", "llm", messages)
 type LCGWrapper struct {
 	model     llms.Model
 	modelName string // Optional model name for tracing
