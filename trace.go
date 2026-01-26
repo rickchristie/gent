@@ -31,11 +31,52 @@ const (
 // -----------------------------------------------------------------------------
 
 // TraceEvent is the marker interface for all trace events.
+//
+// # Creating Custom Traces
+//
+// Use [CustomTrace] for application-specific trace data:
+//
+//	execCtx.Trace(CustomTrace{
+//	    Name: "cache_hit",
+//	    Data: map[string]any{"key": cacheKey, "ttl": ttl},
+//	})
+//
+// For strongly-typed custom traces, embed [BaseTrace]:
+//
+//	type MyCacheTrace struct {
+//	    gent.BaseTrace
+//	    Key string
+//	    Hit bool
+//	}
+//
+//	func (MyCacheTrace) traceEvent() {} // Implement marker method
+//
+//	// Use it
+//	execCtx.Trace(MyCacheTrace{Key: "user:123", Hit: true})
+//
+// # Accessing Traces
+//
+//	events := execCtx.Events()
+//	for _, event := range events {
+//	    switch e := event.(type) {
+//	    case gent.ModelCallTrace:
+//	        log.Printf("Model %s used %d tokens", e.Model, e.InputTokens)
+//	    case MyCacheTrace:
+//	        log.Printf("Cache %s: hit=%v", e.Key, e.Hit)
+//	    }
+//	}
 type TraceEvent interface {
 	traceEvent() // marker method
 }
 
 // BaseTrace contains common fields auto-populated by ExecutionContext.Trace().
+//
+// When you call execCtx.Trace(event), the BaseTrace fields are automatically set:
+//   - Timestamp: Current time
+//   - Iteration: Current iteration number (1-indexed)
+//   - Depth: Current nesting depth (0 for root context)
+//
+// Embed this in custom trace types for consistent behavior.
 type BaseTrace struct {
 	// Timestamp is when this event occurred.
 	Timestamp time.Time

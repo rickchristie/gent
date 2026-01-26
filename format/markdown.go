@@ -8,15 +8,60 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-// Markdown uses markdown headers to delimit sections.
+// Markdown implements [gent.TextFormat] using markdown headers to delimit sections.
 //
-// Example output:
+// Markdown format is suitable for models that are trained on markdown content and
+// naturally produce markdown-formatted output. It uses `# SectionName` headers to
+// mark section boundaries.
+//
+// # Creating and Configuring
+//
+//	textFormat := format.NewMarkdown()
+//
+// # Registering Sections
+//
+// Sections are typically registered automatically by the agent when you configure
+// toolchains and terminations. You can also register sections manually:
+//
+//	textFormat := format.NewMarkdown().
+//	    RegisterSection(toolchain).
+//	    RegisterSection(termination)
+//
+// # Example LLM Output
 //
 //	# Thinking
-//	I need to search for the weather...
+//	I need to search for the weather in Tokyo to answer this question.
 //
 //	# Action
-//	{"tool": "search", "args": {"query": "weather"}}
+//	tool: search
+//	args:
+//	  query: weather in tokyo
+//
+// # Parsing Behavior
+//
+// The parser extracts content between headers. Headers are case-insensitive during
+// parsing but the original registered name is used in the result map:
+//
+//	sections, _ := textFormat.Parse(execCtx, llmOutput)
+//	// sections["Thinking"] = ["I need to search..."]
+//	// sections["Action"] = ["tool: search..."]
+//
+// # Nested Sections
+//
+// FormatSections supports hierarchical output with depth-aware headers:
+//
+//	# ToolResult          (depth 1)
+//	## search             (depth 2 - child)
+//	{"results": [...]}
+//
+// # Using with Agent
+//
+// The agent handles format registration automatically:
+//
+//	agent := react.NewAgent(model).
+//	    WithTextFormat(format.NewMarkdown()).
+//	    WithToolChain(toolchain.NewYAML().RegisterTool(searchTool)).
+//	    WithTermination(termination.NewText("answer"))
 type Markdown struct {
 	sections      []gent.TextSection
 	knownSections map[string]string // lowercase key -> original name

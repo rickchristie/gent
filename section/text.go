@@ -6,13 +6,39 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-// Text is a simple TextOutputSection that returns the raw text content as-is.
-// It never fails parsing, so no tracing is performed.
+// Text implements [gent.TextSection] for free-form text content.
 //
-// Use this for sections where the LLM can write free-form text, such as:
-//   - Thinking/reasoning sections
-//   - Explanation sections
-//   - Any section where you don't need structured parsing
+// Text is the simplest section type - it returns raw content as-is without
+// any parsing or validation. It never fails, so no parse error tracing occurs.
+//
+// # Use Cases
+//
+//   - Thinking/reasoning sections where the model works through a problem
+//   - Explanation sections for providing context
+//   - Any section where content format doesn't matter
+//
+// # Creating and Configuring
+//
+//	// Basic creation
+//	thinking := section.NewText("thinking")
+//
+//	// With guidance for the model
+//	thinking := section.NewText("thinking").
+//	    WithGuidance("Think step by step about how to solve this problem.")
+//
+// # Using with Agent
+//
+// Text sections are typically registered on the TextFormat via the agent:
+//
+//	// Using the default "thinking" section in react agent
+//	agent := react.NewAgent(model)  // Includes thinking section by default
+//
+//	// Or register custom text sections
+//	textFormat := format.NewXML().
+//	    RegisterSection(section.NewText("thinking").
+//	        WithGuidance("Reason about the problem.")).
+//	    RegisterSection(section.NewText("plan").
+//	        WithGuidance("List your planned steps."))
 type Text struct {
 	sectionName string
 	guidance    string

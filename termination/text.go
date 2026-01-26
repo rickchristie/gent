@@ -7,7 +7,41 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// Text simply returns the raw text content as the final answer.
+// Text implements [gent.Termination] for plain text answers.
+//
+// This is the simplest termination type - any non-empty text in the answer section
+// triggers termination. Use this when the agent should respond with free-form text.
+//
+// # Creating and Configuring
+//
+//	// Create with section name "answer"
+//	term := termination.NewText("answer")
+//
+//	// Add guidance for the model
+//	term := termination.NewText("answer").
+//	    WithGuidance("Provide a helpful, concise answer to the user's question.")
+//
+// # Using with Agent
+//
+//	agent := react.NewAgent(model).
+//	    WithTermination(termination.NewText("answer").
+//	        WithGuidance("Write your final response to the user."))
+//
+// # Adding Validation
+//
+// You can add an [gent.AnswerValidator] to reject answers that don't meet criteria:
+//
+//	term := termination.NewText("answer")
+//	term.SetValidator(&myValidator{})  // Implement gent.AnswerValidator
+//
+// When a validator rejects an answer, the status is [gent.TerminationAnswerRejected]
+// and feedback is provided for the agent to improve its answer.
+//
+// # Termination Behavior
+//
+//   - Empty content: Returns [gent.TerminationContinue]
+//   - Non-empty content with validation failure: Returns [gent.TerminationAnswerRejected]
+//   - Non-empty content passing validation: Returns [gent.TerminationAnswerAccepted]
 type Text struct {
 	sectionName string
 	guidance    string

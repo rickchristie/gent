@@ -11,18 +11,59 @@ import (
 	"github.com/rickchristie/gent/schema"
 )
 
-// JSON expects tool calls in JSON format.
+// JSON implements [gent.ToolChain] for parsing JSON-formatted tool calls.
+//
+// Use JSON toolchain when working with models that are trained to output JSON,
+// or when you need strict parsing without YAML's type inference. Note that JSON
+// is more strict than YAML - all strings must be quoted, no multiline strings
+// without escaping.
+//
+// For most use cases, [YAML] is recommended as it's more forgiving and works
+// well with language models.
+//
+// # Creating and Configuring
+//
+//	// Create with default "action" section name
+//	tc := toolchain.NewJSON()
+//
+//	// Or customize the section name
+//	tc := toolchain.NewJSON().WithSectionName("tool_call")
+//
+// # Registering Tools
+//
+//	// Register tools using method chaining
+//	tc := toolchain.NewJSON().
+//	    RegisterTool(searchTool).
+//	    RegisterTool(calendarTool).
+//	    RegisterTool(emailTool)
+//
+// # Expected Model Output Format
 //
 // Single tool call:
 //
 //	{"tool": "search", "args": {"query": "weather"}}
 //
-// Multiple tool calls (parallel):
+// Multiple parallel tool calls (use JSON array):
 //
 //	[
 //	  {"tool": "search", "args": {"query": "weather"}},
 //	  {"tool": "calendar", "args": {"date": "today"}}
 //	]
+//
+// # Using with Agent
+//
+//	agent := react.NewAgent(model).
+//	    WithToolChain(toolchain.NewJSON().
+//	        RegisterTool(searchTool).
+//	        RegisterTool(calendarTool))
+//
+// # Integration with TextFormat
+//
+// The Execute method requires a TextFormat to format results. This is typically
+// provided by the agent loop:
+//
+//	result, err := tc.Execute(execCtx, actionContent, textFormat)
+//	// result.Text contains formatted observation to feed back to the model
 type JSON struct {
 	tools       []any
 	toolMap     map[string]any

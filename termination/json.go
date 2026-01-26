@@ -11,8 +11,67 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// JSON parses JSON content into type T.
+// JSON implements [gent.Termination] for structured JSON answers.
+//
+// Use JSON termination when you need the agent to return structured data that
+// can be programmatically processed. The type parameter T defines the expected
+// structure, and a JSON Schema is automatically generated from it.
+//
 // Supports: primitives, pointers, structs, slices, maps, time.Time, time.Duration.
+//
+// # Creating and Configuring
+//
+//	// Define your response structure
+//	type OrderResponse struct {
+//	    OrderID   string   `json:"order_id"`
+//	    Status    string   `json:"status"`
+//	    Items     []string `json:"items"`
+//	    Total     float64  `json:"total"`
+//	}
+//
+//	// Create JSON termination
+//	term := termination.NewJSON[OrderResponse]("answer")
+//
+//	// Add guidance and example
+//	term := termination.NewJSON[OrderResponse]("answer").
+//	    WithGuidance("Provide the order details in JSON format.").
+//	    WithExample(OrderResponse{
+//	        OrderID: "ORD-12345",
+//	        Status:  "confirmed",
+//	        Items:   []string{"Widget", "Gadget"},
+//	        Total:   99.99,
+//	    })
+//
+// # Using with Agent
+//
+//	agent := react.NewAgent(model).
+//	    WithTermination(termination.NewJSON[OrderResponse]("answer").
+//	        WithGuidance("Return the order details."))
+//
+// # Struct Tags
+//
+// Use struct tags to customize the JSON Schema:
+//
+//	type Response struct {
+//	    Name    string  `json:"name"`                        // Required field
+//	    Age     int     `json:"age,omitempty"`               // Optional (omitempty)
+//	    Email   *string `json:"email"`                       // Optional (pointer)
+//	    Country string  `json:"country" description:"ISO country code"` // With description
+//	}
+//
+// # Adding Validation
+//
+// You can add an [gent.AnswerValidator] to validate the parsed struct:
+//
+//	term := termination.NewJSON[OrderResponse]("answer")
+//	term.SetValidator(&orderValidator{})  // Receives OrderResponse
+//
+// # Termination Behavior
+//
+//   - Empty content: Returns [gent.TerminationContinue]
+//   - Invalid JSON: Returns [gent.TerminationContinue] (agent should try again)
+//   - Valid JSON with validation failure: Returns [gent.TerminationAnswerRejected]
+//   - Valid JSON passing validation: Returns [gent.TerminationAnswerAccepted]
 type JSON[T any] struct {
 	sectionName string
 	guidance    string

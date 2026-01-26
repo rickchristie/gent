@@ -9,21 +9,53 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// YAML is a TextOutputSection that parses YAML content into type T.
+// YAML implements [gent.TextSection] for structured YAML content.
+//
+// Use YAML sections when you need the LLM to output structured data within
+// the agent loop. YAML is often easier for LLMs to generate than JSON due
+// to less strict syntax (no quotes required, simpler multiline strings).
+//
 // Supports: primitives, pointers, structs, slices, maps, time.Time, time.Duration.
 //
-// Use this for sections where you need the LLM to output structured YAML data.
-// YAML is often easier for LLMs to generate than JSON due to less strict syntax.
+// # Use Cases
 //
-// Example:
+//   - Intermediate structured data within reasoning
+//   - Plans or configuration-like content
+//   - Any section requiring typed data with multiline strings
+//
+// # Creating and Configuring
 //
 //	type Plan struct {
 //	    Goal  string   `yaml:"goal" description:"the main objective"`
 //	    Steps []string `yaml:"steps" description:"ordered list of steps"`
 //	}
 //
-//	section := section.NewYAML[Plan]("plan").
-//	    WithGuidance("Create a plan to achieve the user's goal.")
+//	// Create with type parameter
+//	plan := section.NewYAML[Plan]("plan")
+//
+//	// Add guidance and example
+//	plan := section.NewYAML[Plan]("plan").
+//	    WithGuidance("Create a plan to achieve the user's goal.").
+//	    WithExample(Plan{
+//	        Goal:  "Deploy the application",
+//	        Steps: []string{"Build", "Test", "Deploy"},
+//	    })
+//
+// # Struct Tags
+//
+// Use yaml struct tags for field naming:
+//
+//	type Config struct {
+//	    Name     string `yaml:"name"`
+//	    Timeout  int    `yaml:"timeout,omitempty"`
+//	    Enabled  bool   `yaml:"enabled"`
+//	}
+//
+// # Parse Error Handling
+//
+// When YAML parsing fails, a [gent.ParseErrorTrace] is emitted and the error
+// is returned. The framework tracks consecutive parse errors via
+// [gent.KeySectionParseErrorConsecutive] for limit enforcement.
 type YAML[T any] struct {
 	sectionName string
 	guidance    string

@@ -1,43 +1,43 @@
 package gent
 
-// TextSection defines a section within the LLM's text output. Each section knows how to
-// describe itself and parse its content.
+// TextSection defines a section within the LLM's text output.
 //
-// The idea is, on each iteration we're asking the LLM to provide outputs, but there are actually
-// multiple tasks in one output. For example, in a ReAct agent loop, the first LLM call might
-// ask the LLM to provide "Thought" and "Action" sections. The next LLM call might ask for
-// either "Observation" or "Final Answer" section.
+// # Concept
 //
-// By defining sections, we can modularize the prompt construction and output parsing logic.
-// Each section can provide its own prompt instructions and parsing logic, making it easier
-// to compose complex outputs from the LLM.
+// LLM outputs often contain multiple logical sections. For example, a ReAct agent might
+// output "Thinking" and "Action" sections, or "Thinking" and "Answer" sections. TextSection
+// allows modular definition of these sections with their own parsing logic.
 //
-// See: [TextFormat] for how sections are structured in the overall output.
+// # Relationships
 //
-// # Tracing Requirements for Implementors
+//   - [TextFormat] uses TextSections to know what to parse and how to format
+//   - [ToolChain] implements TextSection for the "action" section
+//   - [Termination] implements TextSection for the "answer" section
 //
-// Implementations MUST handle the following tracing responsibilities:
+// # Implementing TextSection
 //
-// On parse error:
-//   - Trace a ParseErrorTrace with the appropriate ErrorType for your section
-//   - The RawContent should contain the content that failed to parse
-//   - Stats are auto-updated when ParseErrorTrace is traced
+// For most cases, use the section package implementations:
 //
-// Supported ErrorTypes and their corresponding keys:
-//   - "section": KeySectionParseErrorConsecutive (for generic output sections)
-//   - "toolchain": KeyToolchainParseErrorConsecutive (for tool call parsing)
-//   - "termination": KeyTerminationParseErrorConsecutive (for termination parsing)
+//	// Simple text passthrough
+//	thinking := section.NewText("thinking").WithGuidance("Think step by step")
 //
-// On successful parse:
-//   - Call execCtx.Stats().ResetCounter() for the appropriate consecutive error key
+//	// JSON-parsed section with typed output
+//	config := section.NewJSON[ConfigSchema]("config").WithGuidance("Provide configuration")
 //
-// Sections that never fail parsing (e.g., simple text passthrough) may skip tracing.
+// For custom parsing, implement the interface:
 //
-// Example (for a generic section):
+//	type MySection struct {
+//	    name     string
+//	    guidance string
+//	}
+//
+//	func (s *MySection) Name() string     { return s.name }
+//	func (s *MySection) Guidance() string { return s.guidance }
 //
 //	func (s *MySection) ParseSection(execCtx *ExecutionContext, content string) (any, error) {
-//	    result, err := s.doParse(content)
+//	    parsed, err := s.doParse(content)
 //	    if err != nil {
+//	        // Trace error for stats (see Tracing Requirements below)
 //	        if execCtx != nil {
 //	            execCtx.Trace(ParseErrorTrace{
 //	                ErrorType:  "section",
@@ -47,16 +47,40 @@ package gent
 //	        }
 //	        return nil, err
 //	    }
+//	    // Reset consecutive error counter on success
 //	    if execCtx != nil {
 //	        execCtx.Stats().ResetCounter(KeySectionParseErrorConsecutive)
 //	    }
-//	    return result, nil
+//	    return parsed, nil
 //	}
 //
+// # Tracing Requirements
+//
+// ParseSection MUST handle tracing for stats tracking:
+//
+// On parse error:
+//   - Trace a ParseErrorTrace with the appropriate ErrorType
+//   - Stats are auto-updated when ParseErrorTrace is traced
+//
+// Supported ErrorTypes and their corresponding keys:
+//   - "section": [KeySectionParseErrorConsecutive] (for generic sections)
+//   - "toolchain": [KeyToolchainParseErrorConsecutive] (for ToolChain)
+//   - "termination": [KeyTerminationParseErrorConsecutive] (for Termination)
+//
+// On successful parse:
+//   - Call execCtx.Stats().ResetCounter() for the appropriate consecutive error key
+//
+// Sections that never fail parsing (e.g., simple text passthrough) may skip tracing.
+//
+// # Available Implementations
+//
 // The section package provides ready-to-use implementations:
-//   - section.Text: Simple passthrough section (never fails)
-//   - section.JSON[T]: Parses JSON into type T with schema generation
-//   - section.YAML[T]: Parses YAML into type T with schema generation
+//   - section.Text: Simple passthrough (never fails)
+//   - section.JSON[T]: Parse JSON into typed struct T
+//   - section.YAML[T]: Parse YAML into typed struct T
+//   - section.Schema: Generate guidance from JSON Schema
+//
+// See: [TextFormat] for how sections are structured in the overall output.
 type TextSection interface {
 	// Name returns the section identifier (e.g., "thinking", "action", "answer")
 	Name() string

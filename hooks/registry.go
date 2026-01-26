@@ -7,25 +7,71 @@ import (
 )
 
 // Registry manages a collection of hooks and dispatches events to them.
-// Hooks can implement any combination of hook interfaces - they will only
-// receive events for the interfaces they implement.
 //
-// ExecutionContext is passed separately from events, making it clear that
-// the context is always available. Hooks can access LoopData via execCtx.Data()
-// and can spawn child contexts if needed.
+// # Overview
 //
-// Example usage:
+// Registry is the central coordination point for hooks. It:
+//   - Stores registered hooks in order
+//   - Dispatches events to hooks that implement the relevant interface
+//   - Passes ExecutionContext to hooks for access to stats, data, and tracing
 //
-//	type MyHook struct{}
-//	func (h *MyHook) OnBeforeExecution(
-//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.BeforeExecutionEvent,
-//	) {
-//	    data := execCtx.Data().(MyLoopData)
-//	    ...
+// Hooks can implement any combination of hook interfaces - they only receive
+// events for the interfaces they implement.
+//
+// # Creating and Using
+//
+//	// Create a registry and register hooks
+//	registry := hooks.NewRegistry()
+//	registry.Register(&LoggingHook{})
+//	registry.Register(&MetricsHook{})
+//
+//	// Use with executor
+//	exec := executor.New(loop, config).WithHooks(registry)
+//
+// # Hooks with Multiple Interfaces
+//
+// A single hook can implement multiple interfaces:
+//
+//	type FullHook struct {
+//	    logger *log.Logger
 //	}
 //
-//	registry := hooks.NewRegistry()
-//	registry.Register(&MyHook{})
+//	func (h *FullHook) OnBeforeExecution(
+//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.BeforeExecutionEvent,
+//	) {
+//	    h.logger.Print("Execution started")
+//	}
+//
+//	func (h *FullHook) OnAfterToolCall(
+//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.AfterToolCallEvent,
+//	) {
+//	    h.logger.Printf("Tool %s: %v", e.ToolName, e.Duration)
+//	}
+//
+//	// Register once - receives both event types
+//	registry.Register(&FullHook{logger: log.Default()})
+//
+// # Accessing ExecutionContext
+//
+// Hooks receive the ExecutionContext which provides:
+//   - execCtx.Data() - Access to the agent's LoopData
+//   - execCtx.Stats() - Read/write stats counters and gauges
+//   - execCtx.GetTraces() - Access recorded traces
+//   - execCtx.Context() - The underlying context.Context
+//
+// Example:
+//
+//	func (h *MyHook) OnAfterIteration(
+//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.AfterIterationEvent,
+//	) {
+//	    iterations := execCtx.Stats().GetIterations()
+//	    h.logger.Printf("Completed iteration %d", iterations)
+//	}
+//
+// # Thread Safety
+//
+// Registry is NOT thread-safe. Register all hooks before starting execution.
+// Fire methods should only be called by the executor.
 type Registry struct {
 	hooks []any
 }

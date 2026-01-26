@@ -9,13 +9,21 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-// JSON is a TextOutputSection that parses JSON content into type T.
+// JSON implements [gent.TextSection] for structured JSON content.
+//
+// Use JSON sections when you need the LLM to output structured data within
+// the agent loop (as opposed to the final answer). The section automatically
+// generates a JSON Schema from the type parameter T.
+//
 // Supports: primitives, pointers, structs, slices, maps, time.Time, time.Duration.
 //
-// Use this for sections where you need the LLM to output structured JSON data.
-// The section automatically generates a JSON Schema from the type T.
+// # Use Cases
 //
-// Example:
+//   - Intermediate analysis that the agent loop processes
+//   - Structured plans or decisions within reasoning
+//   - Any section requiring typed data extraction
+//
+// # Creating and Configuring
 //
 //	type Analysis struct {
 //	    Sentiment string   `json:"sentiment" description:"positive, negative, or neutral"`
@@ -23,8 +31,34 @@ import (
 //	    Score     float64  `json:"score" description:"confidence score 0-1"`
 //	}
 //
-//	section := section.NewJSON[Analysis]("analysis").
-//	    WithGuidance("Analyze the provided text.")
+//	// Create with type parameter
+//	analysis := section.NewJSON[Analysis]("analysis")
+//
+//	// Add guidance and example
+//	analysis := section.NewJSON[Analysis]("analysis").
+//	    WithGuidance("Analyze the sentiment and topics of the text.").
+//	    WithExample(Analysis{
+//	        Sentiment: "positive",
+//	        Topics:    []string{"technology", "innovation"},
+//	        Score:     0.85,
+//	    })
+//
+// # Struct Tags
+//
+// Use struct tags to customize the generated JSON Schema:
+//
+//	type Response struct {
+//	    Name    string  `json:"name"`                        // Required field
+//	    Age     int     `json:"age,omitempty"`               // Optional (omitempty)
+//	    Email   *string `json:"email"`                       // Optional (pointer)
+//	    Country string  `json:"country" description:"ISO country code"`
+//	}
+//
+// # Parse Error Handling
+//
+// When JSON parsing fails, a [gent.ParseErrorTrace] is emitted and the error
+// is returned. The framework tracks consecutive parse errors via
+// [gent.KeySectionParseErrorConsecutive] for limit enforcement.
 type JSON[T any] struct {
 	sectionName string
 	guidance    string

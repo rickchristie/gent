@@ -11,17 +11,91 @@ import (
 // ErrAmbiguousTags is returned in strict mode when section tags appear inside other sections.
 var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside another section")
 
-// XML uses XML-style tags to delimit sections.
+// XML implements [gent.TextFormat] using XML-style tags to delimit sections.
 //
-// Example output:
+// XML format is the recommended default for most agents. The clear opening and
+// closing tags make it easy for models to produce correctly structured output,
+// and the parser handles edge cases like literal tag names in content.
+//
+// # Creating and Configuring
+//
+//	// Standard usage
+//	textFormat := format.NewXML()
+//
+//	// Enable strict mode for debugging ambiguous outputs
+//	textFormat := format.NewXML().WithStrict(true)
+//
+// # Registering Sections
+//
+// Sections are typically registered automatically by the agent when you configure
+// toolchains and terminations. You can also register sections manually:
+//
+//	textFormat := format.NewXML().
+//	    RegisterSection(toolchain).
+//	    RegisterSection(termination)
+//
+// # Example LLM Output
 //
 //	<thinking>
-//	I need to search for the weather...
+//	I need to search for the weather in Tokyo to answer this question.
 //	</thinking>
 //
 //	<action>
-//	{"tool": "search", "args": {"query": "weather"}}
+//	tool: search
+//	args:
+//	  query: weather in tokyo
 //	</action>
+//
+// # Parsing Behavior
+//
+// The parser extracts content between matching tags. Tags are case-insensitive
+// during parsing but the original registered name is used in the result map:
+//
+//	sections, _ := textFormat.Parse(execCtx, llmOutput)
+//	// sections["thinking"] = ["I need to search..."]
+//	// sections["action"] = ["tool: search..."]
+//
+// # Handling Literal Tags in Content
+//
+// The parser correctly handles cases where the model mentions tag names literally:
+//
+//	<thinking>
+//	I should provide the answer in the <answer> section.
+//	</thinking>
+//	<answer>
+//	The weather is sunny.
+//	</answer>
+//
+// The parser pairs each closing tag with its nearest preceding opening tag,
+// correctly extracting both sections even when `<answer>` appears in thinking.
+//
+// # Strict Mode
+//
+// Enable strict mode to detect potentially ambiguous parses:
+//
+//	textFormat := format.NewXML().WithStrict(true)
+//
+// In strict mode, Parse returns [ErrAmbiguousTags] if a section's content
+// contains another registered section's tags.
+//
+// # Nested Sections
+//
+// FormatSections supports hierarchical output with nested tags:
+//
+//	<tool_result>
+//	<search>
+//	{"results": [...]}
+//	</search>
+//	</tool_result>
+//
+// # Using with Agent
+//
+// The agent handles format registration automatically:
+//
+//	agent := react.NewAgent(model).
+//	    WithTextFormat(format.NewXML()).
+//	    WithToolChain(toolchain.NewYAML().RegisterTool(searchTool)).
+//	    WithTermination(termination.NewText("answer"))
 type XML struct {
 	sections      []gent.TextSection
 	knownSections map[string]string // lowercase key -> original name

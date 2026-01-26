@@ -6,13 +6,54 @@ import (
 )
 
 // TimeProvider provides time-related functionality for agents.
-// It allows injecting custom time sources for testing and provides
-// convenient formatting methods for use in prompts.
 //
-// All methods are accessible in templates via the .Time field:
+// # Purpose
 //
-//	Today is {{.Time.Today}} ({{.Time.Weekday}})
-//	Current time: {{.Time.Format "3:04 PM"}}
+// Time is critical for many agent tasks (scheduling, deadlines, business hours).
+// TimeProvider allows:
+//   - Injecting time into prompts via templates
+//   - Deterministic testing with fixed times
+//   - Custom time sources (e.g., user's timezone)
+//
+// # Usage in Prompts
+//
+// Access via the .Time field in behavior templates:
+//
+//	agent := react.NewAgent(model).
+//	    WithBehaviorAndContext(`
+//	        Today is {{.Time.Today}} ({{.Time.Weekday}}).
+//	        Current time: {{.Time.Time "3:04 PM"}}.
+//	        Help the user with their scheduling request.
+//	    `)
+//
+// # Testing
+//
+// Use [MockTimeProvider] for deterministic tests:
+//
+//	func TestSchedulingAgent(t *testing.T) {
+//	    // Fix time to a Monday at 9am
+//	    fixedTime := time.Date(2025, 6, 16, 9, 0, 0, 0, time.UTC)
+//	    mockTime := gent.NewMockTimeProvider(fixedTime)
+//
+//	    agent := react.NewAgent(model).
+//	        WithTimeProvider(mockTime).
+//	        WithBehaviorAndContext("Today is {{.Time.Weekday}}")
+//
+//	    // Agent will always see "Monday" regardless of actual day
+//	}
+//
+// # Implementing Custom TimeProvider
+//
+// For custom needs (e.g., user timezone, simulated time):
+//
+//	type UserTimezoneProvider struct {
+//	    loc *time.Location
+//	}
+//
+//	func (p *UserTimezoneProvider) Now() time.Time {
+//	    return time.Now().In(p.loc)
+//	}
+//	// ... implement other methods
 type TimeProvider interface {
 	// Now returns the current time.
 	//

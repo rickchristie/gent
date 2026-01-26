@@ -4,16 +4,73 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// AgentLoop is responsible for:
-//  1. Constructing the entire prompt to be sent to the LLM model.
-//  2. Calling the LLM model with the constructed prompt.
-//  3. Parsing LLM output and processes it (e.g., tool calls, termination, saving data, etc).
-//  4. Decide whether to continue the loop or terminate with results.
+// AgentLoop orchestrates a single iteration of the agent's think-act-observe cycle.
 //
-// Implementations may reuse [ToolChain], [Termination], [TextOutputFormat] or create their own
-// custom logic to handle all of the above.
+// # Responsibilities
 //
-// The executor will call [AgentLoop.Next] repeatedly until it returns [LATerminate] result.
+//  1. Construct the prompt to be sent to the LLM model
+//  2. Call the LLM model with the constructed prompt
+//  3. Parse LLM output (tool calls, termination, other sections)
+//  4. Execute any tool calls and collect observations
+//  5. Decide whether to continue iterating or terminate
+//
+// # Available Implementations
+//
+//   - agents/react: ReAct-style agent with thinking, action, and answer sections
+//
+// # Implementing Custom Loops
+//
+// Custom loops can use provided building blocks ([ToolChain], [Termination], [TextFormat])
+// or implement everything from scratch. Example:
+//
+//	type MyLoop struct {
+//	    model      gent.Model
+//	    toolchain  gent.ToolChain
+//	    termination gent.Termination
+//	    format     gent.TextFormat
+//	}
+//
+//	func (l *MyLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+//	    data := execCtx.Data().(*MyLoopData)
+//
+//	    // 1. Build prompt from task and scratchpad
+//	    messages := l.buildMessages(data)
+//
+//	    // 2. Call model
+//	    response, err := l.model.GenerateContent(execCtx, "gpt-4", systemPrompt, messages)
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//
+//	    // 3. Parse output
+//	    sections, err := l.format.Parse(execCtx, response.Text)
+//	    if err != nil {
+//	        // Feed parse error back to LLM
+//	        return &gent.AgentLoopResult{
+//	            Action:     gent.LAContinue,
+//	            NextPrompt: fmt.Sprintf("Parse error: %v", err),
+//	        }, nil
+//	    }
+//
+//	    // 4. Check for tool calls
+//	    if actionContent, ok := sections[l.toolchain.Name()]; ok {
+//	        result, _ := l.toolchain.Execute(execCtx, actionContent[0], l.format)
+//	        data.AddIterationHistory(...)
+//	        return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: result.Text}, nil
+//	    }
+//
+//	    // 5. Check for termination
+//	    if answerContent, ok := sections[l.termination.Name()]; ok {
+//	        result := l.termination.ShouldTerminate(execCtx, answerContent[0])
+//	        if result.Status == gent.TerminationAnswerAccepted {
+//	            return &gent.AgentLoopResult{Action: gent.LATerminate, Result: result.Content}, nil
+//	        }
+//	    }
+//
+//	    return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: "Continue..."}, nil
+//	}
+//
+// The executor calls Next() repeatedly until it returns [LATerminate] or a limit is exceeded.
 type AgentLoop[Data LoopData] interface {
 	// Next performs one iteration of the agent loop.
 	//
@@ -21,12 +78,15 @@ type AgentLoop[Data LoopData] interface {
 	//   - Access to LoopData via execCtx.Data()
 	//   - Automatic tracing for all framework components
 	//   - Context for cancellation via execCtx.Context()
+	//   - Stats for limit checking via execCtx.Stats()
 	//
 	// Use execCtx.Context() when calling external APIs that require context.Context.
 	// The context is cancelled when limits are exceeded or the parent context is cancelled.
 	//
-	// Returns an error if the iteration fails (e.g., LLM call failure, parse error).
-	// The executor will handle the error appropriately.
+	// Return values:
+	//   - LAContinue: Continue to next iteration with NextPrompt as observation
+	//   - LATerminate: Stop execution with Result as final output
+	//   - error: Iteration failed, execution terminates with error
 	Next(execCtx *ExecutionContext) (*AgentLoopResult, error)
 }
 

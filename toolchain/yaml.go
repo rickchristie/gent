@@ -11,7 +11,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// YAML expects tool calls in YAML format.
+// YAML implements [gent.ToolChain] for parsing YAML-formatted tool calls.
+//
+// YAML is the recommended toolchain for most use cases. It's more forgiving than JSON
+// (no quotes required for strings, multiline strings are easier), and uses schema-aware
+// parsing to preserve string types when the schema expects them.
+//
+// # Creating and Configuring
+//
+//	// Create with default "action" section name
+//	tc := toolchain.NewYAML()
+//
+//	// Or customize the section name
+//	tc := toolchain.NewYAML().WithSectionName("tool_call")
+//
+// # Registering Tools
+//
+//	// Register tools using method chaining
+//	tc := toolchain.NewYAML().
+//	    RegisterTool(searchTool).
+//	    RegisterTool(calendarTool).
+//	    RegisterTool(emailTool)
+//
+// # Expected Model Output Format
 //
 // Single tool call:
 //
@@ -19,7 +41,7 @@ import (
 //	args:
 //	  query: weather in tokyo
 //
-// Multiple tool calls:
+// Multiple parallel tool calls (use YAML array):
 //
 //	- tool: search
 //	  args:
@@ -27,6 +49,33 @@ import (
 //	- tool: calendar
 //	  args:
 //	    date: today
+//
+// # Schema-Aware Parsing
+//
+// YAML toolchain uses the tool's JSON Schema to guide type parsing. When a field is
+// declared as "string" in the schema, the raw YAML value is preserved as a string
+// even if YAML would normally parse it as another type.
+//
+// This prevents issues like "123" being parsed as an integer when you need a string:
+//
+//	schema.Object(map[string]*schema.Property{
+//	    "phone": schema.String("Phone number"),  // "555-1234" stays as string
+//	})
+//
+// # Using with Agent
+//
+//	agent := react.NewAgent(model).
+//	    WithToolChain(toolchain.NewYAML().
+//	        RegisterTool(searchTool).
+//	        RegisterTool(calendarTool))
+//
+// # Integration with TextFormat
+//
+// The Execute method requires a TextFormat to format results. This is typically
+// provided by the agent loop:
+//
+//	result, err := tc.Execute(execCtx, actionContent, textFormat)
+//	// result.Text contains formatted observation to feed back to the model
 type YAML struct {
 	tools        []any
 	toolMap      map[string]any

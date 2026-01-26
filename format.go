@@ -3,28 +3,73 @@ package gent
 import "errors"
 
 // FormattedSection represents a section with its name, content, and optional children.
+//
 // Used when building sectioned text via TextFormat.FormatSections.
-// Children are rendered recursively, with depth-aware formatting (e.g., Markdown uses
-// increasing header levels: #, ##, ###).
+// Children are rendered recursively, with depth-aware formatting:
+//   - XML: Nested tags (<parent><child>...</child></parent>)
+//   - Markdown: Increasing header levels (#, ##, ###)
+//
+// Example:
+//
+//	sections := []FormattedSection{
+//	    {Name: "observation", Content: "Tool executed successfully", Children: []FormattedSection{
+//	        {Name: "result", Content: "Order #12345 found"},
+//	        {Name: "status", Content: "shipped"},
+//	    }},
+//	}
 type FormattedSection struct {
 	Name     string
 	Content  string
 	Children []FormattedSection
 }
 
-// TextFormat defines how sections are structured in the LLM output and how to format
+// TextFormat defines how sections are structured in LLM output and how to format
 // sections for input to the LLM.
 //
-// It handles the "envelope" - how sections are delimited, extracted, and formatted.
-// This interface is used bidirectionally:
+// # Responsibilities
+//
+// TextFormat handles the "envelope" - how sections are delimited, extracted, and formatted:
 //   - Parsing: Extract sections from LLM output (Parse method)
-//   - Formatting: Build section-delimited text for LLM input (FormatSection)
+//   - Formatting: Build section-delimited text for LLM input (FormatSections)
+//   - Structure: Generate format description for prompts (DescribeStructure)
 //
-// See: [TextSection] for section definitions.
+// The format does NOT define what content goes in each section - that's handled by
+// [TextSection] implementations (ToolChain, Termination, custom sections).
 //
-// # Tracing Requirements for Implementors
+// # Implementing TextFormat
 //
-// Implementations MUST handle the following tracing responsibilities:
+// To create a custom format (e.g., for a new delimiter style):
+//
+//	type MyFormat struct {
+//	    sections []TextSection
+//	}
+//
+//	func (f *MyFormat) RegisterSection(section TextSection) TextFormat {
+//	    f.sections = append(f.sections, section)
+//	    return f
+//	}
+//
+//	func (f *MyFormat) DescribeStructure() string {
+//	    // Generate prompt explaining the format structure
+//	    var sb strings.Builder
+//	    sb.WriteString("Use the following format:\n")
+//	    for _, s := range f.sections {
+//	        sb.WriteString(fmt.Sprintf("[%s]: %s\n", s.Name(), s.Guidance()))
+//	    }
+//	    return sb.String()
+//	}
+//
+//	func (f *MyFormat) Parse(execCtx *ExecutionContext, output string) (map[string][]string, error) {
+//	    // Parse sections from output (see tracing requirements below)
+//	}
+//
+//	func (f *MyFormat) FormatSections(sections []FormattedSection) string {
+//	    // Format sections for LLM input
+//	}
+//
+// # Tracing Requirements
+//
+// Parse MUST handle tracing for stats tracking:
 //
 // On parse error:
 //   - Trace a ParseErrorTrace with ErrorType="format"
@@ -34,7 +79,7 @@ type FormattedSection struct {
 // On successful parse:
 //   - Call execCtx.Stats().ResetCounter(KeyFormatParseErrorConsecutive)
 //
-// Example:
+// Example implementation:
 //
 //	func (f *MyFormat) Parse(execCtx *ExecutionContext, output string) (map[string][]string, error) {
 //	    result, err := f.doParse(output)
@@ -53,6 +98,13 @@ type FormattedSection struct {
 //	    }
 //	    return result, nil
 //	}
+//
+// # Available Implementations
+//
+//   - format.NewXML(): XML-style tags (<section>content</section>)
+//   - format.NewMarkdown(): Markdown headers (# Section)
+//
+// See: [TextSection] for section definitions.
 type TextFormat interface {
 	// RegisterSection adds a section to the format. The section name is used for
 	// both DescribeStructure output and Parse recognition.

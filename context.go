@@ -19,15 +19,59 @@ type HookFirer interface {
 	FireAfterToolCall(ctx context.Context, execCtx *ExecutionContext, event AfterToolCallEvent)
 }
 
-// ExecutionContext is the ambient context passed through everything in the framework.
-// It provides automatic tracing, state management, and support for nested agent loops.
+// ExecutionContext is the central context passed through all framework components.
 //
-// All framework components (Model, ToolChain, Hooks, AgentLoop) receive ExecutionContext,
-// enabling automatic trace collection without manual wiring.
+// # Key Features
 //
-// ExecutionContext embeds a context.Context for cancellation propagation. When limits
-// are exceeded, the context is cancelled, which propagates to all child contexts and
-// ongoing operations (like model calls).
+//   - Automatic tracing: Trace() records events with timestamps and iteration info
+//   - Stats tracking: Stats are auto-updated from traces and propagate hierarchically
+//   - Limit enforcement: Execution terminates when limits are exceeded
+//   - Cancellation: Propagates to all child contexts and ongoing operations
+//   - Nested loops: Child contexts share stats with parents for aggregate limits
+//
+// # Usage in Tools
+//
+//	func (t *MyTool) Call(ctx context.Context, input Input) (*ToolResult[Output], error) {
+//	    // Use standard context for external calls (inherits cancellation)
+//	    result, err := externalAPI.Call(ctx, input)
+//	    return &ToolResult[Output]{Text: result}, err
+//	}
+//
+// # Usage in Custom AgentLoop
+//
+//	func (l *MyLoop) Next(execCtx *ExecutionContext) (*AgentLoopResult, error) {
+//	    // Access loop data
+//	    data := execCtx.Data().(*MyLoopData)
+//
+//	    // Check current iteration
+//	    fmt.Printf("Iteration %d\n", execCtx.Iteration())
+//
+//	    // Record custom trace
+//	    execCtx.Trace(CustomTrace{Name: "my_event", Data: map[string]any{"key": "value"}})
+//
+//	    // Use standard context for model calls
+//	    response, err := model.GenerateContent(execCtx, ...)
+//	}
+//
+// # Nested Agent Loops
+//
+// For tools that run sub-agents, create a child context:
+//
+//	func (t *SubAgentTool) Call(ctx context.Context, input Input) (*ToolResult[Output], error) {
+//	    // Create child context (stats propagate to parent)
+//	    childCtx := parentExecCtx.NewChild("sub-agent", childData)
+//
+//	    // Run sub-agent
+//	    exec := executor.New(subAgent, config)
+//	    exec.Execute(childCtx)
+//
+//	    return &ToolResult[Output]{Text: childCtx.FinalResult()}, nil
+//	}
+//
+// # Thread Safety
+//
+// All methods are safe for concurrent use. Multiple goroutines can trace events,
+// update stats, and access data concurrently.
 type ExecutionContext struct {
 	mu sync.RWMutex
 

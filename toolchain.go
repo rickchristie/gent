@@ -48,39 +48,103 @@ func (r *ToolChainResult) AsContentParts() []ContentPart {
 	return append(parts, r.Media...)
 }
 
-// ToolChain manages a collection of tools and implements TextSection.
+// ToolChain manages a collection of tools and implements [TextSection].
 //
-// Responsibilities:
+// # Responsibilities
+//
 //   - Guidance: Brief instruction for the action section (inherited from TextSection)
 //   - AvailableToolsPrompt: Full tool catalog with format instructions and schemas
-//   - Parse: Extract tool calls from LLM output
-//   - Execute: Call tools with parsed arguments, format results using TextFormat
+//   - Execute: Parse tool calls, validate args, call tools, format results
 //
-// The ToolChain handles output formatting so tools can focus on business logic.
-// Different ToolChain implementations (JSON, YAML) use the same tools but format
-// outputs differently based on their serialization format.
+// # Implementing a ToolChain
+//
+// To create a custom ToolChain (e.g., for a new serialization format):
+//
+//  1. Implement [TextSection]: Name(), Guidance(), ParseSection()
+//  2. Implement RegisterTool to store tools (use reflection for generic tools)
+//  3. Implement AvailableToolsPrompt to generate the tool catalog
+//  4. Implement Execute with proper tracing and error handling
+//
+// # Tracing Requirements
+//
+// Execute MUST trace tool calls for stats tracking:
+//
+//	// For each tool call:
+//	startTime := time.Now()
+//	output, err := tool.Call(execCtx.Context(), input)
+//	execCtx.Trace(ToolCallTrace{
+//	    ToolName: toolName,
+//	    Input:    input,
+//	    Output:   output,
+//	    Duration: time.Since(startTime),
+//	    Error:    err,
+//	})
+//
+// This enables automatic stat updates: [KeyToolCalls], [KeyToolCallsFor],
+// [KeyToolCallsErrorTotal], [KeyToolCallsErrorConsecutive], etc.
+//
+// # Parse Error Handling
+//
+// Execute MUST trace parse errors:
+//
+//	if parseErr != nil {
+//	    execCtx.Trace(ParseErrorTrace{
+//	        ErrorType:  "toolchain",
+//	        RawContent: content,
+//	        Error:      parseErr,
+//	    })
+//	}
+//
+// On successful parse, reset the consecutive error counter:
+//
+//	execCtx.Stats().ResetCounter(KeyToolchainParseErrorConsecutive)
+//
+// # Hook Integration
+//
+// Execute SHOULD fire tool call hooks if a HookFirer is available:
+//
+//	// Before tool call
+//	beforeEvent := &BeforeToolCallEvent{ToolName: name, Args: input}
+//	execCtx.FireBeforeToolCall(beforeEvent)
+//	input = beforeEvent.Args // hooks can modify args
+//
+//	// After tool call
+//	execCtx.FireAfterToolCall(AfterToolCallEvent{...})
+//
+// # Available Implementations
+//
+//   - toolchain.NewYAML(): YAML-based tool calls (recommended for readability)
+//   - toolchain.NewJSON(): JSON-based tool calls
 //
 // Tools are stored as []any to support generic Tool[I, TextOutput] with different
 // type parameters. The ToolChain uses reflection to call tools at runtime.
-//
-// When an ExecutionContext is provided, tool executions are automatically traced.
-// Use execCtx.Context() for any operations that require context.Context.
 type ToolChain interface {
 	TextSection
 
-	// RegisterTool adds a tool to the chain. The tool must implement Tool[I, TextOutput].
-	// Returns self for chaining.
+	// RegisterTool adds a tool to the chain.
+	//
+	// The tool must implement Tool[I, TextOutput] for some types I and TextOutput.
+	// The ToolChain uses reflection to discover and call the tool's methods.
+	//
+	// Panics if:
+	//   - tool is nil
+	//   - tool doesn't implement the Tool interface
+	//   - a tool with the same name is already registered
+	//
+	// Returns self for method chaining.
 	RegisterTool(tool any) ToolChain
 
-	// AvailableToolsPrompt returns the tool catalog with parameter schemas for each
-	// registered tool. This should be placed in the system prompt to inform the LLM
-	// about available tools.
+	// AvailableToolsPrompt returns the tool catalog with parameter schemas.
 	//
-	// Note: Format instructions for how to call tools are provided by Guidance(),
-	// which is inherited from TextSection.
+	// This should be placed in the system prompt to inform the LLM about available
+	// tools. The format depends on the implementation (YAML schema, JSON schema, etc.).
+	//
+	// Note: Format instructions for HOW to call tools (e.g., "use YAML format")
+	// are provided by Guidance(), which is inherited from TextSection.
 	AvailableToolsPrompt() string
 
 	// Execute parses tool calls from content and executes them.
+	//
 	// The textFormat parameter is used to format the results - it must not be nil.
 	//
 	// Returns a ToolChainResult with:
