@@ -48,22 +48,31 @@
 // # Configuration
 //
 // The agent can be configured with:
-//   - WithBehaviorAndContext: Custom behavior instructions
-//   - WithCriticalRules: Critical rules the agent must follow
+//   - WithBehaviorAndContext: Custom behavior instructions (formatted as "behavior" section)
+//   - WithCriticalRules: Critical rules the agent must follow (formatted as "critical_rules" section)
 //   - WithFormat: Custom output format (default: XML)
 //   - WithToolChain: Custom tool chain (default: YAML)
 //   - WithTermination: Custom termination handler (default: Text)
 //   - WithThinking: Enable thinking section
 //   - WithStreaming: Enable streaming responses
-//   - WithSystemTemplate: Custom system prompt template
-//   - WithTimeProvider: Custom time provider for templates
+//   - WithSystemPromptBuilder: Custom function to build system prompt messages
+//   - WithTimeProvider: Custom time provider
 //
-// # Templates
+// # System Prompt Builder
 //
-// The system prompt is a Go text/template with access to:
-//   - Time provider functions: {{.Time.Today}}, {{.Time.Weekday}}, {{.Time.Format "layout"}}
-//   - Behavior context: {{.BehaviorAndContext}}
-//   - Critical rules: {{.CriticalRules}}
-//   - Output format: {{.OutputPrompt}}
-//   - Tools description: {{.ToolsPrompt}}
+// The system prompt is built using a SystemPromptBuilder function. The default builder
+// (DefaultSystemPromptBuilder) formats all sections using the configured TextFormat for
+// consistency. Sections include: behavior, re_act, critical_rules, available_tools, output_format.
+//
+// For full control over the system prompt, use WithSystemPromptBuilder to provide a custom
+// function that returns []gent.MessageContent. This allows for multi-message system prompts
+// or few-shot examples.
+//
+// Example:
+//
+//	agent.WithSystemPromptBuilder(func(ctx SystemPromptContext) []gent.MessageContent {
+//	    return []gent.MessageContent{
+//	        {Role: llms.ChatMessageTypeSystem, Parts: []gent.ContentPart{...}},
+//	    }
+//	})
 package react

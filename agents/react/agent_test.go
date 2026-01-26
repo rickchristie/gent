@@ -884,7 +884,7 @@ func TestNewAgent_Defaults(t *testing.T) {
 	assert.NotNil(t, loop.toolChain, "expected default toolChain to be set")
 	assert.NotNil(t, loop.termination, "expected default termination to be set")
 	assert.NotNil(t, loop.timeProvider, "expected default timeProvider to be set")
-	assert.NotNil(t, loop.systemTemplate, "expected default systemTemplate to be set")
+	assert.NotNil(t, loop.systemPromptBuilder, "expected default systemPromptBuilder to be set")
 }
 
 func TestAgent_WithTimeProvider(t *testing.T) {
@@ -898,79 +898,175 @@ func TestAgent_WithTimeProvider(t *testing.T) {
 	assert.Equal(t, "Sunday", loop.TimeProvider().Weekday())
 }
 
-func TestAgent_ProcessTemplateString(t *testing.T) {
-	type input struct {
-		template string
-		mockTime time.Time
-	}
+func TestDefaultSystemPromptBuilder(t *testing.T) {
+	t.Run("formats all sections with TextFormat", func(t *testing.T) {
+		format := newMockFormat()
+		ctx := SystemPromptContext{
+			Format:             format,
+			BehaviorAndContext: "You are helpful.",
+			CriticalRules:      "Never lie.",
+			OutputPrompt:       "Use XML tags.",
+			ToolsPrompt:        "Available tools: search",
+			Time:               gent.NewDefaultTimeProvider(),
+		}
 
-	type expected struct {
-		result string
-	}
+		messages := DefaultSystemPromptBuilder(ctx)
 
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "expands template variables",
-			input: input{
-				template: "Today is {{.Time.Today}} ({{.Time.Weekday}}).",
-				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
-			},
-			expected: expected{result: "Today is 2025-06-15 (Sunday)."},
-		},
-		{
-			name: "no template variables",
-			input: input{
-				template: "You are a helpful assistant.",
-				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
-			},
-			expected: expected{result: "You are a helpful assistant."},
-		},
-		{
-			name: "empty input",
-			input: input{
-				template: "",
-				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
-			},
-			expected: expected{result: ""},
-		},
-		{
-			name: "invalid template returns original",
-			input: input{
-				template: "This has {{ invalid syntax",
-				mockTime: time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC),
-			},
-			expected: expected{result: "This has {{ invalid syntax"},
-		},
-		{
-			name: "multiple variables",
-			input: input{
-				template: `## Task
-You are helping on {{.Time.Today}}.
-It's a {{.Time.Weekday}}.
-Current time: {{.Time.Format "15:04"}}`,
-				mockTime: time.Date(2024, 12, 25, 10, 0, 0, 0, time.UTC),
-			},
-			expected: expected{result: `## Task
-You are helping on 2024-12-25.
-It's a Wednesday.
-Current time: 10:00`},
-		},
-	}
+		require.Len(t, messages, 1)
+		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			model := newMockModel()
-			mockTimeProvider := gent.NewMockTimeProvider(tt.input.mockTime)
+		// Check that content contains all formatted sections
+		content, ok := messages[0].Parts[0].(llms.TextContent)
+		require.True(t, ok)
 
-			loop := NewAgent(model).WithTimeProvider(mockTimeProvider)
+		// All sections should be formatted with XML tags (from mockFormat)
+		assert.Contains(t, content.Text, "<behavior>")
+		assert.Contains(t, content.Text, "You are helpful.")
+		assert.Contains(t, content.Text, "<re_act>")
+		assert.Contains(t, content.Text, "<critical_rules>")
+		assert.Contains(t, content.Text, "Never lie.")
+		assert.Contains(t, content.Text, "<available_tools>")
+		assert.Contains(t, content.Text, "<output_format>")
+	})
 
-			result := loop.processTemplateString(tt.input.template)
+	t.Run("skips empty optional sections", func(t *testing.T) {
+		format := newMockFormat()
+		ctx := SystemPromptContext{
+			Format:             format,
+			BehaviorAndContext: "", // empty
+			CriticalRules:      "", // empty
+			OutputPrompt:       "Use XML.",
+			ToolsPrompt:        "tools",
+			Time:               gent.NewDefaultTimeProvider(),
+		}
 
-			assert.Equal(t, tt.expected.result, result)
-		})
-	}
+		messages := DefaultSystemPromptBuilder(ctx)
+
+		require.Len(t, messages, 1)
+		content, ok := messages[0].Parts[0].(llms.TextContent)
+		require.True(t, ok)
+
+		// Required sections should be present
+		assert.Contains(t, content.Text, "<re_act>")
+		assert.Contains(t, content.Text, "<available_tools>")
+		assert.Contains(t, content.Text, "<output_format>")
+
+		// Optional sections should not be present when empty
+		assert.NotContains(t, content.Text, "<behavior>")
+		assert.NotContains(t, content.Text, "<critical_rules>")
+	})
 }
+
+func TestAgent_WithSystemPromptBuilder(t *testing.T) {
+	t.Run("custom builder is used", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
+
+		customBuilder := func(ctx SystemPromptContext) []gent.MessageContent {
+			return []gent.MessageContent{
+				{
+					Role:  llms.ChatMessageTypeSystem,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "Custom system prompt"}},
+				},
+			}
+		}
+
+		loop := NewAgent(model).
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term).
+			WithSystemPromptBuilder(customBuilder)
+
+		data := NewLoopData(&gent.Task{Text: "Hello"})
+		messages := loop.buildMessages(data, "output", "tools")
+
+		// First message should be our custom system prompt
+		require.GreaterOrEqual(t, len(messages), 1)
+		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
+		content, ok := messages[0].Parts[0].(llms.TextContent)
+		require.True(t, ok)
+		assert.Equal(t, "Custom system prompt", content.Text)
+	})
+
+	t.Run("builder can return multiple messages", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
+
+		multiMessageBuilder := func(ctx SystemPromptContext) []gent.MessageContent {
+			return []gent.MessageContent{
+				{
+					Role:  llms.ChatMessageTypeSystem,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "System 1"}},
+				},
+				{
+					Role:  llms.ChatMessageTypeHuman,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "Example user"}},
+				},
+				{
+					Role:  llms.ChatMessageTypeAI,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "Example response"}},
+				},
+			}
+		}
+
+		loop := NewAgent(model).
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term).
+			WithSystemPromptBuilder(multiMessageBuilder)
+
+		data := NewLoopData(&gent.Task{Text: "Hello"})
+		messages := loop.buildMessages(data, "output", "tools")
+
+		// Should have: 3 from builder + 1 task + 1 BEGIN!
+		require.Len(t, messages, 5)
+		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role)
+		assert.Equal(t, llms.ChatMessageTypeAI, messages[2].Role)
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[3].Role) // task
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[4].Role) // BEGIN!
+	})
+
+	t.Run("builder receives correct context", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
+		mockTime := gent.NewMockTimeProvider(time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+
+		var capturedCtx SystemPromptContext
+		capturingBuilder := func(ctx SystemPromptContext) []gent.MessageContent {
+			capturedCtx = ctx
+			return []gent.MessageContent{
+				{
+					Role:  llms.ChatMessageTypeSystem,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "test"}},
+				},
+			}
+		}
+
+		loop := NewAgent(model).
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term).
+			WithTimeProvider(mockTime).
+			WithBehaviorAndContext("Be helpful").
+			WithCriticalRules("No lies").
+			WithSystemPromptBuilder(capturingBuilder)
+
+		data := NewLoopData(&gent.Task{Text: "Hello"})
+		loop.buildMessages(data, "output prompt", "tools prompt")
+
+		assert.Equal(t, format, capturedCtx.Format)
+		assert.Equal(t, "Be helpful", capturedCtx.BehaviorAndContext)
+		assert.Equal(t, "No lies", capturedCtx.CriticalRules)
+		assert.Equal(t, "output prompt", capturedCtx.OutputPrompt)
+		assert.Equal(t, "tools prompt", capturedCtx.ToolsPrompt)
+		assert.Equal(t, mockTime, capturedCtx.Time)
+	})
+}
+

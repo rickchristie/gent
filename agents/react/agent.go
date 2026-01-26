@@ -3,7 +3,6 @@ package react
 import (
 	"fmt"
 	"strings"
-	"text/template"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
@@ -64,22 +63,24 @@ var _ gent.LoopData = (*LoopData)(nil)
 // Agent implements the ReAct (Reasoning and Acting) agent loop.
 // Flow: Think -> Act -> Observe -> Repeat until termination.
 //
-// The prompt construction follows this structure:
-//   - System message: ReAct explanation + output format + user's additional context
-//   - User message: Task and scratchpad (previous iterations)
+// The message construction follows this structure:
+//  1. System prompt(s) - from SystemPromptBuilder (default: behavior, re_act, critical_rules, tools, output_format)
+//  2. Task message (user) - formatted task text + media
+//  3. Scratchpad messages - interleaved AI responses and observations from previous iterations
+//  4. BEGIN!/CONTINUE! (user) - signals start or continuation of the loop
 //
-// Templates can be customized via WithSystemTemplate() for full control over prompting.
+// System prompts can be customized via WithSystemPromptBuilder() for full control over prompting.
 type Agent struct {
-	behaviorAndContext string
-	criticalRules      string
-	systemTemplate     *template.Template
-	model              gent.Model
-	format             gent.TextFormat
-	toolChain          gent.ToolChain
-	termination        gent.Termination
-	thinkingSection    gent.TextSection
-	timeProvider       gent.TimeProvider
-	useStreaming       bool
+	behaviorAndContext  string
+	criticalRules       string
+	systemPromptBuilder SystemPromptBuilder
+	model               gent.Model
+	format              gent.TextFormat
+	toolChain           gent.ToolChain
+	termination         gent.Termination
+	thinkingSection     gent.TextSection
+	timeProvider        gent.TimeProvider
+	useStreaming        bool
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -88,61 +89,39 @@ type Agent struct {
 //   - ToolChain: toolchain.NewYAML()
 //   - Termination: termination.NewText("answer")
 //   - TimeProvider: gent.NewDefaultTimeProvider()
-//   - SystemTemplate: DefaultReActSystemTemplate
+//   - SystemPromptBuilder: DefaultSystemPromptBuilder
 func NewAgent(model gent.Model) *Agent {
 	return &Agent{
-		model:          model,
-		format:         format.NewXML(),
-		toolChain:      toolchain.NewYAML(),
-		termination:    termination.NewText("answer"),
-		timeProvider:   gent.NewDefaultTimeProvider(),
-		systemTemplate: DefaultReActSystemTemplate,
+		model:               model,
+		format:              format.NewXML(),
+		toolChain:           toolchain.NewYAML(),
+		termination:         termination.NewText("answer"),
+		timeProvider:        gent.NewDefaultTimeProvider(),
+		systemPromptBuilder: DefaultSystemPromptBuilder,
 	}
 }
 
 // WithBehaviorAndContext sets behavior instructions and context to include in the system prompt.
-// This is appended to the default ReAct instructions, not a replacement.
-// Use WithSystemTemplate() to completely replace the system prompt template.
+// This is passed to the SystemPromptBuilder and formatted as a "behavior" section.
+// Use WithSystemPromptBuilder() to completely replace how the system prompt is built.
 func (r *Agent) WithBehaviorAndContext(prompt string) *Agent {
 	r.behaviorAndContext = prompt
 	return r
 }
 
 // WithCriticalRules sets critical rules to include in the system prompt.
-// Critical rules are placed in a separate section from behavior and context.
+// Critical rules are placed in a separate "critical_rules" section.
 func (r *Agent) WithCriticalRules(rules string) *Agent {
 	r.criticalRules = rules
 	return r
 }
 
-// WithSystemTemplate sets a custom system prompt template.
-// Use this for full control over the ReAct prompting.
-// See DefaultReActSystemTemplate for the expected template structure.
-func (r *Agent) WithSystemTemplate(tmpl *template.Template) *Agent {
-	r.systemTemplate = tmpl
+// WithSystemPromptBuilder sets a custom function to build the system prompt.
+// Use this for full control over the system prompt structure.
+// See DefaultSystemPromptBuilder for the expected behavior.
+func (r *Agent) WithSystemPromptBuilder(builder SystemPromptBuilder) *Agent {
+	r.systemPromptBuilder = builder
 	return r
-}
-
-// WithSystemTemplateString sets a custom system prompt template from a string.
-// The string is parsed as a Go text/template with access to SystemPromptData fields:
-//   - {{.BehaviorAndContext}} - behavior instructions from WithBehaviorAndContext()
-//   - {{.CriticalRules}} - critical rules from WithCriticalRules()
-//   - {{.OutputPrompt}} - output format instructions (tools, termination, etc.)
-//
-// Example:
-//
-//	loop.WithSystemTemplateString(`You are a coding assistant.
-//	{{if .BehaviorAndContext}}{{.BehaviorAndContext}}{{end}}
-//	{{.OutputPrompt}}`)
-//
-// Returns error if the template string is invalid.
-func (r *Agent) WithSystemTemplateString(tmplStr string) (*Agent, error) {
-	tmpl, err := template.New("react_system").Parse(tmplStr)
-	if err != nil {
-		return r, fmt.Errorf("failed to parse template: %w", err)
-	}
-	r.systemTemplate = tmpl
-	return r, nil
 }
 
 // WithFormat sets the text output format.
@@ -346,46 +325,11 @@ func (r *Agent) buildOutputSections() []gent.TextOutputSection {
 	return sections
 }
 
-// processTemplateString processes a string as a template.
-// This allows users to use template variables like {{.Time.Today}} in their prompts.
-func (r *Agent) processTemplateString(input string) string {
-	if input == "" {
-		return ""
-	}
-
-	// If the input doesn't contain template syntax, return as-is
-	if !strings.Contains(input, "{{") {
-		return input
-	}
-
-	// Parse and execute the input as a template
-	tmpl, err := template.New("template_string").Parse(input)
-	if err != nil {
-		// If parsing fails, return the original string
-		return input
-	}
-
-	// Execute with access to Time provider
-	data := struct {
-		Time gent.TimeProvider
-	}{
-		Time: r.timeProvider,
-	}
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		// If execution fails, return the original string
-		return input
-	}
-
-	return buf.String()
-}
-
 // buildMessages constructs the message list for the model call.
 // Message structure:
-//  1. System prompt (role: system) - x1
+//  1. System prompt (from SystemPromptBuilder) - typically 1 message
 //  2. Task (role: user) - x1, text + media parts, panics if both empty
-//  3. Scratchpad (N messages interleaved: role: AI, then role: tool)
+//  3. Scratchpad (N messages interleaved: role: AI, then role: human)
 //  4. BEGIN!/CONTINUE! (role: user) - x1
 func (r *Agent) buildMessages(
 	data gent.LoopData,
@@ -394,13 +338,27 @@ func (r *Agent) buildMessages(
 ) []llms.MessageContent {
 	var messages []llms.MessageContent
 
-	// 1. System prompt
-	messages = append(messages, r.buildSystemMessage(outputPrompt, toolsPrompt))
+	// 1. System prompt(s) from builder
+	ctx := SystemPromptContext{
+		Format:             r.format,
+		BehaviorAndContext: r.behaviorAndContext,
+		CriticalRules:      r.criticalRules,
+		OutputPrompt:       outputPrompt,
+		ToolsPrompt:        toolsPrompt,
+		Time:               r.timeProvider,
+	}
+	systemMessages := r.systemPromptBuilder(ctx)
+	for _, msg := range systemMessages {
+		messages = append(messages, llms.MessageContent{
+			Role:  msg.Role,
+			Parts: toLLMParts(msg.Parts),
+		})
+	}
 
 	// 2. Task message (role: user) - text + media parts
 	messages = append(messages, r.buildTaskMessage(data))
 
-	// 3. Scratchpad messages (interleaved AI and tool messages)
+	// 3. Scratchpad messages (interleaved AI and human messages)
 	scratchpad := data.GetScratchPad()
 	for _, iter := range scratchpad {
 		for _, msg := range iter.Messages {
@@ -422,33 +380,6 @@ func (r *Agent) buildMessages(
 	})
 
 	return messages
-}
-
-// buildSystemMessage constructs the system message using the template.
-func (r *Agent) buildSystemMessage(outputPrompt string, toolsPrompt string) llms.MessageContent {
-	// Process prompts as templates to expand variables like {{.Time.Today}}
-	processedBehavior := r.processTemplateString(r.behaviorAndContext)
-	processedRules := r.processTemplateString(r.criticalRules)
-
-	// Build system message using template
-	templateData := SystemPromptData{
-		BehaviorAndContext: processedBehavior,
-		CriticalRules:      processedRules,
-		OutputPrompt:       outputPrompt,
-		ToolsPrompt:        toolsPrompt,
-		Time:               r.timeProvider,
-	}
-
-	systemContent, err := ExecuteTemplate(r.systemTemplate, templateData)
-	if err != nil {
-		// Fallback to basic prompt if template fails
-		systemContent = outputPrompt
-	}
-
-	return llms.MessageContent{
-		Role:  llms.ChatMessageTypeSystem,
-		Parts: []llms.ContentPart{llms.TextContent{Text: systemContent}},
-	}
 }
 
 // buildTaskMessage constructs the task message with text and media parts.

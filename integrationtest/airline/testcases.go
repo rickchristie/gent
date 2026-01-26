@@ -172,24 +172,25 @@ func RunRescheduleScenario(ctx context.Context, w io.Writer, config AirlineTestC
 	fixture.RegisterAllTools(tc)
 
 	// Create the ReAct loop
+	tp := fixture.TimeProvider()
 	loop := react.NewAgent(model).
 		WithToolChain(tc).
-		WithTimeProvider(fixture.TimeProvider()).
+		WithTimeProvider(tp).
 		WithStreaming(config.UseStreaming).
-		WithBehaviorAndContext(`## Task Description
+		WithBehaviorAndContext(fmt.Sprintf(`## Task Description
 
 You are a helpful airline customer service agent for SkyWings Airlines.
 Your role is to assist customers with their flight bookings, including checking flight information,
 rescheduling flights, and answering policy questions.
 
-Today is {{.Time.Today}} ({{.Time.Weekday}}).
+Today is %s (%s).
 
 Always be polite and professional. When rescheduling, make sure to:
 1. Verify the customer's identity and booking
 2. Check the airline's change policy
 3. Search for available alternative flights
 4. Inform the customer of any fees before making changes
-5. Confirm the change and provide updated booking details`).
+5. Confirm the change and provide updated booking details`, tp.Today(), tp.Weekday())).
 		WithCriticalRules(`DO NOT HALLUCINATE
 - Every claim in your answer MUST come from tool outputs or user-provided information
 - NEVER invent specific data (IDs, prices, times, availability)
@@ -526,24 +527,25 @@ func (s *InteractiveChatState) SendMessage(ctx context.Context, userMessage stri
 	s.Fixture.RegisterAllTools(tc)
 
 	// Create the ReAct loop
+	tp := s.Fixture.TimeProvider()
 	loop := react.NewAgent(s.Model).
 		WithToolChain(tc).
-		WithTimeProvider(s.Fixture.TimeProvider()).
+		WithTimeProvider(tp).
 		WithStreaming(s.Config.UseStreaming).
-		WithBehaviorAndContext(`## Task Description
+		WithBehaviorAndContext(fmt.Sprintf(`## Task Description
 
 You are a helpful airline customer service agent for SkyWings Airlines.
 Your role is to assist customers with their flight bookings, including checking flight information,
 rescheduling flights, and answering policy questions.
 
-Today is {{.Time.Today}} ({{.Time.Weekday}}).
+Today is %s (%s).
 
 Always be polite and professional. When rescheduling, make sure to:
 1. Verify the customer's identity and booking
 2. Check the airline's change policy
 3. Search for available alternative flights
 4. Inform the customer of any fees before making changes
-5. Confirm the change and provide updated booking details`).
+5. Confirm the change and provide updated booking details`, tp.Today(), tp.Weekday())).
 		WithCriticalRules(`DO NOT HALLUCINATE
 - Every claim in your answer MUST come from tool outputs or user-provided information
 - NEVER invent specific data (IDs, prices, times, availability)

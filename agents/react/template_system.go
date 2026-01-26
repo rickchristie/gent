@@ -1,18 +1,17 @@
 package react
 
 import (
-	"bytes"
-	_ "embed"
-	"text/template"
+	"strings"
 
 	"github.com/rickchristie/gent"
+	"github.com/tmc/langchaingo/llms"
 )
 
-//go:embed template_system.tmpl
-var reactSystemTemplateContent string
+// SystemPromptContext provides data for building system prompts.
+type SystemPromptContext struct {
+	// Format is the TextFormat used to format sections consistently.
+	Format gent.TextFormat
 
-// SystemPromptData contains the data passed to ReAct templates.
-type SystemPromptData struct {
 	// BehaviorAndContext contains behavior instructions and context provided by the user.
 	BehaviorAndContext string
 
@@ -20,31 +19,74 @@ type SystemPromptData struct {
 	CriticalRules string
 
 	// OutputPrompt explains how to format output sections (from Formatter).
-	// This describes only the format structure (e.g., XML tags) without tool details.
 	OutputPrompt string
 
 	// ToolsPrompt describes available tools and how to call them (from ToolChain).
 	ToolsPrompt string
 
-	// Time provides access to time-related functions in templates.
-	// Use {{.Time.Today}}, {{.Time.Weekday}}, {{.Time.Format "2006-01-02"}}, etc.
+	// Time provides access to time-related functions.
 	Time gent.TimeProvider
 }
 
-// DefaultReActSystemTemplate is the default template for the ReAct system prompt.
-// It explains the Think-Act-Observe loop to the LLM.
-//
-// The template file is located at agents/react/template_system.tmpl
-// Users can replace this template via Agent.WithSystemTemplate().
-var DefaultReActSystemTemplate = template.Must(
-	template.New("react_system").Parse(reactSystemTemplateContent),
-)
+// SystemPromptBuilder builds system prompt messages from the given context.
+// It returns a slice of MessageContent, allowing for multi-message system prompts
+// or few-shot examples if needed.
+type SystemPromptBuilder func(ctx SystemPromptContext) []gent.MessageContent
 
-// ExecuteTemplate executes a template with the given data and returns the result.
-func ExecuteTemplate(tmpl *template.Template, data SystemPromptData) (string, error) {
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
+// reactExplanation is the default ReAct pattern explanation text.
+const reactExplanation = `You are an AI assistant that solves problems using the ReAct (Reasoning and Acting) pattern.
+
+## How ReAct Works
+
+You will solve problems through a cycle of:
+1. **Think**: Analyze the current situation, reason about what you know, and decide what to do next.
+2. **Act**: Take an action by calling one of the available tools.
+3. **Observe**: Review the results of your action.
+
+Repeat this cycle until you have enough information to provide a final answer.
+
+## Important Guidelines
+
+- Always think before acting. Explain your reasoning clearly.
+- Use tools to gather information. Don't make up facts.
+- If a tool call fails, analyze the error and try a different approach.
+- When you have sufficient information to answer, provide your final response.
+- Be concise but thorough in your reasoning.`
+
+// DefaultSystemPromptBuilder is the default builder for ReAct system prompts.
+// It formats all sections using the TextFormat for consistency.
+func DefaultSystemPromptBuilder(ctx SystemPromptContext) []gent.MessageContent {
+	var sections []string
+
+	// Behavior and context (if provided)
+	if ctx.BehaviorAndContext != "" {
+		sections = append(sections, ctx.Format.FormatSection("behavior", ctx.BehaviorAndContext))
 	}
-	return buf.String(), nil
+
+	// ReAct explanation
+	sections = append(sections, ctx.Format.FormatSection("re_act", reactExplanation))
+
+	// Critical rules (if provided)
+	if ctx.CriticalRules != "" {
+		sections = append(sections, ctx.Format.FormatSection("critical_rules", ctx.CriticalRules))
+	}
+
+	// Available tools
+	if ctx.ToolsPrompt != "" {
+		sections = append(sections, ctx.Format.FormatSection("available_tools", ctx.ToolsPrompt))
+	}
+
+	// Output format
+	if ctx.OutputPrompt != "" {
+		sections = append(sections, ctx.Format.FormatSection("output_format", ctx.OutputPrompt))
+	}
+
+	systemContent := strings.Join(sections, "\n\n")
+
+	return []gent.MessageContent{
+		{
+			Role:  llms.ChatMessageTypeSystem,
+			Parts: []gent.ContentPart{llms.TextContent{Text: systemContent}},
+		},
+	}
 }
