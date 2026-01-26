@@ -49,15 +49,6 @@ func (f *Markdown) FormatSection(name string, content string) string {
 	return fmt.Sprintf("# %s\n%s", name, content)
 }
 
-// WrapObservation returns the text as-is for Markdown format.
-// Markdown doesn't use XML-style wrappers.
-func (f *Markdown) WrapObservation(text string) string {
-	if text == "" {
-		return ""
-	}
-	return text
-}
-
 // DescribeStructure generates the prompt explaining the output format structure.
 // It shows the header format with each section's prompt instructions.
 func (f *Markdown) DescribeStructure() string {

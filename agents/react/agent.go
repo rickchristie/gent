@@ -500,37 +500,37 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) string {
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.
-// The result.Text is already fully formatted with section separators and wrapper
-// by the ToolChain using the TextFormat.
+// The result.Text contains formatted sections from the ToolChain. This method
+// collects all sections and wraps them in a single observation section.
 func (r *Agent) executeToolCalls(
 	execCtx *gent.ExecutionContext,
 	contents []string,
 ) string {
-	var allText []string
+	var allSections []string
 
 	for _, content := range contents {
 		result, err := r.toolChain.Execute(execCtx, content, r.format)
 		if err != nil {
 			// Format error using the text format
 			errorText := r.format.FormatSection("error", fmt.Sprintf("Error: %v", err))
-			allText = append(allText, r.format.WrapObservation(errorText))
+			allSections = append(allSections, errorText)
 			continue
 		}
 
-		// result.Text is already fully formatted (sections + wrapper)
 		if result.Text != "" {
-			allText = append(allText, result.Text)
+			allSections = append(allSections, result.Text)
 		}
 
 		// TODO: Handle result.Media for multimodal support
 		// For now, media is not included in the observation text
 	}
 
-	if len(allText) == 0 {
+	if len(allSections) == 0 {
 		return ""
 	}
 
-	return strings.Join(allText, "\n")
+	// Wrap all sections in a single observation
+	return r.format.FormatSection("observation", strings.Join(allSections, "\n"))
 }
 
 // buildIteration creates an Iteration from response and observation.

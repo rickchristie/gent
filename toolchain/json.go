@@ -379,11 +379,8 @@ func (c *JSON) Execute(
 		textBuilder.WriteString(textFormat.FormatSection(section.Name, section.Content))
 	}
 
-	// Wrap the observation
-	formattedText := textFormat.WrapObservation(textBuilder.String())
-
 	return &gent.ToolChainResult{
-		Text:  formattedText,
+		Text:  textBuilder.String(),
 		Media: allMedia,
 		Raw:   raw,
 	}, nil

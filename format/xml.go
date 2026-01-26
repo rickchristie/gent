@@ -63,15 +63,6 @@ func (f *XML) FormatSection(name string, content string) string {
 	return fmt.Sprintf("<%s>\n%s\n</%s>", name, content, name)
 }
 
-// WrapObservation wraps the observation text in <observation> tags.
-// Returns empty string if input is empty.
-func (f *XML) WrapObservation(text string) string {
-	if text == "" {
-		return ""
-	}
-	return fmt.Sprintf("<observation>\n%s\n</observation>", text)
-}
-
 // DescribeStructure generates the prompt explaining the output format structure.
 // It shows the tag format with each section's prompt instructions.
 func (f *XML) DescribeStructure() string {

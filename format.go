@@ -15,7 +15,7 @@ type FormattedSection struct {
 // It handles the "envelope" - how sections are delimited, extracted, and formatted.
 // This interface is used bidirectionally:
 //   - Parsing: Extract sections from LLM output (Parse method)
-//   - Formatting: Build section-delimited text for LLM input (FormatSection, WrapObservation)
+//   - Formatting: Build section-delimited text for LLM input (FormatSection)
 //
 // See: [TextSection] for section definitions.
 //
@@ -76,14 +76,6 @@ type TextFormat interface {
 	// The format depends on the implementation (e.g., "# name\ncontent" for Markdown,
 	// "<name>\ncontent\n</name>" for XML).
 	FormatSection(name string, content string) string
-
-	// WrapObservation wraps the complete observation text with format-specific delimiters.
-	// For XML format, this wraps in <observation>...</observation> tags.
-	// For Markdown format, this may return the text as-is or add a header.
-	//
-	// This method should be called after all sections are formatted and joined.
-	// If the input is empty, returns an empty string.
-	WrapObservation(text string) string
 }
 
 // TextOutputFormat is an alias for TextFormat for backward compatibility.

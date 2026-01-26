@@ -203,13 +203,6 @@ func (m *mockFormat) FormatSection(name string, content string) string {
 	return "<" + name + ">\n" + content + "\n</" + name + ">"
 }
 
-func (m *mockFormat) WrapObservation(text string) string {
-	if text == "" {
-		return ""
-	}
-	return "<observation>\n" + text + "\n</observation>"
-}
-
 // ----------------------------------------------------------------------------
 // Helper to create ExecutionContext for tests
 // ----------------------------------------------------------------------------
