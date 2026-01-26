@@ -1848,6 +1848,357 @@ func (t *instructionsTool) Call(
 	}, nil
 }
 
+func TestJSON_Execute_TracesToolCallErrors(t *testing.T) {
+	t.Run("tool error increments all error counters", func(t *testing.T) {
+		tc := NewJSON()
+		tool := gent.NewToolFunc(
+			"failing_tool",
+			"A test tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				return "", errors.New("tool execution failed")
+			},
+		)
+		tc.RegisterTool(tool)
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		execCtx.StartIteration()
+
+		_, err := tc.Execute(execCtx, `{"tool": "failing_tool", "args": {}}`, testFormat())
+		require.NoError(t, err)
+
+		stats := execCtx.Stats()
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			"error total mismatch")
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorFor+"failing_tool"),
+			"error for tool mismatch")
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			"error consecutive mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"failing_tool"),
+			"error consecutive for tool mismatch")
+	})
+
+	t.Run("successful tool after failure resets consecutive counters", func(t *testing.T) {
+		tc := NewJSON()
+		callCount := 0
+		tool := gent.NewToolFunc(
+			"test_tool",
+			"A test tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				callCount++
+				if callCount == 1 {
+					return "", errors.New("first call fails")
+				}
+				return "success", nil
+			},
+		)
+		tc.RegisterTool(tool)
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+
+		// First iteration: tool fails
+		execCtx.StartIteration()
+		_, err := tc.Execute(execCtx, `{"tool": "test_tool", "args": {}}`, testFormat())
+		require.NoError(t, err)
+
+		stats := execCtx.Stats()
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			"after first call: error total mismatch")
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			"after first call: error consecutive mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"test_tool"),
+			"after first call: error consecutive for tool mismatch")
+
+		// Second iteration: tool succeeds
+		execCtx.StartIteration()
+		_, err = tc.Execute(execCtx, `{"tool": "test_tool", "args": {}}`, testFormat())
+		require.NoError(t, err)
+
+		// Total should remain 1, but consecutive should be reset to 0
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			"after second call: error total should not change")
+		assert.Equal(t, int64(0), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			"after second call: error consecutive should be reset")
+		assert.Equal(t, int64(0),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"test_tool"),
+			"after second call: error consecutive for tool should be reset")
+	})
+
+	t.Run("multiple consecutive failures accumulate", func(t *testing.T) {
+		tc := NewJSON()
+		tool := gent.NewToolFunc(
+			"always_fails",
+			"A test tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				return "", errors.New("always fails")
+			},
+		)
+		tc.RegisterTool(tool)
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+
+		// Three consecutive failures
+		for i := 1; i <= 3; i++ {
+			execCtx.StartIteration()
+			_, err := tc.Execute(execCtx, `{"tool": "always_fails", "args": {}}`, testFormat())
+			require.NoError(t, err)
+
+			stats := execCtx.Stats()
+			assert.Equal(t, int64(i), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+				"after iteration %d: error total mismatch", i)
+			assert.Equal(t, int64(i), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+				"after iteration %d: error consecutive mismatch", i)
+		}
+	})
+}
+
+func TestJSON_Execute_TracesToolCallErrors_UnknownTool(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		errorTotal       int64
+		errorFor         int64
+		errorConsecutive int64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "unknown tool increments error counters",
+			input: input{
+				content: `{"tool": "nonexistent", "args": {}}`,
+			},
+			expected: expected{
+				errorTotal:       1,
+				errorFor:         1,
+				errorConsecutive: 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			// Don't register any tools
+
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx.StartIteration()
+
+			_, err := tc.Execute(execCtx, tt.input.content, testFormat())
+			require.NoError(t, err) // Execute returns nil, errors are in Raw.Errors
+
+			stats := execCtx.Stats()
+			assert.Equal(t, tt.expected.errorTotal,
+				stats.GetCounter(gent.KeyToolCallsErrorTotal),
+				"error total mismatch")
+			assert.Equal(t, tt.expected.errorFor,
+				stats.GetCounter(gent.KeyToolCallsErrorFor+"nonexistent"),
+				"error for tool mismatch")
+			assert.Equal(t, tt.expected.errorConsecutive,
+				stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+				"error consecutive mismatch")
+		})
+	}
+}
+
+func TestJSON_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		errorTotal       int64
+		errorFor         int64
+		errorConsecutive int64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "schema validation error increments error counters",
+			input: input{
+				content: `{"tool": "validated_tool", "args": {}}`,
+			},
+			expected: expected{
+				errorTotal:       1,
+				errorFor:         1,
+				errorConsecutive: 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tool := gent.NewToolFunc(
+				"validated_tool",
+				"A tool with required schema",
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"required_field": map[string]any{"type": "string"},
+					},
+					"required": []any{"required_field"},
+				},
+				func(ctx context.Context, args map[string]any) (string, error) {
+					return "should not reach", nil
+				},
+			)
+			tc.RegisterTool(tool)
+
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx.StartIteration()
+
+			_, err := tc.Execute(execCtx, tt.input.content, testFormat())
+			require.NoError(t, err)
+
+			stats := execCtx.Stats()
+			assert.Equal(t, tt.expected.errorTotal,
+				stats.GetCounter(gent.KeyToolCallsErrorTotal),
+				"error total mismatch")
+			assert.Equal(t, tt.expected.errorFor,
+				stats.GetCounter(gent.KeyToolCallsErrorFor+"validated_tool"),
+				"error for tool mismatch")
+			assert.Equal(t, tt.expected.errorConsecutive,
+				stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+				"error consecutive mismatch")
+		})
+	}
+}
+
+func TestJSON_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
+	t.Run("multiple tools with mixed success/failure in single execute", func(t *testing.T) {
+		tc := NewJSON()
+		tc.RegisterTool(gent.NewToolFunc(
+			"success_tool",
+			"A successful tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				return "success", nil
+			},
+		))
+		tc.RegisterTool(gent.NewToolFunc(
+			"failing_tool",
+			"A failing tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				return "", errors.New("tool failed")
+			},
+		))
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		execCtx.StartIteration()
+
+		content := `[
+			{"tool": "success_tool", "args": {}},
+			{"tool": "failing_tool", "args": {}}
+		]`
+		_, err := tc.Execute(execCtx, content, testFormat())
+		require.NoError(t, err)
+
+		stats := execCtx.Stats()
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			"error total mismatch")
+		assert.Equal(t, int64(0), stats.GetCounter(gent.KeyToolCallsErrorFor+"success_tool"),
+			"error for success_tool mismatch")
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorFor+"failing_tool"),
+			"error for failing_tool mismatch")
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			"error consecutive mismatch")
+		assert.Equal(t, int64(0),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"success_tool"),
+			"error consecutive for success_tool mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"failing_tool"),
+			"error consecutive for failing_tool mismatch")
+	})
+
+	t.Run("per-tool consecutive resets independently across executions", func(t *testing.T) {
+		tc := NewJSON()
+		tool1CallCount := 0
+		tool2CallCount := 0
+		tc.RegisterTool(gent.NewToolFunc(
+			"tool1",
+			"First tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				tool1CallCount++
+				if tool1CallCount == 1 {
+					return "", errors.New("tool1 fails first time")
+				}
+				return "tool1 success", nil
+			},
+		))
+		tc.RegisterTool(gent.NewToolFunc(
+			"tool2",
+			"Second tool",
+			nil,
+			func(ctx context.Context, args map[string]any) (string, error) {
+				tool2CallCount++
+				// Tool2 always fails
+				return "", errors.New("tool2 always fails")
+			},
+		))
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+
+		// First iteration: both tools fail
+		execCtx.StartIteration()
+		_, err := tc.Execute(execCtx, `[
+			{"tool": "tool1", "args": {}},
+			{"tool": "tool2", "args": {}}
+		]`, testFormat())
+		require.NoError(t, err)
+
+		stats := execCtx.Stats()
+		assert.Equal(t, int64(2), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			"iteration 1: total errors")
+		assert.Equal(t, int64(2), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			"iteration 1: consecutive errors")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool1"),
+			"iteration 1: tool1 consecutive")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool2"),
+			"iteration 1: tool2 consecutive")
+
+		// Second iteration: tool1 succeeds, tool2 still fails
+		execCtx.StartIteration()
+		_, err = tc.Execute(execCtx, `[
+			{"tool": "tool1", "args": {}},
+			{"tool": "tool2", "args": {}}
+		]`, testFormat())
+		require.NoError(t, err)
+
+		// Total increments by 1 (only tool2 fails)
+		// Global consecutive resets then increments to 1 (tool1 success resets, tool2 increments)
+		// tool1 consecutive should be reset
+		// tool2 consecutive should be 2
+		assert.Equal(t, int64(3), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			"iteration 2: total errors")
+		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			"iteration 2: consecutive errors (reset by tool1 success, then +1 by tool2)")
+		assert.Equal(t, int64(0),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool1"),
+			"iteration 2: tool1 consecutive reset")
+		assert.Equal(t, int64(2),
+			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool2"),
+			"iteration 2: tool2 consecutive accumulated")
+	})
+}
+
 func TestJSON_Execute_WithInstructions(t *testing.T) {
 	type input struct {
 		content      string

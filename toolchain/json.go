@@ -306,6 +306,12 @@ func (c *JSON) Execute(
 				Content: fmt.Sprintf("Error: %v", err),
 			})
 		} else {
+			// Successful tool call - reset consecutive error counters
+			if execCtx != nil {
+				execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutive)
+				execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutiveFor + call.Name)
+			}
+
 			// Store raw result
 			raw.Results[i] = &gent.RawToolCallResult{
 				Name:   output.Name,

@@ -417,6 +417,17 @@ func (ctx *ExecutionContext) traceEventLocked(event TraceEvent) {
 		if e.ToolName != "" {
 			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsFor+e.ToolName, 1)
 		}
+		if e.Error != nil {
+			// Track error stats
+			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorTotal, 1)
+			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorConsecutive, 1)
+			if e.ToolName != "" {
+				ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorFor+e.ToolName, 1)
+				ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorConsecutiveFor+e.ToolName, 1)
+			}
+		}
+		// Note: Consecutive error counters are reset by toolchain implementations
+		// when a tool call succeeds, matching the pattern used by parse error stats.
 	case ParseErrorTrace:
 		iteration := fmt.Sprintf("%d", ctx.iteration)
 		switch e.ErrorType {

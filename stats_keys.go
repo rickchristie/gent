@@ -24,6 +24,14 @@ const (
 	KeyToolCallsFor = "gent:tool_calls:" // + tool name
 )
 
+// Tool call error tracking keys (errors during tool execution).
+const (
+	KeyToolCallsErrorTotal          = "gent:tool_calls_error_total"
+	KeyToolCallsErrorFor            = "gent:tool_calls_error:"             // + tool name
+	KeyToolCallsErrorConsecutive    = "gent:tool_calls_error_consecutive"
+	KeyToolCallsErrorConsecutiveFor = "gent:tool_calls_error_consecutive:" // + tool name
+)
+
 // Format parse error tracking keys (errors parsing LLM output sections).
 const (
 	KeyFormatParseErrorTotal       = "gent:format_parse_error_total"
