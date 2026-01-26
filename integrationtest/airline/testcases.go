@@ -201,7 +201,7 @@ Always be polite and professional. When rescheduling, make sure to:
 I have a flight booked for tomorrow (flight AA100 from JFK to LAX) but my meeting is running late.
 Can you help me reschedule to a later flight on the same day? I'd prefer an evening flight if possible.`
 
-	data := react.NewLoopData(llms.TextContent{Text: customerRequest})
+	data := react.NewLoopData(&gent.Task{Text: customerRequest})
 
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-reschedule", data)
@@ -552,7 +552,7 @@ Always be polite and professional. When rescheduling, make sure to:
 
 	// Format message history as the task
 	taskContent := s.formatMessageHistory()
-	data := react.NewLoopData(llms.TextContent{Text: taskContent})
+	data := react.NewLoopData(&gent.Task{Text: taskContent})
 
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-chat", data)

@@ -37,7 +37,8 @@ type AgentLoop[Data LoopData] interface {
 // provided hooks, for logging, metrics, etc.
 type LoopData interface {
 	// GetTask returns the original input provided by the user that started the agent loop.
-	GetTask() []ContentPart
+	// The Task.Text should be pre-formatted by the client (including chat history if applicable).
+	GetTask() *Task
 
 	// GetIterationHistory returns all [Iteration] recorded, including those that may be
 	// compacted away from GetScratchPad.
@@ -72,6 +73,27 @@ type MessageContent struct {
 // new interface method later, it will be easy.
 type ContentPart interface {
 	llms.ContentPart
+}
+
+// Task represents the input to an agent loop.
+// The client is responsible for formatting the Text field (including chat history if applicable).
+type Task struct {
+	// Text is the formatted task description/instructions.
+	// For chat tasks, this should include the formatted message history.
+	Text string
+
+	// Media contains images, audio, or other non-text content.
+	Media []ContentPart
+}
+
+// AsContentParts returns the task as a slice of ContentParts for building LLM messages.
+// The text is returned first (if non-empty), followed by any media.
+func (t *Task) AsContentParts() []ContentPart {
+	var parts []ContentPart
+	if t.Text != "" {
+		parts = append(parts, llms.TextContent{Text: t.Text})
+	}
+	return append(parts, t.Media...)
 }
 
 type LoopAction string

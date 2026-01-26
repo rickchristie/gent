@@ -217,12 +217,11 @@ func newTestExecCtx(data gent.LoopData) *gent.ExecutionContext {
 
 func TestLoopData_GetTask(t *testing.T) {
 	type input struct {
-		taskParts []gent.ContentPart
+		task *gent.Task
 	}
 
 	type expected struct {
-		partsCount int
-		text       string
+		text string
 	}
 
 	tests := []struct {
@@ -231,33 +230,42 @@ func TestLoopData_GetTask(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "single text part",
+			name: "task with text",
 			input: input{
-				taskParts: []gent.ContentPart{llms.TextContent{Text: "test input"}},
+				task: &gent.Task{Text: "test input"},
 			},
 			expected: expected{
-				partsCount: 1,
-				text:       "test input",
+				text: "test input",
+			},
+		},
+		{
+			name: "nil task",
+			input: input{
+				task: nil,
+			},
+			expected: expected{
+				text: "",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data := NewLoopData(tt.input.taskParts...)
+			data := NewLoopData(tt.input.task)
 
 			result := data.GetTask()
 
-			assert.Len(t, result, tt.expected.partsCount)
-			tc, ok := result[0].(llms.TextContent)
-			assert.True(t, ok, "expected TextContent, got %T", result[0])
-			assert.Equal(t, tt.expected.text, tc.Text)
+			if tt.input.task == nil {
+				assert.Nil(t, result)
+			} else {
+				assert.Equal(t, tt.expected.text, result.Text)
+			}
 		})
 	}
 }
 
 func TestLoopData_IterationHistory(t *testing.T) {
-	data := NewLoopData()
+	data := NewLoopData(nil)
 
 	assert.Empty(t, data.GetIterationHistory(), "expected empty history initially")
 
@@ -274,7 +282,7 @@ func TestLoopData_IterationHistory(t *testing.T) {
 }
 
 func TestLoopData_ScratchPad(t *testing.T) {
-	data := NewLoopData()
+	data := NewLoopData(nil)
 
 	assert.Empty(t, data.GetScratchPad(), "expected empty scratchpad initially")
 
@@ -352,7 +360,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Hello"})
+	data := NewLoopData(&gent.Task{Text: "Hello"})
 
 	messages := loop.buildMessages(data, "output prompt", "tools prompt")
 
@@ -378,7 +386,7 @@ func TestAgent_Next_Termination(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "What is 6*7?"})
+	data := NewLoopData(&gent.Task{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -415,7 +423,7 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Search for test"})
+	data := NewLoopData(&gent.Task{Text: "Search for test"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -449,7 +457,7 @@ func TestAgent_Next_ToolError(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Use broken tool"})
+	data := NewLoopData(&gent.Task{Text: "Use broken tool"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -469,7 +477,7 @@ func TestAgent_Next_ModelError(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Hello"})
+	data := NewLoopData(&gent.Task{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(execCtx)
 
@@ -495,7 +503,7 @@ func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Hello"})
+	data := NewLoopData(&gent.Task{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -525,7 +533,7 @@ func TestAgent_Next_ParseError_TracesError(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Test"})
+	data := NewLoopData(&gent.Task{Text: "Test"})
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(execCtx)
 
@@ -572,7 +580,7 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(llms.TextContent{Text: "Use tools a and b"})
+	data := NewLoopData(&gent.Task{Text: "Use tools a and b"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -729,7 +737,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 				WithToolChain(tc).
 				WithTermination(term)
 
-			data := NewLoopData(llms.TextContent{Text: "Execute the task"})
+			data := NewLoopData(&gent.Task{Text: "Execute the task"})
 			execCtx := newTestExecCtx(data)
 
 			result, err := loop.Next(execCtx)
@@ -780,7 +788,6 @@ func TestNewAgent_Defaults(t *testing.T) {
 	assert.NotNil(t, loop.termination, "expected default termination to be set")
 	assert.NotNil(t, loop.timeProvider, "expected default timeProvider to be set")
 	assert.NotNil(t, loop.systemTemplate, "expected default systemTemplate to be set")
-	assert.NotNil(t, loop.taskTemplate, "expected default taskTemplate to be set")
 }
 
 func TestAgent_WithTimeProvider(t *testing.T) {

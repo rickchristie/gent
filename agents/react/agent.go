@@ -15,22 +15,22 @@ import (
 
 // LoopData implements gent.LoopData for the ReAct agent loop.
 type LoopData struct {
-	task             []gent.ContentPart
+	task             *gent.Task
 	iterationHistory []*gent.Iteration
 	scratchpad       []*gent.Iteration
 }
 
-// NewLoopData creates a new LoopData with the given input.
-func NewLoopData(input ...gent.ContentPart) *LoopData {
+// NewLoopData creates a new LoopData with the given task.
+func NewLoopData(task *gent.Task) *LoopData {
 	return &LoopData{
-		task:             input,
+		task:             task,
 		iterationHistory: make([]*gent.Iteration, 0),
 		scratchpad:       make([]*gent.Iteration, 0),
 	}
 }
 
 // GetTask returns the original input provided by the user.
-func (d *LoopData) GetTask() []gent.ContentPart {
+func (d *LoopData) GetTask() *gent.Task {
 	return d.task
 }
 
@@ -68,13 +68,11 @@ var _ gent.LoopData = (*LoopData)(nil)
 //   - System message: ReAct explanation + output format + user's additional context
 //   - User message: Task and scratchpad (previous iterations)
 //
-// Templates can be customized via WithSystemTemplate() and WithTaskTemplate() for full control
-// over prompting.
+// Templates can be customized via WithSystemTemplate() for full control over prompting.
 type Agent struct {
 	behaviorAndContext string
 	criticalRules      string
 	systemTemplate     *template.Template
-	taskTemplate       *template.Template
 	model              gent.Model
 	format             gent.TextFormat
 	toolChain          gent.ToolChain
@@ -91,7 +89,6 @@ type Agent struct {
 //   - Termination: termination.NewText("answer")
 //   - TimeProvider: gent.NewDefaultTimeProvider()
 //   - SystemTemplate: DefaultReActSystemTemplate
-//   - TaskTemplate: DefaultReActTaskTemplate
 func NewAgent(model gent.Model) *Agent {
 	return &Agent{
 		model:          model,
@@ -100,7 +97,6 @@ func NewAgent(model gent.Model) *Agent {
 		termination:    termination.NewText("answer"),
 		timeProvider:   gent.NewDefaultTimeProvider(),
 		systemTemplate: DefaultReActSystemTemplate,
-		taskTemplate:   DefaultReActTaskTemplate,
 	}
 }
 
@@ -146,35 +142,6 @@ func (r *Agent) WithSystemTemplateString(tmplStr string) (*Agent, error) {
 		return r, fmt.Errorf("failed to parse template: %w", err)
 	}
 	r.systemTemplate = tmpl
-	return r, nil
-}
-
-// WithTaskTemplate sets a custom task prompt template.
-// Use this for full control over the task/user message format.
-// See DefaultReActTaskTemplate for the expected template structure.
-func (r *Agent) WithTaskTemplate(tmpl *template.Template) *Agent {
-	r.taskTemplate = tmpl
-	return r
-}
-
-// WithTaskTemplateString sets a custom task prompt template from a string.
-// The string is parsed as a Go text/template with access to TaskPromptData fields:
-//   - {{.Task}} - the original task/input
-//   - {{.ScratchPad}} - formatted history of previous iterations
-//
-// Example:
-//
-//	loop.WithTaskTemplateString(`<task>{{.Task}}</task>
-//	{{if .ScratchPad}}{{.ScratchPad}}
-//	CONTINUE!{{else}}BEGIN!{{end}}`)
-//
-// Returns error if the template string is invalid.
-func (r *Agent) WithTaskTemplateString(tmplStr string) (*Agent, error) {
-	tmpl, err := template.New("react_task").Parse(tmplStr)
-	if err != nil {
-		return r, fmt.Errorf("failed to parse template: %w", err)
-	}
-	r.taskTemplate = tmpl
 	return r, nil
 }
 
@@ -461,17 +428,17 @@ func (r *Agent) buildMessages(
 }
 
 // buildTaskMessage constructs the task message combining task and scratchpad.
+// Uses TextFormat to format the task section for consistency.
 func (r *Agent) buildTaskMessage(data gent.LoopData) string {
-	// Get task text
+	var parts []string
+
+	// Task section
 	task := data.GetTask()
-	var taskText strings.Builder
-	for _, part := range task {
-		if tc, ok := part.(llms.TextContent); ok {
-			taskText.WriteString(tc.Text)
-		}
+	if task != nil && task.Text != "" {
+		parts = append(parts, r.format.FormatSection("task", task.Text))
 	}
 
-	// Build scratchpad from previous iterations
+	// Scratchpad (iterations are already formatted)
 	var scratchpadText strings.Builder
 	for _, iter := range data.GetScratchPad() {
 		for _, msg := range iter.Messages {
@@ -484,19 +451,15 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) string {
 		}
 	}
 
-	// Execute task template
-	taskData := TaskPromptData{
-		Task:       taskText.String(),
-		ScratchPad: strings.TrimSpace(scratchpadText.String()),
+	scratchpad := strings.TrimSpace(scratchpadText.String())
+	if scratchpad != "" {
+		parts = append(parts, scratchpad)
+		parts = append(parts, "CONTINUE!")
+	} else {
+		parts = append(parts, "BEGIN!")
 	}
 
-	content, err := ExecuteTaskTemplate(r.taskTemplate, taskData)
-	if err != nil {
-		// Fallback to just the task if template fails
-		return taskText.String()
-	}
-
-	return content
+	return strings.Join(parts, "\n")
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.

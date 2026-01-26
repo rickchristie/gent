@@ -56,12 +56,11 @@
 //   - WithThinking: Enable thinking section
 //   - WithStreaming: Enable streaming responses
 //   - WithSystemTemplate: Custom system prompt template
-//   - WithTaskTemplate: Custom task message template
 //   - WithTimeProvider: Custom time provider for templates
 //
 // # Templates
 //
-// The system and task prompts are Go text/templates with access to:
+// The system prompt is a Go text/template with access to:
 //   - Time provider functions: {{.Time.Today}}, {{.Time.Weekday}}, {{.Time.Format "layout"}}
 //   - Behavior context: {{.BehaviorAndContext}}
 //   - Critical rules: {{.CriticalRules}}

@@ -71,14 +71,10 @@ func (h *LoggerHook) OnBeforeExecution(
 	data := execCtx.Data()
 	if data != nil {
 		task := data.GetTask()
-		if len(task) > 0 {
+		if task != nil && task.Text != "" {
 			h.log("")
 			h.log("Task:")
-			for _, part := range task {
-				if tc, ok := part.(llms.TextContent); ok {
-					h.log("  %s", tc.Text)
-				}
-			}
+			h.log("  %s", task.Text)
 		}
 	}
 }

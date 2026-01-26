@@ -17,20 +17,20 @@ import (
 
 // mockLoopData implements gent.LoopData for testing.
 type mockLoopData struct {
-	task             []gent.ContentPart
+	task             *gent.Task
 	iterationHistory []*gent.Iteration
 	scratchpad       []*gent.Iteration
 }
 
 func newMockLoopData() *mockLoopData {
 	return &mockLoopData{
-		task:             []gent.ContentPart{llms.TextContent{Text: "test task"}},
+		task:             &gent.Task{Text: "test task"},
 		iterationHistory: make([]*gent.Iteration, 0),
 		scratchpad:       make([]*gent.Iteration, 0),
 	}
 }
 
-func (d *mockLoopData) GetTask() []gent.ContentPart {
+func (d *mockLoopData) GetTask() *gent.Task {
 	return d.task
 }
 
