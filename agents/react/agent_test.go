@@ -349,24 +349,121 @@ func TestAgent_BuildOutputSections(t *testing.T) {
 }
 
 func TestAgent_BuildMessages(t *testing.T) {
-	model := newMockModel()
-	format := newMockFormat()
-	tc := newMockToolChain()
-	term := newMockTermination()
+	t.Run("without scratchpad shows BEGIN", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
 
-	loop := NewAgent(model).
-		WithBehaviorAndContext("You are helpful.").
-		WithFormat(format).
-		WithToolChain(tc).
-		WithTermination(term)
+		loop := NewAgent(model).
+			WithBehaviorAndContext("You are helpful.").
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Hello"})
+		data := NewLoopData(&gent.Task{Text: "Hello"})
 
-	messages := loop.buildMessages(data, "output prompt", "tools prompt")
+		messages := loop.buildMessages(data, "output prompt", "tools prompt")
 
-	require.GreaterOrEqual(t, len(messages), 2, "expected at least 2 messages")
-	assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
-	assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role)
+		// Expected structure: system, task, BEGIN!
+		require.Len(t, messages, 3, "expected 3 messages: system, task, BEGIN!")
+
+		// Message 1: System prompt
+		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
+
+		// Message 2: Task (role: user)
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role)
+		taskText, ok := messages[1].Parts[0].(llms.TextContent)
+		require.True(t, ok)
+		assert.Contains(t, taskText.Text, "Hello")
+
+		// Message 3: BEGIN! (role: user)
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[2].Role)
+		beginText, ok := messages[2].Parts[0].(llms.TextContent)
+		require.True(t, ok)
+		assert.Equal(t, "BEGIN!", beginText.Text)
+	})
+
+	t.Run("with scratchpad shows CONTINUE and interleaved messages", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
+
+		loop := NewAgent(model).
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term)
+
+		data := NewLoopData(&gent.Task{Text: "Do something"})
+
+		// Add scratchpad with one iteration (AI response + observation)
+		iter := &gent.Iteration{
+			Messages: []gent.MessageContent{
+				{
+					Role:  llms.ChatMessageTypeAI,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "thinking..."}},
+				},
+				{
+					Role:  llms.ChatMessageTypeHuman,
+					Parts: []gent.ContentPart{llms.TextContent{Text: "tool result"}},
+				},
+			},
+		}
+		data.SetScratchPad([]*gent.Iteration{iter})
+
+		messages := loop.buildMessages(data, "output prompt", "tools prompt")
+
+		// Expected: system, task, AI, observation, CONTINUE!
+		require.Len(t, messages, 5, "expected 5 messages: system, task, AI, observation, CONTINUE!")
+
+		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role) // task
+		assert.Equal(t, llms.ChatMessageTypeAI, messages[2].Role)    // scratchpad AI
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[3].Role) // scratchpad observation
+
+		// Last message: CONTINUE!
+		assert.Equal(t, llms.ChatMessageTypeHuman, messages[4].Role)
+		continueText, ok := messages[4].Parts[0].(llms.TextContent)
+		require.True(t, ok)
+		assert.Equal(t, "CONTINUE!", continueText.Text)
+	})
+
+	t.Run("panics when task is empty", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
+
+		loop := NewAgent(model).
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term)
+
+		data := NewLoopData(&gent.Task{Text: "", Media: nil})
+
+		assert.Panics(t, func() {
+			loop.buildMessages(data, "output prompt", "tools prompt")
+		})
+	})
+
+	t.Run("panics when task is nil", func(t *testing.T) {
+		model := newMockModel()
+		format := newMockFormat()
+		tc := newMockToolChain()
+		term := newMockTermination()
+
+		loop := NewAgent(model).
+			WithFormat(format).
+			WithToolChain(tc).
+			WithTermination(term)
+
+		data := NewLoopData(nil)
+
+		assert.Panics(t, func() {
+			loop.buildMessages(data, "output prompt", "tools prompt")
+		})
+	})
 }
 
 func TestAgent_Next_Termination(t *testing.T) {

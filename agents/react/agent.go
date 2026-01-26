@@ -382,6 +382,11 @@ func (r *Agent) processTemplateString(input string) string {
 }
 
 // buildMessages constructs the message list for the model call.
+// Message structure:
+//  1. System prompt (role: system) - x1
+//  2. Task (role: user) - x1, text + media parts, panics if both empty
+//  3. Scratchpad (N messages interleaved: role: AI, then role: tool)
+//  4. BEGIN!/CONTINUE! (role: user) - x1
 func (r *Agent) buildMessages(
 	data gent.LoopData,
 	outputPrompt string,
@@ -389,6 +394,38 @@ func (r *Agent) buildMessages(
 ) []llms.MessageContent {
 	var messages []llms.MessageContent
 
+	// 1. System prompt
+	messages = append(messages, r.buildSystemMessage(outputPrompt, toolsPrompt))
+
+	// 2. Task message (role: user) - text + media parts
+	messages = append(messages, r.buildTaskMessage(data))
+
+	// 3. Scratchpad messages (interleaved AI and tool messages)
+	scratchpad := data.GetScratchPad()
+	for _, iter := range scratchpad {
+		for _, msg := range iter.Messages {
+			messages = append(messages, llms.MessageContent{
+				Role:  msg.Role,
+				Parts: toLLMParts(msg.Parts),
+			})
+		}
+	}
+
+	// 4. BEGIN!/CONTINUE! message (role: user)
+	continueText := "BEGIN!"
+	if len(scratchpad) > 0 {
+		continueText = "CONTINUE!"
+	}
+	messages = append(messages, llms.MessageContent{
+		Role:  llms.ChatMessageTypeHuman,
+		Parts: []llms.ContentPart{llms.TextContent{Text: continueText}},
+	})
+
+	return messages
+}
+
+// buildSystemMessage constructs the system message using the template.
+func (r *Agent) buildSystemMessage(outputPrompt string, toolsPrompt string) llms.MessageContent {
 	// Process prompts as templates to expand variables like {{.Time.Today}}
 	processedBehavior := r.processTemplateString(r.behaviorAndContext)
 	processedRules := r.processTemplateString(r.criticalRules)
@@ -408,58 +445,44 @@ func (r *Agent) buildMessages(
 		systemContent = outputPrompt
 	}
 
-	if systemContent != "" {
-		messages = append(messages, llms.MessageContent{
-			Role:  llms.ChatMessageTypeSystem,
-			Parts: []llms.ContentPart{llms.TextContent{Text: systemContent}},
-		})
+	return llms.MessageContent{
+		Role:  llms.ChatMessageTypeSystem,
+		Parts: []llms.ContentPart{llms.TextContent{Text: systemContent}},
 	}
-
-	// User message: task and scratchpad
-	taskContent := r.buildTaskMessage(data)
-	if taskContent != "" {
-		messages = append(messages, llms.MessageContent{
-			Role:  llms.ChatMessageTypeHuman,
-			Parts: []llms.ContentPart{llms.TextContent{Text: taskContent}},
-		})
-	}
-
-	return messages
 }
 
-// buildTaskMessage constructs the task message combining task and scratchpad.
-// Uses TextFormat to format the task section for consistency.
-func (r *Agent) buildTaskMessage(data gent.LoopData) string {
-	var parts []string
-
-	// Task section
+// buildTaskMessage constructs the task message with text and media parts.
+// Panics if task is nil or has both empty text and no media.
+func (r *Agent) buildTaskMessage(data gent.LoopData) llms.MessageContent {
 	task := data.GetTask()
-	if task != nil && task.Text != "" {
-		parts = append(parts, r.format.FormatSection("task", task.Text))
+	if task == nil || (task.Text == "" && len(task.Media) == 0) {
+		panic("task must have either text or media content")
 	}
 
-	// Scratchpad (iterations are already formatted)
-	var scratchpadText strings.Builder
-	for _, iter := range data.GetScratchPad() {
-		for _, msg := range iter.Messages {
-			for _, part := range msg.Parts {
-				if tc, ok := part.(llms.TextContent); ok {
-					scratchpadText.WriteString(tc.Text)
-					scratchpadText.WriteString("\n")
-				}
-			}
-		}
+	var parts []llms.ContentPart
+
+	// Add formatted task text if present
+	if task.Text != "" {
+		formattedText := r.format.FormatSection("task", task.Text)
+		parts = append(parts, llms.TextContent{Text: formattedText})
 	}
 
-	scratchpad := strings.TrimSpace(scratchpadText.String())
-	if scratchpad != "" {
-		parts = append(parts, scratchpad)
-		parts = append(parts, "CONTINUE!")
-	} else {
-		parts = append(parts, "BEGIN!")
-	}
+	// Add media parts
+	parts = append(parts, toLLMParts(task.Media)...)
 
-	return strings.Join(parts, "\n")
+	return llms.MessageContent{
+		Role:  llms.ChatMessageTypeHuman,
+		Parts: parts,
+	}
+}
+
+// toLLMParts converts gent.ContentPart slice to llms.ContentPart slice.
+func toLLMParts(parts []gent.ContentPart) []llms.ContentPart {
+	result := make([]llms.ContentPart, len(parts))
+	for i, p := range parts {
+		result[i] = p
+	}
+	return result
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.
@@ -497,6 +520,10 @@ func (r *Agent) executeToolCalls(
 }
 
 // buildIteration creates an Iteration from response and observation.
+// The response is stored as AI role, and observation as Human role.
+// Note: We use Human role for observations because the text-based ReAct pattern
+// doesn't use native tool calling APIs. The observation is a user message containing
+// tool output in text form.
 func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 	var messages []gent.MessageContent
 
@@ -507,13 +534,13 @@ func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 	}
 	messages = append(messages, assistantMsg)
 
-	// User message (observation) - only if there's an observation
+	// Observation message (Human role) - only if there's an observation
 	if observation != "" {
-		userMsg := gent.MessageContent{
+		observationMsg := gent.MessageContent{
 			Role:  llms.ChatMessageTypeHuman,
 			Parts: []gent.ContentPart{llms.TextContent{Text: observation}},
 		}
-		messages = append(messages, userMsg)
+		messages = append(messages, observationMsg)
 	}
 
 	return &gent.Iteration{
