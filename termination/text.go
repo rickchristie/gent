@@ -11,6 +11,7 @@ import (
 type Text struct {
 	sectionName string
 	guidance    string
+	validator   gent.AnswerValidator
 }
 
 // NewText creates a new Text termination with the given name.
@@ -46,12 +47,51 @@ func (t *Text) ParseSection(_ *gent.ExecutionContext, content string) (any, erro
 	return strings.TrimSpace(content), nil
 }
 
+// SetValidator sets the validator to run on parsed answers before acceptance.
+func (t *Text) SetValidator(validator gent.AnswerValidator) {
+	t.validator = validator
+}
+
 // ShouldTerminate checks if the content indicates termination.
-// For Text termination, any non-empty content triggers termination.
-func (t *Text) ShouldTerminate(content string) []gent.ContentPart {
+// For Text termination, any non-empty content triggers termination (after validation).
+// Panics if execCtx is nil.
+func (t *Text) ShouldTerminate(
+	execCtx *gent.ExecutionContext,
+	content string,
+) *gent.TerminationResult {
+	if execCtx == nil {
+		panic("termination: ShouldTerminate called with nil ExecutionContext")
+	}
+
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
-		return nil
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
 	}
-	return []gent.ContentPart{llms.TextContent{Text: trimmed}}
+
+	// Run validator if set
+	if t.validator != nil {
+		result := t.validator.Validate(execCtx, trimmed)
+		if !result.Accepted {
+			// Track rejection stats
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+t.validator.Name(), 1)
+
+			// Convert feedback to ContentPart
+			var feedback []gent.ContentPart
+			for _, section := range result.Feedback {
+				formatted := "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
+				feedback = append(feedback, llms.TextContent{Text: formatted})
+			}
+
+			return &gent.TerminationResult{
+				Status:  gent.TerminationAnswerRejected,
+				Content: feedback,
+			}
+		}
+	}
+
+	return &gent.TerminationResult{
+		Status:  gent.TerminationAnswerAccepted,
+		Content: []gent.ContentPart{llms.TextContent{Text: trimmed}},
+	}
 }

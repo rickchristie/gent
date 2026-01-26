@@ -264,14 +264,48 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 			}
 
 			// ParseSection succeeded, check if we should terminate
-			if result := r.termination.ShouldTerminate(content); len(result) > 0 {
+			result := r.termination.ShouldTerminate(execCtx, content)
+			switch result.Status {
+			case gent.TerminationAnswerAccepted:
 				// Add final iteration to history
 				iter := r.buildIteration(responseContent, "")
 				data.AddIterationHistory(iter)
 				return &gent.AgentLoopResult{
 					Action: gent.LATerminate,
-					Result: result,
+					Result: result.Content,
 				}, nil
+
+			case gent.TerminationAnswerRejected:
+				// Build observation from rejection feedback
+				var feedbackText string
+				for _, part := range result.Content {
+					if tc, ok := part.(llms.TextContent); ok {
+						feedbackText += tc.Text + "\n"
+					}
+				}
+				if feedbackText == "" {
+					feedbackText = "Answer validation failed. Please try again."
+				}
+
+				observation := r.format.FormatSections([]gent.FormattedSection{
+					{Name: "observation", Content: strings.TrimSpace(feedbackText)},
+				})
+
+				iter := r.buildIteration(responseContent, observation)
+				data.AddIterationHistory(iter)
+
+				scratchpad := data.GetScratchPad()
+				scratchpad = append(scratchpad, iter)
+				data.SetScratchPad(scratchpad)
+
+				return &gent.AgentLoopResult{
+					Action:     gent.LAContinue,
+					NextPrompt: observation,
+				}, nil
+
+			case gent.TerminationContinue:
+				// Continue checking other termination contents
+				continue
 			}
 		}
 

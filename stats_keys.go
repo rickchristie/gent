@@ -60,6 +60,12 @@ const (
 	KeySectionParseErrorConsecutive = "gent:section_parse_error_consecutive"
 )
 
+// Answer rejection tracking keys (answers rejected by validators).
+const (
+	KeyAnswerRejectedTotal = "gent:answer_rejected_total"
+	KeyAnswerRejectedBy    = "gent:answer_rejected_by:" // + validator name
+)
+
 // protectedKeys contains keys that cannot be modified by user code.
 var protectedKeys = map[string]bool{
 	KeyIterations: true,

@@ -257,6 +257,7 @@ func (tc *limitTestToolChain) Execute(
 type limitTestTermination struct {
 	parseErrors []error
 	callIdx     int
+	validator   gent.AnswerValidator
 }
 
 func newLimitTestTermination() *limitTestTermination {
@@ -270,6 +271,10 @@ func (t *limitTestTermination) WithParseErrors(errs ...error) *limitTestTerminat
 
 func (t *limitTestTermination) Name() string     { return "answer" }
 func (t *limitTestTermination) Guidance() string { return "Write your final answer." }
+
+func (t *limitTestTermination) SetValidator(validator gent.AnswerValidator) {
+	t.validator = validator
+}
 
 func (t *limitTestTermination) ParseSection(
 	execCtx *gent.ExecutionContext,
@@ -297,16 +302,47 @@ func (t *limitTestTermination) ParseSection(
 	return content, nil
 }
 
-func (t *limitTestTermination) ShouldTerminate(content string) []gent.ContentPart {
+func (t *limitTestTermination) ShouldTerminate(
+	execCtx *gent.ExecutionContext,
+	content string,
+) *gent.TerminationResult {
+	if execCtx == nil {
+		panic("limitTestTermination: ShouldTerminate called with nil ExecutionContext")
+	}
+
 	// Check if we had a parse error for this call
 	idx := t.callIdx - 1
 	if idx >= 0 && idx < len(t.parseErrors) && t.parseErrors[idx] != nil {
-		return nil
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
 	}
-	if content != "" {
-		return []gent.ContentPart{llms.TextContent{Text: content}}
+	if content == "" {
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
 	}
-	return nil
+
+	// Run validator if set
+	if t.validator != nil {
+		result := t.validator.Validate(execCtx, content)
+		if !result.Accepted {
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+t.validator.Name(), 1)
+
+			var feedback []gent.ContentPart
+			for _, section := range result.Feedback {
+				formatted := "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
+				feedback = append(feedback, llms.TextContent{Text: formatted})
+			}
+
+			return &gent.TerminationResult{
+				Status:  gent.TerminationAnswerRejected,
+				Content: feedback,
+			}
+		}
+	}
+
+	return &gent.TerminationResult{
+		Status:  gent.TerminationAnswerAccepted,
+		Content: []gent.ContentPart{llms.TextContent{Text: content}},
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -1915,5 +1951,236 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallErrorPerTool(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+	})
+}
+
+// ----------------------------------------------------------------------------
+// Mock Answer Validator for testing
+// ----------------------------------------------------------------------------
+
+type limitTestValidator struct {
+	name        string
+	acceptances []bool
+	feedback    []gent.FormattedSection
+	callIdx     int
+}
+
+func newLimitTestValidator(name string) *limitTestValidator {
+	return &limitTestValidator{name: name}
+}
+
+func (v *limitTestValidator) WithAcceptances(acceptances ...bool) *limitTestValidator {
+	v.acceptances = acceptances
+	return v
+}
+
+func (v *limitTestValidator) WithFeedback(sections ...gent.FormattedSection) *limitTestValidator {
+	v.feedback = sections
+	return v
+}
+
+func (v *limitTestValidator) Name() string { return v.name }
+
+func (v *limitTestValidator) Validate(
+	execCtx *gent.ExecutionContext,
+	answer any,
+) *gent.ValidationResult {
+	idx := v.callIdx
+	v.callIdx++
+
+	accepted := true
+	if idx < len(v.acceptances) {
+		accepted = v.acceptances[idx]
+	}
+
+	if accepted {
+		return &gent.ValidationResult{Accepted: true}
+	}
+	return &gent.ValidationResult{Accepted: false, Feedback: v.feedback}
+}
+
+// ----------------------------------------------------------------------------
+// Test: Answer rejection total limit
+// ----------------------------------------------------------------------------
+
+func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
+	t.Run("stops when answer rejected total exceeded", func(t *testing.T) {
+		// Model provides answers that get rejected
+		model := newLimitTestModel().
+			AddResponse("<answer>bad answer 1</answer>", 100, 50).
+			AddResponse("<answer>bad answer 2</answer>", 100, 50).
+			AddResponse("<answer>bad answer 3</answer>", 100, 50).
+			AddResponse("<answer>good answer</answer>", 100, 50)
+
+		format := newLimitTestFormat().
+			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 2"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 3"}}).
+			AddParseResult(map[string][]string{"answer": {"good answer"}})
+
+		toolChain := newLimitTestToolChain()
+		termination := newLimitTestTermination()
+
+		validator := newLimitTestValidator("test_validator").
+			WithAcceptances(false, false, false, true).
+			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
+		termination.SetValidator(validator)
+
+		limits := []gent.Limit{
+			{Type: gent.LimitExactKey, Key: gent.KeyAnswerRejectedTotal, MaxValue: 2},
+		}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, gent.KeyAnswerRejectedTotal, execCtx.ExceededLimit().Key)
+	})
+
+	t.Run("exceeds limit at third iteration after successful tool calls", func(t *testing.T) {
+		// Iteration 1-2: tool calls (no answer)
+		// Iteration 3-5: answers rejected (3rd rejection exceeds limit of 2)
+		model := newLimitTestModel().
+			AddResponse("<action>tool: search</action>", 100, 50).
+			AddResponse("<action>tool: search</action>", 100, 50).
+			AddResponse("<answer>bad answer 1</answer>", 100, 50).
+			AddResponse("<answer>bad answer 2</answer>", 100, 50).
+			AddResponse("<answer>bad answer 3</answer>", 100, 50).
+			AddResponse("<answer>good answer</answer>", 100, 50)
+
+		format := newLimitTestFormat().
+			AddParseResult(map[string][]string{"action": {"tool: search"}}).
+			AddParseResult(map[string][]string{"action": {"tool: search"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 2"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 3"}}).
+			AddParseResult(map[string][]string{"answer": {"good answer"}})
+
+		toolChain := newLimitTestToolChain().
+			WithTool("search", func(args map[string]any) (string, error) {
+				return "found something", nil
+			})
+		termination := newLimitTestTermination()
+
+		validator := newLimitTestValidator("test_validator").
+			WithAcceptances(false, false, false, true).
+			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
+		termination.SetValidator(validator)
+
+		limits := []gent.Limit{
+			{Type: gent.LimitExactKey, Key: gent.KeyAnswerRejectedTotal, MaxValue: 2},
+		}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, gent.KeyAnswerRejectedTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, 5, execCtx.Iteration())
+	})
+}
+
+// ----------------------------------------------------------------------------
+// Test: Answer rejection by validator limit (prefix)
+// ----------------------------------------------------------------------------
+
+func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
+	t.Run("stops when validator-specific rejection limit exceeded (prefix)", func(t *testing.T) {
+		model := newLimitTestModel().
+			AddResponse("<answer>bad answer 1</answer>", 100, 50).
+			AddResponse("<answer>bad answer 2</answer>", 100, 50).
+			AddResponse("<answer>good answer</answer>", 100, 50)
+
+		format := newLimitTestFormat().
+			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 2"}}).
+			AddParseResult(map[string][]string{"answer": {"good answer"}})
+
+		toolChain := newLimitTestToolChain()
+		termination := newLimitTestTermination()
+
+		validator := newLimitTestValidator("schema_validator").
+			WithAcceptances(false, false, true).
+			WithFeedback(gent.FormattedSection{Name: "error", Content: "Schema validation failed"})
+		termination.SetValidator(validator)
+
+		limits := []gent.Limit{
+			{Type: gent.LimitKeyPrefix, Key: gent.KeyAnswerRejectedBy, MaxValue: 1},
+		}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		require.NotNil(t, execCtx.ExceededLimit())
+	})
+
+	t.Run("child model call validator exceeds limit while main validator does not", func(t *testing.T) {
+		// Scenario:
+		// - Main loop uses "main_validator" - its rejections should NOT trigger the limit
+		// - Tool makes child calls that simulate child agent with "child_validator"
+		// - Limit is set for child_validator only (using exact key, not prefix)
+		// - Main rejections: 3 (don't trigger)
+		// - Child rejections: 2 (2nd exceeds limit of 1)
+		//
+		// Iteration 1: main answer rejected by main_validator
+		// Iteration 2: main answer rejected by main_validator
+		// Iteration 3: tool call - simulates child agent rejection by child_validator
+		// Iteration 4: main answer rejected by main_validator
+		// Iteration 5: tool call - simulates child agent rejection by child_validator -> LIMIT!
+
+		childCallCount := 0
+		model := newLimitTestModel().
+			AddResponse("<answer>main bad 1</answer>", 100, 50).
+			AddResponse("<answer>main bad 2</answer>", 100, 50).
+			AddResponse("<action>tool: child_agent</action>", 100, 50).
+			AddResponse("<answer>main bad 3</answer>", 100, 50).
+			AddResponse("<action>tool: child_agent</action>", 100, 50).
+			AddResponse("<answer>good answer</answer>", 100, 50)
+
+		format := newLimitTestFormat().
+			AddParseResult(map[string][]string{"answer": {"main bad 1"}}).
+			AddParseResult(map[string][]string{"answer": {"main bad 2"}}).
+			AddParseResult(map[string][]string{"action": {"tool: child_agent"}}).
+			AddParseResult(map[string][]string{"answer": {"main bad 3"}}).
+			AddParseResult(map[string][]string{"action": {"tool: child_agent"}}).
+			AddParseResult(map[string][]string{"answer": {"good answer"}})
+
+		toolChain := newLimitTestToolChain().
+			WithToolCtx("child_agent", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
+				childCallCount++
+				// Simulate what a child agent termination would do when its validator rejects
+				// This increments the child_validator stats on the shared execCtx
+				execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
+				execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+"child_validator", 1)
+				return "child agent completed with rejection", nil
+			})
+		termination := newLimitTestTermination()
+
+		// Main loop uses main_validator - rejections tracked as main_validator
+		mainValidator := newLimitTestValidator("main_validator").
+			WithAcceptances(false, false, false, true). // reject first 3, accept 4th
+			WithFeedback(gent.FormattedSection{Name: "error", Content: "Main validation failed"})
+		termination.SetValidator(mainValidator)
+
+		// Limit only for child_validator - main_validator rejections don't count
+		limits := []gent.Limit{
+			{Type: gent.LimitExactKey, Key: gent.KeyAnswerRejectedBy + "child_validator", MaxValue: 1},
+		}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		// Should terminate due to child_validator limit exceeded
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		require.NotNil(t, execCtx.ExceededLimit())
+		assert.Equal(t, gent.KeyAnswerRejectedBy+"child_validator", execCtx.ExceededLimit().Key)
+
+		// Verify stats
+		// main_validator: 3 rejections (iter 1, 2, 4)
+		// child_validator: 2 rejections (iter 3, 5) - but limit exceeded at 2nd
+		assert.Equal(t,
+			int64(3),
+			execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"main_validator"))
+		assert.Equal(t,
+			int64(2),
+			execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"child_validator"))
+		assert.Equal(t, 5, execCtx.Iteration())
 	})
 }

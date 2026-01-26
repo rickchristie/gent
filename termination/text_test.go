@@ -1,11 +1,28 @@
 package termination
 
 import (
+	"context"
 	"testing"
 
+	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 	"github.com/tmc/langchaingo/llms"
 )
+
+// mockValidator is a test validator that can accept or reject answers.
+type mockValidator struct {
+	name     string
+	accepted bool
+	feedback []gent.FormattedSection
+}
+
+func (m *mockValidator) Name() string { return m.name }
+func (m *mockValidator) Validate(_ *gent.ExecutionContext, _ any) *gent.ValidationResult {
+	return &gent.ValidationResult{
+		Accepted: m.accepted,
+		Feedback: m.feedback,
+	}
+}
 
 func TestText_Name(t *testing.T) {
 	type input struct {
@@ -138,8 +155,8 @@ func TestText_ShouldTerminate(t *testing.T) {
 	}
 
 	type expected struct {
-		shouldTerminate bool
-		resultText      string
+		status     gent.TerminationStatus
+		resultText string
 	}
 
 	tests := []struct {
@@ -151,32 +168,32 @@ func TestText_ShouldTerminate(t *testing.T) {
 			name:  "non-empty content terminates",
 			input: input{content: "The final answer."},
 			expected: expected{
-				shouldTerminate: true,
-				resultText:      "The final answer.",
+				status:     gent.TerminationAnswerAccepted,
+				resultText: "The final answer.",
 			},
 		},
 		{
 			name:  "empty content does not terminate",
 			input: input{content: ""},
 			expected: expected{
-				shouldTerminate: false,
-				resultText:      "",
+				status:     gent.TerminationContinue,
+				resultText: "",
 			},
 		},
 		{
 			name:  "whitespace only does not terminate",
 			input: input{content: "   "},
 			expected: expected{
-				shouldTerminate: false,
-				resultText:      "",
+				status:     gent.TerminationContinue,
+				resultText: "",
 			},
 		},
 		{
 			name:  "content with surrounding whitespace is trimmed",
 			input: input{content: "  trimmed content  "},
 			expected: expected{
-				shouldTerminate: true,
-				resultText:      "trimmed content",
+				status:     gent.TerminationAnswerAccepted,
+				resultText: "trimmed content",
 			},
 		},
 	}
@@ -184,18 +201,72 @@ func TestText_ShouldTerminate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewText("answer")
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
-			result := term.ShouldTerminate(tt.input.content)
+			result := term.ShouldTerminate(execCtx, tt.input.content)
 
-			if tt.expected.shouldTerminate {
-				assert.NotNil(t, result)
-				assert.Len(t, result, 1)
-				tc, ok := result[0].(llms.TextContent)
-				assert.True(t, ok, "expected TextContent, got %T", result[0])
+			assert.Equal(t, tt.expected.status, result.Status)
+			if tt.expected.status == gent.TerminationAnswerAccepted {
+				assert.Len(t, result.Content, 1)
+				tc, ok := result.Content[0].(llms.TextContent)
+				assert.True(t, ok, "expected TextContent, got %T", result.Content[0])
 				assert.Equal(t, tt.expected.resultText, tc.Text)
-			} else {
-				assert.Nil(t, result)
 			}
 		})
 	}
+}
+
+func TestText_SetValidator(t *testing.T) {
+	t.Run("validator accepts answer", func(t *testing.T) {
+		term := NewText("answer")
+		term.SetValidator(&mockValidator{
+			name:     "test_validator",
+			accepted: true,
+		})
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, "valid answer")
+
+		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
+		assert.Len(t, result.Content, 1)
+	})
+
+	t.Run("validator rejects answer and increments stats", func(t *testing.T) {
+		term := NewText("answer")
+		term.SetValidator(&mockValidator{
+			name:     "test_validator",
+			accepted: false,
+			feedback: []gent.FormattedSection{
+				{Name: "error", Content: "Invalid answer format"},
+			},
+		})
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, "invalid answer")
+
+		assert.Equal(t, gent.TerminationAnswerRejected, result.Status)
+		assert.Len(t, result.Content, 1)
+
+		// Verify stats were incremented
+		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedTotal))
+		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"test_validator"))
+	})
+
+	t.Run("no validator means answer accepted", func(t *testing.T) {
+		term := NewText("answer")
+		// No validator set
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, "any answer")
+
+		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
+	})
+
+	t.Run("nil execCtx panics", func(t *testing.T) {
+		term := NewText("answer")
+
+		assert.Panics(t, func() {
+			term.ShouldTerminate(nil, "answer")
+		})
+	})
 }

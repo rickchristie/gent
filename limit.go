@@ -42,5 +42,8 @@ func DefaultLimits() []Limit {
 
 		// Stop after 3 consecutive tool call errors
 		{Type: LimitExactKey, Key: KeyToolCallsErrorConsecutive, MaxValue: 3},
+
+		// Stop after 10 total answer rejections (by validators)
+		{Type: LimitExactKey, Key: KeyAnswerRejectedTotal, MaxValue: 10},
 	}
 }

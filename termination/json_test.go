@@ -420,9 +420,9 @@ func TestJSON_ShouldTerminate(t *testing.T) {
 	}
 
 	type expected struct {
-		shouldTerminate bool
-		containsName    bool
-		containsValue   bool
+		status        gent.TerminationStatus
+		containsName  bool
+		containsValue bool
 	}
 
 	tests := []struct {
@@ -434,36 +434,36 @@ func TestJSON_ShouldTerminate(t *testing.T) {
 			name:  "valid JSON terminates",
 			input: input{content: `{"name": "test", "value": 42}`},
 			expected: expected{
-				shouldTerminate: true,
-				containsName:    true,
-				containsValue:   true,
+				status:        gent.TerminationAnswerAccepted,
+				containsName:  true,
+				containsValue: true,
 			},
 		},
 		{
 			name:  "empty content does not terminate",
 			input: input{content: ""},
 			expected: expected{
-				shouldTerminate: false,
-				containsName:    false,
-				containsValue:   false,
+				status:        gent.TerminationContinue,
+				containsName:  false,
+				containsValue: false,
 			},
 		},
 		{
 			name:  "invalid JSON does not terminate",
 			input: input{content: `{invalid json}`},
 			expected: expected{
-				shouldTerminate: false,
-				containsName:    false,
-				containsValue:   false,
+				status:        gent.TerminationContinue,
+				containsName:  false,
+				containsValue: false,
 			},
 		},
 		{
 			name:  "type mismatch does not terminate",
 			input: input{content: `"just a string"`},
 			expected: expected{
-				shouldTerminate: false,
-				containsName:    false,
-				containsValue:   false,
+				status:        gent.TerminationContinue,
+				containsName:  false,
+				containsValue: false,
 			},
 		},
 	}
@@ -471,14 +471,15 @@ func TestJSON_ShouldTerminate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewJSON[SimpleStruct]("answer")
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
-			result := term.ShouldTerminate(tt.input.content)
+			result := term.ShouldTerminate(execCtx, tt.input.content)
 
-			if tt.expected.shouldTerminate {
-				assert.NotNil(t, result)
-				assert.Len(t, result, 1)
-				tc, ok := result[0].(llms.TextContent)
-				assert.True(t, ok, "expected TextContent, got %T", result[0])
+			assert.Equal(t, tt.expected.status, result.Status)
+			if tt.expected.status == gent.TerminationAnswerAccepted {
+				assert.Len(t, result.Content, 1)
+				tc, ok := result.Content[0].(llms.TextContent)
+				assert.True(t, ok, "expected TextContent, got %T", result.Content[0])
 				if tt.expected.containsName {
 					assert.True(t, strings.Contains(tc.Text, "test"),
 						"result should contain 'test'")
@@ -487,11 +488,79 @@ func TestJSON_ShouldTerminate(t *testing.T) {
 					assert.True(t, strings.Contains(tc.Text, "42"),
 						"result should contain '42'")
 				}
-			} else {
-				assert.Nil(t, result)
 			}
 		})
 	}
+}
+
+// mockJSONValidator is a test validator for JSON termination.
+type mockJSONValidator struct {
+	name     string
+	accepted bool
+	feedback []gent.FormattedSection
+}
+
+func (m *mockJSONValidator) Name() string { return m.name }
+func (m *mockJSONValidator) Validate(_ *gent.ExecutionContext, _ any) *gent.ValidationResult {
+	return &gent.ValidationResult{
+		Accepted: m.accepted,
+		Feedback: m.feedback,
+	}
+}
+
+func TestJSON_SetValidator(t *testing.T) {
+	t.Run("validator accepts answer", func(t *testing.T) {
+		term := NewJSON[SimpleStruct]("answer")
+		term.SetValidator(&mockJSONValidator{
+			name:     "json_validator",
+			accepted: true,
+		})
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, `{"name": "test", "value": 42}`)
+
+		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
+		assert.Len(t, result.Content, 1)
+	})
+
+	t.Run("validator rejects answer and increments stats", func(t *testing.T) {
+		term := NewJSON[SimpleStruct]("answer")
+		term.SetValidator(&mockJSONValidator{
+			name:     "schema_validator",
+			accepted: false,
+			feedback: []gent.FormattedSection{
+				{Name: "error", Content: "Missing required field"},
+			},
+		})
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, `{"name": "test", "value": 42}`)
+
+		assert.Equal(t, gent.TerminationAnswerRejected, result.Status)
+		assert.Len(t, result.Content, 1)
+
+		// Verify stats were incremented
+		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedTotal))
+		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"schema_validator"))
+	})
+
+	t.Run("no validator means answer accepted", func(t *testing.T) {
+		term := NewJSON[SimpleStruct]("answer")
+		// No validator set
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, `{"name": "test", "value": 42}`)
+
+		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
+	})
+
+	t.Run("nil execCtx panics", func(t *testing.T) {
+		term := NewJSON[SimpleStruct]("answer")
+
+		assert.Panics(t, func() {
+			term.ShouldTerminate(nil, `{"name": "test", "value": 42}`)
+		})
+	})
 }
 
 func TestJSON_ParseSection_TracesErrors(t *testing.T) {

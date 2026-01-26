@@ -17,6 +17,7 @@ type JSON[T any] struct {
 	sectionName string
 	guidance    string
 	example     *T
+	validator   gent.AnswerValidator
 }
 
 // NewJSON creates a new JSON termination with the given name.
@@ -108,27 +109,65 @@ func (t *JSON[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 	return result, nil
 }
 
+// SetValidator sets the validator to run on parsed answers before acceptance.
+func (t *JSON[T]) SetValidator(validator gent.AnswerValidator) {
+	t.validator = validator
+}
+
 // ShouldTerminate checks if the content indicates termination.
-// For JSON termination, valid JSON that parses into T triggers termination.
+// For JSON termination, valid JSON that parses into T triggers termination (after validation).
 // The result is returned as a TextContent containing the re-serialized JSON.
-func (t *JSON[T]) ShouldTerminate(content string) []gent.ContentPart {
+// Panics if execCtx is nil.
+func (t *JSON[T]) ShouldTerminate(
+	execCtx *gent.ExecutionContext,
+	content string,
+) *gent.TerminationResult {
+	if execCtx == nil {
+		panic("termination: ShouldTerminate called with nil ExecutionContext")
+	}
+
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
 	}
 
 	var result T
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
+	}
+
+	// Run validator if set
+	if t.validator != nil {
+		validationResult := t.validator.Validate(execCtx, result)
+		if !validationResult.Accepted {
+			// Track rejection stats
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+t.validator.Name(), 1)
+
+			// Convert feedback to ContentPart
+			var feedback []gent.ContentPart
+			for _, section := range validationResult.Feedback {
+				formatted := "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
+				feedback = append(feedback, llms.TextContent{Text: formatted})
+			}
+
+			return &gent.TerminationResult{
+				Status:  gent.TerminationAnswerRejected,
+				Content: feedback,
+			}
+		}
 	}
 
 	// Re-serialize to ensure consistent formatting
 	formatted, err := json.Marshal(result)
 	if err != nil {
-		return nil
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
 	}
 
-	return []gent.ContentPart{llms.TextContent{Text: string(formatted)}}
+	return &gent.TerminationResult{
+		Status:  gent.TerminationAnswerAccepted,
+		Content: []gent.ContentPart{llms.TextContent{Text: string(formatted)}},
+	}
 }
 
 // generateJSONSchema creates a JSON Schema from a Go type using reflection.

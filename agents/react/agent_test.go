@@ -120,6 +120,7 @@ type mockTermination struct {
 	guidance      string
 	shouldTermRes []gent.ContentPart
 	parseErr      error
+	validator     gent.AnswerValidator
 }
 
 func newMockTermination() *mockTermination {
@@ -153,18 +154,34 @@ func (m *mockTermination) ParseSection(execCtx *gent.ExecutionContext, content s
 	return content, nil
 }
 
-func (m *mockTermination) ShouldTerminate(content string) []gent.ContentPart {
+func (m *mockTermination) SetValidator(validator gent.AnswerValidator) {
+	m.validator = validator
+}
+
+func (m *mockTermination) ShouldTerminate(
+	execCtx *gent.ExecutionContext,
+	content string,
+) *gent.TerminationResult {
+	if execCtx == nil {
+		panic("mockTermination: ShouldTerminate called with nil ExecutionContext")
+	}
 	// If parseErr is set, simulate that parsing failed so termination shouldn't happen
 	if m.parseErr != nil {
-		return nil
+		return &gent.TerminationResult{Status: gent.TerminationContinue}
 	}
 	if content != "" && m.shouldTermRes != nil {
-		return m.shouldTermRes
+		return &gent.TerminationResult{
+			Status:  gent.TerminationAnswerAccepted,
+			Content: m.shouldTermRes,
+		}
 	}
 	if content != "" {
-		return []gent.ContentPart{llms.TextContent{Text: content}}
+		return &gent.TerminationResult{
+			Status:  gent.TerminationAnswerAccepted,
+			Content: []gent.ContentPart{llms.TextContent{Text: content}},
+		}
 	}
-	return nil
+	return &gent.TerminationResult{Status: gent.TerminationContinue}
 }
 
 // ----------------------------------------------------------------------------
