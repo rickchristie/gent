@@ -102,9 +102,10 @@ func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 // This is an internal type used by toolchain implementations to collect
 // tool outputs before formatting.
 type ToolCallOutput struct {
-	Name  string            // Tool name
-	Text  any               // Raw typed text output (will be formatted as JSON/YAML)
-	Media []gent.ContentPart // Media content (images, audio, etc.)
+	Name         string             // Tool name
+	Text         any                // Raw typed text output (will be formatted as JSON/YAML)
+	Media        []gent.ContentPart // Media content (images, audio, etc.)
+	Instructions string             // Optional follow-up instructions for the LLM
 }
 
 // CallToolWithTypedInputReflect calls a generic Tool[I, TextOutput] with already-typed input.
@@ -160,16 +161,23 @@ func CallToolWithTypedInputReflect(
 	resultStruct := resultVal.Elem()
 	textField := resultStruct.FieldByName("Text")
 	mediaField := resultStruct.FieldByName("Media")
+	instructionsField := resultStruct.FieldByName("Instructions")
 
 	var media []gent.ContentPart
 	if mediaField.IsValid() && !mediaField.IsNil() {
 		media = mediaField.Interface().([]gent.ContentPart)
 	}
 
+	var instructions string
+	if instructionsField.IsValid() {
+		instructions = instructionsField.String()
+	}
+
 	return &ToolCallOutput{
-		Name:  toolName,
-		Text:  textField.Interface(),
-		Media: media,
+		Name:         toolName,
+		Text:         textField.Interface(),
+		Media:        media,
+		Instructions: instructions,
 	}, nil
 }
 

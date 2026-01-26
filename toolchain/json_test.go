@@ -1825,3 +1825,86 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 		})
 	}
 }
+
+// instructionsTool is a test tool that returns Instructions in its result.
+type instructionsTool struct {
+	name         string
+	description  string
+	schema       map[string]any
+	result       string
+	instructions string
+}
+
+func (t *instructionsTool) Name() string                   { return t.name }
+func (t *instructionsTool) Description() string            { return t.description }
+func (t *instructionsTool) ParameterSchema() map[string]any { return t.schema }
+func (t *instructionsTool) Call(
+	ctx context.Context,
+	input map[string]any,
+) (*gent.ToolResult[string], error) {
+	return &gent.ToolResult[string]{
+		Text:         t.result,
+		Instructions: t.instructions,
+	}, nil
+}
+
+func TestJSON_Execute_WithInstructions(t *testing.T) {
+	type input struct {
+		content      string
+		result       string
+		instructions string
+	}
+
+	type expected struct {
+		text string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "tool without instructions has flat output",
+			input: input{
+				content:      `{"tool": "test", "args": {}}`,
+				result:       "search result",
+				instructions: "",
+			},
+			expected: expected{
+				text: "<observation>\n<test>\n\"search result\"\n</test>\n</observation>",
+			},
+		},
+		{
+			name: "tool with instructions has nested sections",
+			input: input{
+				content:      `{"tool": "test", "args": {}}`,
+				result:       "customer info",
+				instructions: "Remember to verify customer ID before proceeding.",
+			},
+			expected: expected{
+				text: "<observation>\n<test>\n<result>\n\"customer info\"\n</result>\n" +
+					"<instructions>\nRemember to verify customer ID before proceeding.\n" +
+					"</instructions>\n</test>\n</observation>",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tool := &instructionsTool{
+				name:         "test",
+				description:  "A test tool",
+				result:       tt.input.result,
+				instructions: tt.input.instructions,
+			}
+			tc.RegisterTool(tool)
+
+			result, err := tc.Execute(nil, tt.input.content, testFormat())
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected.text, result.Text)
+		})
+	}
+}

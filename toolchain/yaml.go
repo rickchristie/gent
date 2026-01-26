@@ -455,10 +455,23 @@ func (c *YAML) Execute(
 					Content: "error: failed to marshal output",
 				})
 			} else {
-				sections = append(sections, gent.FormattedSection{
-					Name:    call.Name,
-					Content: strings.TrimSpace(string(yamlData)),
-				})
+				// If instructions present, create nested sections
+				if output.Instructions != "" {
+					resultSection := textFormat.FormatSection("result", strings.TrimSpace(string(yamlData)))
+					instructionsSection := textFormat.FormatSection(
+						"instructions",
+						output.Instructions,
+					)
+					sections = append(sections, gent.FormattedSection{
+						Name:    call.Name,
+						Content: resultSection + "\n" + instructionsSection,
+					})
+				} else {
+					sections = append(sections, gent.FormattedSection{
+						Name:    call.Name,
+						Content: strings.TrimSpace(string(yamlData)),
+					})
+				}
 			}
 
 			// Collect media from tool result

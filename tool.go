@@ -40,6 +40,19 @@ type ToolResult[TextOutput any] struct {
 	// These are passed through by the ToolChain (possibly transformed, e.g., resized).
 	// The ToolChain is not responsible for formatting media - it's passed as-is.
 	Media []ContentPart
+
+	// Instructions are optional follow-up instructions for the LLM. This follows the pattern we
+	// see in production systems. For example:
+	//   - The "change directory" tool might return instructions
+	//     "Current working directory is now /home/user/projects" to inform the LLM of state change.
+	//   - The "search bookings" tool might return instructions
+	//     "Use recommendation search tool to give customer options" if the search yields no
+	//     results.
+	//
+	// These instructions are made separate from Result to allow the ToolChain to format them
+	// appropriately for the LLM, distinct from the main tool output. Also, exposing this field
+	// explicitly encourages tool implementers to think about LLM guidance as part of tool design.
+	Instructions string
 }
 
 // ToolFunc is a convenience type for creating tools from functions with typed I/O.
