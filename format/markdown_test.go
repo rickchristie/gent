@@ -259,11 +259,9 @@ The answer with extra spaces in header.`,
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
 
-			var sections []gent.TextOutputSection
 			for _, name := range tt.input.sections {
-				sections = append(sections, &mockSection{name: name, prompt: ""})
+				format.RegisterSection(&mockSection{name: name, prompt: ""})
 			}
-			format.DescribeStructure(sections)
 
 			result, err := format.Parse(nil, tt.input.output)
 
@@ -326,15 +324,14 @@ func TestMarkdown_DescribeStructure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
 
-			var sections []gent.TextOutputSection
 			for _, name := range tt.input.sections {
-				sections = append(sections, &mockSection{
+				format.RegisterSection(&mockSection{
 					name:   name,
 					prompt: "This prompt should be ignored",
 				})
 			}
 
-			result := format.DescribeStructure(sections)
+			result := format.DescribeStructure()
 
 			assert.Equal(t, tt.expected.output, result)
 		})
@@ -387,10 +384,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
-			sections := []gent.TextOutputSection{
-				&mockSection{name: "answer", prompt: "Answer here"},
-			}
-			format.DescribeStructure(sections)
+			format.RegisterSection(&mockSection{name: "answer", prompt: "Answer here"})
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -419,6 +413,71 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 			assert.Equal(t, tt.expected.formatErrorAtIter,
 				stats.GetCounter(gent.KeyFormatParseErrorAt+"1"),
 				"format error at iteration mismatch")
+		})
+	}
+}
+
+func TestMarkdown_RegisterSection(t *testing.T) {
+	type expected struct {
+		output string
+	}
+
+	tests := []struct {
+		name     string
+		sections []string
+		expected expected
+	}{
+		{
+			name:     "single section",
+			sections: []string{"Answer"},
+			expected: expected{
+				output: "Format your response using markdown headers for each section:\n\n" +
+					"# Answer\n" +
+					"... Answer content here ...\n\n",
+			},
+		},
+		{
+			name:     "multiple sections",
+			sections: []string{"Thinking", "Action"},
+			expected: expected{
+				output: "Format your response using markdown headers for each section:\n\n" +
+					"# Thinking\n" +
+					"... Thinking content here ...\n\n" +
+					"# Action\n" +
+					"... Action content here ...\n\n",
+			},
+		},
+		{
+			name:     "idempotent registration",
+			sections: []string{"Answer", "Answer", "Answer"},
+			expected: expected{
+				output: "Format your response using markdown headers for each section:\n\n" +
+					"# Answer\n" +
+					"... Answer content here ...\n\n",
+			},
+		},
+		{
+			name:     "case insensitive idempotency",
+			sections: []string{"Answer", "answer", "ANSWER"},
+			expected: expected{
+				output: "Format your response using markdown headers for each section:\n\n" +
+					"# Answer\n" +
+					"... Answer content here ...\n\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := NewMarkdown()
+
+			for _, name := range tt.sections {
+				format.RegisterSection(&mockSection{name: name, prompt: ""})
+			}
+
+			result := format.DescribeStructure()
+
+			assert.Equal(t, tt.expected.output, result)
 		})
 	}
 }

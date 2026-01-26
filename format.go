@@ -39,11 +39,18 @@ import "errors"
 //	    return result, nil
 //	}
 type TextOutputFormat interface {
+	// RegisterSection adds a section to the format. The section name is used for
+	// both DescribeStructure output and Parse recognition.
+	// Returns self for chaining.
+	RegisterSection(section TextOutputSection) TextOutputFormat
+
 	// DescribeStructure generates the prompt explaining the output format structure.
 	// It shows the tag/header format with brief placeholders, without including
 	// detailed section prompts. Use this when section prompts (like tool descriptions)
 	// should be placed elsewhere in the system prompt.
-	DescribeStructure(sections []TextOutputSection) string
+	//
+	// Sections must be registered via RegisterSection before calling this method.
+	DescribeStructure() string
 
 	// Parse extracts raw content for each section from the LLM output.
 	// Returns map of section name -> slice of content strings (supports multiple instances).

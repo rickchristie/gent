@@ -23,6 +23,7 @@ var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside anot
 //	{"tool": "search", "args": {"query": "weather"}}
 //	</action>
 type XML struct {
+	sections      []gent.TextOutputSection
 	knownSections map[string]bool
 	strict        bool
 }
@@ -30,6 +31,7 @@ type XML struct {
 // NewXML creates a new XML format.
 func NewXML() *XML {
 	return &XML{
+		sections:      make([]gent.TextOutputSection, 0),
 		knownSections: make(map[string]bool),
 	}
 }
@@ -42,19 +44,31 @@ func (f *XML) WithStrict(strict bool) *XML {
 	return f
 }
 
+// RegisterSection adds a section to the format.
+// If a section with the same name already exists, it is not added again.
+// Returns self for chaining.
+func (f *XML) RegisterSection(section gent.TextOutputSection) gent.TextOutputFormat {
+	name := strings.ToLower(section.Name())
+	if f.knownSections[name] {
+		return f // Already registered
+	}
+	f.sections = append(f.sections, section)
+	f.knownSections[name] = true
+	return f
+}
+
 // DescribeStructure generates the prompt explaining only the format structure.
 // It shows the tag format with brief placeholders, without including detailed section prompts.
-func (f *XML) DescribeStructure(sections []gent.TextOutputSection) string {
-	if len(sections) == 0 {
+func (f *XML) DescribeStructure() string {
+	if len(f.sections) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
 	sb.WriteString("Format your response using XML-style tags for each section:\n\n")
 
-	for _, section := range sections {
+	for _, section := range f.sections {
 		name := section.Name()
-		f.knownSections[strings.ToLower(name)] = true
 		fmt.Fprintf(&sb, "<%s>\n", name)
 		fmt.Fprintf(&sb, "... %s content here ...\n", name)
 		fmt.Fprintf(&sb, "</%s>\n", name)

@@ -167,7 +167,11 @@ func (m *mockFormat) WithParseError(err error) *mockFormat {
 	return m
 }
 
-func (m *mockFormat) DescribeStructure(sections []gent.TextOutputSection) string {
+func (m *mockFormat) RegisterSection(_ gent.TextOutputSection) gent.TextOutputFormat {
+	return m
+}
+
+func (m *mockFormat) DescribeStructure() string {
 	return "mock format structure"
 }
 

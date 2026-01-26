@@ -253,9 +253,11 @@ func (r *Agent) RegisterTool(tool any) *Agent {
 func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 	data := execCtx.Data()
 
-	// Build output sections and generate prompts
-	sections := r.buildOutputSections()
-	outputPrompt := r.format.DescribeStructure(sections)
+	// Register output sections and generate prompts
+	for _, section := range r.buildOutputSections() {
+		r.format.RegisterSection(section)
+	}
+	outputPrompt := r.format.DescribeStructure()
 	toolsPrompt := r.toolChain.Prompt()
 
 	// Build messages for model call

@@ -399,11 +399,9 @@ The actual answer.
 				format = format.WithStrict(true)
 			}
 
-			var sections []gent.TextOutputSection
 			for _, name := range tt.input.sections {
-				sections = append(sections, &mockSection{name: name, prompt: ""})
+				format.RegisterSection(&mockSection{name: name, prompt: ""})
 			}
-			format.DescribeStructure(sections)
 
 			result, err := format.Parse(nil, tt.input.output)
 
@@ -469,15 +467,14 @@ func TestXML_DescribeStructure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewXML()
 
-			var sections []gent.TextOutputSection
 			for _, name := range tt.input.sections {
-				sections = append(sections, &mockSection{
+				format.RegisterSection(&mockSection{
 					name:   name,
 					prompt: "This prompt should be ignored",
 				})
 			}
 
-			result := format.DescribeStructure(sections)
+			result := format.DescribeStructure()
 
 			assert.Equal(t, tt.expected.output, result)
 		})
@@ -530,10 +527,7 @@ func TestXML_Parse_TracesErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewXML()
-			sections := []gent.TextOutputSection{
-				&mockSection{name: "answer", prompt: "Answer here"},
-			}
-			format.DescribeStructure(sections)
+			format.RegisterSection(&mockSection{name: "answer", prompt: "Answer here"})
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -562,6 +556,76 @@ func TestXML_Parse_TracesErrors(t *testing.T) {
 			assert.Equal(t, tt.expected.formatErrorAtIter,
 				stats.GetCounter(gent.KeyFormatParseErrorAt+"1"),
 				"format error at iteration mismatch")
+		})
+	}
+}
+
+func TestXML_RegisterSection(t *testing.T) {
+	type expected struct {
+		output string
+	}
+
+	tests := []struct {
+		name     string
+		sections []string
+		expected expected
+	}{
+		{
+			name:     "single section",
+			sections: []string{"answer"},
+			expected: expected{
+				output: "Format your response using XML-style tags for each section:\n\n" +
+					"<answer>\n" +
+					"... answer content here ...\n" +
+					"</answer>\n",
+			},
+		},
+		{
+			name:     "multiple sections",
+			sections: []string{"thinking", "action"},
+			expected: expected{
+				output: "Format your response using XML-style tags for each section:\n\n" +
+					"<thinking>\n" +
+					"... thinking content here ...\n" +
+					"</thinking>\n" +
+					"<action>\n" +
+					"... action content here ...\n" +
+					"</action>\n",
+			},
+		},
+		{
+			name:     "idempotent registration",
+			sections: []string{"answer", "answer", "answer"},
+			expected: expected{
+				output: "Format your response using XML-style tags for each section:\n\n" +
+					"<answer>\n" +
+					"... answer content here ...\n" +
+					"</answer>\n",
+			},
+		},
+		{
+			name:     "case insensitive idempotency",
+			sections: []string{"Answer", "answer", "ANSWER"},
+			expected: expected{
+				output: "Format your response using XML-style tags for each section:\n\n" +
+					"<Answer>\n" +
+					"... Answer content here ...\n" +
+					"</Answer>\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := NewXML()
+
+			for _, name := range tt.sections {
+				format.RegisterSection(&mockSection{name: name, prompt: ""})
+			}
+
+			result := format.DescribeStructure()
+
+			assert.Equal(t, tt.expected.output, result)
 		})
 	}
 }
