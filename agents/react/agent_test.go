@@ -3,6 +3,7 @@ package react
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,7 @@ type mockTermination struct {
 	name          string
 	guidance      string
 	shouldTermRes []gent.ContentPart
+	parseErr      error
 }
 
 func newMockTermination() *mockTermination {
@@ -129,14 +131,33 @@ func (m *mockTermination) WithTerminationResult(parts ...gent.ContentPart) *mock
 	return m
 }
 
+func (m *mockTermination) WithParseError(err error) *mockTermination {
+	m.parseErr = err
+	return m
+}
+
 func (m *mockTermination) Name() string     { return m.name }
 func (m *mockTermination) Guidance() string { return m.guidance }
 
-func (m *mockTermination) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
+func (m *mockTermination) ParseSection(execCtx *gent.ExecutionContext, content string) (any, error) {
+	if m.parseErr != nil {
+		if execCtx != nil {
+			execCtx.Trace(gent.ParseErrorTrace{
+				ErrorType:  "termination",
+				RawContent: content,
+				Error:      m.parseErr,
+			})
+		}
+		return nil, m.parseErr
+	}
 	return content, nil
 }
 
 func (m *mockTermination) ShouldTerminate(content string) []gent.ContentPart {
+	// If parseErr is set, simulate that parsing failed so termination shouldn't happen
+	if m.parseErr != nil {
+		return nil
+	}
 	if content != "" && m.shouldTermRes != nil {
 		return m.shouldTermRes
 	}
@@ -655,6 +676,232 @@ func TestAgent_Next_ParseError_TracesError(t *testing.T) {
 	stats := execCtx.Stats()
 	assert.Equal(t, int64(1), stats.GetCounter(gent.KeyFormatParseErrorTotal))
 	assert.Equal(t, int64(1), stats.GetCounter(gent.KeyFormatParseErrorConsecutive))
+}
+
+func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
+	type input struct {
+		responseContent string
+	}
+
+	type mocks struct {
+		formatParseResult map[string][]string
+		formatParseErr    error
+		toolChainErr      error
+		terminationErr    error
+	}
+
+	type expected struct {
+		action                       gent.LoopAction
+		nextPrompt                   string
+		scratchpadLen                int
+		iterationHistoryLen          int
+		scratchpadObservationContent string
+	}
+
+	// Create wrapped errors that simulate real toolchain/termination parse errors.
+	// Real implementations wrap the underlying JSON/YAML error with details.
+	toolchainJSONErr := fmt.Errorf(
+		"%w: invalid character 'n' looking for beginning of value",
+		gent.ErrInvalidJSON,
+	)
+	terminationJSONErr := fmt.Errorf(
+		"%w: unexpected end of JSON input",
+		gent.ErrInvalidJSON,
+	)
+
+	tests := []struct {
+		name     string
+		input    input
+		mocks    mocks
+		expected expected
+	}{
+		{
+			name: "format parse error feeds back with exact error message",
+			input: input{
+				responseContent: "completely invalid response with no sections",
+			},
+			mocks: mocks{
+				formatParseErr: gent.ErrNoSectionsFound,
+			},
+			expected: expected{
+				action: gent.LAContinue,
+				nextPrompt: "<observation>\n" +
+					"Format parse error: no recognized sections found in output\n" +
+					"\n" +
+					"Your response could not be parsed. " +
+					"Please ensure your response follows the expected format.\n" +
+					"\n" +
+					"Your raw response was:\n" +
+					"completely invalid response with no sections\n" +
+					"\n" +
+					"Please try again with proper formatting.\n" +
+					"</observation>",
+				scratchpadLen:       1,
+				iterationHistoryLen: 1,
+				scratchpadObservationContent: "<observation>\n" +
+					"Format parse error: no recognized sections found in output\n" +
+					"\n" +
+					"Your response could not be parsed. " +
+					"Please ensure your response follows the expected format.\n" +
+					"\n" +
+					"Your raw response was:\n" +
+					"completely invalid response with no sections\n" +
+					"\n" +
+					"Please try again with proper formatting.\n" +
+					"</observation>",
+			},
+		},
+		{
+			name: "toolchain Execute error feeds back with detailed JSON parse error",
+			input: input{
+				responseContent: "<action>not valid json at all</action>",
+			},
+			mocks: mocks{
+				formatParseResult: map[string][]string{
+					"action": {"not valid json at all"},
+				},
+				toolChainErr: toolchainJSONErr,
+			},
+			expected: expected{
+				action: gent.LAContinue,
+				nextPrompt: "<observation>\n" +
+					"<error>\n" +
+					"Error: invalid JSON in section content: " +
+					"invalid character 'n' looking for beginning of value\n" +
+					"</error>\n" +
+					"</observation>",
+				scratchpadLen:       1,
+				iterationHistoryLen: 1,
+				scratchpadObservationContent: "<observation>\n" +
+					"<error>\n" +
+					"Error: invalid JSON in section content: " +
+					"invalid character 'n' looking for beginning of value\n" +
+					"</error>\n" +
+					"</observation>",
+			},
+		},
+		{
+			name: "termination ParseSection error feeds back with detailed JSON parse error",
+			input: input{
+				responseContent: "<answer>{malformed json</answer>",
+			},
+			mocks: mocks{
+				formatParseResult: map[string][]string{
+					"answer": {"{malformed json"},
+				},
+				terminationErr: terminationJSONErr,
+			},
+			expected: expected{
+				action: gent.LAContinue,
+				nextPrompt: "<observation>\n" +
+					"Termination parse error: invalid JSON in section content: " +
+					"unexpected end of JSON input\n" +
+					"Content: {malformed json\n" +
+					"\n" +
+					"Please try again with proper formatting.\n" +
+					"</observation>",
+				scratchpadLen:       1,
+				iterationHistoryLen: 1,
+				scratchpadObservationContent: "<observation>\n" +
+					"Termination parse error: invalid JSON in section content: " +
+					"unexpected end of JSON input\n" +
+					"Content: {malformed json\n" +
+					"\n" +
+					"Please try again with proper formatting.\n" +
+					"</observation>",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup model
+			response := &gent.ContentResponse{
+				Choices: []*gent.ContentChoice{{Content: tt.input.responseContent}},
+			}
+			model := newMockModel(response)
+
+			// Setup format
+			format := newMockFormat()
+			if tt.mocks.formatParseErr != nil {
+				format = format.WithParseError(tt.mocks.formatParseErr)
+			} else if tt.mocks.formatParseResult != nil {
+				format = format.WithParseResult(tt.mocks.formatParseResult)
+			}
+
+			// Setup toolchain
+			tc := newMockToolChain()
+			if tt.mocks.toolChainErr != nil {
+				tc = tc.WithErrors(tt.mocks.toolChainErr)
+			}
+
+			// Setup termination
+			term := newMockTermination()
+			if tt.mocks.terminationErr != nil {
+				term = term.WithParseError(tt.mocks.terminationErr)
+			}
+
+			// Build agent
+			loop := NewAgent(model).
+				WithFormat(format).
+				WithToolChain(tc).
+				WithTermination(term)
+
+			// Execute
+			data := NewLoopData(&gent.Task{Text: "Test task"})
+			execCtx := newTestExecCtx(data)
+			result, err := loop.Next(execCtx)
+
+			// Assert no error returned (errors are fed back as observations)
+			require.NoError(t, err)
+
+			// Assert action
+			assert.Equal(t, tt.expected.action, result.Action)
+
+			// Assert NextPrompt (full match)
+			assert.Equal(t, tt.expected.nextPrompt, result.NextPrompt)
+
+			// Assert scratchpad length
+			assert.Equal(t, tt.expected.scratchpadLen, len(data.GetScratchPad()))
+
+			// Assert iteration history length
+			assert.Equal(t, tt.expected.iterationHistoryLen, len(data.GetIterationHistory()))
+
+			// Verify scratchpad observation content (full match)
+			if tt.expected.scratchpadLen > 0 {
+				scratchpad := data.GetScratchPad()
+				lastIter := scratchpad[len(scratchpad)-1]
+				require.GreaterOrEqual(t, len(lastIter.Messages), 2,
+					"iteration should have at least 2 messages (AI response + observation)")
+
+				// Last message should be the observation (Human role)
+				observationMsg := lastIter.Messages[len(lastIter.Messages)-1]
+				assert.Equal(t, llms.ChatMessageTypeHuman, observationMsg.Role)
+
+				// Extract and verify observation text (full match)
+				require.Len(t, observationMsg.Parts, 1)
+				textContent, ok := observationMsg.Parts[0].(llms.TextContent)
+				require.True(t, ok, "observation should be TextContent")
+				assert.Equal(t, tt.expected.scratchpadObservationContent, textContent.Text)
+			}
+
+			// Verify iteration history observation content matches scratchpad
+			if tt.expected.iterationHistoryLen > 0 {
+				history := data.GetIterationHistory()
+				lastIter := history[len(history)-1]
+				require.GreaterOrEqual(t, len(lastIter.Messages), 2,
+					"iteration should have at least 2 messages (AI response + observation)")
+
+				observationMsg := lastIter.Messages[len(lastIter.Messages)-1]
+				assert.Equal(t, llms.ChatMessageTypeHuman, observationMsg.Role)
+
+				require.Len(t, observationMsg.Parts, 1)
+				textContent, ok := observationMsg.Parts[0].(llms.TextContent)
+				require.True(t, ok, "observation should be TextContent")
+				assert.Equal(t, tt.expected.scratchpadObservationContent, textContent.Text)
+			}
+		})
+	}
 }
 
 func TestAgent_Next_MultipleTools(t *testing.T) {

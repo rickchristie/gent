@@ -252,7 +252,18 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 
 	// No actions present - check for termination
 	if terminationContents, ok := parsed[r.termination.Name()]; ok && len(terminationContents) > 0 {
+		var terminationParseErrors []string
+
 		for _, content := range terminationContents {
+			// First validate by calling ParseSection (traces errors for stats)
+			_, termParseErr := r.termination.ParseSection(execCtx, content)
+			if termParseErr != nil {
+				terminationParseErrors = append(terminationParseErrors,
+					fmt.Sprintf("Termination parse error: %v\nContent: %s", termParseErr, content))
+				continue
+			}
+
+			// ParseSection succeeded, check if we should terminate
 			if result := r.termination.ShouldTerminate(content); len(result) > 0 {
 				// Add final iteration to history
 				iter := r.buildIteration(responseContent, "")
@@ -263,20 +274,43 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 				}, nil
 			}
 		}
+
+		// If we had termination parse errors but no successful termination, feed back errors
+		if len(terminationParseErrors) > 0 {
+			errorContent := strings.Join(terminationParseErrors, "\n\n") +
+				"\n\nPlease try again with proper formatting."
+			observation := r.format.FormatSections([]gent.FormattedSection{
+				{Name: "observation", Content: errorContent},
+			})
+
+			iter := r.buildIteration(responseContent, observation)
+			data.AddIterationHistory(iter)
+
+			scratchpad := data.GetScratchPad()
+			scratchpad = append(scratchpad, iter)
+			data.SetScratchPad(scratchpad)
+
+			return &gent.AgentLoopResult{
+				Action:     gent.LAContinue,
+				NextPrompt: observation,
+			}, nil
+		}
 	}
 
 	// Handle parse error - feed back to agent as observation to allow recovery
 	if parseErr != nil {
-		observation := fmt.Sprintf(`<observation>
-Format parse error: %v
+		errorContent := fmt.Sprintf(`Format parse error: %v
 
 Your response could not be parsed. Please ensure your response follows the expected format.
 
 Your raw response was:
 %s
 
-Please try again with proper formatting.
-</observation>`, parseErr, responseContent)
+Please try again with proper formatting.`, parseErr, responseContent)
+
+		observation := r.format.FormatSections([]gent.FormattedSection{
+			{Name: "observation", Content: errorContent},
+		})
 
 		// Build iteration with parse error feedback
 		iter := r.buildIteration(responseContent, observation)
