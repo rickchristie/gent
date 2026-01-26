@@ -18,18 +18,12 @@ type Text struct {
 	prompt      string
 }
 
-// NewText creates a new Text section with default section name "text".
-func NewText() *Text {
+// NewText creates a new Text section with the given name.
+func NewText(name string) *Text {
 	return &Text{
-		sectionName: "text",
+		sectionName: name,
 		prompt:      "Write your response here.",
 	}
-}
-
-// WithSectionName sets the section name for this section.
-func (t *Text) WithSectionName(name string) *Text {
-	t.sectionName = name
-	return t
 }
 
 // WithPrompt sets the prompt instructions for this section.

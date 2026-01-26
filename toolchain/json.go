@@ -52,8 +52,13 @@ func (c *JSON) Name() string {
 	return c.sectionName
 }
 
-// Prompt returns instructions for how to write tool calls in this section.
+// Prompt returns a brief instruction for the action section.
 func (c *JSON) Prompt() string {
+	return "Call a tool to take action."
+}
+
+// AvailableToolsPrompt returns the full tool catalog with format instructions and schemas.
+func (c *JSON) AvailableToolsPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("Call tools using JSON format:\n")
 	sb.WriteString(`{"tool": "tool_name", "args": {...}}`)

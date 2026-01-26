@@ -88,7 +88,7 @@ type Agent struct {
 // Defaults:
 //   - Format: format.NewXML()
 //   - ToolChain: toolchain.NewYAML()
-//   - Termination: termination.NewText()
+//   - Termination: termination.NewText("answer")
 //   - TimeProvider: gent.NewDefaultTimeProvider()
 //   - SystemTemplate: DefaultReActSystemTemplate
 //   - TaskTemplate: DefaultReActTaskTemplate
@@ -97,7 +97,7 @@ func NewAgent(model gent.Model) *Agent {
 		model:          model,
 		format:         format.NewXML(),
 		toolChain:      toolchain.NewYAML(),
-		termination:    termination.NewText(),
+		termination:    termination.NewText("answer"),
 		timeProvider:   gent.NewDefaultTimeProvider(),
 		systemTemplate: DefaultReActSystemTemplate,
 		taskTemplate:   DefaultReActTaskTemplate,
@@ -210,8 +210,7 @@ func (r *Agent) TimeProvider() gent.TimeProvider {
 
 // WithThinking enables the thinking section with the given prompt.
 func (r *Agent) WithThinking(prompt string) *Agent {
-	r.thinkingSection = section.NewText().
-		WithSectionName("thinking").
+	r.thinkingSection = section.NewText("thinking").
 		WithPrompt(prompt)
 	return r
 }
@@ -258,7 +257,7 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 		r.format.RegisterSection(section)
 	}
 	outputPrompt := r.format.DescribeStructure()
-	toolsPrompt := r.toolChain.Prompt()
+	toolsPrompt := r.toolChain.AvailableToolsPrompt()
 
 	// Build messages for model call
 	messages := r.buildMessages(data, outputPrompt, toolsPrompt)
@@ -285,8 +284,7 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 
 	// Check for action (tool calls) section first - actions take priority over termination
 	// This ensures tools are executed even if the model also outputs an answer
-	actionName := r.toolChain.Name()
-	actionContents, hasActions := parsed[actionName]
+	actionContents, hasActions := parsed[r.toolChain.Name()]
 	if hasActions && len(actionContents) > 0 {
 		// Execute tool calls (automatically traced via execCtx)
 		observation := r.executeToolCalls(execCtx, actionContents)
@@ -307,8 +305,7 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	}
 
 	// No actions present - check for termination
-	terminationName := r.termination.Name()
-	if terminationContents, ok := parsed[terminationName]; ok && len(terminationContents) > 0 {
+	if terminationContents, ok := parsed[r.termination.Name()]; ok && len(terminationContents) > 0 {
 		for _, content := range terminationContents {
 			if result := r.termination.ShouldTerminate(content); len(result) > 0 {
 				// Add final iteration to history

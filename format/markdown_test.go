@@ -45,7 +45,7 @@ The weather is sunny today.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"answer": {"The weather is sunny today."},
+					"Answer": {"The weather is sunny today."},
 				},
 				err: nil,
 			},
@@ -65,9 +65,9 @@ The weather is sunny.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {"I need to search for weather information."},
-					"action":   {`{"tool": "search", "args": {"query": "weather"}}`},
-					"answer":   {"The weather is sunny."},
+					"Thinking": {"I need to search for weather information."},
+					"Action":   {`{"tool": "search", "args": {"query": "weather"}}`},
+					"Answer":   {"The weather is sunny."},
 				},
 				err: nil,
 			},
@@ -84,7 +84,7 @@ Second action content.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"action": {"First action content.", "Second action content."},
+					"Action": {"First action content.", "Second action content."},
 				},
 				err: nil,
 			},
@@ -98,7 +98,7 @@ Case insensitive content.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {"Case insensitive content."},
+					"Thinking": {"Case insensitive content."},
 				},
 				err: nil,
 			},
@@ -114,7 +114,7 @@ The actual answer.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"answer": {"The actual answer."},
+					"Answer": {"The actual answer."},
 				},
 				err: nil,
 			},
@@ -130,7 +130,7 @@ The answer.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"answer": {"The answer."},
+					"Answer": {"The answer."},
 				},
 				err: nil,
 			},
@@ -149,12 +149,12 @@ Hello! I apologize for any inconvenience. Please provide your booking reference 
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {
+					"Thinking": {
 						`The customer is referring to their "number," likely meaning booking ` +
 							`reference number. No tools can be called yet without identifiers. ` +
 							`Proceed to final response.`,
 					},
-					"answer": {
+					"Answer": {
 						"Hello! I apologize for any inconvenience. Please provide your " +
 							"booking reference number.",
 					},
@@ -174,7 +174,7 @@ Hello! I apologize for any inconvenience. Please provide your booking reference 
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"answer": {"Content with whitespace around it."},
+					"Answer": {"Content with whitespace around it."},
 				},
 				err: nil,
 			},
@@ -215,9 +215,9 @@ Done.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {"Quick thought."},
-					"action":   {"do_something"},
-					"answer":   {"Done."},
+					"Thinking": {"Quick thought."},
+					"Action":   {"do_something"},
+					"Answer":   {"Done."},
 				},
 				err: nil,
 			},
@@ -234,7 +234,7 @@ func main() {
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"code": {"func main() {\n    // This is a comment with # symbol\n    fmt.Println(\"Hello\")\n}"},
+					"Code": {"func main() {\n    // This is a comment with # symbol\n    fmt.Println(\"Hello\")\n}"},
 				},
 				err: nil,
 			},
@@ -248,7 +248,7 @@ The answer with extra spaces in header.`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"answer": {"The answer with extra spaces in header."},
+					"Answer": {"The answer with extra spaces in header."},
 				},
 				err: nil,
 			},
@@ -273,7 +273,8 @@ The answer with extra spaces in header.`,
 
 func TestMarkdown_DescribeStructure(t *testing.T) {
 	type input struct {
-		sections []string
+		name   string
+		prompt string
 	}
 
 	type expected struct {
@@ -282,40 +283,39 @@ func TestMarkdown_DescribeStructure(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		input    input
+		input    []input
 		expected expected
 	}{
 		{
-			name: "empty sections returns empty string",
-			input: input{
-				sections: nil,
-			},
+			name:  "empty sections returns empty string",
+			input: nil,
 			expected: expected{
 				output: "",
 			},
 		},
 		{
-			name: "single section",
-			input: input{
-				sections: []string{"Answer"},
+			name: "single section includes prompt",
+			input: []input{
+				{name: "Answer", prompt: "Write your final answer here."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Answer\n" +
-					"... Answer content here ...\n\n",
+					"Write your final answer here.\n\n",
 			},
 		},
 		{
-			name: "multiple sections ignores prompts",
-			input: input{
-				sections: []string{"Thinking", "Action"},
+			name: "multiple sections include prompts",
+			input: []input{
+				{name: "Thinking", prompt: "Think through the problem."},
+				{name: "Action", prompt: "Call a tool to take action."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Thinking\n" +
-					"... Thinking content here ...\n\n" +
+					"Think through the problem.\n\n" +
 					"# Action\n" +
-					"... Action content here ...\n\n",
+					"Call a tool to take action.\n\n",
 			},
 		},
 	}
@@ -324,10 +324,10 @@ func TestMarkdown_DescribeStructure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
 
-			for _, name := range tt.input.sections {
+			for _, s := range tt.input {
 				format.RegisterSection(&mockSection{
-					name:   name,
-					prompt: "This prompt should be ignored",
+					name:   s.name,
+					prompt: s.prompt,
 				})
 			}
 
@@ -384,7 +384,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
-			format.RegisterSection(&mockSection{name: "answer", prompt: "Answer here"})
+			format.RegisterSection(&mockSection{name: "Answer", prompt: "Answer here"})
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -418,51 +418,69 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 }
 
 func TestMarkdown_RegisterSection(t *testing.T) {
+	type input struct {
+		name   string
+		prompt string
+	}
+
 	type expected struct {
 		output string
 	}
 
 	tests := []struct {
 		name     string
-		sections []string
+		sections []input
 		expected expected
 	}{
 		{
-			name:     "single section",
-			sections: []string{"Answer"},
+			name: "single section",
+			sections: []input{
+				{name: "Answer", prompt: "Write your answer."},
+			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Answer\n" +
-					"... Answer content here ...\n\n",
+					"Write your answer.\n\n",
 			},
 		},
 		{
-			name:     "multiple sections",
-			sections: []string{"Thinking", "Action"},
+			name: "multiple sections",
+			sections: []input{
+				{name: "Thinking", prompt: "Think here."},
+				{name: "Action", prompt: "Act here."},
+			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Thinking\n" +
-					"... Thinking content here ...\n\n" +
+					"Think here.\n\n" +
 					"# Action\n" +
-					"... Action content here ...\n\n",
+					"Act here.\n\n",
 			},
 		},
 		{
-			name:     "idempotent registration",
-			sections: []string{"Answer", "Answer", "Answer"},
+			name: "idempotent registration",
+			sections: []input{
+				{name: "Answer", prompt: "Write your answer."},
+				{name: "Answer", prompt: "Different prompt."},
+				{name: "Answer", prompt: "Another prompt."},
+			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Answer\n" +
-					"... Answer content here ...\n\n",
+					"Write your answer.\n\n",
 			},
 		},
 		{
-			name:     "case insensitive idempotency",
-			sections: []string{"Answer", "answer", "ANSWER"},
+			name: "case insensitive idempotency",
+			sections: []input{
+				{name: "Answer", prompt: "First prompt."},
+				{name: "answer", prompt: "Second prompt."},
+				{name: "ANSWER", prompt: "Third prompt."},
+			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Answer\n" +
-					"... Answer content here ...\n\n",
+					"First prompt.\n\n",
 			},
 		},
 	}
@@ -471,8 +489,8 @@ func TestMarkdown_RegisterSection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
 
-			for _, name := range tt.sections {
-				format.RegisterSection(&mockSection{name: name, prompt: ""})
+			for _, s := range tt.sections {
+				format.RegisterSection(&mockSection{name: s.name, prompt: s.prompt})
 			}
 
 			result := format.DescribeStructure()

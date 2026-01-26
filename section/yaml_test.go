@@ -38,23 +38,16 @@ func TestYAML_Name(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "default name",
+			name: "returns provided name",
 			input: func() *YAML[YAMLSimpleStruct] {
-				return NewYAML[YAMLSimpleStruct]()
-			},
-			expected: "data",
-		},
-		{
-			name: "custom name",
-			input: func() *YAML[YAMLSimpleStruct] {
-				return NewYAML[YAMLSimpleStruct]().WithSectionName("plan")
+				return NewYAML[YAMLSimpleStruct]("plan")
 			},
 			expected: "plan",
 		},
 		{
 			name: "empty name",
 			input: func() *YAML[YAMLSimpleStruct] {
-				return NewYAML[YAMLSimpleStruct]().WithSectionName("")
+				return NewYAML[YAMLSimpleStruct]("")
 			},
 			expected: "",
 		},
@@ -82,7 +75,7 @@ func TestYAML_Prompt(t *testing.T) {
 		{
 			name: "default prompt with schema",
 			input: func() gent.TextOutputSection {
-				return NewYAML[YAMLSimpleStruct]()
+				return NewYAML[YAMLSimpleStruct]("data")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -99,7 +92,7 @@ func TestYAML_Prompt(t *testing.T) {
 		{
 			name: "with custom prompt",
 			input: func() gent.TextOutputSection {
-				return NewYAML[YAMLSimpleStruct]().WithPrompt("Create a plan.")
+				return NewYAML[YAMLSimpleStruct]("data").WithPrompt("Create a plan.")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -116,7 +109,7 @@ func TestYAML_Prompt(t *testing.T) {
 		{
 			name: "with example",
 			input: func() gent.TextOutputSection {
-				return NewYAML[YAMLSimpleStruct]().WithExample(YAMLSimpleStruct{
+				return NewYAML[YAMLSimpleStruct]("data").WithExample(YAMLSimpleStruct{
 					Name:  "test",
 					Value: 42,
 				})
@@ -275,7 +268,7 @@ func TestYAML_ParseSection(t *testing.T) {
 		},
 	}
 
-	section := NewYAML[YAMLSimpleStruct]()
+	section := NewYAML[YAMLSimpleStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -385,7 +378,7 @@ tags: [a, b, c]`,
 		},
 	}
 
-	section := NewYAML[YAMLNestedStruct]()
+	section := NewYAML[YAMLNestedStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -403,49 +396,49 @@ tags: [a, b, c]`,
 
 func TestYAML_ParseSection_PrimitiveTypes(t *testing.T) {
 	t.Run("string type", func(t *testing.T) {
-		section := NewYAML[string]()
+		section := NewYAML[string]("data")
 		result, err := section.ParseSection(nil, `hello`)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", result)
 	})
 
 	t.Run("int type", func(t *testing.T) {
-		section := NewYAML[int]()
+		section := NewYAML[int]("data")
 		result, err := section.ParseSection(nil, `42`)
 		require.NoError(t, err)
 		assert.Equal(t, 42, result)
 	})
 
 	t.Run("float type", func(t *testing.T) {
-		section := NewYAML[float64]()
+		section := NewYAML[float64]("data")
 		result, err := section.ParseSection(nil, `3.14`)
 		require.NoError(t, err)
 		assert.Equal(t, 3.14, result)
 	})
 
 	t.Run("bool type", func(t *testing.T) {
-		section := NewYAML[bool]()
+		section := NewYAML[bool]("data")
 		result, err := section.ParseSection(nil, `true`)
 		require.NoError(t, err)
 		assert.Equal(t, true, result)
 	})
 
 	t.Run("slice type block style", func(t *testing.T) {
-		section := NewYAML[[]string]()
+		section := NewYAML[[]string]("data")
 		result, err := section.ParseSection(nil, "- a\n- b\n- c")
 		require.NoError(t, err)
 		assert.Equal(t, []string{"a", "b", "c"}, result)
 	})
 
 	t.Run("slice type inline style", func(t *testing.T) {
-		section := NewYAML[[]string]()
+		section := NewYAML[[]string]("data")
 		result, err := section.ParseSection(nil, `[a, b, c]`)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"a", "b", "c"}, result)
 	})
 
 	t.Run("map type", func(t *testing.T) {
-		section := NewYAML[map[string]int]()
+		section := NewYAML[map[string]int]("data")
 		result, err := section.ParseSection(nil, "a: 1\nb: 2")
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"a": 1, "b": 2}, result)
@@ -510,7 +503,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 		},
 	}
 
-	section := NewYAML[YAMLSimpleStruct]()
+	section := NewYAML[YAMLSimpleStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -541,7 +534,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 }
 
 func TestYAML_ParseSection_WithMap(t *testing.T) {
-	section := NewYAML[YAMLStructWithMap]()
+	section := NewYAML[YAMLStructWithMap]("data")
 
 	input := `metadata:
   key1: value1
@@ -595,7 +588,7 @@ func TestYAML_ParseSection_MultilineStrings(t *testing.T) {
 		},
 	}
 
-	section := NewYAML[MultilineStruct]()
+	section := NewYAML[MultilineStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -608,8 +601,7 @@ func TestYAML_ParseSection_MultilineStrings(t *testing.T) {
 }
 
 func TestYAML_MethodChaining(t *testing.T) {
-	section := NewYAML[YAMLSimpleStruct]().
-		WithSectionName("plan").
+	section := NewYAML[YAMLSimpleStruct]("plan").
 		WithPrompt("Create a plan.").
 		WithExample(YAMLSimpleStruct{Name: "example", Value: 100})
 

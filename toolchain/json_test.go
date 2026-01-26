@@ -111,6 +111,23 @@ func TestJSON_RegisterTool(t *testing.T) {
 }
 
 func TestJSON_Prompt(t *testing.T) {
+	tc := NewJSON()
+	tool := gent.NewToolFunc(
+		"test_tool",
+		"A test tool",
+		nil,
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "", nil
+		},
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	assert.Equal(t, "Call a tool to take action.", prompt)
+}
+
+func TestJSON_AvailableToolsPrompt(t *testing.T) {
 	type input struct {
 		toolName        string
 		toolDescription string
@@ -174,7 +191,7 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
@@ -955,7 +972,7 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 	}
 }
 
-func TestJSON_Prompt_SchemaFeatures(t *testing.T) {
+func TestJSON_AvailableToolsPrompt_SchemaFeatures(t *testing.T) {
 	type input struct {
 		toolName        string
 		toolDescription string
@@ -1268,14 +1285,14 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
 	}
 }
 
-func TestJSON_Prompt_MultipleTools(t *testing.T) {
+func TestJSON_AvailableToolsPrompt_MultipleTools(t *testing.T) {
 	type mockTool struct {
 		name        string
 		description string
@@ -1373,14 +1390,14 @@ Available tools:
 				tc.RegisterTool(tool)
 			}
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
 	}
 }
 
-func TestJSON_Prompt_FormatInstructions(t *testing.T) {
+func TestJSON_AvailableToolsPrompt_FormatInstructions(t *testing.T) {
 	type expected struct {
 		prompt string
 	}
@@ -1419,7 +1436,7 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})

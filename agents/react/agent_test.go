@@ -79,8 +79,9 @@ func (m *mockToolChain) WithErrors(errs ...error) *mockToolChain {
 	return m
 }
 
-func (m *mockToolChain) Name() string   { return m.name }
-func (m *mockToolChain) Prompt() string { return m.prompt }
+func (m *mockToolChain) Name() string                { return m.name }
+func (m *mockToolChain) Prompt() string              { return m.prompt }
+func (m *mockToolChain) AvailableToolsPrompt() string { return "mock available tools prompt" }
 
 func (m *mockToolChain) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil

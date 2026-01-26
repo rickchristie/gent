@@ -13,18 +13,12 @@ type Text struct {
 	prompt      string
 }
 
-// NewText creates a new Text termination with default section name "answer".
-func NewText() *Text {
+// NewText creates a new Text termination with the given name.
+func NewText(name string) *Text {
 	return &Text{
-		sectionName: "answer",
+		sectionName: name,
 		prompt:      "Write your final answer here.",
 	}
-}
-
-// WithSectionName sets the section name for this termination.
-func (t *Text) WithSectionName(name string) *Text {
-	t.sectionName = name
-	return t
 }
 
 // WithPrompt sets the prompt instructions for this termination.

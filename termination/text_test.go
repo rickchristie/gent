@@ -22,8 +22,8 @@ func TestText_Name(t *testing.T) {
 		expected expected
 	}{
 		{
-			name:     "default name",
-			input:    input{sectionName: ""},
+			name:     "returns provided name",
+			input:    input{sectionName: "answer"},
 			expected: expected{name: "answer"},
 		},
 		{
@@ -35,10 +35,7 @@ func TestText_Name(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			term := NewText()
-			if tt.input.sectionName != "" {
-				term.WithSectionName(tt.input.sectionName)
-			}
+			term := NewText(tt.input.sectionName)
 
 			assert.Equal(t, tt.expected.name, term.Name())
 		})
@@ -73,7 +70,7 @@ func TestText_Prompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			term := NewText()
+			term := NewText("answer")
 			if tt.input.customPrompt != "" {
 				term.WithPrompt(tt.input.customPrompt)
 			}
@@ -125,7 +122,7 @@ func TestText_ParseSection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			term := NewText()
+			term := NewText("answer")
 
 			result, err := term.ParseSection(nil, tt.input.content)
 
@@ -186,7 +183,7 @@ func TestText_ShouldTerminate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			term := NewText()
+			term := NewText("answer")
 
 			result := term.ShouldTerminate(tt.input.content)
 

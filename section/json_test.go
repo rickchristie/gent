@@ -50,23 +50,16 @@ func TestJSON_Name(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "default name",
+			name: "returns provided name",
 			input: func() *JSON[SimpleStruct] {
-				return NewJSON[SimpleStruct]()
-			},
-			expected: "data",
-		},
-		{
-			name: "custom name",
-			input: func() *JSON[SimpleStruct] {
-				return NewJSON[SimpleStruct]().WithSectionName("analysis")
+				return NewJSON[SimpleStruct]("analysis")
 			},
 			expected: "analysis",
 		},
 		{
 			name: "empty name",
 			input: func() *JSON[SimpleStruct] {
-				return NewJSON[SimpleStruct]().WithSectionName("")
+				return NewJSON[SimpleStruct]("")
 			},
 			expected: "",
 		},
@@ -94,7 +87,7 @@ func TestJSON_Prompt(t *testing.T) {
 		{
 			name: "default prompt with schema",
 			input: func() gent.TextOutputSection {
-				return NewJSON[SimpleStruct]()
+				return NewJSON[SimpleStruct]("data")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -111,7 +104,7 @@ func TestJSON_Prompt(t *testing.T) {
 		{
 			name: "with custom prompt",
 			input: func() gent.TextOutputSection {
-				return NewJSON[SimpleStruct]().WithPrompt("Analyze the data.")
+				return NewJSON[SimpleStruct]("data").WithPrompt("Analyze the data.")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -128,7 +121,7 @@ func TestJSON_Prompt(t *testing.T) {
 		{
 			name: "with example",
 			input: func() gent.TextOutputSection {
-				return NewJSON[SimpleStruct]().WithExample(SimpleStruct{
+				return NewJSON[SimpleStruct]("data").WithExample(SimpleStruct{
 					Name:  "test",
 					Value: 42,
 				})
@@ -148,7 +141,7 @@ func TestJSON_Prompt(t *testing.T) {
 		{
 			name: "with description fields",
 			input: func() gent.TextOutputSection {
-				return NewJSON[StructWithDescription]()
+				return NewJSON[StructWithDescription]("data")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -304,7 +297,7 @@ func TestJSON_ParseSection(t *testing.T) {
 		},
 	}
 
-	section := NewJSON[SimpleStruct]()
+	section := NewJSON[SimpleStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -394,7 +387,7 @@ func TestJSON_ParseSection_NestedStruct(t *testing.T) {
 		},
 	}
 
-	section := NewJSON[NestedStruct]()
+	section := NewJSON[NestedStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -412,42 +405,42 @@ func TestJSON_ParseSection_NestedStruct(t *testing.T) {
 
 func TestJSON_ParseSection_PrimitiveTypes(t *testing.T) {
 	t.Run("string type", func(t *testing.T) {
-		section := NewJSON[string]()
+		section := NewJSON[string]("data")
 		result, err := section.ParseSection(nil, `"hello"`)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", result)
 	})
 
 	t.Run("int type", func(t *testing.T) {
-		section := NewJSON[int]()
+		section := NewJSON[int]("data")
 		result, err := section.ParseSection(nil, `42`)
 		require.NoError(t, err)
 		assert.Equal(t, 42, result)
 	})
 
 	t.Run("float type", func(t *testing.T) {
-		section := NewJSON[float64]()
+		section := NewJSON[float64]("data")
 		result, err := section.ParseSection(nil, `3.14`)
 		require.NoError(t, err)
 		assert.Equal(t, 3.14, result)
 	})
 
 	t.Run("bool type", func(t *testing.T) {
-		section := NewJSON[bool]()
+		section := NewJSON[bool]("data")
 		result, err := section.ParseSection(nil, `true`)
 		require.NoError(t, err)
 		assert.Equal(t, true, result)
 	})
 
 	t.Run("slice type", func(t *testing.T) {
-		section := NewJSON[[]string]()
+		section := NewJSON[[]string]("data")
 		result, err := section.ParseSection(nil, `["a", "b", "c"]`)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"a", "b", "c"}, result)
 	})
 
 	t.Run("map type", func(t *testing.T) {
-		section := NewJSON[map[string]int]()
+		section := NewJSON[map[string]int]("data")
 		result, err := section.ParseSection(nil, `{"a": 1, "b": 2}`)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"a": 1, "b": 2}, result)
@@ -512,7 +505,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 		},
 	}
 
-	section := NewJSON[SimpleStruct]()
+	section := NewJSON[SimpleStruct]("data")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -543,7 +536,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 }
 
 func TestJSON_ParseSection_WithMap(t *testing.T) {
-	section := NewJSON[StructWithMap]()
+	section := NewJSON[StructWithMap]("data")
 
 	input := `{"metadata": {"key1": "value1", "key2": "value2"}}`
 	result, err := section.ParseSection(nil, input)
@@ -555,8 +548,7 @@ func TestJSON_ParseSection_WithMap(t *testing.T) {
 }
 
 func TestJSON_MethodChaining(t *testing.T) {
-	section := NewJSON[SimpleStruct]().
-		WithSectionName("analysis").
+	section := NewJSON[SimpleStruct]("analysis").
 		WithPrompt("Analyze the data.").
 		WithExample(SimpleStruct{Name: "example", Value: 100})
 

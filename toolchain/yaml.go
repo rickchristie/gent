@@ -58,8 +58,13 @@ func (c *YAML) Name() string {
 	return c.sectionName
 }
 
-// Prompt returns instructions for how to write tool calls in this section.
+// Prompt returns a brief instruction for the action section.
 func (c *YAML) Prompt() string {
+	return "Call a tool to take action."
+}
+
+// AvailableToolsPrompt returns the full tool catalog with format instructions and schemas.
+func (c *YAML) AvailableToolsPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("Call tools using YAML format:\n")
 	sb.WriteString("tool: tool_name\n")
@@ -72,11 +77,12 @@ func (c *YAML) Prompt() string {
 	sb.WriteString("- tool: tool2\n")
 	sb.WriteString("  args:\n")
 	sb.WriteString("    param: value\n")
-	sb.WriteString("\nFor strings with special characters (colons, quotes) or multiple lines, use double quotes:\n")
+	sb.WriteString("\nFor strings with special characters (colons, quotes) or multiple lines, ")
+	sb.WriteString("use double quotes:\n")
 	sb.WriteString("- tool: send_email\n")
 	sb.WriteString("  args:\n")
 	sb.WriteString("    subject: \"Unsubscribe Confirmation: Newsletter\"\n")
-	sb.WriteString("    body: \"You have been unsubscribed.\\n\\nYou will no longer receive emails from us.\"\n")
+	sb.WriteString("    body: \"You have been unsubscribed.\\n\\nYou will no longer receive emails.\"\n")
 	sb.WriteString("\nAvailable tools:\n")
 
 	for _, tool := range c.tools {

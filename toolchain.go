@@ -24,7 +24,8 @@ type ToolChainResult struct {
 // ToolChain manages a collection of tools and implements TextOutputSection.
 //
 // Responsibilities:
-//   - Prompt: Describe available tools and input format to the LLM
+//   - Prompt: Brief instruction for the action section (inherited from TextOutputSection)
+//   - AvailableToolsPrompt: Full tool catalog with format instructions and schemas
 //   - Parse: Extract tool calls from LLM output
 //   - Execute: Call tools with parsed arguments
 //   - Format: Convert tool outputs to the appropriate format (JSON, YAML, etc.) for the LLM
@@ -44,6 +45,11 @@ type ToolChain interface {
 	// RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
 	// Returns self for chaining.
 	RegisterTool(tool any) ToolChain
+
+	// AvailableToolsPrompt returns the full tool catalog including format instructions
+	// and parameter schemas for each registered tool. This should be placed in the
+	// system prompt to inform the LLM about available tools.
+	AvailableToolsPrompt() string
 
 	// Execute parses tool calls from content and executes them.
 	// Returns results for each tool call.

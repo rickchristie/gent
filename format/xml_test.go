@@ -413,7 +413,8 @@ The actual answer.
 
 func TestXML_DescribeStructure(t *testing.T) {
 	type input struct {
-		sections []string
+		name   string
+		prompt string
 	}
 
 	type expected struct {
@@ -422,42 +423,41 @@ func TestXML_DescribeStructure(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		input    input
+		input    []input
 		expected expected
 	}{
 		{
-			name: "empty sections returns empty string",
-			input: input{
-				sections: nil,
-			},
+			name:  "empty sections returns empty string",
+			input: nil,
 			expected: expected{
 				output: "",
 			},
 		},
 		{
-			name: "single section",
-			input: input{
-				sections: []string{"answer"},
+			name: "single section includes prompt",
+			input: []input{
+				{name: "answer", prompt: "Write your final answer here."},
 			},
 			expected: expected{
 				output: "Format your response using XML-style tags for each section:\n\n" +
 					"<answer>\n" +
-					"... answer content here ...\n" +
+					"Write your final answer here.\n" +
 					"</answer>\n",
 			},
 		},
 		{
-			name: "multiple sections ignores prompts",
-			input: input{
-				sections: []string{"thinking", "action"},
+			name: "multiple sections include prompts",
+			input: []input{
+				{name: "thinking", prompt: "Think through the problem."},
+				{name: "action", prompt: "Call a tool to take action."},
 			},
 			expected: expected{
 				output: "Format your response using XML-style tags for each section:\n\n" +
 					"<thinking>\n" +
-					"... thinking content here ...\n" +
+					"Think through the problem.\n" +
 					"</thinking>\n" +
 					"<action>\n" +
-					"... action content here ...\n" +
+					"Call a tool to take action.\n" +
 					"</action>\n",
 			},
 		},
@@ -467,10 +467,10 @@ func TestXML_DescribeStructure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewXML()
 
-			for _, name := range tt.input.sections {
+			for _, s := range tt.input {
 				format.RegisterSection(&mockSection{
-					name:   name,
-					prompt: "This prompt should be ignored",
+					name:   s.name,
+					prompt: s.prompt,
 				})
 			}
 
@@ -561,55 +561,73 @@ func TestXML_Parse_TracesErrors(t *testing.T) {
 }
 
 func TestXML_RegisterSection(t *testing.T) {
+	type input struct {
+		name   string
+		prompt string
+	}
+
 	type expected struct {
 		output string
 	}
 
 	tests := []struct {
 		name     string
-		sections []string
+		sections []input
 		expected expected
 	}{
 		{
-			name:     "single section",
-			sections: []string{"answer"},
+			name: "single section",
+			sections: []input{
+				{name: "answer", prompt: "Write your answer."},
+			},
 			expected: expected{
 				output: "Format your response using XML-style tags for each section:\n\n" +
 					"<answer>\n" +
-					"... answer content here ...\n" +
+					"Write your answer.\n" +
 					"</answer>\n",
 			},
 		},
 		{
-			name:     "multiple sections",
-			sections: []string{"thinking", "action"},
+			name: "multiple sections",
+			sections: []input{
+				{name: "thinking", prompt: "Think here."},
+				{name: "action", prompt: "Act here."},
+			},
 			expected: expected{
 				output: "Format your response using XML-style tags for each section:\n\n" +
 					"<thinking>\n" +
-					"... thinking content here ...\n" +
+					"Think here.\n" +
 					"</thinking>\n" +
 					"<action>\n" +
-					"... action content here ...\n" +
+					"Act here.\n" +
 					"</action>\n",
 			},
 		},
 		{
-			name:     "idempotent registration",
-			sections: []string{"answer", "answer", "answer"},
+			name: "idempotent registration",
+			sections: []input{
+				{name: "answer", prompt: "Write your answer."},
+				{name: "answer", prompt: "Different prompt."},
+				{name: "answer", prompt: "Another prompt."},
+			},
 			expected: expected{
 				output: "Format your response using XML-style tags for each section:\n\n" +
 					"<answer>\n" +
-					"... answer content here ...\n" +
+					"Write your answer.\n" +
 					"</answer>\n",
 			},
 		},
 		{
-			name:     "case insensitive idempotency",
-			sections: []string{"Answer", "answer", "ANSWER"},
+			name: "case insensitive idempotency",
+			sections: []input{
+				{name: "Answer", prompt: "First prompt."},
+				{name: "answer", prompt: "Second prompt."},
+				{name: "ANSWER", prompt: "Third prompt."},
+			},
 			expected: expected{
 				output: "Format your response using XML-style tags for each section:\n\n" +
 					"<Answer>\n" +
-					"... Answer content here ...\n" +
+					"First prompt.\n" +
 					"</Answer>\n",
 			},
 		},
@@ -619,8 +637,8 @@ func TestXML_RegisterSection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewXML()
 
-			for _, name := range tt.sections {
-				format.RegisterSection(&mockSection{name: name, prompt: ""})
+			for _, s := range tt.sections {
+				format.RegisterSection(&mockSection{name: s.name, prompt: s.prompt})
 			}
 
 			result := format.DescribeStructure()

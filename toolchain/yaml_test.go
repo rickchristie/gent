@@ -112,6 +112,23 @@ args: {}`,
 }
 
 func TestYAML_Prompt(t *testing.T) {
+	tc := NewYAML()
+	tool := gent.NewToolFunc(
+		"test_tool",
+		"A test tool",
+		nil,
+		func(ctx context.Context, args map[string]any) (string, error) {
+			return "", nil
+		},
+	)
+	tc.RegisterTool(tool)
+
+	prompt := tc.Prompt()
+
+	assert.Equal(t, "Call a tool to take action.", prompt)
+}
+
+func TestYAML_AvailableToolsPrompt(t *testing.T) {
 	type input struct {
 		toolName        string
 		toolDescription string
@@ -157,7 +174,7 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 - tool: send_email
   args:
     subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
 
 Available tools:
 
@@ -185,7 +202,7 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
@@ -1078,7 +1095,7 @@ args:
 	}
 }
 
-func TestYAML_Prompt_SchemaFeatures(t *testing.T) {
+func TestYAML_AvailableToolsPrompt_SchemaFeatures(t *testing.T) {
 	type input struct {
 		toolName        string
 		toolDescription string
@@ -1106,7 +1123,7 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 - tool: send_email
   args:
     subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
 
 Available tools:
 `
@@ -1364,14 +1381,14 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
 	}
 }
 
-func TestYAML_Prompt_MultipleTools(t *testing.T) {
+func TestYAML_AvailableToolsPrompt_MultipleTools(t *testing.T) {
 	type mockTool struct {
 		name        string
 		description string
@@ -1403,7 +1420,7 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 - tool: send_email
   args:
     subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
 
 Available tools:
 `
@@ -1474,14 +1491,14 @@ Available tools:
 				tc.RegisterTool(tool)
 			}
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})
 	}
 }
 
-func TestYAML_Prompt_FormatInstructions(t *testing.T) {
+func TestYAML_AvailableToolsPrompt_FormatInstructions(t *testing.T) {
 	type expected struct {
 		prompt string
 	}
@@ -1510,7 +1527,7 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 - tool: send_email
   args:
     subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
 
 Available tools:
 
@@ -1533,7 +1550,7 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.Prompt()
+			prompt := tc.AvailableToolsPrompt()
 
 			assert.Equal(t, tt.expected.prompt, prompt)
 		})

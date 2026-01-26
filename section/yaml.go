@@ -22,8 +22,7 @@ import (
 //	    Steps []string `yaml:"steps" description:"ordered list of steps"`
 //	}
 //
-//	section := section.NewYAML[Plan]().
-//	    WithSectionName("plan").
+//	section := section.NewYAML[Plan]("Plan").
 //	    WithPrompt("Create a plan to achieve the user's goal.")
 type YAML[T any] struct {
 	sectionName string
@@ -31,18 +30,12 @@ type YAML[T any] struct {
 	example     *T
 }
 
-// NewYAML creates a new YAML section with default section name "data".
-func NewYAML[T any]() *YAML[T] {
+// NewYAML creates a new YAML section with the given name.
+func NewYAML[T any](name string) *YAML[T] {
 	return &YAML[T]{
-		sectionName: "data",
+		sectionName: name,
 		prompt:      "",
 	}
-}
-
-// WithSectionName sets the section name for this section.
-func (y *YAML[T]) WithSectionName(name string) *YAML[T] {
-	y.sectionName = name
-	return y
 }
 
 // WithPrompt sets the prompt instructions for this section.

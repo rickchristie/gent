@@ -24,7 +24,7 @@ var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside anot
 //	</action>
 type XML struct {
 	sections      []gent.TextOutputSection
-	knownSections map[string]bool
+	knownSections map[string]string // lowercase key -> original name
 	strict        bool
 }
 
@@ -32,7 +32,7 @@ type XML struct {
 func NewXML() *XML {
 	return &XML{
 		sections:      make([]gent.TextOutputSection, 0),
-		knownSections: make(map[string]bool),
+		knownSections: make(map[string]string),
 	}
 }
 
@@ -48,17 +48,17 @@ func (f *XML) WithStrict(strict bool) *XML {
 // If a section with the same name already exists, it is not added again.
 // Returns self for chaining.
 func (f *XML) RegisterSection(section gent.TextOutputSection) gent.TextOutputFormat {
-	name := strings.ToLower(section.Name())
-	if f.knownSections[name] {
+	lowerName := strings.ToLower(section.Name())
+	if _, exists := f.knownSections[lowerName]; exists {
 		return f // Already registered
 	}
 	f.sections = append(f.sections, section)
-	f.knownSections[name] = true
+	f.knownSections[lowerName] = section.Name() // Store original name
 	return f
 }
 
-// DescribeStructure generates the prompt explaining only the format structure.
-// It shows the tag format with brief placeholders, without including detailed section prompts.
+// DescribeStructure generates the prompt explaining the output format structure.
+// It shows the tag format with each section's prompt instructions.
 func (f *XML) DescribeStructure() string {
 	if len(f.sections) == 0 {
 		return ""
@@ -70,7 +70,7 @@ func (f *XML) DescribeStructure() string {
 	for _, section := range f.sections {
 		name := section.Name()
 		fmt.Fprintf(&sb, "<%s>\n", name)
-		fmt.Fprintf(&sb, "... %s content here ...\n", name)
+		fmt.Fprintf(&sb, "%s\n", section.Prompt())
 		fmt.Fprintf(&sb, "</%s>\n", name)
 	}
 
@@ -106,10 +106,10 @@ func (f *XML) doParse(output string) (map[string][]string, error) {
 
 	// For each known section, find matches by pairing closing tags with their nearest
 	// preceding opening tags. This handles cases where LLM writes literal tags in content.
-	for sectionName := range f.knownSections {
-		matches := f.findSectionMatches(output, sectionName)
+	for lowerName, originalName := range f.knownSections {
+		matches := f.findSectionMatches(output, lowerName)
 		for _, content := range matches {
-			result[sectionName] = append(result[sectionName], content)
+			result[originalName] = append(result[originalName], content)
 		}
 	}
 

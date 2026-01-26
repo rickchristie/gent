@@ -15,23 +15,16 @@ func TestText_Name(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "default name",
+			name: "returns provided name",
 			input: func() *Text {
-				return NewText()
-			},
-			expected: "text",
-		},
-		{
-			name: "custom name",
-			input: func() *Text {
-				return NewText().WithSectionName("thinking")
+				return NewText("thinking")
 			},
 			expected: "thinking",
 		},
 		{
 			name: "empty name",
 			input: func() *Text {
-				return NewText().WithSectionName("")
+				return NewText("")
 			},
 			expected: "",
 		},
@@ -54,28 +47,28 @@ func TestText_Prompt(t *testing.T) {
 		{
 			name: "default prompt",
 			input: func() *Text {
-				return NewText()
+				return NewText("test")
 			},
 			expected: "Write your response here.",
 		},
 		{
 			name: "custom prompt",
 			input: func() *Text {
-				return NewText().WithPrompt("Think step by step about the problem.")
+				return NewText("test").WithPrompt("Think step by step about the problem.")
 			},
 			expected: "Think step by step about the problem.",
 		},
 		{
 			name: "empty prompt",
 			input: func() *Text {
-				return NewText().WithPrompt("")
+				return NewText("test").WithPrompt("")
 			},
 			expected: "",
 		},
 		{
 			name: "multiline prompt",
 			input: func() *Text {
-				return NewText().WithPrompt("Line 1\nLine 2\nLine 3")
+				return NewText("test").WithPrompt("Line 1\nLine 2\nLine 3")
 			},
 			expected: "Line 1\nLine 2\nLine 3",
 		},
@@ -210,7 +203,7 @@ func TestText_ParseSection(t *testing.T) {
 		},
 	}
 
-	section := NewText()
+	section := NewText("test")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,7 +248,7 @@ func TestText_ParseSection_WithExecutionContext(t *testing.T) {
 		},
 	}
 
-	section := NewText()
+	section := NewText("test")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,8 +269,7 @@ func TestText_ParseSection_WithExecutionContext(t *testing.T) {
 }
 
 func TestText_MethodChaining(t *testing.T) {
-	section := NewText().
-		WithSectionName("thinking").
+	section := NewText("thinking").
 		WithPrompt("Think carefully about the problem.")
 
 	assert.Equal(t, "thinking", section.Name())

@@ -19,14 +19,14 @@ import (
 //	{"tool": "search", "args": {"query": "weather"}}
 type Markdown struct {
 	sections      []gent.TextOutputSection
-	knownSections map[string]bool
+	knownSections map[string]string // lowercase key -> original name
 }
 
 // NewMarkdown creates a new Markdown format.
 func NewMarkdown() *Markdown {
 	return &Markdown{
 		sections:      make([]gent.TextOutputSection, 0),
-		knownSections: make(map[string]bool),
+		knownSections: make(map[string]string),
 	}
 }
 
@@ -34,17 +34,17 @@ func NewMarkdown() *Markdown {
 // If a section with the same name already exists, it is not added again.
 // Returns self for chaining.
 func (f *Markdown) RegisterSection(section gent.TextOutputSection) gent.TextOutputFormat {
-	name := strings.ToLower(section.Name())
-	if f.knownSections[name] {
+	lowerName := strings.ToLower(section.Name())
+	if _, exists := f.knownSections[lowerName]; exists {
 		return f // Already registered
 	}
 	f.sections = append(f.sections, section)
-	f.knownSections[name] = true
+	f.knownSections[lowerName] = section.Name() // Store original name
 	return f
 }
 
-// DescribeStructure generates the prompt explaining only the format structure.
-// It shows the header format with brief placeholders, without including detailed section prompts.
+// DescribeStructure generates the prompt explaining the output format structure.
+// It shows the header format with each section's prompt instructions.
 func (f *Markdown) DescribeStructure() string {
 	if len(f.sections) == 0 {
 		return ""
@@ -56,7 +56,7 @@ func (f *Markdown) DescribeStructure() string {
 	for _, section := range f.sections {
 		name := section.Name()
 		fmt.Fprintf(&sb, "# %s\n", name)
-		fmt.Fprintf(&sb, "... %s content here ...\n\n", name)
+		fmt.Fprintf(&sb, "%s\n\n", section.Prompt())
 	}
 
 	return sb.String()
@@ -106,9 +106,18 @@ func (f *Markdown) doParse(output string) (map[string][]string, error) {
 		sectionName := strings.TrimSpace(output[match[2]:match[3]])
 		sectionNameLower := strings.ToLower(sectionName)
 
-		// Skip sections we don't recognize (if knownSections is populated)
-		if len(f.knownSections) > 0 && !f.knownSections[sectionNameLower] {
-			continue
+		// Determine the key for the result map
+		// If knownSections is populated, skip unrecognized sections and use original name
+		var resultKey string
+		if len(f.knownSections) > 0 {
+			originalName, exists := f.knownSections[sectionNameLower]
+			if !exists {
+				continue // Skip sections we don't recognize
+			}
+			resultKey = originalName
+		} else {
+			// No known sections - use the name as found in the output
+			resultKey = sectionName
 		}
 
 		// Content starts after the header line
@@ -124,7 +133,7 @@ func (f *Markdown) doParse(output string) (map[string][]string, error) {
 
 		content := strings.TrimSpace(output[contentStart:contentEnd])
 		if content != "" {
-			result[sectionNameLower] = append(result[sectionNameLower], content)
+			result[resultKey] = append(result[resultKey], content)
 		}
 	}
 

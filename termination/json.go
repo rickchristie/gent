@@ -19,18 +19,12 @@ type JSON[T any] struct {
 	example     *T
 }
 
-// NewJSON creates a new JSON termination with default section name "answer".
-func NewJSON[T any]() *JSON[T] {
+// NewJSON creates a new JSON termination with the given name.
+func NewJSON[T any](name string) *JSON[T] {
 	return &JSON[T]{
-		sectionName: "answer",
+		sectionName: name,
 		prompt:      "",
 	}
-}
-
-// WithSectionName sets the section name for this termination.
-func (t *JSON[T]) WithSectionName(name string) *JSON[T] {
-	t.sectionName = name
-	return t
 }
 
 // WithPrompt sets the prompt instructions for this termination.

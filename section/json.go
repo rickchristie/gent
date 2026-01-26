@@ -23,8 +23,7 @@ import (
 //	    Score     float64  `json:"score" description:"confidence score 0-1"`
 //	}
 //
-//	section := section.NewJSON[Analysis]().
-//	    WithSectionName("analysis").
+//	section := section.NewJSON[Analysis]("Analysis").
 //	    WithPrompt("Analyze the provided text.")
 type JSON[T any] struct {
 	sectionName string
@@ -32,18 +31,12 @@ type JSON[T any] struct {
 	example     *T
 }
 
-// NewJSON creates a new JSON section with default section name "data".
-func NewJSON[T any]() *JSON[T] {
+// NewJSON creates a new JSON section with the given name.
+func NewJSON[T any](name string) *JSON[T] {
 	return &JSON[T]{
-		sectionName: "data",
+		sectionName: name,
 		prompt:      "",
 	}
-}
-
-// WithSectionName sets the section name for this section.
-func (j *JSON[T]) WithSectionName(name string) *JSON[T] {
-	j.sectionName = name
-	return j
 }
 
 // WithPrompt sets the prompt instructions for this section.
