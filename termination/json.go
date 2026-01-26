@@ -15,7 +15,7 @@ import (
 // Supports: primitives, pointers, structs, slices, maps, time.Time, time.Duration.
 type JSON[T any] struct {
 	sectionName string
-	prompt      string
+	guidance    string
 	example     *T
 }
 
@@ -23,17 +23,22 @@ type JSON[T any] struct {
 func NewJSON[T any](name string) *JSON[T] {
 	return &JSON[T]{
 		sectionName: name,
-		prompt:      "",
+		guidance:    "",
 	}
 }
 
-// WithPrompt sets the prompt instructions for this termination.
-func (t *JSON[T]) WithPrompt(prompt string) *JSON[T] {
-	t.prompt = prompt
+// WithGuidance sets the guidance text for this termination. The guidance appears at the
+// beginning of the section content when TextOutputFormat.DescribeStructure() generates
+// the format prompt, followed by the JSON schema.
+//
+// This can be instructions (e.g., "Provide your final answer") or additional context.
+func (t *JSON[T]) WithGuidance(guidance string) *JSON[T] {
+	t.guidance = guidance
 	return t
 }
 
-// WithExample sets an example value to include in the prompt.
+// WithExample sets an example value to include in the guidance.
+// The example is serialized to JSON and appended after the schema.
 func (t *JSON[T]) WithExample(example T) *JSON[T] {
 	t.example = &example
 	return t
@@ -44,12 +49,12 @@ func (t *JSON[T]) Name() string {
 	return t.sectionName
 }
 
-// Prompt returns the instructions including JSON schema derived from T.
-func (t *JSON[T]) Prompt() string {
+// Guidance returns the full guidance text including JSON schema derived from T.
+func (t *JSON[T]) Guidance() string {
 	var sb strings.Builder
 
-	if t.prompt != "" {
-		sb.WriteString(t.prompt)
+	if t.guidance != "" {
+		sb.WriteString(t.guidance)
 		sb.WriteString("\n\n")
 	}
 

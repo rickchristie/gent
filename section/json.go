@@ -13,7 +13,7 @@ import (
 // Supports: primitives, pointers, structs, slices, maps, time.Time, time.Duration.
 //
 // Use this for sections where you need the LLM to output structured JSON data.
-// The section automatically generates a JSON Schema prompt from the type T.
+// The section automatically generates a JSON Schema from the type T.
 //
 // Example:
 //
@@ -23,11 +23,11 @@ import (
 //	    Score     float64  `json:"score" description:"confidence score 0-1"`
 //	}
 //
-//	section := section.NewJSON[Analysis]("Analysis").
-//	    WithPrompt("Analyze the provided text.")
+//	section := section.NewJSON[Analysis]("analysis").
+//	    WithGuidance("Analyze the provided text.")
 type JSON[T any] struct {
 	sectionName string
-	prompt      string
+	guidance    string
 	example     *T
 }
 
@@ -35,17 +35,22 @@ type JSON[T any] struct {
 func NewJSON[T any](name string) *JSON[T] {
 	return &JSON[T]{
 		sectionName: name,
-		prompt:      "",
+		guidance:    "",
 	}
 }
 
-// WithPrompt sets the prompt instructions for this section.
-func (j *JSON[T]) WithPrompt(prompt string) *JSON[T] {
-	j.prompt = prompt
+// WithGuidance sets the guidance text for this section. The guidance appears at the
+// beginning of the section content when TextOutputFormat.DescribeStructure() generates
+// the format prompt, followed by the JSON schema.
+//
+// This can be instructions (e.g., "Analyze the provided text") or additional context.
+func (j *JSON[T]) WithGuidance(guidance string) *JSON[T] {
+	j.guidance = guidance
 	return j
 }
 
-// WithExample sets an example value to include in the prompt.
+// WithExample sets an example value to include in the guidance.
+// The example is serialized to JSON and appended after the schema.
 func (j *JSON[T]) WithExample(example T) *JSON[T] {
 	j.example = &example
 	return j
@@ -56,12 +61,12 @@ func (j *JSON[T]) Name() string {
 	return j.sectionName
 }
 
-// Prompt returns the instructions including JSON schema derived from T.
-func (j *JSON[T]) Prompt() string {
+// Guidance returns the full guidance text including JSON schema derived from T.
+func (j *JSON[T]) Guidance() string {
 	var sb strings.Builder
 
-	if j.prompt != "" {
-		sb.WriteString(j.prompt)
+	if j.guidance != "" {
+		sb.WriteString(j.guidance)
 		sb.WriteString("\n\n")
 	}
 

@@ -58,8 +58,8 @@ func (c *YAML) Name() string {
 	return c.sectionName
 }
 
-// Prompt returns a brief instruction for the action section.
-func (c *YAML) Prompt() string {
+// Guidance returns a brief guidance text for the action section.
+func (c *YAML) Guidance() string {
 	return "Call a tool to take action."
 }
 

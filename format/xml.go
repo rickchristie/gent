@@ -70,7 +70,7 @@ func (f *XML) DescribeStructure() string {
 	for _, section := range f.sections {
 		name := section.Name()
 		fmt.Fprintf(&sb, "<%s>\n", name)
-		fmt.Fprintf(&sb, "%s\n", section.Prompt())
+		fmt.Fprintf(&sb, "%s\n", section.Guidance())
 		fmt.Fprintf(&sb, "</%s>\n", name)
 	}
 

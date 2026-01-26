@@ -38,37 +38,37 @@ func TestText_Name(t *testing.T) {
 	}
 }
 
-func TestText_Prompt(t *testing.T) {
+func TestText_Guidance(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    func() *Text
 		expected string
 	}{
 		{
-			name: "default prompt",
+			name: "default guidance",
 			input: func() *Text {
 				return NewText("test")
 			},
 			expected: "Write your response here.",
 		},
 		{
-			name: "custom prompt",
+			name: "custom guidance",
 			input: func() *Text {
-				return NewText("test").WithPrompt("Think step by step about the problem.")
+				return NewText("test").WithGuidance("Think step by step about the problem.")
 			},
 			expected: "Think step by step about the problem.",
 		},
 		{
-			name: "empty prompt",
+			name: "empty guidance",
 			input: func() *Text {
-				return NewText("test").WithPrompt("")
+				return NewText("test").WithGuidance("")
 			},
 			expected: "",
 		},
 		{
-			name: "multiline prompt",
+			name: "multiline guidance",
 			input: func() *Text {
-				return NewText("test").WithPrompt("Line 1\nLine 2\nLine 3")
+				return NewText("test").WithGuidance("Line 1\nLine 2\nLine 3")
 			},
 			expected: "Line 1\nLine 2\nLine 3",
 		},
@@ -77,7 +77,7 @@ func TestText_Prompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			section := tt.input()
-			assert.Equal(t, tt.expected, section.Prompt())
+			assert.Equal(t, tt.expected, section.Guidance())
 		})
 	}
 }
@@ -270,10 +270,10 @@ func TestText_ParseSection_WithExecutionContext(t *testing.T) {
 
 func TestText_MethodChaining(t *testing.T) {
 	section := NewText("thinking").
-		WithPrompt("Think carefully about the problem.")
+		WithGuidance("Think carefully about the problem.")
 
 	assert.Equal(t, "thinking", section.Name())
-	assert.Equal(t, "Think carefully about the problem.", section.Prompt())
+	assert.Equal(t, "Think carefully about the problem.", section.Guidance())
 }
 
 func TestText_ImplementsTextOutputSection(t *testing.T) {

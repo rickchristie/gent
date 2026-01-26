@@ -22,11 +22,11 @@ import (
 //	    Steps []string `yaml:"steps" description:"ordered list of steps"`
 //	}
 //
-//	section := section.NewYAML[Plan]("Plan").
-//	    WithPrompt("Create a plan to achieve the user's goal.")
+//	section := section.NewYAML[Plan]("plan").
+//	    WithGuidance("Create a plan to achieve the user's goal.")
 type YAML[T any] struct {
 	sectionName string
-	prompt      string
+	guidance    string
 	example     *T
 }
 
@@ -34,17 +34,22 @@ type YAML[T any] struct {
 func NewYAML[T any](name string) *YAML[T] {
 	return &YAML[T]{
 		sectionName: name,
-		prompt:      "",
+		guidance:    "",
 	}
 }
 
-// WithPrompt sets the prompt instructions for this section.
-func (y *YAML[T]) WithPrompt(prompt string) *YAML[T] {
-	y.prompt = prompt
+// WithGuidance sets the guidance text for this section. The guidance appears at the
+// beginning of the section content when TextOutputFormat.DescribeStructure() generates
+// the format prompt, followed by the YAML schema.
+//
+// This can be instructions (e.g., "Create a plan to achieve the goal") or additional context.
+func (y *YAML[T]) WithGuidance(guidance string) *YAML[T] {
+	y.guidance = guidance
 	return y
 }
 
-// WithExample sets an example value to include in the prompt.
+// WithExample sets an example value to include in the guidance.
+// The example is serialized to YAML and appended after the schema.
 func (y *YAML[T]) WithExample(example T) *YAML[T] {
 	y.example = &example
 	return y
@@ -55,12 +60,12 @@ func (y *YAML[T]) Name() string {
 	return y.sectionName
 }
 
-// Prompt returns the instructions including YAML schema derived from T.
-func (y *YAML[T]) Prompt() string {
+// Guidance returns the full guidance text including YAML schema derived from T.
+func (y *YAML[T]) Guidance() string {
 	var sb strings.Builder
 
-	if y.prompt != "" {
-		sb.WriteString(y.prompt)
+	if y.guidance != "" {
+		sb.WriteString(y.guidance)
 		sb.WriteString("\n\n")
 	}
 

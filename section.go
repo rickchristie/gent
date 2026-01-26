@@ -61,9 +61,16 @@ type TextOutputSection interface {
 	// Name returns the section identifier (e.g., "thinking", "action", "answer")
 	Name() string
 
-	// Prompt returns instructions for what should go in this section.
-	// This is included in the LLM prompt.
-	Prompt() string
+	// Guidance returns the guidance text that appears inside this section when
+	// TextOutputFormat.DescribeStructure() generates the format prompt for the LLM.
+	//
+	// This can be either:
+	//   - Instructions telling the LLM what to write (e.g., "Write your final answer here")
+	//   - Examples showing the expected format (e.g., `{"tool": "search", "query": "..."}`)
+	//   - A combination of both
+	//
+	// The guidance helps the LLM understand what content belongs in this section.
+	Guidance() string
 
 	// ParseSection parses the raw text content extracted for this section.
 	// Returns the parsed result or an error if parsing fails.

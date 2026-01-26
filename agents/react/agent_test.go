@@ -59,14 +59,14 @@ func (m *mockModel) GenerateContent(
 
 type mockToolChain struct {
 	name      string
-	prompt    string
+	guidance  string
 	results   []*gent.ToolChainResult
 	errors    []error
 	callCount int
 }
 
 func newMockToolChain() *mockToolChain {
-	return &mockToolChain{name: "action", prompt: "Use tools here."}
+	return &mockToolChain{name: "action", guidance: "Use tools here."}
 }
 
 func (m *mockToolChain) WithResults(results ...*gent.ToolChainResult) *mockToolChain {
@@ -79,8 +79,8 @@ func (m *mockToolChain) WithErrors(errs ...error) *mockToolChain {
 	return m
 }
 
-func (m *mockToolChain) Name() string                { return m.name }
-func (m *mockToolChain) Prompt() string              { return m.prompt }
+func (m *mockToolChain) Name() string                 { return m.name }
+func (m *mockToolChain) Guidance() string             { return m.guidance }
 func (m *mockToolChain) AvailableToolsPrompt() string { return "mock available tools prompt" }
 
 func (m *mockToolChain) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
@@ -115,12 +115,12 @@ func (m *mockToolChain) Execute(
 
 type mockTermination struct {
 	name          string
-	prompt        string
+	guidance      string
 	shouldTermRes []gent.ContentPart
 }
 
 func newMockTermination() *mockTermination {
-	return &mockTermination{name: "answer", prompt: "Write your final answer."}
+	return &mockTermination{name: "answer", guidance: "Write your final answer."}
 }
 
 func (m *mockTermination) WithTerminationResult(parts ...gent.ContentPart) *mockTermination {
@@ -128,8 +128,8 @@ func (m *mockTermination) WithTerminationResult(parts ...gent.ContentPart) *mock
 	return m
 }
 
-func (m *mockTermination) Name() string   { return m.name }
-func (m *mockTermination) Prompt() string { return m.prompt }
+func (m *mockTermination) Name() string     { return m.name }
+func (m *mockTermination) Guidance() string { return m.guidance }
 
 func (m *mockTermination) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil
@@ -477,7 +477,7 @@ func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
 
 	format := newMockFormat().WithParseError(gent.ErrNoSectionsFound)
 	tc := newMockToolChain()
-	term := &mockTermination{name: "answer", prompt: "answer"}
+	term := &mockTermination{name: "answer", guidance: "answer"}
 
 	loop := NewAgent(model).
 		WithFormat(format).

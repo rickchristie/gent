@@ -74,9 +74,9 @@ func TestJSON_Prompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewJSON[string]("answer")
-			term.WithPrompt(tt.input.promptText)
+			term.WithGuidance(tt.input.promptText)
 
-			prompt := term.Prompt()
+			prompt := term.Guidance()
 
 			if tt.expected.containsPrompt {
 				assert.True(t, strings.Contains(prompt, tt.input.promptText),
@@ -361,7 +361,7 @@ func TestJSON_WithExample(t *testing.T) {
 	term := NewJSON[SimpleStruct]("answer").
 		WithExample(SimpleStruct{Name: "example", Value: 42})
 
-	prompt := term.Prompt()
+	prompt := term.Guidance()
 
 	assert.True(t, strings.Contains(prompt, "example"),
 		"prompt should contain example name")
@@ -377,7 +377,7 @@ type DescribedStruct struct {
 func TestJSON_SchemaWithDescriptions(t *testing.T) {
 	term := NewJSON[DescribedStruct]("answer")
 
-	prompt := term.Prompt()
+	prompt := term.Guidance()
 
 	assert.True(t, strings.Contains(prompt, "unique identifier"),
 		"prompt should contain ID description")
@@ -394,7 +394,7 @@ type OmitEmptyStruct struct {
 func TestJSON_SchemaRequired(t *testing.T) {
 	term := NewJSON[OmitEmptyStruct]("answer")
 
-	prompt := term.Prompt()
+	prompt := term.Guidance()
 
 	assert.True(t, strings.Contains(prompt, `"required"`),
 		"prompt should contain required field")

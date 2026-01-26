@@ -208,10 +208,10 @@ func (r *Agent) TimeProvider() gent.TimeProvider {
 	return r.timeProvider
 }
 
-// WithThinking enables the thinking section with the given prompt.
-func (r *Agent) WithThinking(prompt string) *Agent {
+// WithThinking enables the thinking section with the given guidance.
+func (r *Agent) WithThinking(guidance string) *Agent {
 	r.thinkingSection = section.NewText("thinking").
-		WithPrompt(prompt)
+		WithGuidance(guidance)
 	return r
 }
 

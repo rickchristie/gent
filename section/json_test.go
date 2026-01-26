@@ -104,7 +104,7 @@ func TestJSON_Prompt(t *testing.T) {
 		{
 			name: "with custom prompt",
 			input: func() gent.TextOutputSection {
-				return NewJSON[SimpleStruct]("data").WithPrompt("Analyze the data.")
+				return NewJSON[SimpleStruct]("data").WithGuidance("Analyze the data.")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -160,7 +160,7 @@ func TestJSON_Prompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			section := tt.input()
-			prompt := section.Prompt()
+			prompt := section.Guidance()
 
 			assert.Contains(t, prompt, tt.expected.promptPrefix)
 
@@ -549,13 +549,13 @@ func TestJSON_ParseSection_WithMap(t *testing.T) {
 
 func TestJSON_MethodChaining(t *testing.T) {
 	section := NewJSON[SimpleStruct]("analysis").
-		WithPrompt("Analyze the data.").
+		WithGuidance("Analyze the data.").
 		WithExample(SimpleStruct{Name: "example", Value: 100})
 
 	assert.Equal(t, "analysis", section.Name())
-	assert.Contains(t, section.Prompt(), "Analyze the data.")
-	assert.Contains(t, section.Prompt(), "Example:")
-	assert.Contains(t, section.Prompt(), "example")
+	assert.Contains(t, section.Guidance(), "Analyze the data.")
+	assert.Contains(t, section.Guidance(), "Example:")
+	assert.Contains(t, section.Guidance(), "example")
 }
 
 func TestJSON_ImplementsTextOutputSection(t *testing.T) {

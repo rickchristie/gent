@@ -52,8 +52,8 @@ func (c *JSON) Name() string {
 	return c.sectionName
 }
 
-// Prompt returns a brief instruction for the action section.
-func (c *JSON) Prompt() string {
+// Guidance returns a brief guidance text for the action section.
+func (c *JSON) Guidance() string {
 	return "Call a tool to take action."
 }
 

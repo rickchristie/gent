@@ -56,7 +56,7 @@ func (f *Markdown) DescribeStructure() string {
 	for _, section := range f.sections {
 		name := section.Name()
 		fmt.Fprintf(&sb, "# %s\n", name)
-		fmt.Fprintf(&sb, "%s\n\n", section.Prompt())
+		fmt.Fprintf(&sb, "%s\n\n", section.Guidance())
 	}
 
 	return sb.String()

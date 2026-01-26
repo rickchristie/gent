@@ -10,20 +10,23 @@ import (
 // Text simply returns the raw text content as the final answer.
 type Text struct {
 	sectionName string
-	prompt      string
+	guidance    string
 }
 
 // NewText creates a new Text termination with the given name.
 func NewText(name string) *Text {
 	return &Text{
 		sectionName: name,
-		prompt:      "Write your final answer here.",
+		guidance:    "Write your final answer here.",
 	}
 }
 
-// WithPrompt sets the prompt instructions for this termination.
-func (t *Text) WithPrompt(prompt string) *Text {
-	t.prompt = prompt
+// WithGuidance sets the guidance text for this termination. The guidance appears inside
+// the section tags when TextOutputFormat.DescribeStructure() generates the format prompt.
+//
+// This can be instructions (e.g., "Write your final answer") or examples, or both.
+func (t *Text) WithGuidance(guidance string) *Text {
+	t.guidance = guidance
 	return t
 }
 
@@ -32,9 +35,9 @@ func (t *Text) Name() string {
 	return t.sectionName
 }
 
-// Prompt returns the instructions for what should go in this section.
-func (t *Text) Prompt() string {
-	return t.prompt
+// Guidance returns the guidance text for this termination.
+func (t *Text) Guidance() string {
+	return t.guidance
 }
 
 // ParseSection returns the trimmed content as a string.

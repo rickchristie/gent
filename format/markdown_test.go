@@ -10,12 +10,12 @@ import (
 
 // mockSection is a simple TextOutputSection for testing.
 type mockSection struct {
-	name   string
-	prompt string
+	name     string
+	guidance string
 }
 
-func (m *mockSection) Name() string   { return m.name }
-func (m *mockSection) Prompt() string { return m.prompt }
+func (m *mockSection) Name() string     { return m.name }
+func (m *mockSection) Guidance() string { return m.guidance }
 func (m *mockSection) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil
 }
@@ -260,7 +260,7 @@ The answer with extra spaces in header.`,
 			format := NewMarkdown()
 
 			for _, name := range tt.input.sections {
-				format.RegisterSection(&mockSection{name: name, prompt: ""})
+				format.RegisterSection(&mockSection{name: name, guidance: ""})
 			}
 
 			result, err := format.Parse(nil, tt.input.output)
@@ -273,8 +273,8 @@ The answer with extra spaces in header.`,
 
 func TestMarkdown_DescribeStructure(t *testing.T) {
 	type input struct {
-		name   string
-		prompt string
+		name     string
+		guidance string
 	}
 
 	type expected struct {
@@ -294,9 +294,9 @@ func TestMarkdown_DescribeStructure(t *testing.T) {
 			},
 		},
 		{
-			name: "single section includes prompt",
+			name: "single section includes guidance",
 			input: []input{
-				{name: "Answer", prompt: "Write your final answer here."},
+				{name: "Answer", guidance: "Write your final answer here."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
@@ -305,10 +305,10 @@ func TestMarkdown_DescribeStructure(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple sections include prompts",
+			name: "multiple sections include guidance",
 			input: []input{
-				{name: "Thinking", prompt: "Think through the problem."},
-				{name: "Action", prompt: "Call a tool to take action."},
+				{name: "Thinking", guidance: "Think through the problem."},
+				{name: "Action", guidance: "Call a tool to take action."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
@@ -326,8 +326,8 @@ func TestMarkdown_DescribeStructure(t *testing.T) {
 
 			for _, s := range tt.input {
 				format.RegisterSection(&mockSection{
-					name:   s.name,
-					prompt: s.prompt,
+					name:     s.name,
+					guidance: s.guidance,
 				})
 			}
 
@@ -384,7 +384,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
-			format.RegisterSection(&mockSection{name: "Answer", prompt: "Answer here"})
+			format.RegisterSection(&mockSection{name: "Answer", guidance: "Answer here"})
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -419,8 +419,8 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 
 func TestMarkdown_RegisterSection(t *testing.T) {
 	type input struct {
-		name   string
-		prompt string
+		name     string
+		guidance string
 	}
 
 	type expected struct {
@@ -435,7 +435,7 @@ func TestMarkdown_RegisterSection(t *testing.T) {
 		{
 			name: "single section",
 			sections: []input{
-				{name: "Answer", prompt: "Write your answer."},
+				{name: "Answer", guidance: "Write your answer."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
@@ -446,8 +446,8 @@ func TestMarkdown_RegisterSection(t *testing.T) {
 		{
 			name: "multiple sections",
 			sections: []input{
-				{name: "Thinking", prompt: "Think here."},
-				{name: "Action", prompt: "Act here."},
+				{name: "Thinking", guidance: "Think here."},
+				{name: "Action", guidance: "Act here."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
@@ -460,9 +460,9 @@ func TestMarkdown_RegisterSection(t *testing.T) {
 		{
 			name: "idempotent registration",
 			sections: []input{
-				{name: "Answer", prompt: "Write your answer."},
-				{name: "Answer", prompt: "Different prompt."},
-				{name: "Answer", prompt: "Another prompt."},
+				{name: "Answer", guidance: "Write your answer."},
+				{name: "Answer", guidance: "Different guidance."},
+				{name: "Answer", guidance: "Another guidance."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
@@ -473,14 +473,14 @@ func TestMarkdown_RegisterSection(t *testing.T) {
 		{
 			name: "case insensitive idempotency",
 			sections: []input{
-				{name: "Answer", prompt: "First prompt."},
-				{name: "answer", prompt: "Second prompt."},
-				{name: "ANSWER", prompt: "Third prompt."},
+				{name: "Answer", guidance: "First guidance."},
+				{name: "answer", guidance: "Second guidance."},
+				{name: "ANSWER", guidance: "Third guidance."},
 			},
 			expected: expected{
 				output: "Format your response using markdown headers for each section:\n\n" +
 					"# Answer\n" +
-					"First prompt.\n\n",
+					"First guidance.\n\n",
 			},
 		},
 	}
@@ -490,7 +490,7 @@ func TestMarkdown_RegisterSection(t *testing.T) {
 			format := NewMarkdown()
 
 			for _, s := range tt.sections {
-				format.RegisterSection(&mockSection{name: s.name, prompt: s.prompt})
+				format.RegisterSection(&mockSection{name: s.name, guidance: s.guidance})
 			}
 
 			result := format.DescribeStructure()

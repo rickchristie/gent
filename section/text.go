@@ -15,20 +15,24 @@ import (
 //   - Any section where you don't need structured parsing
 type Text struct {
 	sectionName string
-	prompt      string
+	guidance    string
 }
 
 // NewText creates a new Text section with the given name.
 func NewText(name string) *Text {
 	return &Text{
 		sectionName: name,
-		prompt:      "Write your response here.",
+		guidance:    "Write your response here.",
 	}
 }
 
-// WithPrompt sets the prompt instructions for this section.
-func (t *Text) WithPrompt(prompt string) *Text {
-	t.prompt = prompt
+// WithGuidance sets the guidance text for this section. The guidance appears inside
+// the section tags when TextOutputFormat.DescribeStructure() generates the format prompt.
+//
+// This can be instructions (e.g., "Think step by step about the problem") or examples
+// showing the expected format, or a combination of both.
+func (t *Text) WithGuidance(guidance string) *Text {
+	t.guidance = guidance
 	return t
 }
 
@@ -37,9 +41,9 @@ func (t *Text) Name() string {
 	return t.sectionName
 }
 
-// Prompt returns the instructions for what should go in this section.
-func (t *Text) Prompt() string {
-	return t.prompt
+// Guidance returns the guidance text for this section.
+func (t *Text) Guidance() string {
+	return t.guidance
 }
 
 // ParseSection returns the trimmed content as a string.

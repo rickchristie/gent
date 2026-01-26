@@ -72,10 +72,10 @@ func TestText_Prompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewText("answer")
 			if tt.input.customPrompt != "" {
-				term.WithPrompt(tt.input.customPrompt)
+				term.WithGuidance(tt.input.customPrompt)
 			}
 
-			assert.Equal(t, tt.expected.prompt, term.Prompt())
+			assert.Equal(t, tt.expected.prompt, term.Guidance())
 		})
 	}
 }

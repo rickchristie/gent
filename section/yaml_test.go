@@ -92,7 +92,7 @@ func TestYAML_Prompt(t *testing.T) {
 		{
 			name: "with custom prompt",
 			input: func() gent.TextOutputSection {
-				return NewYAML[YAMLSimpleStruct]("data").WithPrompt("Create a plan.")
+				return NewYAML[YAMLSimpleStruct]("data").WithGuidance("Create a plan.")
 			},
 			expected: struct {
 				containsSchema  bool
@@ -131,7 +131,7 @@ func TestYAML_Prompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			section := tt.input()
-			prompt := section.Prompt()
+			prompt := section.Guidance()
 
 			assert.Contains(t, prompt, tt.expected.promptPrefix)
 
@@ -602,13 +602,13 @@ func TestYAML_ParseSection_MultilineStrings(t *testing.T) {
 
 func TestYAML_MethodChaining(t *testing.T) {
 	section := NewYAML[YAMLSimpleStruct]("plan").
-		WithPrompt("Create a plan.").
+		WithGuidance("Create a plan.").
 		WithExample(YAMLSimpleStruct{Name: "example", Value: 100})
 
 	assert.Equal(t, "plan", section.Name())
-	assert.Contains(t, section.Prompt(), "Create a plan.")
-	assert.Contains(t, section.Prompt(), "Example:")
-	assert.Contains(t, section.Prompt(), "example")
+	assert.Contains(t, section.Guidance(), "Create a plan.")
+	assert.Contains(t, section.Guidance(), "Example:")
+	assert.Contains(t, section.Guidance(), "example")
 }
 
 func TestYAML_ImplementsTextOutputSection(t *testing.T) {

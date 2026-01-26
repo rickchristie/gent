@@ -123,7 +123,7 @@ func TestYAML_Prompt(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	prompt := tc.Prompt()
+	prompt := tc.Guidance()
 
 	assert.Equal(t, "Call a tool to take action.", prompt)
 }
