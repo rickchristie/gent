@@ -98,7 +98,7 @@ func TestJSON_Prompt(t *testing.T) {
 				containsSchema:  true,
 				containsPrompt:  false,
 				containsExample: false,
-				promptPrefix:    "Respond with valid JSON matching this schema:",
+				promptPrefix:    "data content must be valid JSON matching this schema:",
 			},
 		},
 		{
@@ -135,7 +135,7 @@ func TestJSON_Prompt(t *testing.T) {
 				containsSchema:  true,
 				containsPrompt:  false,
 				containsExample: true,
-				promptPrefix:    "Respond with valid JSON matching this schema:",
+				promptPrefix:    "data content must be valid JSON matching this schema:",
 			},
 		},
 		{
@@ -152,7 +152,7 @@ func TestJSON_Prompt(t *testing.T) {
 				containsSchema:  true,
 				containsPrompt:  false,
 				containsExample: false,
-				promptPrefix:    "Respond with valid JSON matching this schema:",
+				promptPrefix:    "data content must be valid JSON matching this schema:",
 			},
 		},
 	}

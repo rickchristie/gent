@@ -8,11 +8,27 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/format"
 	"github.com/rickchristie/gent/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
 )
+
+// yamlTestFormat returns a TextFormat for use in YAML tests.
+func yamlTestFormat() gent.TextFormat {
+	return format.NewXML()
+}
+
+// getYAMLOutputString extracts a string from a raw output value.
+func getYAMLOutputString(output any) string {
+	if output == nil {
+		return ""
+	}
+	if s, ok := output.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", output)
+}
 
 func TestYAML_Name(t *testing.T) {
 	type input struct {
@@ -98,14 +114,14 @@ args: {}`,
 
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, yamlTestFormat())
 
 			if tt.expected.err != nil {
 				assert.ErrorIs(t, err, tt.expected.err)
 			} else {
 				require.NoError(t, err)
-				assert.Len(t, result.Calls, tt.expected.callCount)
-				assert.Equal(t, tt.expected.callName, result.Calls[0].Name)
+				assert.Len(t, result.Raw.Calls, tt.expected.callCount)
+				assert.Equal(t, tt.expected.callName, result.Raw.Calls[0].Name)
 			}
 		})
 	}
@@ -394,7 +410,7 @@ args:
 			},
 			expected: expected{
 				callCount:   1,
-				results:     []string{"'Results for: weather'\n"},
+				results:     []string{"Results for: weather"},
 				errors:      []error{nil},
 				resultNames: []string{"search"},
 			},
@@ -459,7 +475,7 @@ args: {}`,
 			},
 			expected: expected{
 				callCount:   2,
-				results:     []string{"search result\n", "calendar result\n"},
+				results:     []string{"search result", "calendar result"},
 				errors:      []error{nil, nil},
 				resultNames: []string{"search", "calendar"},
 			},
@@ -479,7 +495,7 @@ args: {}`,
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, yamlTestFormat())
 
 			if tt.expected.executeErr != nil {
 				assert.ErrorIs(t, err, tt.expected.executeErr)
@@ -487,21 +503,21 @@ args: {}`,
 			}
 
 			require.NoError(t, err)
-			assert.Len(t, result.Calls, tt.expected.callCount)
+			assert.Len(t, result.Raw.Calls, tt.expected.callCount)
 
 			for i, expectedResult := range tt.expected.results {
 				if tt.expected.errors[i] != nil {
-					assert.Error(t, result.Errors[i])
+					assert.Error(t, result.Raw.Errors[i])
 					if errors.Is(tt.expected.errors[i], gent.ErrUnknownTool) {
-						assert.ErrorIs(t, result.Errors[i], gent.ErrUnknownTool)
+						assert.ErrorIs(t, result.Raw.Errors[i], gent.ErrUnknownTool)
 					} else {
-						assert.Equal(t, tt.expected.errors[i].Error(), result.Errors[i].Error())
+						assert.Equal(t, tt.expected.errors[i].Error(), result.Raw.Errors[i].Error())
 					}
 				} else {
-					assert.NoError(t, result.Errors[i])
-					assert.Equal(t, expectedResult, yamlGetTextContent(result.Results[i].Result))
+					assert.NoError(t, result.Raw.Errors[i])
+					assert.Equal(t, expectedResult, getYAMLOutputString(result.Raw.Results[i].Output))
 					if len(tt.expected.resultNames) > i {
-						assert.Equal(t, tt.expected.resultNames[i], result.Results[i].Name)
+						assert.Equal(t, tt.expected.resultNames[i], result.Raw.Results[i].Name)
 					}
 				}
 			}
@@ -558,7 +574,7 @@ args:
   query: weather`,
 			},
 			expected: expected{
-				result:      "'Results for: weather'\n",
+				result:      "Results for: weather",
 				noToolError: true,
 			},
 		},
@@ -636,7 +652,7 @@ args:
   numbers: 123`,
 			},
 			expected: expected{
-				result:      "success\n",
+				result:      "success",
 				noToolError: true,
 			},
 		},
@@ -668,7 +684,7 @@ args:
   passengers: 2`,
 			},
 			expected: expected{
-				result:      "booked\n",
+				result:      "booked",
 				noToolError: true,
 			},
 		},
@@ -718,18 +734,18 @@ args:
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, yamlTestFormat())
 			require.NoError(t, err)
 
 			if tt.expected.noToolError {
-				assert.NoError(t, result.Errors[0])
-				require.NotNil(t, result.Results[0])
-				assert.Equal(t, tt.expected.result, yamlGetTextContent(result.Results[0].Result))
+				assert.NoError(t, result.Raw.Errors[0])
+				require.NotNil(t, result.Raw.Results[0])
+				assert.Equal(t, tt.expected.result, getYAMLOutputString(result.Raw.Results[0].Output))
 			} else {
-				require.Error(t, result.Errors[0])
-				assert.Contains(t, result.Errors[0].Error(), tt.expected.errContains)
+				require.Error(t, result.Raw.Errors[0])
+				assert.Contains(t, result.Raw.Errors[0].Error(), tt.expected.errContains)
 				if tt.expected.resultIsNil {
-					assert.Nil(t, result.Results[0])
+					assert.Nil(t, result.Raw.Results[0])
 				}
 			}
 		})
@@ -800,9 +816,9 @@ args:
 			require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
 			assert.Equal(t, tt.expected.dateValue, dateStr)
 
-			execResult, err := tc.Execute(nil, tt.input.content)
+			execResult, err := tc.Execute(nil, tt.input.content, yamlTestFormat())
 			require.NoError(t, err)
-			assert.NoError(t, execResult.Errors[0])
+			assert.NoError(t, execResult.Raw.Errors[0])
 		})
 	}
 }
@@ -891,9 +907,9 @@ args:
 			require.True(t, ok, "expected string, got %T: %v", val, val)
 			assert.Equal(t, tt.expected.value, strVal)
 
-			execResult, err := tc.Execute(nil, content)
+			execResult, err := tc.Execute(nil, content, yamlTestFormat())
 			require.NoError(t, err)
-			assert.NoError(t, execResult.Errors[0])
+			assert.NoError(t, execResult.Raw.Errors[0])
 		})
 	}
 }
@@ -988,7 +1004,7 @@ args:
   timestamp: 2026-01-20T10:30:00Z`,
 			},
 			expected: expected{
-				output: "2026-01-20|2026-01-20T10:30:00Z\n",
+				output: "2026-01-20|2026-01-20T10:30:00Z",
 			},
 		},
 	}
@@ -1015,11 +1031,11 @@ args:
 			)
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, yamlTestFormat())
 			require.NoError(t, err)
-			require.NoError(t, result.Errors[0])
+			require.NoError(t, result.Raw.Errors[0])
 
-			output := yamlGetTextContent(result.Results[0].Result)
+			output := getYAMLOutputString(result.Raw.Results[0].Output)
 			assert.Equal(t, tt.expected.output, output)
 		})
 	}
@@ -1042,22 +1058,22 @@ func TestYAML_Execute_DurationConversion(t *testing.T) {
 		{
 			name:     "hours and minutes",
 			input:    input{duration: "1h30m"},
-			expected: expected{output: "1h30m0s\n"},
+			expected: expected{output: "1h30m0s"},
 		},
 		{
 			name:     "just minutes",
 			input:    input{duration: "45m"},
-			expected: expected{output: "45m0s\n"},
+			expected: expected{output: "45m0s"},
 		},
 		{
 			name:     "with seconds",
 			input:    input{duration: "2h15m30s"},
-			expected: expected{output: "2h15m30s\n"},
+			expected: expected{output: "2h15m30s"},
 		},
 		{
 			name:     "milliseconds",
 			input:    input{duration: "500ms"},
-			expected: expected{output: "500ms\n"},
+			expected: expected{output: "500ms"},
 		},
 	}
 
@@ -1085,11 +1101,11 @@ func TestYAML_Execute_DurationConversion(t *testing.T) {
 args:
   duration: %s`, tt.input.duration)
 
-			result, err := tc.Execute(nil, content)
+			result, err := tc.Execute(nil, content, yamlTestFormat())
 			require.NoError(t, err)
-			require.NoError(t, result.Errors[0])
+			require.NoError(t, result.Raw.Errors[0])
 
-			output := yamlGetTextContent(result.Results[0].Result)
+			output := getYAMLOutputString(result.Raw.Results[0].Output)
 			assert.Equal(t, tt.expected.output, output)
 		})
 	}
@@ -1511,17 +1527,6 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 	}
 }
 
-// yamlGetTextContent extracts the text from a []gent.ContentPart.
-func yamlGetTextContent(parts []gent.ContentPart) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	if tc, ok := parts[0].(llms.TextContent); ok {
-		return tc.Text
-	}
-	return ""
-}
-
 // -----------------------------------------------------------------------------
 // BeforeToolCallHook Argument Modification Tests
 // -----------------------------------------------------------------------------
@@ -1587,7 +1592,7 @@ args:
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original"},
 				toolReceived: map[string]any{"value": "modified"},
-				result:       "'received: modified'\n",
+				result:       "received: modified",
 			},
 		},
 		{
@@ -1604,7 +1609,7 @@ args:
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original"},
 				toolReceived: map[string]any{"value": "completely new"},
-				result:       "'received: completely new'\n",
+				result:       "received: completely new",
 			},
 		},
 		{
@@ -1622,7 +1627,7 @@ args:
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original"},
 				toolReceived: map[string]any{"value": "original", "extra": "added"},
-				result:       "'received: original'\n",
+				result:       "received: original",
 			},
 		},
 		{
@@ -1641,7 +1646,7 @@ args:
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original", "remove": "this"},
 				toolReceived: map[string]any{"value": "original"},
-				result:       "'received: original'\n",
+				result:       "received: original",
 			},
 		},
 		{
@@ -1656,7 +1661,7 @@ args:
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "unchanged"},
 				toolReceived: map[string]any{"value": "unchanged"},
-				result:       "'received: unchanged'\n",
+				result:       "received: unchanged",
 			},
 		},
 	}
@@ -1689,7 +1694,7 @@ args:
 			execCtx.StartIteration()
 
 			// Execute
-			result, err := tc.Execute(execCtx, tt.input.content)
+			result, err := tc.Execute(execCtx, tt.input.content, yamlTestFormat())
 
 			require.NoError(t, err)
 			assert.True(t, hook.called, "hook should have been called")
@@ -1697,8 +1702,8 @@ args:
 				"hook should have seen original args")
 			assert.Equal(t, tt.expected.toolReceived, receivedArgs,
 				"tool should have received modified args")
-			assert.NoError(t, result.Errors[0])
-			assert.Equal(t, tt.expected.result, yamlGetTextContent(result.Results[0].Result))
+			assert.NoError(t, result.Raw.Errors[0])
+			assert.Equal(t, tt.expected.result, getYAMLOutputString(result.Raw.Results[0].Output))
 		})
 	}
 }
@@ -1772,11 +1777,11 @@ func TestYAML_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 			execCtx.SetHookFirer(registry)
 			execCtx.StartIteration()
 
-			result, err := tc.Execute(execCtx, tt.input.content)
+			result, err := tc.Execute(execCtx, tt.input.content, yamlTestFormat())
 
 			require.NoError(t, err)
-			assert.NoError(t, result.Errors[0])
-			assert.NoError(t, result.Errors[1])
+			assert.NoError(t, result.Raw.Errors[0])
+			assert.NoError(t, result.Raw.Errors[1])
 			assert.Equal(t, tt.expected.tool1Received, tool1Received)
 			assert.Equal(t, tt.expected.tool2Received, tool2Received)
 		})

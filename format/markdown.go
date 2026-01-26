@@ -18,14 +18,14 @@ import (
 //	# Action
 //	{"tool": "search", "args": {"query": "weather"}}
 type Markdown struct {
-	sections      []gent.TextOutputSection
+	sections      []gent.TextSection
 	knownSections map[string]string // lowercase key -> original name
 }
 
 // NewMarkdown creates a new Markdown format.
 func NewMarkdown() *Markdown {
 	return &Markdown{
-		sections:      make([]gent.TextOutputSection, 0),
+		sections:      make([]gent.TextSection, 0),
 		knownSections: make(map[string]string),
 	}
 }
@@ -33,7 +33,7 @@ func NewMarkdown() *Markdown {
 // RegisterSection adds a section to the format.
 // If a section with the same name already exists, it is not added again.
 // Returns self for chaining.
-func (f *Markdown) RegisterSection(section gent.TextOutputSection) gent.TextOutputFormat {
+func (f *Markdown) RegisterSection(section gent.TextSection) gent.TextFormat {
 	lowerName := strings.ToLower(section.Name())
 	if _, exists := f.knownSections[lowerName]; exists {
 		return f // Already registered
@@ -41,6 +41,21 @@ func (f *Markdown) RegisterSection(section gent.TextOutputSection) gent.TextOutp
 	f.sections = append(f.sections, section)
 	f.knownSections[lowerName] = section.Name() // Store original name
 	return f
+}
+
+// FormatSection formats a single section with markdown header.
+// Format: "# name\ncontent"
+func (f *Markdown) FormatSection(name string, content string) string {
+	return fmt.Sprintf("# %s\n%s", name, content)
+}
+
+// WrapObservation returns the text as-is for Markdown format.
+// Markdown doesn't use XML-style wrappers.
+func (f *Markdown) WrapObservation(text string) string {
+	if text == "" {
+		return ""
+	}
+	return text
 }
 
 // DescribeStructure generates the prompt explaining the output format structure.

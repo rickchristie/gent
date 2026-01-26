@@ -98,15 +98,26 @@ func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 	return inputVal.Elem().Interface(), nil
 }
 
-// CallToolWithTypedInputReflect calls a generic Tool[I, O] with already-typed input.
+// ToolCallOutput holds the result of calling a tool via reflection.
+// This is an internal type used by toolchain implementations to collect
+// tool outputs before formatting.
+type ToolCallOutput struct {
+	Name  string            // Tool name
+	Text  any               // Raw typed text output (will be formatted as JSON/YAML)
+	Media []gent.ContentPart // Media content (images, audio, etc.)
+}
+
+// CallToolWithTypedInputReflect calls a generic Tool[I, TextOutput] with already-typed input.
 //
 // The typedInput must be the correct type for the tool's input type I.
 // Use TransformArgsReflect to convert map[string]any to the typed input first.
+//
+// Returns a ToolCallOutput containing the tool name, text output, and any media.
 func CallToolWithTypedInputReflect(
 	ctx context.Context,
 	tool any,
 	typedInput any,
-) (*gent.ToolCallResult, error) {
+) (*ToolCallOutput, error) {
 	toolVal := reflect.ValueOf(tool)
 	if !toolVal.IsValid() {
 		return nil, errors.New("invalid tool value")
@@ -132,7 +143,7 @@ func CallToolWithTypedInputReflect(
 		reflect.ValueOf(typedInput),
 	})
 
-	// Handle results: (*ToolResult[O], error)
+	// Handle results: (*ToolResult[TextOutput], error)
 	resultVal := results[0]
 	errVal := results[1]
 
@@ -141,23 +152,28 @@ func CallToolWithTypedInputReflect(
 		return nil, errVal.Interface().(error)
 	}
 
-	// Extract from *ToolResult[O]
+	// Extract from *ToolResult[TextOutput]
 	if resultVal.IsNil() {
 		return nil, errors.New("nil result from tool")
 	}
 
 	resultStruct := resultVal.Elem()
-	outputField := resultStruct.FieldByName("Output")
-	resultField := resultStruct.FieldByName("Result")
+	textField := resultStruct.FieldByName("Text")
+	mediaField := resultStruct.FieldByName("Media")
 
-	return &gent.ToolCallResult{
-		Name:   toolName,
-		Output: outputField.Interface(),
-		Result: resultField.Interface().([]gent.ContentPart),
+	var media []gent.ContentPart
+	if mediaField.IsValid() && !mediaField.IsNil() {
+		media = mediaField.Interface().([]gent.ContentPart)
+	}
+
+	return &ToolCallOutput{
+		Name:  toolName,
+		Text:  textField.Interface(),
+		Media: media,
 	}, nil
 }
 
-// CallToolReflect calls a generic Tool[I, O] using reflection.
+// CallToolReflect calls a generic Tool[I, TextOutput] using reflection.
 //
 // It converts args (map[string]any) to the tool's input type. The conversion handles
 // type coercion from JSON Schema intermediary types to Go types:
@@ -171,7 +187,7 @@ func CallToolReflect(
 	ctx context.Context,
 	tool any,
 	args map[string]any,
-) (*gent.ToolCallResult, error) {
+) (*ToolCallOutput, error) {
 	typedInput, err := TransformArgsReflect(tool, args)
 	if err != nil {
 		return nil, err

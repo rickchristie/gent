@@ -89,7 +89,7 @@ func TestCallToolReflect_DateStringToTime(t *testing.T) {
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			require.NotNil(t, result)
-			output := result.Output.(string)
+			output := result.Text.(string)
 			assert.Equal(t, tt.expected.result, output)
 		})
 	}
@@ -157,7 +157,7 @@ func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			require.NotNil(t, result)
-			output := result.Output.(string)
+			output := result.Text.(string)
 			assert.Equal(t, tt.expected.result, output)
 		})
 	}
@@ -234,7 +234,7 @@ func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			require.NotNil(t, result)
-			output := result.Output.(string)
+			output := result.Text.(string)
 			assert.Equal(t, tt.expected.result, output)
 		})
 	}
@@ -267,7 +267,7 @@ func TestCallToolReflect_MixedTypes(t *testing.T) {
 
 	require.NoError(t, err)
 	expected := "test-event|2026-06-15|2h30m0s"
-	output := result.Output.(string)
+	output := result.Text.(string)
 	assert.Equal(t, expected, output)
 }
 
@@ -297,7 +297,7 @@ func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 	result, err := CallToolReflect(context.Background(), tool, args)
 
 	require.NoError(t, err)
-	output := result.Output.(string)
+	output := result.Text.(string)
 	assert.Equal(t, "is-a-string", output)
 }
 
@@ -325,7 +325,7 @@ func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 
 	require.NoError(t, err)
 	expected := "2026-01-20"
-	output := result.Output.(string)
+	output := result.Text.(string)
 	assert.Equal(t, expected, output)
 }
 

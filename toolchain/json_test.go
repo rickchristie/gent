@@ -8,11 +8,16 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/format"
 	"github.com/rickchristie/gent/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
 )
+
+// testFormat returns a TextFormat for use in tests.
+func testFormat() gent.TextFormat {
+	return format.NewXML()
+}
 
 func TestJSON_Name(t *testing.T) {
 	type input struct {
@@ -97,14 +102,14 @@ func TestJSON_RegisterTool(t *testing.T) {
 
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, testFormat())
 
 			if tt.expected.err != nil {
 				assert.ErrorIs(t, err, tt.expected.err)
 			} else {
 				require.NoError(t, err)
-				assert.Len(t, result.Calls, tt.expected.callCount)
-				assert.Equal(t, tt.expected.callName, result.Calls[0].Name)
+				assert.Len(t, result.Raw.Calls, tt.expected.callCount)
+				assert.Equal(t, tt.expected.callName, result.Raw.Calls[0].Name)
 			}
 		})
 	}
@@ -349,7 +354,7 @@ func TestJSON_Execute(t *testing.T) {
 			},
 			expected: expected{
 				callCount:   1,
-				results:     []string{`"Results for: weather"`},
+				results:     []string{`Results for: weather`},
 				errors:      []error{nil},
 				resultNames: []string{"search"},
 			},
@@ -412,7 +417,7 @@ func TestJSON_Execute(t *testing.T) {
 			},
 			expected: expected{
 				callCount:   2,
-				results:     []string{`"search result"`, `"calendar result"`},
+				results:     []string{`search result`, `calendar result`},
 				errors:      []error{nil, nil},
 				resultNames: []string{"search", "calendar"},
 			},
@@ -432,7 +437,7 @@ func TestJSON_Execute(t *testing.T) {
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, testFormat())
 
 			if tt.expected.executeErr != nil {
 				assert.ErrorIs(t, err, tt.expected.executeErr)
@@ -440,21 +445,21 @@ func TestJSON_Execute(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Len(t, result.Calls, tt.expected.callCount)
+			assert.Len(t, result.Raw.Calls, tt.expected.callCount)
 
 			for i, expectedResult := range tt.expected.results {
 				if tt.expected.errors[i] != nil {
-					assert.Error(t, result.Errors[i])
+					assert.Error(t, result.Raw.Errors[i])
 					if errors.Is(tt.expected.errors[i], gent.ErrUnknownTool) {
-						assert.ErrorIs(t, result.Errors[i], gent.ErrUnknownTool)
+						assert.ErrorIs(t, result.Raw.Errors[i], gent.ErrUnknownTool)
 					} else {
-						assert.Equal(t, tt.expected.errors[i].Error(), result.Errors[i].Error())
+						assert.Equal(t, tt.expected.errors[i].Error(), result.Raw.Errors[i].Error())
 					}
 				} else {
-					assert.NoError(t, result.Errors[i])
-					assert.Equal(t, expectedResult, getTextContent(result.Results[i].Result))
+					assert.NoError(t, result.Raw.Errors[i])
+					assert.Equal(t, expectedResult, getOutputString(result.Raw.Results[i].Output))
 					if len(tt.expected.resultNames) > i {
-						assert.Equal(t, tt.expected.resultNames[i], result.Results[i].Name)
+						assert.Equal(t, tt.expected.resultNames[i], result.Raw.Results[i].Name)
 					}
 				}
 			}
@@ -509,7 +514,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 				content: `{"tool": "search", "args": {"query": "weather"}}`,
 			},
 			expected: expected{
-				result:      `"Results for: weather"`,
+				result:      `Results for: weather`,
 				noToolError: true,
 			},
 		},
@@ -581,7 +586,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 				content: `{"tool": "flexible", "args": {"anything": "works", "numbers": 123}}`,
 			},
 			expected: expected{
-				result:      `"success"`,
+				result:      `success`,
 				noToolError: true,
 			},
 		},
@@ -610,7 +615,7 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 					`"passengers": 2}}`,
 			},
 			expected: expected{
-				result:      `"booked"`,
+				result:      `booked`,
 				noToolError: true,
 			},
 		},
@@ -657,18 +662,18 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 				tc.RegisterTool(tool)
 			}
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, testFormat())
 			require.NoError(t, err)
 
 			if tt.expected.noToolError {
-				assert.NoError(t, result.Errors[0])
-				require.NotNil(t, result.Results[0])
-				assert.Equal(t, tt.expected.result, getTextContent(result.Results[0].Result))
+				assert.NoError(t, result.Raw.Errors[0])
+				require.NotNil(t, result.Raw.Results[0])
+				assert.Equal(t, tt.expected.result, getOutputString(result.Raw.Results[0].Output))
 			} else {
-				require.Error(t, result.Errors[0])
-				assert.Contains(t, result.Errors[0].Error(), tt.expected.errContains)
+				require.Error(t, result.Raw.Errors[0])
+				assert.Contains(t, result.Raw.Errors[0].Error(), tt.expected.errContains)
 				if tt.expected.resultIsNil {
-					assert.Nil(t, result.Results[0])
+					assert.Nil(t, result.Raw.Results[0])
 				}
 			}
 		})
@@ -736,9 +741,9 @@ func TestJSON_ParseSection_DateAsString(t *testing.T) {
 			require.True(t, ok, "expected date to be string, got %T: %v", dateVal, dateVal)
 			assert.Equal(t, tt.expected.dateValue, dateStr)
 
-			execResult, err := tc.Execute(nil, tt.input.content)
+			execResult, err := tc.Execute(nil, tt.input.content, testFormat())
 			require.NoError(t, err)
-			assert.NoError(t, execResult.Errors[0])
+			assert.NoError(t, execResult.Raw.Errors[0])
 		})
 	}
 }
@@ -825,9 +830,9 @@ func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
 			require.True(t, ok, "expected string, got %T: %v", val, val)
 			assert.Equal(t, tt.expected.value, strVal)
 
-			execResult, err := tc.Execute(nil, content)
+			execResult, err := tc.Execute(nil, content, testFormat())
 			require.NoError(t, err)
-			assert.NoError(t, execResult.Errors[0])
+			assert.NoError(t, execResult.Raw.Errors[0])
 		})
 	}
 }
@@ -864,7 +869,7 @@ func TestJSON_Execute_TimeConversion(t *testing.T) {
 					`"timestamp": "2026-01-20T10:30:00Z"}}`,
 			},
 			expected: expected{
-				output: `"2026-01-20|2026-01-20T10:30:00Z"`,
+				output: `2026-01-20|2026-01-20T10:30:00Z`,
 			},
 		},
 	}
@@ -891,11 +896,11 @@ func TestJSON_Execute_TimeConversion(t *testing.T) {
 			)
 			tc.RegisterTool(tool)
 
-			result, err := tc.Execute(nil, tt.input.content)
+			result, err := tc.Execute(nil, tt.input.content, testFormat())
 			require.NoError(t, err)
-			require.NoError(t, result.Errors[0])
+			require.NoError(t, result.Raw.Errors[0])
 
-			output := getTextContent(result.Results[0].Result)
+			output := getOutputString(result.Raw.Results[0].Output)
 			assert.Equal(t, tt.expected.output, output)
 		})
 	}
@@ -918,22 +923,22 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 		{
 			name:     "hours and minutes",
 			input:    input{duration: "1h30m"},
-			expected: expected{output: `"1h30m0s"`},
+			expected: expected{output: `1h30m0s`},
 		},
 		{
 			name:     "just minutes",
 			input:    input{duration: "45m"},
-			expected: expected{output: `"45m0s"`},
+			expected: expected{output: `45m0s`},
 		},
 		{
 			name:     "with seconds",
 			input:    input{duration: "2h15m30s"},
-			expected: expected{output: `"2h15m30s"`},
+			expected: expected{output: `2h15m30s`},
 		},
 		{
 			name:     "milliseconds",
 			input:    input{duration: "500ms"},
-			expected: expected{output: `"500ms"`},
+			expected: expected{output: `500ms`},
 		},
 	}
 
@@ -962,11 +967,11 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 				tt.input.duration,
 			)
 
-			result, err := tc.Execute(nil, content)
+			result, err := tc.Execute(nil, content, testFormat())
 			require.NoError(t, err)
-			require.NoError(t, result.Errors[0])
+			require.NoError(t, result.Raw.Errors[0])
 
-			output := getTextContent(result.Results[0].Result)
+			output := getOutputString(result.Raw.Results[0].Output)
 			assert.Equal(t, tt.expected.output, output)
 		})
 	}
@@ -1423,15 +1428,15 @@ For multiple parallel calls, use an array:
 	}
 }
 
-// getTextContent extracts the text from a []gent.ContentPart (assumes single TextContent).
-func getTextContent(parts []gent.ContentPart) string {
-	if len(parts) == 0 {
+// getOutputString extracts a string from a raw output value.
+func getOutputString(output any) string {
+	if output == nil {
 		return ""
 	}
-	if tc, ok := parts[0].(llms.TextContent); ok {
-		return tc.Text
+	if s, ok := output.(string); ok {
+		return s
 	}
-	return ""
+	return fmt.Sprintf("%v", output)
 }
 
 // -----------------------------------------------------------------------------
@@ -1497,7 +1502,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original"},
 				toolReceived: map[string]any{"value": "modified"},
-				result:       `"received: modified"`,
+				result:       `received: modified`,
 			},
 		},
 		{
@@ -1512,7 +1517,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original"},
 				toolReceived: map[string]any{"value": "completely new"},
-				result:       `"received: completely new"`,
+				result:       `received: completely new`,
 			},
 		},
 		{
@@ -1528,7 +1533,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original"},
 				toolReceived: map[string]any{"value": "original", "extra": "added"},
-				result:       `"received: original"`,
+				result:       `received: original`,
 			},
 		},
 		{
@@ -1544,7 +1549,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "original", "remove": "this"},
 				toolReceived: map[string]any{"value": "original"},
-				result:       `"received: original"`,
+				result:       `received: original`,
 			},
 		},
 		{
@@ -1557,7 +1562,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				hookCalled:   true,
 				originalArgs: map[string]any{"value": "unchanged"},
 				toolReceived: map[string]any{"value": "unchanged"},
-				result:       `"received: unchanged"`,
+				result:       `received: unchanged`,
 			},
 		},
 	}
@@ -1590,7 +1595,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			execCtx.StartIteration()
 
 			// Execute
-			result, err := tc.Execute(execCtx, tt.input.content)
+			result, err := tc.Execute(execCtx, tt.input.content, testFormat())
 
 			require.NoError(t, err)
 			assert.True(t, hook.called, "hook should have been called")
@@ -1598,8 +1603,8 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				"hook should have seen original args")
 			assert.Equal(t, tt.expected.toolReceived, receivedArgs,
 				"tool should have received modified args")
-			assert.NoError(t, result.Errors[0])
-			assert.Equal(t, tt.expected.result, getTextContent(result.Results[0].Result))
+			assert.NoError(t, result.Raw.Errors[0])
+			assert.Equal(t, tt.expected.result, getOutputString(result.Raw.Results[0].Output))
 		})
 	}
 }
@@ -1671,11 +1676,11 @@ func TestJSON_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 			execCtx.SetHookFirer(registry)
 			execCtx.StartIteration()
 
-			result, err := tc.Execute(execCtx, tt.input.content)
+			result, err := tc.Execute(execCtx, tt.input.content, testFormat())
 
 			require.NoError(t, err)
-			assert.NoError(t, result.Errors[0])
-			assert.NoError(t, result.Errors[1])
+			assert.NoError(t, result.Raw.Errors[0])
+			assert.NoError(t, result.Raw.Errors[1])
 			assert.Equal(t, tt.expected.tool1Received, tool1Received)
 			assert.Equal(t, tt.expected.tool2Received, tool2Received)
 		})

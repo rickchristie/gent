@@ -1,6 +1,6 @@
 package gent
 
-// TextOutputSection defines a section within the LLM's text output. Each section knows how to
+// TextSection defines a section within the LLM's text output. Each section knows how to
 // describe itself and parse its content.
 //
 // The idea is, on each iteration we're asking the LLM to provide outputs, but there are actually
@@ -12,7 +12,7 @@ package gent
 // Each section can provide its own prompt instructions and parsing logic, making it easier
 // to compose complex outputs from the LLM.
 //
-// See: [TextOutputFormat] for how sections are structured in the overall output.
+// See: [TextFormat] for how sections are structured in the overall output.
 //
 // # Tracing Requirements for Implementors
 //
@@ -57,12 +57,12 @@ package gent
 //   - section.Text: Simple passthrough section (never fails)
 //   - section.JSON[T]: Parses JSON into type T with schema generation
 //   - section.YAML[T]: Parses YAML into type T with schema generation
-type TextOutputSection interface {
+type TextSection interface {
 	// Name returns the section identifier (e.g., "thinking", "action", "answer")
 	Name() string
 
 	// Guidance returns the guidance text that appears inside this section when
-	// TextOutputFormat.DescribeStructure() generates the format prompt for the LLM.
+	// TextFormat.DescribeStructure() generates the format prompt for the LLM.
 	//
 	// This can be either:
 	//   - Instructions telling the LLM what to write (e.g., "Write your final answer here")
@@ -79,3 +79,7 @@ type TextOutputSection interface {
 	// check for nil before tracing or updating stats.
 	ParseSection(execCtx *ExecutionContext, content string) (any, error)
 }
+
+// TextOutputSection is an alias for TextSection for backward compatibility.
+// Deprecated: Use TextSection instead.
+type TextOutputSection = TextSection

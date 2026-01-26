@@ -23,7 +23,7 @@ var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside anot
 //	{"tool": "search", "args": {"query": "weather"}}
 //	</action>
 type XML struct {
-	sections      []gent.TextOutputSection
+	sections      []gent.TextSection
 	knownSections map[string]string // lowercase key -> original name
 	strict        bool
 }
@@ -31,7 +31,7 @@ type XML struct {
 // NewXML creates a new XML format.
 func NewXML() *XML {
 	return &XML{
-		sections:      make([]gent.TextOutputSection, 0),
+		sections:      make([]gent.TextSection, 0),
 		knownSections: make(map[string]string),
 	}
 }
@@ -47,7 +47,7 @@ func (f *XML) WithStrict(strict bool) *XML {
 // RegisterSection adds a section to the format.
 // If a section with the same name already exists, it is not added again.
 // Returns self for chaining.
-func (f *XML) RegisterSection(section gent.TextOutputSection) gent.TextOutputFormat {
+func (f *XML) RegisterSection(section gent.TextSection) gent.TextFormat {
 	lowerName := strings.ToLower(section.Name())
 	if _, exists := f.knownSections[lowerName]; exists {
 		return f // Already registered
@@ -55,6 +55,21 @@ func (f *XML) RegisterSection(section gent.TextOutputSection) gent.TextOutputFor
 	f.sections = append(f.sections, section)
 	f.knownSections[lowerName] = section.Name() // Store original name
 	return f
+}
+
+// FormatSection formats a single section with XML tags.
+// Format: "<name>\ncontent\n</name>"
+func (f *XML) FormatSection(name string, content string) string {
+	return fmt.Sprintf("<%s>\n%s\n</%s>", name, content, name)
+}
+
+// WrapObservation wraps the observation text in <observation> tags.
+// Returns empty string if input is empty.
+func (f *XML) WrapObservation(text string) string {
+	if text == "" {
+		return ""
+	}
+	return fmt.Sprintf("<observation>\n%s\n</observation>", text)
 }
 
 // DescribeStructure generates the prompt explaining the output format structure.

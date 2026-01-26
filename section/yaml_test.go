@@ -86,7 +86,7 @@ func TestYAML_Prompt(t *testing.T) {
 				containsSchema:  true,
 				containsPrompt:  false,
 				containsExample: false,
-				promptPrefix:    "Respond with valid YAML matching this schema:",
+				promptPrefix:    "data content must be valid YAML matching this schema:",
 			},
 		},
 		{
@@ -123,7 +123,7 @@ func TestYAML_Prompt(t *testing.T) {
 				containsSchema:  true,
 				containsPrompt:  false,
 				containsExample: true,
-				promptPrefix:    "Respond with valid YAML matching this schema:",
+				promptPrefix:    "data content must be valid YAML matching this schema:",
 			},
 		},
 	}

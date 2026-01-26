@@ -76,10 +76,10 @@ type Agent struct {
 	systemTemplate     *template.Template
 	taskTemplate       *template.Template
 	model              gent.Model
-	format             gent.TextOutputFormat
+	format             gent.TextFormat
 	toolChain          gent.ToolChain
 	termination        gent.Termination
-	thinkingSection    gent.TextOutputSection
+	thinkingSection    gent.TextSection
 	timeProvider       gent.TimeProvider
 	useStreaming       bool
 }
@@ -179,7 +179,7 @@ func (r *Agent) WithTaskTemplateString(tmplStr string) (*Agent, error) {
 }
 
 // WithFormat sets the text output format.
-func (r *Agent) WithFormat(f gent.TextOutputFormat) *Agent {
+func (r *Agent) WithFormat(f gent.TextFormat) *Agent {
 	r.format = f
 	return r
 }
@@ -216,8 +216,8 @@ func (r *Agent) WithThinking(guidance string) *Agent {
 }
 
 // WithThinkingSection sets a custom thinking section.
-func (r *Agent) WithThinkingSection(section gent.TextOutputSection) *Agent {
-	r.thinkingSection = section
+func (r *Agent) WithThinkingSection(s gent.TextSection) *Agent {
+	r.thinkingSection = s
 	return r
 }
 
@@ -500,45 +500,37 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) string {
 }
 
 // executeToolCalls executes tool calls from the parsed action contents.
+// The result.Text is already fully formatted with section separators and wrapper
+// by the ToolChain using the TextFormat.
 func (r *Agent) executeToolCalls(
 	execCtx *gent.ExecutionContext,
 	contents []string,
 ) string {
-	var observations []string
+	var allText []string
 
 	for _, content := range contents {
-		result, err := r.toolChain.Execute(execCtx, content)
+		result, err := r.toolChain.Execute(execCtx, content, r.format)
 		if err != nil {
-			observations = append(observations, fmt.Sprintf("Error: %v", err))
+			// Format error using the text format
+			errorText := r.format.FormatSection("error", fmt.Sprintf("Error: %v", err))
+			allText = append(allText, r.format.WrapObservation(errorText))
 			continue
 		}
 
-		// Process results and errors
-		for i, toolResult := range result.Results {
-			if result.Errors[i] != nil {
-				observations = append(observations,
-					fmt.Sprintf("[%s] Error: %v", result.Calls[i].Name, result.Errors[i]))
-				continue
-			}
-			if toolResult != nil {
-				// Format tool result
-				var resultText strings.Builder
-				fmt.Fprintf(&resultText, "[%s]\n", toolResult.Name)
-				for _, part := range toolResult.Result {
-					if tc, ok := part.(llms.TextContent); ok {
-						resultText.WriteString(tc.Text)
-					}
-				}
-				observations = append(observations, resultText.String())
-			}
+		// result.Text is already fully formatted (sections + wrapper)
+		if result.Text != "" {
+			allText = append(allText, result.Text)
 		}
+
+		// TODO: Handle result.Media for multimodal support
+		// For now, media is not included in the observation text
 	}
 
-	if len(observations) == 0 {
+	if len(allText) == 0 {
 		return ""
 	}
 
-	return "<observation>\n" + strings.Join(observations, "\n") + "\n</observation>"
+	return strings.Join(allText, "\n")
 }
 
 // buildIteration creates an Iteration from response and observation.

@@ -23,7 +23,7 @@ type JSON[T any] struct {
 func NewJSON[T any](name string) *JSON[T] {
 	return &JSON[T]{
 		sectionName: name,
-		guidance:    "",
+		guidance:    "Write your final answer here.",
 	}
 }
 

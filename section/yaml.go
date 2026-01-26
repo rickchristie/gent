@@ -69,7 +69,8 @@ func (y *YAML[T]) Guidance() string {
 		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString("Respond with valid YAML matching this schema:\n")
+	sb.WriteString(y.sectionName)
+	sb.WriteString(" content must be valid YAML matching this schema:\n")
 
 	var zero T
 	schema := GenerateJSONSchema(reflect.TypeOf(zero))

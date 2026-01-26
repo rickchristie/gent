@@ -9,7 +9,6 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/schema"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // JSON expects tool calls in JSON format.
@@ -174,18 +173,28 @@ func (c *JSON) RegisterTool(tool any) gent.ToolChain {
 }
 
 // Execute parses tool calls from content and executes them.
+// The textFormat parameter is used to format the results - it must not be nil.
+//
 // When execCtx is provided, each tool call is automatically traced.
 // If execCtx is nil, tools are executed without tracing using context.Background().
+//
+// Panics if textFormat is nil.
 func (c *JSON) Execute(
 	execCtx *gent.ExecutionContext,
 	content string,
+	textFormat gent.TextFormat,
 ) (*gent.ToolChainResult, error) {
+	if textFormat == nil {
+		panic("textFormat must not be nil")
+	}
+
 	var ctx context.Context
 	if execCtx != nil {
 		ctx = execCtx.Context()
 	} else {
 		ctx = context.Background()
 	}
+
 	// ParseSection handles tracing of parse errors
 	parsed, err := c.ParseSection(execCtx, content)
 	if err != nil {
@@ -193,22 +202,31 @@ func (c *JSON) Execute(
 	}
 
 	calls := parsed.([]*gent.ToolCall)
-	result := &gent.ToolChainResult{
+	raw := &gent.RawToolChainResult{
 		Calls:   calls,
-		Results: make([]*gent.ToolCallResult, len(calls)),
+		Results: make([]*gent.RawToolCallResult, len(calls)),
 		Errors:  make([]error, len(calls)),
 	}
+
+	// Collect formatted sections and media
+	var sections []gent.FormattedSection
+	var allMedia []gent.ContentPart
 
 	for i, call := range calls {
 		tool, ok := c.toolMap[call.Name]
 		if !ok {
-			result.Errors[i] = fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
+			raw.Errors[i] = fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
+			// Add error as a section
+			sections = append(sections, gent.FormattedSection{
+				Name:    call.Name,
+				Content: fmt.Sprintf("Error: %v", raw.Errors[i]),
+			})
 			// Trace the failed call if execCtx is provided
 			if execCtx != nil {
 				execCtx.Trace(gent.ToolCallTrace{
 					ToolName: call.Name,
 					Input:    call.Args,
-					Error:    result.Errors[i],
+					Error:    raw.Errors[i],
 				})
 			}
 			continue
@@ -217,11 +235,14 @@ func (c *JSON) Execute(
 		// Validate args against schema before transformation
 		if compiledSchema, hasSchema := c.schemaMap[call.Name]; hasSchema {
 			if validationErr := compiledSchema.Validate(call.Args); validationErr != nil {
-				result.Errors[i] = validationErr
+				raw.Errors[i] = validationErr
+				sections = append(sections, gent.FormattedSection{
+					Name:    call.Name,
+					Content: fmt.Sprintf("Error: %v", validationErr),
+				})
 
 				if execCtx != nil {
-					// Fire AfterToolCall with validation error (Args is nil since we
-					// couldn't transform)
+					// Fire AfterToolCall with validation error
 					execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
 						ToolName: call.Name,
 						Args:     nil,
@@ -242,7 +263,11 @@ func (c *JSON) Execute(
 		// Transform raw args to typed input
 		typedInput, transformErr := TransformArgsReflect(tool, call.Args)
 		if transformErr != nil {
-			result.Errors[i] = transformErr
+			raw.Errors[i] = transformErr
+			sections = append(sections, gent.FormattedSection{
+				Name:    call.Name,
+				Content: fmt.Sprintf("Error: %v", transformErr),
+			})
 			if execCtx != nil {
 				execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
 					ToolName: call.Name,
@@ -275,16 +300,42 @@ func (c *JSON) Execute(
 		duration := time.Since(startTime)
 
 		if err != nil {
-			result.Errors[i] = err
+			raw.Errors[i] = err
+			sections = append(sections, gent.FormattedSection{
+				Name:    call.Name,
+				Content: fmt.Sprintf("Error: %v", err),
+			})
 		} else {
-			// Format output as JSON (toolchain owns formatting responsibility)
-			result.Results[i] = c.formatOutput(output)
+			// Store raw result
+			raw.Results[i] = &gent.RawToolCallResult{
+				Name:   output.Name,
+				Output: output.Text,
+			}
+
+			// Format output as JSON
+			jsonData, marshalErr := json.Marshal(output.Text)
+			if marshalErr != nil {
+				sections = append(sections, gent.FormattedSection{
+					Name:    call.Name,
+					Content: "error: failed to marshal output",
+				})
+			} else {
+				sections = append(sections, gent.FormattedSection{
+					Name:    call.Name,
+					Content: string(jsonData),
+				})
+			}
+
+			// Collect media from tool result
+			if len(output.Media) > 0 {
+				allMedia = append(allMedia, output.Media...)
+			}
 		}
 
 		// Fire AfterToolCall hook with typed input
 		var outputVal any
 		if output != nil {
-			outputVal = output.Output
+			outputVal = output.Text
 		}
 		if execCtx != nil {
 			execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
@@ -306,29 +357,23 @@ func (c *JSON) Execute(
 		}
 	}
 
-	return result, nil
-}
-
-// formatOutput formats the tool output as JSON for LLM consumption.
-func (c *JSON) formatOutput(output *gent.ToolCallResult) *gent.ToolCallResult {
-	if output == nil {
-		return nil
-	}
-
-	data, err := json.Marshal(output.Output)
-	if err != nil {
-		return &gent.ToolCallResult{
-			Name:   output.Name,
-			Output: output.Output,
-			Result: []gent.ContentPart{llms.TextContent{Text: "error: failed to marshal output"}},
+	// Build formatted text using TextFormat
+	var textBuilder strings.Builder
+	for i, section := range sections {
+		if i > 0 {
+			textBuilder.WriteString("\n")
 		}
+		textBuilder.WriteString(textFormat.FormatSection(section.Name, section.Content))
 	}
 
-	return &gent.ToolCallResult{
-		Name:   output.Name,
-		Output: output.Output,
-		Result: []gent.ContentPart{llms.TextContent{Text: string(data)}},
-	}
+	// Wrap the observation
+	formattedText := textFormat.WrapObservation(textBuilder.String())
+
+	return &gent.ToolChainResult{
+		Text:  formattedText,
+		Media: allMedia,
+		Raw:   raw,
+	}, nil
 }
 
 // Compile-time check that JSON implements gent.ToolChain.

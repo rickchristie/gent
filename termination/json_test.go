@@ -48,12 +48,14 @@ func TestJSON_Name(t *testing.T) {
 
 func TestJSON_Prompt(t *testing.T) {
 	type input struct {
-		promptText string
+		promptText  string
+		useCustom   bool
 	}
 
 	type expected struct {
 		containsPrompt bool
 		containsType   bool
+		promptText     string
 	}
 
 	tests := []struct {
@@ -62,11 +64,21 @@ func TestJSON_Prompt(t *testing.T) {
 		expected expected
 	}{
 		{
-			name:  "custom prompt with type info",
-			input: input{promptText: "Provide the result"},
+			name:  "default guidance",
+			input: input{useCustom: false},
 			expected: expected{
 				containsPrompt: true,
 				containsType:   true,
+				promptText:     "Write your final answer here.",
+			},
+		},
+		{
+			name:  "custom prompt with type info",
+			input: input{promptText: "Provide the result", useCustom: true},
+			expected: expected{
+				containsPrompt: true,
+				containsType:   true,
+				promptText:     "Provide the result",
 			},
 		},
 	}
@@ -74,13 +86,15 @@ func TestJSON_Prompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			term := NewJSON[string]("answer")
-			term.WithGuidance(tt.input.promptText)
+			if tt.input.useCustom {
+				term.WithGuidance(tt.input.promptText)
+			}
 
 			prompt := term.Guidance()
 
 			if tt.expected.containsPrompt {
-				assert.True(t, strings.Contains(prompt, tt.input.promptText),
-					"prompt should contain %q", tt.input.promptText)
+				assert.True(t, strings.Contains(prompt, tt.expected.promptText),
+					"prompt should contain %q", tt.expected.promptText)
 			}
 			if tt.expected.containsType {
 				assert.True(t, strings.Contains(prompt, "string"),

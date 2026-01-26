@@ -70,7 +70,8 @@ func (j *JSON[T]) Guidance() string {
 		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString("Respond with valid JSON matching this schema:\n")
+	sb.WriteString(j.sectionName)
+	sb.WriteString(" content must be valid JSON matching this schema:\n")
 
 	var zero T
 	schema := GenerateJSONSchema(reflect.TypeOf(zero))

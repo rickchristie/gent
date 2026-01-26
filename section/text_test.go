@@ -47,9 +47,9 @@ func TestText_Guidance(t *testing.T) {
 		{
 			name: "default guidance",
 			input: func() *Text {
-				return NewText("test")
+				return NewText("thinking")
 			},
-			expected: "Write your response here.",
+			expected: "thinking content goes here...",
 		},
 		{
 			name: "custom guidance",
@@ -59,11 +59,11 @@ func TestText_Guidance(t *testing.T) {
 			expected: "Think step by step about the problem.",
 		},
 		{
-			name: "empty guidance",
+			name: "empty guidance returns default",
 			input: func() *Text {
-				return NewText("test").WithGuidance("")
+				return NewText("reasoning").WithGuidance("")
 			},
-			expected: "",
+			expected: "reasoning content goes here...",
 		},
 		{
 			name: "multiline guidance",

@@ -22,7 +22,7 @@ type Text struct {
 func NewText(name string) *Text {
 	return &Text{
 		sectionName: name,
-		guidance:    "Write your response here.",
+		guidance:    "",
 	}
 }
 
@@ -42,7 +42,11 @@ func (t *Text) Name() string {
 }
 
 // Guidance returns the guidance text for this section.
+// If no custom guidance is set, returns a default based on the section name.
 func (t *Text) Guidance() string {
+	if t.guidance == "" {
+		return t.sectionName + " content goes here..."
+	}
 	return t.guidance
 }
 

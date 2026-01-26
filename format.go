@@ -2,10 +2,22 @@ package gent
 
 import "errors"
 
-// TextOutputFormat defines how sections are structured in the LLM output.
-// It handles the "envelope" - how sections are delimited and extracted.
+// FormattedSection represents a section with its name and formatted content.
+// Used when building observation output via TextFormat.FormatSections.
+type FormattedSection struct {
+	Name    string
+	Content string
+}
+
+// TextFormat defines how sections are structured in the LLM output and how to format
+// sections for input to the LLM.
 //
-// See: [TextOutputSection] for section definitions.
+// It handles the "envelope" - how sections are delimited, extracted, and formatted.
+// This interface is used bidirectionally:
+//   - Parsing: Extract sections from LLM output (Parse method)
+//   - Formatting: Build section-delimited text for LLM input (FormatSection, WrapObservation)
+//
+// See: [TextSection] for section definitions.
 //
 // # Tracing Requirements for Implementors
 //
@@ -38,11 +50,11 @@ import "errors"
 //	    }
 //	    return result, nil
 //	}
-type TextOutputFormat interface {
+type TextFormat interface {
 	// RegisterSection adds a section to the format. The section name is used for
 	// both DescribeStructure output and Parse recognition.
 	// Returns self for chaining.
-	RegisterSection(section TextOutputSection) TextOutputFormat
+	RegisterSection(section TextSection) TextFormat
 
 	// DescribeStructure generates the prompt explaining the output format structure.
 	// It shows the tag/header format with brief placeholders, without including
@@ -59,7 +71,24 @@ type TextOutputFormat interface {
 	// The execCtx parameter may be nil (e.g., in unit tests). Implementations should
 	// check for nil before tracing or updating stats.
 	Parse(execCtx *ExecutionContext, output string) (map[string][]string, error)
+
+	// FormatSection formats a single section with its name and content.
+	// The format depends on the implementation (e.g., "# name\ncontent" for Markdown,
+	// "<name>\ncontent\n</name>" for XML).
+	FormatSection(name string, content string) string
+
+	// WrapObservation wraps the complete observation text with format-specific delimiters.
+	// For XML format, this wraps in <observation>...</observation> tags.
+	// For Markdown format, this may return the text as-is or add a header.
+	//
+	// This method should be called after all sections are formatted and joined.
+	// If the input is empty, returns an empty string.
+	WrapObservation(text string) string
 }
+
+// TextOutputFormat is an alias for TextFormat for backward compatibility.
+// Deprecated: Use TextFormat instead.
+type TextOutputFormat = TextFormat
 
 // Parse errors
 var (
