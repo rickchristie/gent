@@ -90,7 +90,7 @@ Second action content.`,
 			},
 		},
 		{
-			name: "case insensitive",
+			name: "case insensitive returns original registered name",
 			input: input{
 				sections: []string{"Thinking"},
 				output: `# THINKING

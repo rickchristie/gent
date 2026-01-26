@@ -85,16 +85,16 @@ Second action content.
 			},
 		},
 		{
-			name: "case insensitive",
+			name: "case insensitive returns original registered name",
 			input: input{
-				sections: []string{"thinking"},
+				sections: []string{"Thinking"},
 				output: `<THINKING>
 Case insensitive content.
 </THINKING>`,
 			},
 			expected: expected{
 				sections: map[string][]string{
-					"thinking": {"Case insensitive content."},
+					"Thinking": {"Case insensitive content."},
 				},
 				err: nil,
 			},
