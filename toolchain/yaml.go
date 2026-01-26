@@ -58,13 +58,8 @@ func (c *YAML) Name() string {
 	return c.sectionName
 }
 
-// Guidance returns a brief guidance text for the action section.
+// Guidance returns format instructions for how to call tools using YAML.
 func (c *YAML) Guidance() string {
-	return "Call a tool to take action."
-}
-
-// AvailableToolsPrompt returns the full tool catalog with format instructions and schemas.
-func (c *YAML) AvailableToolsPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("Call tools using YAML format:\n")
 	sb.WriteString("tool: tool_name\n")
@@ -82,8 +77,14 @@ func (c *YAML) AvailableToolsPrompt() string {
 	sb.WriteString("- tool: send_email\n")
 	sb.WriteString("  args:\n")
 	sb.WriteString("    subject: \"Unsubscribe Confirmation: Newsletter\"\n")
-	sb.WriteString("    body: \"You have been unsubscribed.\\n\\nYou will no longer receive emails.\"\n")
-	sb.WriteString("\nAvailable tools:\n")
+	sb.WriteString("    body: \"You have been unsubscribed.\\n\\nYou will no longer receive emails.\"")
+	return sb.String()
+}
+
+// AvailableToolsPrompt returns the tool catalog with parameter schemas for each registered tool.
+func (c *YAML) AvailableToolsPrompt() string {
+	var sb strings.Builder
+	sb.WriteString("Available tools:\n")
 
 	for _, tool := range c.tools {
 		meta, err := GetToolMeta(tool)

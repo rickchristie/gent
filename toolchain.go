@@ -46,9 +46,12 @@ type ToolChain interface {
 	// Returns self for chaining.
 	RegisterTool(tool any) ToolChain
 
-	// AvailableToolsPrompt returns the full tool catalog including format instructions
-	// and parameter schemas for each registered tool. This should be placed in the
-	// system prompt to inform the LLM about available tools.
+	// AvailableToolsPrompt returns the tool catalog with parameter schemas for each
+	// registered tool. This should be placed in the system prompt to inform the LLM
+	// about available tools.
+	//
+	// Note: Format instructions for how to call tools are provided by Guidance(),
+	// which is inherited from TextOutputSection.
 	AvailableToolsPrompt() string
 
 	// Execute parses tool calls from content and executes them.

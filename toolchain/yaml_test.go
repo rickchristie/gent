@@ -123,9 +123,28 @@ func TestYAML_Prompt(t *testing.T) {
 	)
 	tc.RegisterTool(tool)
 
-	prompt := tc.Guidance()
+	guidance := tc.Guidance()
 
-	assert.Equal(t, "Call a tool to take action.", prompt)
+	expectedGuidance := `Call tools using YAML format:
+tool: tool_name
+args:
+  param: value
+
+For multiple parallel calls, use a list:
+- tool: tool1
+  args:
+    param: value
+- tool: tool2
+  args:
+    param: value
+
+For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+- tool: send_email
+  args:
+    subject: "Unsubscribe Confirmation: Newsletter"
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails."`
+
+	assert.Equal(t, expectedGuidance, guidance)
 }
 
 func TestYAML_AvailableToolsPrompt(t *testing.T) {
@@ -136,7 +155,7 @@ func TestYAML_AvailableToolsPrompt(t *testing.T) {
 	}
 
 	type expected struct {
-		prompt string
+		catalog string
 	}
 
 	tests := []struct {
@@ -157,26 +176,7 @@ func TestYAML_AvailableToolsPrompt(t *testing.T) {
 				},
 			},
 			expected: expected{
-				prompt: `Call tools using YAML format:
-tool: tool_name
-args:
-  param: value
-
-For multiple parallel calls, use a list:
-- tool: tool1
-  args:
-    param: value
-- tool: tool2
-  args:
-    param: value
-
-For strings with special characters (colons, quotes) or multiple lines, use double quotes:
-- tool: send_email
-  args:
-    subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
-
-Available tools:
+				catalog: `Available tools:
 
 - search: Search the web
   Parameters:
@@ -202,9 +202,9 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.AvailableToolsPrompt()
+			catalog := tc.AvailableToolsPrompt()
 
-			assert.Equal(t, tt.expected.prompt, prompt)
+			assert.Equal(t, tt.expected.catalog, catalog)
 		})
 	}
 }
@@ -1103,30 +1103,10 @@ func TestYAML_AvailableToolsPrompt_SchemaFeatures(t *testing.T) {
 	}
 
 	type expected struct {
-		prompt string
+		catalog string
 	}
 
-	basePromptPrefix := `Call tools using YAML format:
-tool: tool_name
-args:
-  param: value
-
-For multiple parallel calls, use a list:
-- tool: tool1
-  args:
-    param: value
-- tool: tool2
-  args:
-    param: value
-
-For strings with special characters (colons, quotes) or multiple lines, use double quotes:
-- tool: send_email
-  args:
-    subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
-
-Available tools:
-`
+	baseCatalogPrefix := "Available tools:\n"
 
 	tests := []struct {
 		name     string
@@ -1145,7 +1125,7 @@ Available tools:
 				}, "origin", "destination", "date"),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - search_flights: Search for available flights
   Parameters:
     properties:
@@ -1178,7 +1158,7 @@ Available tools:
 				}, "name", "email"),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - create_user: Create a new user
   Parameters:
     properties:
@@ -1208,7 +1188,7 @@ Available tools:
 				}),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - book_flight: Book a flight
   Parameters:
     properties:
@@ -1233,7 +1213,7 @@ Available tools:
 				}, "quantity"),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - set_quantity: Set item quantity
   Parameters:
     properties:
@@ -1259,7 +1239,7 @@ Available tools:
 				}, "query"),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - search: Search for items
   Parameters:
     properties:
@@ -1290,7 +1270,7 @@ Available tools:
 				}, "name"),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - complex_tool: A tool with multiple types
   Parameters:
     properties:
@@ -1325,7 +1305,7 @@ Available tools:
 				schema:          nil,
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - simple_tool: A simple tool without schema
 `,
 			},
@@ -1342,7 +1322,7 @@ Available tools:
 				}, "username", "email"),
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: baseCatalogPrefix + `
 - validate_input: Validate user input
   Parameters:
     properties:
@@ -1381,9 +1361,9 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.AvailableToolsPrompt()
+			catalog := tc.AvailableToolsPrompt()
 
-			assert.Equal(t, tt.expected.prompt, prompt)
+			assert.Equal(t, tt.expected.catalog, catalog)
 		})
 	}
 }
@@ -1400,30 +1380,8 @@ func TestYAML_AvailableToolsPrompt_MultipleTools(t *testing.T) {
 	}
 
 	type expected struct {
-		prompt string
+		catalog string
 	}
-
-	basePromptPrefix := `Call tools using YAML format:
-tool: tool_name
-args:
-  param: value
-
-For multiple parallel calls, use a list:
-- tool: tool1
-  args:
-    param: value
-- tool: tool2
-  args:
-    param: value
-
-For strings with special characters (colons, quotes) or multiple lines, use double quotes:
-- tool: send_email
-  args:
-    subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
-
-Available tools:
-`
 
 	tests := []struct {
 		name     string
@@ -1451,7 +1409,8 @@ Available tools:
 				},
 			},
 			expected: expected{
-				prompt: basePromptPrefix + `
+				catalog: `Available tools:
+
 - search: Search for information
   Parameters:
     properties:
@@ -1491,16 +1450,16 @@ Available tools:
 				tc.RegisterTool(tool)
 			}
 
-			prompt := tc.AvailableToolsPrompt()
+			catalog := tc.AvailableToolsPrompt()
 
-			assert.Equal(t, tt.expected.prompt, prompt)
+			assert.Equal(t, tt.expected.catalog, catalog)
 		})
 	}
 }
 
-func TestYAML_AvailableToolsPrompt_FormatInstructions(t *testing.T) {
+func TestYAML_Guidance_FormatInstructions(t *testing.T) {
 	type expected struct {
-		prompt string
+		guidance string
 	}
 
 	tests := []struct {
@@ -1510,7 +1469,7 @@ func TestYAML_AvailableToolsPrompt_FormatInstructions(t *testing.T) {
 		{
 			name: "format instructions present",
 			expected: expected{
-				prompt: `Call tools using YAML format:
+				guidance: `Call tools using YAML format:
 tool: tool_name
 args:
   param: value
@@ -1527,12 +1486,7 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 - tool: send_email
   args:
     subject: "Unsubscribe Confirmation: Newsletter"
-    body: "You have been unsubscribed.\n\nYou will no longer receive emails."
-
-Available tools:
-
-- test: Test tool
-`,
+    body: "You have been unsubscribed.\n\nYou will no longer receive emails."`,
 			},
 		},
 	}
@@ -1550,9 +1504,9 @@ Available tools:
 			)
 			tc.RegisterTool(tool)
 
-			prompt := tc.AvailableToolsPrompt()
+			guidance := tc.Guidance()
 
-			assert.Equal(t, tt.expected.prompt, prompt)
+			assert.Equal(t, tt.expected.guidance, guidance)
 		})
 	}
 }

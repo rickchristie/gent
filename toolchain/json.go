@@ -52,19 +52,20 @@ func (c *JSON) Name() string {
 	return c.sectionName
 }
 
-// Guidance returns a brief guidance text for the action section.
+// Guidance returns format instructions for how to call tools using JSON.
 func (c *JSON) Guidance() string {
-	return "Call a tool to take action."
-}
-
-// AvailableToolsPrompt returns the full tool catalog with format instructions and schemas.
-func (c *JSON) AvailableToolsPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("Call tools using JSON format:\n")
 	sb.WriteString(`{"tool": "tool_name", "args": {...}}`)
 	sb.WriteString("\n\nFor multiple parallel calls, use an array:\n")
 	sb.WriteString(`[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]`)
-	sb.WriteString("\n\nAvailable tools:\n")
+	return sb.String()
+}
+
+// AvailableToolsPrompt returns the tool catalog with parameter schemas for each registered tool.
+func (c *JSON) AvailableToolsPrompt() string {
+	var sb strings.Builder
+	sb.WriteString("Available tools:\n")
 
 	for _, tool := range c.tools {
 		meta, err := GetToolMeta(tool)
