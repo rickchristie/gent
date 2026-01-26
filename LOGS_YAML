@@ -1,6 +1,6 @@
-Running tool: /home/ricky/.gobrew/current/go/bin/go test -test.fullpath=true -timeout 15m -run ^TestRescheduleScenario$ github.com/rickchristie/gent/integrationtest/airline -v -count=1
+Running tool: /home/ricky/.gobrew/current/go/bin/go test -test.fullpath=true -timeout 15m -run ^TestRescheduleScenarioYAML$ github.com/rickchristie/gent/integrationtest/airline -v -count=1
 
-=== RUN   TestRescheduleScenario
+=== RUN   TestRescheduleScenarioYAML
 ================================================================================
 AIRLINE RESCHEDULE SCENARIO
 ================================================================================
@@ -13,7 +13,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 --- Agent Execution ---
 
 
->>> [BeforeExecution]: 2026-01-26 01:12:14.181
+>>> [BeforeExecution]: 2026-01-26 17:53:18.790
 ================================================================================
 EXECUTION STARTED
 ================================================================================
@@ -24,12 +24,12 @@ Task:
 I have a flight booked for tomorrow (flight AA100 from JFK to LAX) but my meeting is running late.
 Can you help me reschedule to a later flight on the same day? I'd prefer an evening flight if possible.
 
->>> [BeforeIteration 1]: 2026-01-26 01:12:14.181
+>>> [BeforeIteration 1]: 2026-01-26 17:53:18.790
 --------------------------------------------------------------------------------
 ITERATION 1 START
 --------------------------------------------------------------------------------
 
->>> [BeforeModelCall: grok-4-1-fast]: 2026-01-26 01:12:14.181
+>>> [BeforeModelCall: grok-4-1-fast]: 2026-01-26 17:53:18.790
 Request:
   [0] Role: system
       Content:
@@ -78,25 +78,6 @@ Request:
         </critical_rules>
 
         <available_tools>
-        Call tools using YAML format:
-        tool: tool_name
-        args:
-          param: value
-
-        For multiple parallel calls, use a list:
-        - tool: tool1
-          args:
-            param: value
-        - tool: tool2
-          args:
-            param: value
-
-        For strings with special characters (colons, quotes) or multiple lines, use double quotes:
-        - tool: send_email
-          args:
-            subject: "Unsubscribe Confirmation: Newsletter"
-            body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
-
         Available tools:
 
         - get_customer_info: Retrieve customer information by customer ID or email address
@@ -234,13 +215,30 @@ Request:
         Format your response using XML-style tags for each section:
 
         <thinking>
-        ... thinking content here ...
+        Think step by step about how to help the customer.
         </thinking>
         <action>
-        ... action content here ...
+        Call tools using YAML format:
+        tool: tool_name
+        args:
+          param: value
+
+        For multiple parallel calls, use a list:
+        - tool: tool1
+          args:
+            param: value
+        - tool: tool2
+          args:
+            param: value
+
+        For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+        - tool: send_email
+          args:
+            subject: "Unsubscribe Confirmation: Newsletter"
+            body: "You have been unsubscribed.\n\nYou will no longer receive emails."
         </action>
         <answer>
-        ... answer content here ...
+        Write your final answer here.
         </answer>
 
         </output_format>
@@ -256,40 +254,43 @@ Request:
 
 
 
->>> [AfterModelCall: grok-4-1-fast (duration: 9.425699603s)]: 2026-01-26 01:12:23.607
+>>> [AfterModelCall: grok-4-1-fast (duration: 15.784990854s)]: 2026-01-26 17:53:34.576
 Choice[0]:
   Content:
     <thinking>
-    Customer is John Smith, email john.smith@email.com, wants to reschedule booking for flight AA100 from JFK to LAX on tomorrow (2026-01-27) to a later flight same day, preferably evening.
+    Customer: John Smith, email john.smith@email.com. Booked flight AA100 JFK-LAX on 2026-01-27 (tomorrow). Wants later flight same day, evening preferred.
 
-    To proceed with rescheduling per guidelines:
-    1. Verify identity and booking: Use get_customer_info with email to retrieve customer details (likely including customer ID and bookings).
-    2. Confirm current flight details: Use get_flight_info for AA100 to know departure time, so I can find later alternatives.
-    3. Check change policy: Use search_airline_policy with keyword "change" to inform about fees/rules.
+    Steps required:
+    1. Verify identity/booking: Use get_customer_info by email to get customer ID and any booking details.
+    2. Confirm original flight: get_flight_info for AA100 to know departure time/route/date.
+    3. Check policy: search_airline_policy for 'change'.
+    4. No booking ID yet, so can't get_booking_info until I have it from customer info.
+    5. Once have original details, search for alternatives: search_flight_schedule JFK to LAX on 2026-01-27, later than AA100's time.
+    6. Then inform fees, get confirmation before reschedule.
 
-    No booking ID provided yet, so customer info should provide it. Date for alternatives is 2026-01-27. Will search flights after getting current flight time.
-
-    Parallel tool calls for efficiency.
+    First actions: Gather customer info, flight info, policy.
+    Parallel calls for efficiency.
     </thinking>
     <action>
     - tool: get_customer_info
       args:
-        email: john.smith@email.com
+        email: "john.smith@email.com"
     - tool: get_flight_info
       args:
-        flight_number: AA100
+        flight_number: "AA100"
     - tool: search_airline_policy
       args:
-        keyword: change
+        keyword: "change"
     </action>
   StopReason: stop
-Tokens: input=1489, output=233, total=2471
+Tokens: input=1489, output=252, total=2243
 
->>> [BeforeToolCall: get_customer_info]: 2026-01-26 01:12:23.607
+>>> [BeforeToolCall: get_customer_info]: 2026-01-26 17:53:34.576
 Args:
+customerid: ""
 email: john.smith@email.com
 
->>> [AfterToolCall: get_customer_info (duration: 35.619µs)]: 2026-01-26 01:12:23.607
+>>> [AfterToolCall: get_customer_info (duration: 12.05µs)]: 2026-01-26 17:53:34.576
 Output:
 id: C001
 name: John Smith
@@ -300,11 +301,11 @@ bookingids:
     - BK001
     - BK002
 
->>> [BeforeToolCall: get_flight_info]: 2026-01-26 01:12:23.607
+>>> [BeforeToolCall: get_flight_info]: 2026-01-26 17:53:34.576
 Args:
-flight_number: AA100
+flightnumber: AA100
 
->>> [AfterToolCall: get_flight_info (duration: 10.289µs)]: 2026-01-26 01:12:23.607
+>>> [AfterToolCall: get_flight_info (duration: 4.97µs)]: 2026-01-26 17:53:34.576
 Output:
 flightnumber: AA100
 origin: JFK
@@ -318,11 +319,11 @@ economyprice: 299
 businessprice: 899
 firstclassprice: 1599
 
->>> [BeforeToolCall: search_airline_policy]: 2026-01-26 01:12:23.607
+>>> [BeforeToolCall: search_airline_policy]: 2026-01-26 17:53:34.576
 Args:
 keyword: change
 
->>> [AfterToolCall: search_airline_policy (duration: 13.689µs)]: 2026-01-26 01:12:23.608
+>>> [AfterToolCall: search_airline_policy (duration: 9.489µs)]: 2026-01-26 17:53:34.576
 Output:
 - title: Flight Change and Rescheduling Policy
   content: |-
@@ -340,17 +341,18 @@ Output:
     - Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
     - Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles
 
->>> [AfterIteration 1]: 2026-01-26 01:12:23.608
+>>> [AfterIteration 1]: 2026-01-26 17:53:34.576
 --------------------------------------------------------------------------------
 ITERATION 1 END
 --------------------------------------------------------------------------------
-Duration: 9.426652367s
+Duration: 15.785774335s
 
 AgentLoopResult:
 action: c
 next_prompt: |-
     <observation>
-    [get_customer_info] id: C001
+    <get_customer_info>
+    id: C001
     name: John Smith
     email: john.smith@email.com
     phone: +1-555-0123
@@ -358,8 +360,9 @@ next_prompt: |-
     bookingids:
         - BK001
         - BK002
-
-    [get_flight_info] flightnumber: AA100
+    </get_customer_info>
+    <get_flight_info>
+    flightnumber: AA100
     origin: JFK
     destination: LAX
     departuretime: 2026-01-27T08:00:00Z
@@ -370,8 +373,9 @@ next_prompt: |-
     economyprice: 299
     businessprice: 899
     firstclassprice: 1599
-
-    [search_airline_policy] - title: Flight Change and Rescheduling Policy
+    </get_flight_info>
+    <search_airline_policy>
+    - title: Flight Change and Rescheduling Policy
       content: |-
         Customers may change or reschedule their flights subject to the following:
         - Changes made 24+ hours before departure: $50 change fee for economy, free for business/first class
@@ -386,15 +390,15 @@ next_prompt: |-
         - Silver: Priority boarding, lounge access on international, 25% bonus miles
         - Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
         - Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles
-
+    </search_airline_policy>
     </observation>
 
->>> [BeforeIteration 2]: 2026-01-26 01:12:23.608
+>>> [BeforeIteration 2]: 2026-01-26 17:53:34.576
 --------------------------------------------------------------------------------
 ITERATION 2 START
 --------------------------------------------------------------------------------
 
->>> [BeforeModelCall: grok-4-1-fast]: 2026-01-26 01:12:23.608
+>>> [BeforeModelCall: grok-4-1-fast]: 2026-01-26 17:53:34.576
 Request:
   [0] Role: system
       Content:
@@ -443,25 +447,6 @@ Request:
         </critical_rules>
 
         <available_tools>
-        Call tools using YAML format:
-        tool: tool_name
-        args:
-          param: value
-
-        For multiple parallel calls, use a list:
-        - tool: tool1
-          args:
-            param: value
-        - tool: tool2
-          args:
-            param: value
-
-        For strings with special characters (colons, quotes) or multiple lines, use double quotes:
-        - tool: send_email
-          args:
-            subject: "Unsubscribe Confirmation: Newsletter"
-            body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
-
         Available tools:
 
         - get_customer_info: Retrieve customer information by customer ID or email address
@@ -599,13 +584,30 @@ Request:
         Format your response using XML-style tags for each section:
 
         <thinking>
-        ... thinking content here ...
+        Think step by step about how to help the customer.
         </thinking>
         <action>
-        ... action content here ...
+        Call tools using YAML format:
+        tool: tool_name
+        args:
+          param: value
+
+        For multiple parallel calls, use a list:
+        - tool: tool1
+          args:
+            param: value
+        - tool: tool2
+          args:
+            param: value
+
+        For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+        - tool: send_email
+          args:
+            subject: "Unsubscribe Confirmation: Newsletter"
+            body: "You have been unsubscribed.\n\nYou will no longer receive emails."
         </action>
         <answer>
-        ... answer content here ...
+        Write your final answer here.
         </answer>
 
         </output_format>
@@ -618,30 +620,33 @@ Request:
         </task>
 
         <thinking>
-        Customer is John Smith, email john.smith@email.com, wants to reschedule booking for flight AA100 from JFK to LAX on tomorrow (2026-01-27) to a later flight same day, preferably evening.
+        Customer: John Smith, email john.smith@email.com. Booked flight AA100 JFK-LAX on 2026-01-27 (tomorrow). Wants later flight same day, evening preferred.
 
-        To proceed with rescheduling per guidelines:
-        1. Verify identity and booking: Use get_customer_info with email to retrieve customer details (likely including customer ID and bookings).
-        2. Confirm current flight details: Use get_flight_info for AA100 to know departure time, so I can find later alternatives.
-        3. Check change policy: Use search_airline_policy with keyword "change" to inform about fees/rules.
+        Steps required:
+        1. Verify identity/booking: Use get_customer_info by email to get customer ID and any booking details.
+        2. Confirm original flight: get_flight_info for AA100 to know departure time/route/date.
+        3. Check policy: search_airline_policy for 'change'.
+        4. No booking ID yet, so can't get_booking_info until I have it from customer info.
+        5. Once have original details, search for alternatives: search_flight_schedule JFK to LAX on 2026-01-27, later than AA100's time.
+        6. Then inform fees, get confirmation before reschedule.
 
-        No booking ID provided yet, so customer info should provide it. Date for alternatives is 2026-01-27. Will search flights after getting current flight time.
-
-        Parallel tool calls for efficiency.
+        First actions: Gather customer info, flight info, policy.
+        Parallel calls for efficiency.
         </thinking>
         <action>
         - tool: get_customer_info
           args:
-            email: john.smith@email.com
+            email: "john.smith@email.com"
         - tool: get_flight_info
           args:
-            flight_number: AA100
+            flight_number: "AA100"
         - tool: search_airline_policy
           args:
-            keyword: change
+            keyword: "change"
         </action>
         <observation>
-        [get_customer_info] id: C001
+        <get_customer_info>
+        id: C001
         name: John Smith
         email: john.smith@email.com
         phone: +1-555-0123
@@ -649,8 +654,9 @@ Request:
         bookingids:
             - BK001
             - BK002
-
-        [get_flight_info] flightnumber: AA100
+        </get_customer_info>
+        <get_flight_info>
+        flightnumber: AA100
         origin: JFK
         destination: LAX
         departuretime: 2026-01-27T08:00:00Z
@@ -661,8 +667,9 @@ Request:
         economyprice: 299
         businessprice: 899
         firstclassprice: 1599
-
-        [search_airline_policy] - title: Flight Change and Rescheduling Policy
+        </get_flight_info>
+        <search_airline_policy>
+        - title: Flight Change and Rescheduling Policy
           content: |-
             Customers may change or reschedule their flights subject to the following:
             - Changes made 24+ hours before departure: $50 change fee for economy, free for business/first class
@@ -677,46 +684,48 @@ Request:
             - Silver: Priority boarding, lounge access on international, 25% bonus miles
             - Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
             - Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles
-
+        </search_airline_policy>
         </observation>
 
         CONTINUE!
 
 
 
->>> [AfterModelCall: grok-4-1-fast (duration: 7.608130941s)]: 2026-01-26 01:12:31.216
+>>> [AfterModelCall: grok-4-1-fast (duration: 4.603144307s)]: 2026-01-26 17:53:39.179
 Choice[0]:
   Content:
     <thinking>
-    Customer C001 (John Smith, gold frequent flyer) has bookings BK001 and BK002. Need to identify which one is for AA100 on 2026-01-27 to verify and reschedule.
+    Customer C001 (John Smith, Gold FF) has bookings BK001 and BK002. Original flight AA100 departs 2026-01-27T08:00Z (tomorrow morning). Wants later same-day flight JFK-LAX, evening preferred.
 
-    Flight AA100 departs 2026-01-27T08:00:00Z (early morning). Today is 2026-01-26, so change is more than 24 hours before departure. As gold member, entitled to 1 free change per booking (no fee, but fare difference may apply).
+    Gold FF: 1 free change per booking. Change >24hrs before dep: free anyway for Gold.
 
-    Search for later flights JFK to LAX on 2026-01-27, preferably evening (after ~18:00 local, but use UTC for now).
+    Next:
+    1. Identify correct booking: get_booking_info for BK001 and BK002 (parallel).
+    2. Find alternatives: search_flight_schedule JFK-LAX on 2026-01-27 (filter later than 08:00 post-search).
 
-    Parallel calls: get_booking_info for both bookings to confirm which matches AA100/JFK-LAX/2026-01-27. search_flight_schedule for alternatives on 2026-01-27.
+    Once have booking ID and options, propose to customer (no fees), get preference/confirmation before reschedule_booking.
     </thinking>
     <action>
     - tool: get_booking_info
       args:
-        booking_id: BK001
+        booking_id: "BK001"
     - tool: get_booking_info
       args:
-        booking_id: BK002
+        booking_id: "BK002"
     - tool: search_flight_schedule
       args:
-        origin: JFK
-        destination: LAX
-        date: 2026-01-27
+        origin: "JFK"
+        destination: "LAX"
+        date: "2026-01-27"
     </action>
   StopReason: stop
-Tokens: input=2094, output=264, total=2879
+Tokens: input=2132, output=236, total=2768
 
->>> [BeforeToolCall: get_booking_info]: 2026-01-26 01:12:31.216
+>>> [BeforeToolCall: get_booking_info]: 2026-01-26 17:53:39.180
 Args:
-booking_id: BK001
+bookingid: BK001
 
->>> [AfterToolCall: get_booking_info (duration: 31.679µs)]: 2026-01-26 01:12:31.216
+>>> [AfterToolCall: get_booking_info (duration: 20.02µs)]: 2026-01-26 17:53:39.180
 Output:
 bookingid: BK001
 customerid: C001
@@ -728,11 +737,11 @@ bookingdate: 2026-01-21T00:00:00Z
 totalprice: 299
 mealpreference: vegetarian
 
->>> [BeforeToolCall: get_booking_info]: 2026-01-26 01:12:31.216
+>>> [BeforeToolCall: get_booking_info]: 2026-01-26 17:53:39.180
 Args:
-booking_id: BK002
+bookingid: BK002
 
->>> [AfterToolCall: get_booking_info (duration: 4.96µs)]: 2026-01-26 01:12:31.216
+>>> [AfterToolCall: get_booking_info (duration: 3.22µs)]: 2026-01-26 17:53:39.180
 Output:
 bookingid: BK002
 customerid: C001
@@ -744,13 +753,13 @@ bookingdate: 2026-01-23T00:00:00Z
 totalprice: 799
 mealpreference: regular
 
->>> [BeforeToolCall: search_flight_schedule]: 2026-01-26 01:12:31.216
+>>> [BeforeToolCall: search_flight_schedule]: 2026-01-26 17:53:39.180
 Args:
-date: "2026-01-27"
-destination: LAX
 origin: JFK
+destination: LAX
+date: "2026-01-27"
 
->>> [AfterToolCall: search_flight_schedule (duration: 16.029µs)]: 2026-01-26 01:12:31.216
+>>> [AfterToolCall: search_flight_schedule (duration: 11.95µs)]: 2026-01-26 17:53:39.180
 Output:
 - flightnumber: AA100
   origin: JFK
@@ -786,17 +795,18 @@ Output:
   businessprice: 849
   firstclassprice: 1499
 
->>> [AfterIteration 2]: 2026-01-26 01:12:31.216
+>>> [AfterIteration 2]: 2026-01-26 17:53:39.180
 --------------------------------------------------------------------------------
 ITERATION 2 END
 --------------------------------------------------------------------------------
-Duration: 7.608878335s
+Duration: 4.604187552s
 
 AgentLoopResult:
 action: c
 next_prompt: |-
     <observation>
-    [get_booking_info] bookingid: BK001
+    <get_booking_info>
+    bookingid: BK001
     customerid: C001
     flightnumber: AA100
     seatnumber: 12A
@@ -805,8 +815,9 @@ next_prompt: |-
     bookingdate: 2026-01-21T00:00:00Z
     totalprice: 299
     mealpreference: vegetarian
-
-    [get_booking_info] bookingid: BK002
+    </get_booking_info>
+    <get_booking_info>
+    bookingid: BK002
     customerid: C001
     flightnumber: AA200
     seatnumber: 3C
@@ -815,8 +826,9 @@ next_prompt: |-
     bookingdate: 2026-01-23T00:00:00Z
     totalprice: 799
     mealpreference: regular
-
-    [search_flight_schedule] - flightnumber: AA100
+    </get_booking_info>
+    <search_flight_schedule>
+    - flightnumber: AA100
       origin: JFK
       destination: LAX
       departuretime: 2026-01-27T08:00:00Z
@@ -849,15 +861,15 @@ next_prompt: |-
       economyprice: 279
       businessprice: 849
       firstclassprice: 1499
-
+    </search_flight_schedule>
     </observation>
 
->>> [BeforeIteration 3]: 2026-01-26 01:12:31.217
+>>> [BeforeIteration 3]: 2026-01-26 17:53:39.180
 --------------------------------------------------------------------------------
 ITERATION 3 START
 --------------------------------------------------------------------------------
 
->>> [BeforeModelCall: grok-4-1-fast]: 2026-01-26 01:12:31.217
+>>> [BeforeModelCall: grok-4-1-fast]: 2026-01-26 17:53:39.181
 Request:
   [0] Role: system
       Content:
@@ -906,25 +918,6 @@ Request:
         </critical_rules>
 
         <available_tools>
-        Call tools using YAML format:
-        tool: tool_name
-        args:
-          param: value
-
-        For multiple parallel calls, use a list:
-        - tool: tool1
-          args:
-            param: value
-        - tool: tool2
-          args:
-            param: value
-
-        For strings with special characters (colons, quotes) or multiple lines, use double quotes:
-        - tool: send_email
-          args:
-            subject: "Unsubscribe Confirmation: Newsletter"
-            body: "You have been unsubscribed.\n\nYou will no longer receive emails from us."
-
         Available tools:
 
         - get_customer_info: Retrieve customer information by customer ID or email address
@@ -1062,13 +1055,30 @@ Request:
         Format your response using XML-style tags for each section:
 
         <thinking>
-        ... thinking content here ...
+        Think step by step about how to help the customer.
         </thinking>
         <action>
-        ... action content here ...
+        Call tools using YAML format:
+        tool: tool_name
+        args:
+          param: value
+
+        For multiple parallel calls, use a list:
+        - tool: tool1
+          args:
+            param: value
+        - tool: tool2
+          args:
+            param: value
+
+        For strings with special characters (colons, quotes) or multiple lines, use double quotes:
+        - tool: send_email
+          args:
+            subject: "Unsubscribe Confirmation: Newsletter"
+            body: "You have been unsubscribed.\n\nYou will no longer receive emails."
         </action>
         <answer>
-        ... answer content here ...
+        Write your final answer here.
         </answer>
 
         </output_format>
@@ -1081,30 +1091,33 @@ Request:
         </task>
 
         <thinking>
-        Customer is John Smith, email john.smith@email.com, wants to reschedule booking for flight AA100 from JFK to LAX on tomorrow (2026-01-27) to a later flight same day, preferably evening.
+        Customer: John Smith, email john.smith@email.com. Booked flight AA100 JFK-LAX on 2026-01-27 (tomorrow). Wants later flight same day, evening preferred.
 
-        To proceed with rescheduling per guidelines:
-        1. Verify identity and booking: Use get_customer_info with email to retrieve customer details (likely including customer ID and bookings).
-        2. Confirm current flight details: Use get_flight_info for AA100 to know departure time, so I can find later alternatives.
-        3. Check change policy: Use search_airline_policy with keyword "change" to inform about fees/rules.
+        Steps required:
+        1. Verify identity/booking: Use get_customer_info by email to get customer ID and any booking details.
+        2. Confirm original flight: get_flight_info for AA100 to know departure time/route/date.
+        3. Check policy: search_airline_policy for 'change'.
+        4. No booking ID yet, so can't get_booking_info until I have it from customer info.
+        5. Once have original details, search for alternatives: search_flight_schedule JFK to LAX on 2026-01-27, later than AA100's time.
+        6. Then inform fees, get confirmation before reschedule.
 
-        No booking ID provided yet, so customer info should provide it. Date for alternatives is 2026-01-27. Will search flights after getting current flight time.
-
-        Parallel tool calls for efficiency.
+        First actions: Gather customer info, flight info, policy.
+        Parallel calls for efficiency.
         </thinking>
         <action>
         - tool: get_customer_info
           args:
-            email: john.smith@email.com
+            email: "john.smith@email.com"
         - tool: get_flight_info
           args:
-            flight_number: AA100
+            flight_number: "AA100"
         - tool: search_airline_policy
           args:
-            keyword: change
+            keyword: "change"
         </action>
         <observation>
-        [get_customer_info] id: C001
+        <get_customer_info>
+        id: C001
         name: John Smith
         email: john.smith@email.com
         phone: +1-555-0123
@@ -1112,8 +1125,9 @@ Request:
         bookingids:
             - BK001
             - BK002
-
-        [get_flight_info] flightnumber: AA100
+        </get_customer_info>
+        <get_flight_info>
+        flightnumber: AA100
         origin: JFK
         destination: LAX
         departuretime: 2026-01-27T08:00:00Z
@@ -1124,8 +1138,9 @@ Request:
         economyprice: 299
         businessprice: 899
         firstclassprice: 1599
-
-        [search_airline_policy] - title: Flight Change and Rescheduling Policy
+        </get_flight_info>
+        <search_airline_policy>
+        - title: Flight Change and Rescheduling Policy
           content: |-
             Customers may change or reschedule their flights subject to the following:
             - Changes made 24+ hours before departure: $50 change fee for economy, free for business/first class
@@ -1140,32 +1155,35 @@ Request:
             - Silver: Priority boarding, lounge access on international, 25% bonus miles
             - Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
             - Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles
-
+        </search_airline_policy>
         </observation>
         <thinking>
-        Customer C001 (John Smith, gold frequent flyer) has bookings BK001 and BK002. Need to identify which one is for AA100 on 2026-01-27 to verify and reschedule.
+        Customer C001 (John Smith, Gold FF) has bookings BK001 and BK002. Original flight AA100 departs 2026-01-27T08:00Z (tomorrow morning). Wants later same-day flight JFK-LAX, evening preferred.
 
-        Flight AA100 departs 2026-01-27T08:00:00Z (early morning). Today is 2026-01-26, so change is more than 24 hours before departure. As gold member, entitled to 1 free change per booking (no fee, but fare difference may apply).
+        Gold FF: 1 free change per booking. Change >24hrs before dep: free anyway for Gold.
 
-        Search for later flights JFK to LAX on 2026-01-27, preferably evening (after ~18:00 local, but use UTC for now).
+        Next:
+        1. Identify correct booking: get_booking_info for BK001 and BK002 (parallel).
+        2. Find alternatives: search_flight_schedule JFK-LAX on 2026-01-27 (filter later than 08:00 post-search).
 
-        Parallel calls: get_booking_info for both bookings to confirm which matches AA100/JFK-LAX/2026-01-27. search_flight_schedule for alternatives on 2026-01-27.
+        Once have booking ID and options, propose to customer (no fees), get preference/confirmation before reschedule_booking.
         </thinking>
         <action>
         - tool: get_booking_info
           args:
-            booking_id: BK001
+            booking_id: "BK001"
         - tool: get_booking_info
           args:
-            booking_id: BK002
+            booking_id: "BK002"
         - tool: search_flight_schedule
           args:
-            origin: JFK
-            destination: LAX
-            date: 2026-01-27
+            origin: "JFK"
+            destination: "LAX"
+            date: "2026-01-27"
         </action>
         <observation>
-        [get_booking_info] bookingid: BK001
+        <get_booking_info>
+        bookingid: BK001
         customerid: C001
         flightnumber: AA100
         seatnumber: 12A
@@ -1174,8 +1192,9 @@ Request:
         bookingdate: 2026-01-21T00:00:00Z
         totalprice: 299
         mealpreference: vegetarian
-
-        [get_booking_info] bookingid: BK002
+        </get_booking_info>
+        <get_booking_info>
+        bookingid: BK002
         customerid: C001
         flightnumber: AA200
         seatnumber: 3C
@@ -1184,8 +1203,9 @@ Request:
         bookingdate: 2026-01-23T00:00:00Z
         totalprice: 799
         mealpreference: regular
-
-        [search_flight_schedule] - flightnumber: AA100
+        </get_booking_info>
+        <search_flight_schedule>
+        - flightnumber: AA100
           origin: JFK
           destination: LAX
           departuretime: 2026-01-27T08:00:00Z
@@ -1218,64 +1238,69 @@ Request:
           economyprice: 279
           businessprice: 849
           firstclassprice: 1499
-
+        </search_flight_schedule>
         </observation>
 
         CONTINUE!
 
 
 
->>> [AfterModelCall: grok-4-1-fast (duration: 10.153009497s)]: 2026-01-26 01:12:41.370
+>>> [AfterModelCall: grok-4-1-fast (duration: 35.629572883s)]: 2026-01-26 17:54:14.811
 Choice[0]:
   Content:
     <thinking>
-    Booking confirmed: BK001 for AA100 on 2026-01-27T08:00Z, economy seat 12A, price $299. Customer is gold frequent flyer: entitled to 1 free change per booking (no fee). Change >24h before departure.
+    Customer's relevant booking is BK001: AA100 JFK-LAX 2026-01-27 08:00Z, economy seat 12A, $299.
 
-    Alternatives on 2026-01-27 JFK-LAX:
-    - AA101: 14:00Z ($329 economy, +$30 fare difference)
-    - AA102: 20:00Z evening ($279 economy, -$20 as travel credit)
+    As Gold FF, eligible for 1 free change (no change fee). Today 2026-01-26, >24hrs before dep.
 
-    Plenty seats available (23/67). No need for seat-specific check yet.
+    Alternatives same day later:
+    - AA101 14:00Z ($329 economy, +$30 fare diff)
+    - AA102 20:00Z evening ($279 economy, -$20 travel credit)
 
-    Enough info: Inform customer of policy (free change for gold, fare diff), present options (prefer evening so highlight AA102), ask for preferred flight and seat preference if any, then can reschedule in next interaction. Do not reschedule without confirmation.
+    Enough info: identity/booking verified, policy checked (free change fee, fare diff applies), alternatives found.
 
-    No more tools needed. Provide polite professional response with details.
+    Now inform customer: no change fee, mention fare diffs, propose options (prefer evening AA102), ask for confirmation on flight/seat before rescheduling.
+
+    No need for more tools yet (e.g., seats can check after preference). If confirmed, next would use reschedule_booking + send_notification.
+
+    Final response: polite, professional, list steps implicitly.
     </thinking>
     <answer>
-    Hello John Smith,
+    Hello Mr. John Smith,
 
-    Thank you for contacting SkyWings Airlines customer service. I have verified your identity and details associated with john.smith@email.com (Customer ID: C001). You have a confirmed booking BK001 for flight AA100 from JFK to LAX departing tomorrow, January 27, 2026, at 08:00 UTC (economy class, seat 12A, total price $299).
+    Thank you for reaching out to SkyWings Airlines customer service. I have verified your identity and booking details using your email (john.smith@email.com). Your booking BK001 is for flight AA100 from JFK to LAX, departing 2026-01-27 at 08:00 UTC (economy class, seat 12A, total $299).
 
-    As a Gold frequent flyer member, you are eligible for one free change per booking with no change fee. Any fare difference will apply: if the new flight is more expensive, you'll pay the difference; if cheaper, you'll receive the difference as travel credit. Since your request is more than 24 hours before departure, this qualifies under our standard policy.
+    As a Gold frequent flyer member, you qualify for one free change per booking with no change fee (since this request is more than 24 hours before departure). However, any fare difference will apply: if the new flight costs more, you'll pay the difference; if less, you'll receive travel credit.
 
-    I searched for later flights on the same route and date (2026-01-27). Here are available options after your current departure time:
+    I searched our schedule for later flights from JFK to LAX on 2026-01-27 and found these options with availability:
+    - AA101: Departs 14:00 UTC, arrives 17:30 UTC (economy price $329, +$30 fare difference)
+    - AA102: Departs 20:00 UTC (evening), arrives 23:30 UTC (economy price $279, -$20 travel credit)
 
-    - **Flight AA101**: Departs JFK at 14:00 UTC, arrives LAX 17:30 UTC. Economy price: $329 (fare difference: +$30 to pay). 23 economy seats available.
-    - **Flight AA102** (evening option): Departs JFK at 20:00 UTC, arrives LAX 23:30 UTC. Economy price: $279 (fare difference: -$20 travel credit). 67 economy seats available.
+    AA102 matches your preference for an evening flight and is cheaper than your original.
 
-    Which flight would you like to reschedule to? Do you have a preferred seat (e.g., aisle/window) on the new flight? Please reply with your choice (e.g., "AA102"), and I'll process the change immediately, confirm the updated details, and send a notification to your email.
+    Please confirm which flight you'd like (AA101 or AA102), your preferred seat (e.g., similar to 12A in economy, or any specific request), and any meal preference updates. Once confirmed, I can process the reschedule immediately and send you updated details.
 
-    We're here to help—safe travels!
+    Looking forward to your reply!
 
     Best regards,
     SkyWings Airlines Customer Service
     </answer>
   StopReason: stop
-Tokens: input=2804, output=559, total=4146
+Tokens: input=2834, output=528, total=4344
 
->>> [AfterIteration 3]: 2026-01-26 01:12:41.370
+>>> [AfterIteration 3]: 2026-01-26 17:54:14.811
 --------------------------------------------------------------------------------
 ITERATION 3 END
 --------------------------------------------------------------------------------
-Duration: 10.153947253s
+Duration: 35.630485531s
 
 AgentLoopResult:
 action: t
 result:
-    - "Hello John Smith,\n\nThank you for contacting SkyWings Airlines customer service. I have verified your identity and details associated with john.smith@email.com (Customer ID: C001). You have a confirmed booking BK001 for flight AA100 from JFK to LAX departing tomorrow, January 27, 2026, at 08:00 UTC (economy class, seat 12A, total price $299).\n\nAs a Gold frequent flyer member, you are eligible for one free change per booking with no change fee. Any fare difference will apply: if the new flight is more expensive, you'll pay the difference; if cheaper, you'll receive the difference as travel credit. Since your request is more than 24 hours before departure, this qualifies under our standard policy.\n\nI searched for later flights on the same route and date (2026-01-27). Here are available options after your current departure time:\n\n- **Flight AA101**: Departs JFK at 14:00 UTC, arrives LAX 17:30 UTC. Economy price: $329 (fare difference: +$30 to pay). 23 economy seats available.\n- **Flight AA102** (e
-vening option): Departs JFK at 20:00 UTC, arrives LAX 23:30 UTC. Economy price: $279 (fare difference: -$20 travel credit). 67 economy seats available.\n\nWhich flight would you like to reschedule to? Do you have a preferred seat (e.g., aisle/window) on the new flight? Please reply with your choice (e.g., \"AA102\"), and I'll process the change immediately, confirm the updated details, and send a notification to your email.\n\nWe're here to help—safe travels!\n\nBest regards,  \nSkyWings Airlines Customer Service"
+    - "Hello Mr. John Smith,\n\nThank you for reaching out to SkyWings Airlines customer service. I have verified your identity and booking details using your email (john.smith@email.com). Your booking BK001 is for flight AA100 from JFK to LAX, departing 2026-01-27 at 08:00 UTC (economy class, seat 12A, total $299).\n\nAs a Gold frequent flyer member, you qualify for one free change per booking with no change fee (since this request is more than 24 hours before departure). However, any fare difference will apply: if the new flight costs more, you'll pay the difference; if less, you'll receive travel credit.\n\nI searched our schedule for later flights from JFK to LAX on 2026-01-27 and found these options with availability:\n- AA101: Departs 14:00 UTC, arrives 17:30 UTC (economy price $329, +$30 fare difference)\n- AA102: Departs 20:00 UTC (evening), arrives 23:30 UTC (economy price $279, -$20 travel credit)\n\nAA102 matches your preference for an evening flight and is cheaper than your original.\n\nPlease con
+firm which flight you'd like (AA101 or AA102), your preferred seat (e.g., similar to 12A in economy, or any specific request), and any meal preference updates. Once confirmed, I can process the reschedule immediately and send you updated details.\n\nLooking forward to your reply!\n\nBest regards,  \nSkyWings Airlines Customer Service"
 
->>> [AfterExecution]: 2026-01-26 01:12:41.371
+>>> [AfterExecution]: 2026-01-26 17:54:14.811
 ================================================================================
 EXECUTION COMPLETED
 ================================================================================
@@ -1284,11 +1309,11 @@ termination_reason: success
 Stats:
 counters:
     gent:format_parse_error_consecutive: 0
-    gent:input_tokens: 6387
-    gent:input_tokens:grok-4-1-fast: 6387
+    gent:input_tokens: 6455
+    gent:input_tokens:grok-4-1-fast: 6455
     gent:iterations: 3
-    gent:output_tokens: 1056
-    gent:output_tokens:grok-4-1-fast: 1056
+    gent:output_tokens: 1016
+    gent:output_tokens:grok-4-1-fast: 1016
     gent:tool_calls: 6
     gent:tool_calls:get_booking_info: 2
     gent:tool_calls:get_customer_info: 1
@@ -1300,9 +1325,9 @@ gauges:
     gent:cost: 0
     gent:cost:grok-4-1-fast: 0
 total_cost: 0
-total_input_tokens: 6387
+total_input_tokens: 6455
 total_iterations: 3
-total_output_tokens: 1056
+total_output_tokens: 1016
 total_tool_calls: 6
 
 ================================================================================
@@ -1310,30 +1335,31 @@ EXECUTION COMPLETE
 ================================================================================
 
 --- Final Response to Customer ---
-Hello John Smith,
+Hello Mr. John Smith,
 
-Thank you for contacting SkyWings Airlines customer service. I have verified your identity and details associated with john.smith@email.com (Customer ID: C001). You have a confirmed booking BK001 for flight AA100 from JFK to LAX departing tomorrow, January 27, 2026, at 08:00 UTC (economy class, seat 12A, total price $299).
+Thank you for reaching out to SkyWings Airlines customer service. I have verified your identity and booking details using your email (john.smith@email.com). Your booking BK001 is for flight AA100 from JFK to LAX, departing 2026-01-27 at 08:00 UTC (economy class, seat 12A, total $299).
 
-As a Gold frequent flyer member, you are eligible for one free change per booking with no change fee. Any fare difference will apply: if the new flight is more expensive, you'll pay the difference; if cheaper, you'll receive the difference as travel credit. Since your request is more than 24 hours before departure, this qualifies under our standard policy.
+As a Gold frequent flyer member, you qualify for one free change per booking with no change fee (since this request is more than 24 hours before departure). However, any fare difference will apply: if the new flight costs more, you'll pay the difference; if less, you'll receive travel credit.
 
-I searched for later flights on the same route and date (2026-01-27). Here are available options after your current departure time:
+I searched our schedule for later flights from JFK to LAX on 2026-01-27 and found these options with availability:
+- AA101: Departs 14:00 UTC, arrives 17:30 UTC (economy price $329, +$30 fare difference)
+- AA102: Departs 20:00 UTC (evening), arrives 23:30 UTC (economy price $279, -$20 travel credit)
 
-- **Flight AA101**: Departs JFK at 14:00 UTC, arrives LAX 17:30 UTC. Economy price: $329 (fare difference: +$30 to pay). 23 economy seats available.
-- **Flight AA102** (evening option): Departs JFK at 20:00 UTC, arrives LAX 23:30 UTC. Economy price: $279 (fare difference: -$20 travel credit). 67 economy seats available.
+AA102 matches your preference for an evening flight and is cheaper than your original.
 
-Which flight would you like to reschedule to? Do you have a preferred seat (e.g., aisle/window) on the new flight? Please reply with your choice (e.g., "AA102"), and I'll process the change immediately, confirm the updated details, and send a notification to your email.
+Please confirm which flight you'd like (AA101 or AA102), your preferred seat (e.g., similar to 12A in economy, or any specific request), and any meal preference updates. Once confirmed, I can process the reschedule immediately and send you updated details.
 
-We're here to help—safe travels!
+Looking forward to your reply!
 
 Best regards,
 SkyWings Airlines Customer Service
 
 --- Execution Stats ---
 Total iterations: 3
-Total input tokens: 6387
-Total output tokens: 1056
+Total input tokens: 6455
+Total output tokens: 1016
 Total tool calls: 6
-Duration: 27.18962085s
+Duration: 56.020643954s
 
 ================================================================================
 FULL ITERATION HISTORY
@@ -1342,32 +1368,35 @@ FULL ITERATION HISTORY
 --- Iteration 1 ---
 [ai]
 <thinking>
-Customer is John Smith, email john.smith@email.com, wants to reschedule booking for flight AA100 from JFK to LAX on tomorrow (2026-01-27) to a later flight same day, preferably evening.
+Customer: John Smith, email john.smith@email.com. Booked flight AA100 JFK-LAX on 2026-01-27 (tomorrow). Wants later flight same day, evening preferred.
 
-To proceed with rescheduling per guidelines:
-1. Verify identity and booking: Use get_customer_info with email to retrieve customer details (likely including customer ID and bookings).
-2. Confirm current flight details: Use get_flight_info for AA100 to know departure time, so I can find later alternatives.
-3. Check change policy: Use search_airline_policy with keyword "change" to inform about fees/rules.
+Steps required:
+1. Verify identity/booking: Use get_customer_info by email to get customer ID and any booking details.
+2. Confirm original flight: get_flight_info for AA100 to know departure time/route/date.
+3. Check policy: search_airline_policy for 'change'.
+4. No booking ID yet, so can't get_booking_info until I have it from customer info.
+5. Once have original details, search for alternatives: search_flight_schedule JFK to LAX on 2026-01-27, later than AA100's time.
+6. Then inform fees, get confirmation before reschedule.
 
-No booking ID provided yet, so customer info should provide it. Date for alternatives is 2026-01-27. Will search flights after getting current flight time.
-
-Parallel tool calls for efficiency.
+First actions: Gather customer info, flight info, policy.
+Parallel calls for efficiency.
 </thinking>
 <action>
 - tool: get_customer_info
   args:
-    email: john.smith@email.com
+    email: "john.smith@email.com"
 - tool: get_flight_info
   args:
-    flight_number: AA100
+    flight_number: "AA100"
 - tool: search_airline_policy
   args:
-    keyword: change
+    keyword: "change"
 </action>
 
 [human]
 <observation>
-[get_customer_info] id: C001
+<get_customer_info>
+id: C001
 name: John Smith
 email: john.smith@email.com
 phone: +1-555-0123
@@ -1375,8 +1404,9 @@ frequentflyer: gold
 bookingids:
     - BK001
     - BK002
-
-[get_flight_info] flightnumber: AA100
+</get_customer_info>
+<get_flight_info>
+flightnumber: AA100
 origin: JFK
 destination: LAX
 departuretime: 2026-01-27T08:00:00Z
@@ -1387,8 +1417,9 @@ availableseats: 45
 economyprice: 299
 businessprice: 899
 firstclassprice: 1599
-
-[search_airline_policy] - title: Flight Change and Rescheduling Policy
+</get_flight_info>
+<search_airline_policy>
+- title: Flight Change and Rescheduling Policy
   content: |-
     Customers may change or reschedule their flights subject to the following:
     - Changes made 24+ hours before departure: $50 change fee for economy, free for business/first class
@@ -1403,38 +1434,41 @@ firstclassprice: 1599
     - Silver: Priority boarding, lounge access on international, 25% bonus miles
     - Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
     - Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles
-
+</search_airline_policy>
 </observation>
 
 
 --- Iteration 2 ---
 [ai]
 <thinking>
-Customer C001 (John Smith, gold frequent flyer) has bookings BK001 and BK002. Need to identify which one is for AA100 on 2026-01-27 to verify and reschedule.
+Customer C001 (John Smith, Gold FF) has bookings BK001 and BK002. Original flight AA100 departs 2026-01-27T08:00Z (tomorrow morning). Wants later same-day flight JFK-LAX, evening preferred.
 
-Flight AA100 departs 2026-01-27T08:00:00Z (early morning). Today is 2026-01-26, so change is more than 24 hours before departure. As gold member, entitled to 1 free change per booking (no fee, but fare difference may apply).
+Gold FF: 1 free change per booking. Change >24hrs before dep: free anyway for Gold.
 
-Search for later flights JFK to LAX on 2026-01-27, preferably evening (after ~18:00 local, but use UTC for now).
+Next:
+1. Identify correct booking: get_booking_info for BK001 and BK002 (parallel).
+2. Find alternatives: search_flight_schedule JFK-LAX on 2026-01-27 (filter later than 08:00 post-search).
 
-Parallel calls: get_booking_info for both bookings to confirm which matches AA100/JFK-LAX/2026-01-27. search_flight_schedule for alternatives on 2026-01-27.
+Once have booking ID and options, propose to customer (no fees), get preference/confirmation before reschedule_booking.
 </thinking>
 <action>
 - tool: get_booking_info
   args:
-    booking_id: BK001
+    booking_id: "BK001"
 - tool: get_booking_info
   args:
-    booking_id: BK002
+    booking_id: "BK002"
 - tool: search_flight_schedule
   args:
-    origin: JFK
-    destination: LAX
-    date: 2026-01-27
+    origin: "JFK"
+    destination: "LAX"
+    date: "2026-01-27"
 </action>
 
 [human]
 <observation>
-[get_booking_info] bookingid: BK001
+<get_booking_info>
+bookingid: BK001
 customerid: C001
 flightnumber: AA100
 seatnumber: 12A
@@ -1443,8 +1477,9 @@ status: confirmed
 bookingdate: 2026-01-21T00:00:00Z
 totalprice: 299
 mealpreference: vegetarian
-
-[get_booking_info] bookingid: BK002
+</get_booking_info>
+<get_booking_info>
+bookingid: BK002
 customerid: C001
 flightnumber: AA200
 seatnumber: 3C
@@ -1453,8 +1488,9 @@ status: confirmed
 bookingdate: 2026-01-23T00:00:00Z
 totalprice: 799
 mealpreference: regular
-
-[search_flight_schedule] - flightnumber: AA100
+</get_booking_info>
+<search_flight_schedule>
+- flightnumber: AA100
   origin: JFK
   destination: LAX
   departuretime: 2026-01-27T08:00:00Z
@@ -1487,40 +1523,45 @@ mealpreference: regular
   economyprice: 279
   businessprice: 849
   firstclassprice: 1499
-
+</search_flight_schedule>
 </observation>
 
 
 --- Iteration 3 ---
 [ai]
 <thinking>
-Booking confirmed: BK001 for AA100 on 2026-01-27T08:00Z, economy seat 12A, price $299. Customer is gold frequent flyer: entitled to 1 free change per booking (no fee). Change >24h before departure.
+Customer's relevant booking is BK001: AA100 JFK-LAX 2026-01-27 08:00Z, economy seat 12A, $299.
 
-Alternatives on 2026-01-27 JFK-LAX:
-- AA101: 14:00Z ($329 economy, +$30 fare difference)
-- AA102: 20:00Z evening ($279 economy, -$20 as travel credit)
+As Gold FF, eligible for 1 free change (no change fee). Today 2026-01-26, >24hrs before dep.
 
-Plenty seats available (23/67). No need for seat-specific check yet.
+Alternatives same day later:
+- AA101 14:00Z ($329 economy, +$30 fare diff)
+- AA102 20:00Z evening ($279 economy, -$20 travel credit)
 
-Enough info: Inform customer of policy (free change for gold, fare diff), present options (prefer evening so highlight AA102), ask for preferred flight and seat preference if any, then can reschedule in next interaction. Do not reschedule without confirmation.
+Enough info: identity/booking verified, policy checked (free change fee, fare diff applies), alternatives found.
 
-No more tools needed. Provide polite professional response with details.
+Now inform customer: no change fee, mention fare diffs, propose options (prefer evening AA102), ask for confirmation on flight/seat before rescheduling.
+
+No need for more tools yet (e.g., seats can check after preference). If confirmed, next would use reschedule_booking + send_notification.
+
+Final response: polite, professional, list steps implicitly.
 </thinking>
 <answer>
-Hello John Smith,
+Hello Mr. John Smith,
 
-Thank you for contacting SkyWings Airlines customer service. I have verified your identity and details associated with john.smith@email.com (Customer ID: C001). You have a confirmed booking BK001 for flight AA100 from JFK to LAX departing tomorrow, January 27, 2026, at 08:00 UTC (economy class, seat 12A, total price $299).
+Thank you for reaching out to SkyWings Airlines customer service. I have verified your identity and booking details using your email (john.smith@email.com). Your booking BK001 is for flight AA100 from JFK to LAX, departing 2026-01-27 at 08:00 UTC (economy class, seat 12A, total $299).
 
-As a Gold frequent flyer member, you are eligible for one free change per booking with no change fee. Any fare difference will apply: if the new flight is more expensive, you'll pay the difference; if cheaper, you'll receive the difference as travel credit. Since your request is more than 24 hours before departure, this qualifies under our standard policy.
+As a Gold frequent flyer member, you qualify for one free change per booking with no change fee (since this request is more than 24 hours before departure). However, any fare difference will apply: if the new flight costs more, you'll pay the difference; if less, you'll receive travel credit.
 
-I searched for later flights on the same route and date (2026-01-27). Here are available options after your current departure time:
+I searched our schedule for later flights from JFK to LAX on 2026-01-27 and found these options with availability:
+- AA101: Departs 14:00 UTC, arrives 17:30 UTC (economy price $329, +$30 fare difference)
+- AA102: Departs 20:00 UTC (evening), arrives 23:30 UTC (economy price $279, -$20 travel credit)
 
-- **Flight AA101**: Departs JFK at 14:00 UTC, arrives LAX 17:30 UTC. Economy price: $329 (fare difference: +$30 to pay). 23 economy seats available.
-- **Flight AA102** (evening option): Departs JFK at 20:00 UTC, arrives LAX 23:30 UTC. Economy price: $279 (fare difference: -$20 travel credit). 67 economy seats available.
+AA102 matches your preference for an evening flight and is cheaper than your original.
 
-Which flight would you like to reschedule to? Do you have a preferred seat (e.g., aisle/window) on the new flight? Please reply with your choice (e.g., "AA102"), and I'll process the change immediately, confirm the updated details, and send a notification to your email.
+Please confirm which flight you'd like (AA101 or AA102), your preferred seat (e.g., similar to 12A in economy, or any specific request), and any meal preference updates. Once confirmed, I can process the reschedule immediately and send you updated details.
 
-We're here to help—safe travels!
+Looking forward to your reply!
 
 Best regards,
 SkyWings Airlines Customer Service
@@ -1533,49 +1574,49 @@ ALL TRACE EVENTS
 
 [1] IterationStart: iteration=1
 
-[2] ModelCall: model=grok-4-1-fast, input=1489, output=233, duration=9.425699603s
+[2] ModelCall: model=grok-4-1-fast, input=1489, output=252, duration=15.784990854s
 
-[3] ToolCall: tool=get_customer_info, duration=35.619µs
-          input=map[email:john.smith@email.com]
+[3] ToolCall: tool=get_customer_info, duration=12.05µs
+          input={ john.smith@email.com}
           output={"id":"C001","name":"John Smith","email":"john.smith@email.com","phone":"+1-555-0123","frequent_flyer_tier":"gold","booking_ids":["BK001","BK002"]}
 
-[4] ToolCall: tool=get_flight_info, duration=10.289µs
-          input=map[flight_number:AA100]
+[4] ToolCall: tool=get_flight_info, duration=4.97µs
+          input={AA100}
           output={"flight_number":"AA100","origin":"JFK","destination":"LAX","departure_time":"2026-01-27T08:00:00Z","arrival_time":"2026-01-27T11:30:00Z","aircraft":"Boeing 777","status":"scheduled","available_seats"...
 
-[5] ToolCall: tool=search_airline_policy, duration=13.689µs
-          input=map[keyword:change]
+[5] ToolCall: tool=search_airline_policy, duration=9.489µs
+          input={change}
           output=[{"title":"Flight Change and Rescheduling Policy","content":"Customers may change or reschedule their flights subject to the following:\n- Changes made 24+ hours before departure: $50 change fee for e...
 
-[6] IterationEnd: iteration=1, action=c, duration=9.426652367s
+[6] IterationEnd: iteration=1, action=c, duration=15.785774335s
 
 [7] IterationStart: iteration=2
 
-[8] ModelCall: model=grok-4-1-fast, input=2094, output=264, duration=7.608130941s
+[8] ModelCall: model=grok-4-1-fast, input=2132, output=236, duration=4.603144307s
 
-[9] ToolCall: tool=get_booking_info, duration=31.679µs
-          input=map[booking_id:BK001]
+[9] ToolCall: tool=get_booking_info, duration=20.02µs
+          input={BK001}
           output={"booking_id":"BK001","customer_id":"C001","flight_number":"AA100","seat_number":"12A","class":"economy","status":"confirmed","booking_date":"2026-01-21T00:00:00Z","total_price":299,"meal_preference":...
 
-[10] ToolCall: tool=get_booking_info, duration=4.96µs
-          input=map[booking_id:BK002]
+[10] ToolCall: tool=get_booking_info, duration=3.22µs
+          input={BK002}
           output={"booking_id":"BK002","customer_id":"C001","flight_number":"AA200","seat_number":"3C","class":"business","status":"confirmed","booking_date":"2026-01-23T00:00:00Z","total_price":799,"meal_preference":...
 
-[11] ToolCall: tool=search_flight_schedule, duration=16.029µs
-          input=map[date:2026-01-27 destination:LAX origin:JFK]
+[11] ToolCall: tool=search_flight_schedule, duration=11.95µs
+          input={JFK LAX 2026-01-27}
           output=[{"flight_number":"AA100","origin":"JFK","destination":"LAX","departure_time":"2026-01-27T08:00:00Z","arrival_time":"2026-01-27T11:30:00Z","aircraft":"Boeing 777","status":"scheduled","available_seats...
 
-[12] IterationEnd: iteration=2, action=c, duration=7.608878335s
+[12] IterationEnd: iteration=2, action=c, duration=4.604187552s
 
 [13] IterationStart: iteration=3
 
-[14] ModelCall: model=grok-4-1-fast, input=2804, output=559, duration=10.153009497s
+[14] ModelCall: model=grok-4-1-fast, input=2834, output=528, duration=35.629572883s
 
-[15] IterationEnd: iteration=3, action=t, duration=10.153947253s
+[15] IterationEnd: iteration=3, action=t, duration=35.630485531s
 
 ================================================================================
 TEST COMPLETE
 ================================================================================
---- PASS: TestRescheduleScenario (27.19s)
+--- PASS: TestRescheduleScenarioYAML (56.02s)
 PASS
-ok  	github.com/rickchristie/gent/integrationtest/airline	27.199s
+ok  	github.com/rickchristie/gent/integrationtest/airline	56.033s
