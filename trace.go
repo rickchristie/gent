@@ -54,7 +54,7 @@ func (BaseTrace) traceEvent() {}
 // -----------------------------------------------------------------------------
 
 // ModelCallTrace records an LLM API call.
-// When traced, auto-updates: TotalInputTokens, TotalOutputTokens, TotalCost, *ByModel maps.
+// When traced, auto-updates: TotalInputTokens, TotalOutputTokens, *ByModel maps.
 type ModelCallTrace struct {
 	BaseTrace
 
@@ -72,9 +72,6 @@ type ModelCallTrace struct {
 
 	// OutputTokens is the number of output/completion tokens generated.
 	OutputTokens int
-
-	// Cost is the estimated cost in USD (if available).
-	Cost float64
 
 	// Duration is how long the call took.
 	Duration time.Duration

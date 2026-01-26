@@ -408,11 +408,9 @@ func (ctx *ExecutionContext) traceEventLocked(event TraceEvent) {
 	case ModelCallTrace:
 		ctx.stats.incrCounterNoLimitCheck(KeyInputTokens, int64(e.InputTokens))
 		ctx.stats.incrCounterNoLimitCheck(KeyOutputTokens, int64(e.OutputTokens))
-		ctx.stats.incrGaugeNoLimitCheck(KeyCost, e.Cost)
 		if e.Model != "" {
 			ctx.stats.incrCounterNoLimitCheck(KeyInputTokensFor+e.Model, int64(e.InputTokens))
 			ctx.stats.incrCounterNoLimitCheck(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
-			ctx.stats.incrGaugeNoLimitCheck(KeyCostFor+e.Model, e.Cost)
 		}
 	case ToolCallTrace:
 		ctx.stats.incrCounterNoLimitCheck(KeyToolCalls, 1)

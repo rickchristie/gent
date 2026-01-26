@@ -58,7 +58,6 @@ type mockAgentLoop struct {
 	terminateAt  int // terminate after this many calls (0 = never auto-terminate)
 	inputTokens  int // tokens to trace per iteration
 	outputTokens int
-	cost         float64
 }
 
 func (m *mockAgentLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
@@ -69,16 +68,14 @@ func (m *mockAgentLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopRes
 	terminateAt := m.terminateAt
 	inputTokens := m.inputTokens
 	outputTokens := m.outputTokens
-	cost := m.cost
 	m.mu.Unlock()
 
 	// Trace model call to update stats
-	if inputTokens > 0 || outputTokens > 0 || cost > 0 {
+	if inputTokens > 0 || outputTokens > 0 {
 		execCtx.Trace(gent.ModelCallTrace{
 			Model:        "test-model",
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
-			Cost:         cost,
 		})
 	}
 
@@ -282,64 +279,6 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 			assert.NotNil(t, result.ExceededLimit)
 			assert.Equal(t, tt.expectedKey, result.ExceededLimit.Key)
 			assert.Equal(t, tt.expectedCalls, loop.GetCalls())
-		})
-	}
-}
-
-// -----------------------------------------------------------------------------
-// Single AgentLoop Tests - Cost Limit (Gauge)
-// -----------------------------------------------------------------------------
-
-func TestLimits_CostLimit_Exceeded(t *testing.T) {
-	tests := []struct {
-		name              string
-		costPerCall       float64
-		maxCost           float64
-		expectedCalls     int
-		expectedTerminate gent.TerminationReason
-	}{
-		{
-			name:              "cost limit exceeded after 3 calls",
-			costPerCall:       0.05,
-			maxCost:           0.12,
-			expectedCalls:     3,
-			expectedTerminate: gent.TerminationLimitExceeded,
-		},
-		{
-			name:              "cost limit exceeded on first call",
-			costPerCall:       1.0,
-			maxCost:           0.5,
-			expectedCalls:     1,
-			expectedTerminate: gent.TerminationLimitExceeded,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			loop := &mockAgentLoop{cost: tt.costPerCall}
-			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
-
-			ctx := context.Background()
-			data := newMockLoopData()
-			execCtx := gent.NewExecutionContext(ctx, "test", data)
-			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyCost, MaxValue: tt.maxCost},
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
-			})
-
-			exec.Execute(execCtx)
-
-			result := execCtx.Result()
-			assert.NotNil(t, result)
-			assert.Equal(t, tt.expectedTerminate, result.TerminationReason)
-			assert.NotNil(t, result.ExceededLimit)
-			assert.Equal(t, gent.KeyCost, result.ExceededLimit.Key)
-			assert.Equal(t, tt.expectedCalls, loop.GetCalls())
-
-			// Verify actual cost tracked
-			stats := execCtx.Stats()
-			expectedCost := tt.costPerCall * float64(tt.expectedCalls)
-			assert.InDelta(t, expectedCost, stats.GetTotalCost(), 0.001)
 		})
 	}
 }
@@ -698,7 +637,6 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	loop := &mockAgentLoop{
 		inputTokens:  1000,
 		outputTokens: 1000,
-		cost:         1.0,
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
 
@@ -706,7 +644,6 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyCost, MaxValue: 0.5},         // Would exceed
 		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 500},  // Would exceed
 		{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 500}, // Would exceed
 		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
@@ -718,7 +655,7 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	// First limit in the list should be the one reported
-	assert.Equal(t, gent.KeyCost, result.ExceededLimit.Key)
+	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
 }
 
 func TestLimits_EdgeCase_ContextAlreadyCancelled(t *testing.T) {
@@ -864,78 +801,6 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Gauge-Specific Tests
-// -----------------------------------------------------------------------------
-
-func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
-	// Test prefix limit on gauges (cost per model)
-	callCount := 0
-	loop := &mockAgentLoop{
-		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-			callCount++
-			// Alternate between expensive and cheap models
-			if callCount%2 == 1 {
-				execCtx.Trace(gent.ModelCallTrace{
-					Model: "expensive-model",
-					Cost:  0.10,
-				})
-			} else {
-				execCtx.Trace(gent.ModelCallTrace{
-					Model: "cheap-model",
-					Cost:  0.01,
-				})
-			}
-			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
-		},
-	}
-	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
-
-	ctx := context.Background()
-	data := newMockLoopData()
-	execCtx := gent.NewExecutionContext(ctx, "test", data)
-	execCtx.SetLimits([]gent.Limit{
-		// Limit any single model to $0.25
-		{Type: gent.LimitKeyPrefix, Key: gent.KeyCostFor, MaxValue: 0.25},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
-	})
-
-	exec.Execute(execCtx)
-
-	result := execCtx.Result()
-	assert.NotNil(t, result)
-	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyCostFor, result.ExceededLimit.Key)
-
-	// expensive-model: 0.10 per odd iteration -> iterations 1,3,5 = 0.30 > 0.25
-	// Should trigger after iteration 5
-	stats := execCtx.Stats()
-	assert.InDelta(t, 0.30, stats.GetGauge(gent.KeyCostFor+"expensive-model"), 0.001)
-}
-
-func TestLimits_GaugeExactKey_NotExceededUntilOverThreshold(t *testing.T) {
-	// Gauge value must be strictly greater than MaxValue to exceed
-	loop := &mockAgentLoop{cost: 0.25, terminateAt: 4}
-	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
-
-	ctx := context.Background()
-	data := newMockLoopData()
-	execCtx := gent.NewExecutionContext(ctx, "test", data)
-	execCtx.SetLimits([]gent.Limit{
-		// 4 iterations * 0.25 = 1.0, exactly at limit
-		{Type: gent.LimitExactKey, Key: gent.KeyCost, MaxValue: 1.0},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
-	})
-
-	exec.Execute(execCtx)
-
-	result := execCtx.Result()
-	assert.NotNil(t, result)
-	assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
-	assert.Nil(t, result.ExceededLimit)
-	assert.InDelta(t, 1.0, execCtx.Stats().GetTotalCost(), 0.001)
-}
-
-// -----------------------------------------------------------------------------
 // Default Limits Tests
 // -----------------------------------------------------------------------------
 
@@ -977,6 +842,258 @@ func TestLimits_DefaultLimits_CanBeOverridden(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// Gauge-Specific Tests
+// -----------------------------------------------------------------------------
+
+func TestLimits_GaugeLimit_Exceeded(t *testing.T) {
+	type input struct {
+		gaugeKey       string
+		gaugeIncrement float64
+	}
+
+	type mocks struct {
+		maxValue float64
+	}
+
+	type expected struct {
+		terminationReason gent.TerminationReason
+		exceededKey       string
+		callCount         int
+		finalGaugeValue   float64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		mocks    mocks
+		expected expected
+	}{
+		{
+			name: "gauge limit exceeded after 3 increments",
+			input: input{
+				gaugeKey:       "test:custom_gauge",
+				gaugeIncrement: 0.05,
+			},
+			mocks: mocks{
+				maxValue: 0.12,
+			},
+			expected: expected{
+				terminationReason: gent.TerminationLimitExceeded,
+				exceededKey:       "test:custom_gauge",
+				callCount:         3,
+				finalGaugeValue:   0.15,
+			},
+		},
+		{
+			name: "gauge limit exceeded on first increment",
+			input: input{
+				gaugeKey:       "test:another_gauge",
+				gaugeIncrement: 1.0,
+			},
+			mocks: mocks{
+				maxValue: 0.5,
+			},
+			expected: expected{
+				terminationReason: gent.TerminationLimitExceeded,
+				exceededKey:       "test:another_gauge",
+				callCount:         1,
+				finalGaugeValue:   1.0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			loop := &mockAgentLoop{
+				nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+					execCtx.Stats().IncrGauge(tt.input.gaugeKey, tt.input.gaugeIncrement)
+					return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
+				},
+			}
+			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+			ctx := context.Background()
+			data := newMockLoopData()
+			execCtx := gent.NewExecutionContext(ctx, "test", data)
+			execCtx.SetLimits([]gent.Limit{
+				{Type: gent.LimitExactKey, Key: tt.input.gaugeKey, MaxValue: tt.mocks.maxValue},
+				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+			})
+
+			exec.Execute(execCtx)
+
+			result := execCtx.Result()
+			assert.NotNil(t, result)
+			assert.Equal(t, tt.expected.terminationReason, result.TerminationReason)
+			assert.NotNil(t, result.ExceededLimit)
+			assert.Equal(t, tt.expected.exceededKey, result.ExceededLimit.Key)
+			assert.Equal(t, tt.expected.callCount, loop.GetCalls())
+
+			stats := execCtx.Stats()
+			assert.InDelta(t, tt.expected.finalGaugeValue, stats.GetGauge(tt.input.gaugeKey), 0.001)
+		})
+	}
+}
+
+func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
+	type input struct {
+		gaugePrefix string
+	}
+
+	type mocks struct {
+		maxValue float64
+	}
+
+	type expected struct {
+		terminationReason gent.TerminationReason
+		exceededKeyPrefix string
+		expensiveValue    float64
+		cheapValue        float64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		mocks    mocks
+		expected expected
+	}{
+		{
+			name: "prefix limit triggers on expensive gauge",
+			input: input{
+				gaugePrefix: "test:resource:",
+			},
+			mocks: mocks{
+				maxValue: 0.25,
+			},
+			expected: expected{
+				terminationReason: gent.TerminationLimitExceeded,
+				exceededKeyPrefix: "test:resource:",
+				expensiveValue:    0.30, // 3 iterations * 0.10
+				cheapValue:        0.02, // 2 iterations * 0.01
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			callCount := 0
+			loop := &mockAgentLoop{
+				nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+					callCount++
+					// Alternate between expensive and cheap resources
+					if callCount%2 == 1 {
+						execCtx.Stats().IncrGauge(tt.input.gaugePrefix+"expensive", 0.10)
+					} else {
+						execCtx.Stats().IncrGauge(tt.input.gaugePrefix+"cheap", 0.01)
+					}
+					return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
+				},
+			}
+			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+			ctx := context.Background()
+			data := newMockLoopData()
+			execCtx := gent.NewExecutionContext(ctx, "test", data)
+			execCtx.SetLimits([]gent.Limit{
+				{Type: gent.LimitKeyPrefix, Key: tt.input.gaugePrefix, MaxValue: tt.mocks.maxValue},
+				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+			})
+
+			exec.Execute(execCtx)
+
+			result := execCtx.Result()
+			assert.NotNil(t, result)
+			assert.Equal(t, tt.expected.terminationReason, result.TerminationReason)
+			assert.Equal(t, tt.expected.exceededKeyPrefix, result.ExceededLimit.Key)
+
+			// expensive: 0.10 per odd iteration -> iterations 1,3,5 = 0.30 > 0.25
+			stats := execCtx.Stats()
+			assert.InDelta(t, tt.expected.expensiveValue,
+				stats.GetGauge(tt.input.gaugePrefix+"expensive"), 0.001)
+			assert.InDelta(t, tt.expected.cheapValue,
+				stats.GetGauge(tt.input.gaugePrefix+"cheap"), 0.001)
+		})
+	}
+}
+
+func TestLimits_GaugeExactKey_NotExceededUntilOverThreshold(t *testing.T) {
+	type input struct {
+		gaugeKey       string
+		gaugeIncrement float64
+		terminateAt    int
+	}
+
+	type mocks struct {
+		maxValue float64
+	}
+
+	type expected struct {
+		terminationReason gent.TerminationReason
+		finalGaugeValue   float64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		mocks    mocks
+		expected expected
+	}{
+		{
+			name: "gauge at exactly max value does not exceed",
+			input: input{
+				gaugeKey:       "test:threshold_gauge",
+				gaugeIncrement: 0.25,
+				terminateAt:    4, // 4 * 0.25 = 1.0 exactly at limit
+			},
+			mocks: mocks{
+				maxValue: 1.0,
+			},
+			expected: expected{
+				terminationReason: gent.TerminationSuccess,
+				finalGaugeValue:   1.0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			callCount := 0
+			loop := &mockAgentLoop{
+				nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+					callCount++
+					execCtx.Stats().IncrGauge(tt.input.gaugeKey, tt.input.gaugeIncrement)
+					if callCount >= tt.input.terminateAt {
+						return &gent.AgentLoopResult{
+							Action: gent.LATerminate,
+							Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+						}, nil
+					}
+					return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
+				},
+			}
+			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+			ctx := context.Background()
+			data := newMockLoopData()
+			execCtx := gent.NewExecutionContext(ctx, "test", data)
+			execCtx.SetLimits([]gent.Limit{
+				{Type: gent.LimitExactKey, Key: tt.input.gaugeKey, MaxValue: tt.mocks.maxValue},
+				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+			})
+
+			exec.Execute(execCtx)
+
+			result := execCtx.Result()
+			assert.NotNil(t, result)
+			assert.Equal(t, tt.expected.terminationReason, result.TerminationReason)
+			assert.Nil(t, result.ExceededLimit)
+			assert.InDelta(t, tt.expected.finalGaugeValue,
+				execCtx.Stats().GetGauge(tt.input.gaugeKey), 0.001)
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
 // Stats Aggregation Verification
 // -----------------------------------------------------------------------------
 
@@ -989,7 +1106,6 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 				Model:        "parent-model",
 				InputTokens:  100,
 				OutputTokens: 50,
-				Cost:         0.01,
 			})
 
 			// Spawn child that also traces
@@ -999,7 +1115,6 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 				Model:        "child-model",
 				InputTokens:  200,
 				OutputTokens: 100,
-				Cost:         0.02,
 			})
 			execCtx.CompleteChild(child)
 
@@ -1022,11 +1137,8 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 	// Parent stats should include both parent and child contributions
 	assert.Equal(t, int64(300), stats.GetTotalInputTokens())  // 100 + 200
 	assert.Equal(t, int64(150), stats.GetTotalOutputTokens()) // 50 + 100
-	assert.InDelta(t, 0.03, stats.GetTotalCost(), 0.001)      // 0.01 + 0.02
 
 	// Per-model stats
 	assert.Equal(t, int64(100), stats.GetCounter(gent.KeyInputTokensFor+"parent-model"))
 	assert.Equal(t, int64(200), stats.GetCounter(gent.KeyInputTokensFor+"child-model"))
-	assert.InDelta(t, 0.01, stats.GetGauge(gent.KeyCostFor+"parent-model"), 0.001)
-	assert.InDelta(t, 0.02, stats.GetGauge(gent.KeyCostFor+"child-model"), 0.001)
 }

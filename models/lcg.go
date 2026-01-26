@@ -111,7 +111,6 @@ func (m *LCGWrapper) GenerateContent(
 	if response != nil && response.Info != nil {
 		trace.InputTokens = response.Info.InputTokens
 		trace.OutputTokens = response.Info.OutputTokens
-		// Cost calculation can be added here based on model pricing
 	}
 	execCtx.Trace(trace)
 

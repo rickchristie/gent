@@ -18,12 +18,6 @@ const (
 	KeyOutputTokensFor = "gent:output_tokens:" // + model name
 )
 
-// Cost tracking keys (gauges).
-const (
-	KeyCost    = "gent:cost"
-	KeyCostFor = "gent:cost:" // + model name
-)
-
 // Tool call tracking keys.
 const (
 	KeyToolCalls    = "gent:tool_calls"

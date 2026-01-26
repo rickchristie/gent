@@ -240,11 +240,6 @@ func (s *ExecutionStats) GetTotalOutputTokens() int64 {
 	return s.GetCounter(KeyOutputTokens)
 }
 
-// GetTotalCost returns the total cost across all models.
-func (s *ExecutionStats) GetTotalCost() float64 {
-	return s.GetGauge(KeyCost)
-}
-
 // GetToolCallCount returns the total number of tool calls.
 func (s *ExecutionStats) GetToolCallCount() int64 {
 	return s.GetCounter(KeyToolCalls)
