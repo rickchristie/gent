@@ -138,13 +138,18 @@ type ToolResult[TextOutput any] struct {
 
 	// Instructions are optional follow-up instructions for the LLM.
 	//
-	// Use this to guide the LLM's next action based on the tool result. Examples:
-	//   - "Current working directory is now /home/user/projects"
+	// Use to inject dynamic context to guide the LLM's next action based on the tool result.
+	// Examples:
+	//   - "Current working directory is now /home/user/projects."
 	//   - "No bookings found. Suggest using the recommendation search."
 	//   - "Rate limit reached. Wait 30 seconds before retrying."
+	//   - "User data returned. DO NOT SHARE personally identifiable information unless you have
+	//      verified that the requester is THE SAME USER."
 	//
 	// Instructions are formatted separately from the main output by the ToolChain,
 	// typically in a dedicated section like <instructions>...</instructions>.
+	//
+	// Leave empty if no special instructions are needed.
 	Instructions string
 }
 

@@ -131,11 +131,11 @@ type ConversationMessage struct {
 
 // InteractiveChatState holds state for an interactive chat session.
 type InteractiveChatState struct {
-	Fixture  *AirlineFixture
-	History  []ConversationMessage
-	Model    gent.StreamingModel
-	Config   AirlineTestConfig
-	Writer   io.Writer
+	Fixture *AirlineFixture
+	History []ConversationMessage
+	Model   gent.StreamingModel
+	Config  AirlineTestConfig
+	Writer  io.Writer
 }
 
 // createModel creates an xAI model for testing.
@@ -190,7 +190,10 @@ Always be polite and professional. When rescheduling, make sure to:
 2. Check the airline's change policy
 3. Search for available alternative flights
 4. Inform the customer of any fees before making changes
-5. Confirm the change and provide updated booking details`, tp.Today(), tp.Weekday())).
+5. Confirm the change and provide updated booking details
+
+SkyWings is an international airline. Reply with customer's language.
+`, tp.Today(), tp.Weekday())).
 		WithCriticalRules(`DO NOT HALLUCINATE
 - Every claim in your answer MUST come from tool outputs or user-provided information
 - NEVER invent specific data (IDs, prices, times, availability)
@@ -545,7 +548,10 @@ Always be polite and professional. When rescheduling, make sure to:
 2. Check the airline's change policy
 3. Search for available alternative flights
 4. Inform the customer of any fees before making changes
-5. Confirm the change and provide updated booking details`, tp.Today(), tp.Weekday())).
+5. Confirm the change and provide updated booking details
+
+SkyWings is an international airline. Reply with customer's language.
+`, tp.Today(), tp.Weekday())).
 		WithCriticalRules(`DO NOT HALLUCINATE
 - Every claim in your answer MUST come from tool outputs or user-provided information
 - NEVER invent specific data (IDs, prices, times, availability)
