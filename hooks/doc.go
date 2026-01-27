@@ -37,7 +37,7 @@
 //	func (h *MetricsHook) OnAfterToolCall(
 //	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
-//	    event gent.AfterToolCallEvent,
+//	    event *gent.AfterToolCallEvent,
 //	) {
 //	    metrics.RecordToolCall(event.ToolName, event.Duration)
 //	}

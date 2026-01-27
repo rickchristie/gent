@@ -284,7 +284,7 @@ func (c *JSON) Execute(
 
 				if execCtx != nil {
 					// Fire AfterToolCall with validation error
-					execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+					execCtx.FireAfterToolCall(ctx, &gent.AfterToolCallEvent{
 						ToolName: call.Name,
 						Args:     nil,
 						Error:    validationErr,
@@ -310,7 +310,7 @@ func (c *JSON) Execute(
 				Content: fmt.Sprintf("Error: %v", transformErr),
 			})
 			if execCtx != nil {
-				execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+				execCtx.FireAfterToolCall(ctx, &gent.AfterToolCallEvent{
 					ToolName: call.Name,
 					Args:     nil,
 					Error:    transformErr,
@@ -396,7 +396,7 @@ func (c *JSON) Execute(
 			outputVal = output.Text
 		}
 		if execCtx != nil {
-			execCtx.FireAfterToolCall(ctx, gent.AfterToolCallEvent{
+			execCtx.FireAfterToolCall(ctx, &gent.AfterToolCallEvent{
 				ToolName: call.Name,
 				Args:     inputToUse,
 				Output:   outputVal,

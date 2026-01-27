@@ -171,12 +171,24 @@
 //
 //	type LoggingHook struct{}
 //
-//	func (h *LoggingHook) OnBeforeIteration(ctx context.Context, execCtx *ExecutionContext, e BeforeIterationEvent) {
+//	func (h *LoggingHook) OnBeforeIteration(
+//	    ctx context.Context,
+//	    execCtx *ExecutionContext,
+//	    e *BeforeIterationEvent,
+//	) {
 //	    log.Printf("Starting iteration %d", e.Iteration)
 //	}
 //
-//	func (h *LoggingHook) OnAfterModelCall(ctx context.Context, execCtx *ExecutionContext, e AfterModelCallEvent) {
-//	    log.Printf("Model call took %v, used %d tokens", e.Duration, e.Response.Info.InputTokens)
+//	func (h *LoggingHook) OnAfterModelCall(
+//	    ctx context.Context,
+//	    execCtx *ExecutionContext,
+//	    e *AfterModelCallEvent,
+//	) {
+//	    log.Printf(
+//	        "Model call took %v, used %d tokens",
+//	        e.Duration,
+//	        e.Response.Info.InputTokens,
+//	    )
 //	}
 //
 //	// Register hooks

@@ -37,13 +37,17 @@ import (
 //	}
 //
 //	func (h *FullHook) OnBeforeExecution(
-//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.BeforeExecutionEvent,
+//	    ctx context.Context,
+//	    execCtx *gent.ExecutionContext,
+//	    e *gent.BeforeExecutionEvent,
 //	) {
 //	    h.logger.Print("Execution started")
 //	}
 //
 //	func (h *FullHook) OnAfterToolCall(
-//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.AfterToolCallEvent,
+//	    ctx context.Context,
+//	    execCtx *gent.ExecutionContext,
+//	    e *gent.AfterToolCallEvent,
 //	) {
 //	    h.logger.Printf("Tool %s: %v", e.ToolName, e.Duration)
 //	}
@@ -62,7 +66,9 @@ import (
 // Example:
 //
 //	func (h *MyHook) OnAfterIteration(
-//	    ctx context.Context, execCtx *gent.ExecutionContext, e gent.AfterIterationEvent,
+//	    ctx context.Context,
+//	    execCtx *gent.ExecutionContext,
+//	    e *gent.AfterIterationEvent,
 //	) {
 //	    iterations := execCtx.Stats().GetIterations()
 //	    h.logger.Printf("Completed iteration %d", iterations)
@@ -92,12 +98,12 @@ func (r *Registry) Register(hook any) *Registry {
 	return r
 }
 
-// FireBeforeExecution dispatches a BeforeExecutionEvent to all registered
-// BeforeExecutionHook implementations.
+// FireBeforeExecution dispatches a BeforeExecutionEvent to all
+// registered BeforeExecutionHook implementations.
 func (r *Registry) FireBeforeExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeExecutionEvent,
+	event *gent.BeforeExecutionEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeExecutionHook); ok {
@@ -106,12 +112,12 @@ func (r *Registry) FireBeforeExecution(
 	}
 }
 
-// FireAfterExecution dispatches an AfterExecutionEvent to all registered
-// AfterExecutionHook implementations.
+// FireAfterExecution dispatches an AfterExecutionEvent to all
+// registered AfterExecutionHook implementations.
 func (r *Registry) FireAfterExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterExecutionEvent,
+	event *gent.AfterExecutionEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterExecutionHook); ok {
@@ -120,12 +126,12 @@ func (r *Registry) FireAfterExecution(
 	}
 }
 
-// FireBeforeIteration dispatches a BeforeIterationEvent to all registered
-// BeforeIterationHook implementations.
+// FireBeforeIteration dispatches a BeforeIterationEvent to all
+// registered BeforeIterationHook implementations.
 func (r *Registry) FireBeforeIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeIterationEvent,
+	event *gent.BeforeIterationEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeIterationHook); ok {
@@ -134,12 +140,12 @@ func (r *Registry) FireBeforeIteration(
 	}
 }
 
-// FireAfterIteration dispatches an AfterIterationEvent to all registered
-// AfterIterationHook implementations.
+// FireAfterIteration dispatches an AfterIterationEvent to all
+// registered AfterIterationHook implementations.
 func (r *Registry) FireAfterIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterIterationEvent,
+	event *gent.AfterIterationEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterIterationHook); ok {
@@ -148,9 +154,13 @@ func (r *Registry) FireAfterIteration(
 	}
 }
 
-// FireError dispatches an ErrorEvent to all registered ErrorHook implementations.
-// This is informational only; errors from hooks are not propagated.
-func (r *Registry) FireError(ctx context.Context, execCtx *gent.ExecutionContext, event gent.ErrorEvent) {
+// FireError dispatches an ErrorEvent to all registered ErrorHook
+// implementations.
+func (r *Registry) FireError(
+	ctx context.Context,
+	execCtx *gent.ExecutionContext,
+	event *gent.ErrorEvent,
+) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.ErrorHook); ok {
 			hook.OnError(ctx, execCtx, event)
@@ -158,13 +168,13 @@ func (r *Registry) FireError(ctx context.Context, execCtx *gent.ExecutionContext
 	}
 }
 
-// FireBeforeModelCall dispatches a BeforeModelCallEvent to all registered
-// BeforeModelCallHook implementations.
-// This is informational only; errors from hooks are not propagated.
+// FireBeforeModelCall dispatches a BeforeModelCallEvent to all
+// registered BeforeModelCallHook implementations.
+// Hooks can modify event.Request for ephemeral context injection.
 func (r *Registry) FireBeforeModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeModelCallEvent,
+	event *gent.BeforeModelCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeModelCallHook); ok {
@@ -173,13 +183,12 @@ func (r *Registry) FireBeforeModelCall(
 	}
 }
 
-// FireAfterModelCall dispatches an AfterModelCallEvent to all registered
-// AfterModelCallHook implementations.
-// This is informational only; errors from hooks are not propagated.
+// FireAfterModelCall dispatches an AfterModelCallEvent to all
+// registered AfterModelCallHook implementations.
 func (r *Registry) FireAfterModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterModelCallEvent,
+	event *gent.AfterModelCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterModelCallHook); ok {
@@ -188,8 +197,8 @@ func (r *Registry) FireAfterModelCall(
 	}
 }
 
-// FireBeforeToolCall dispatches a BeforeToolCallEvent to all registered
-// BeforeToolCallHook implementations.
+// FireBeforeToolCall dispatches a BeforeToolCallEvent to all
+// registered BeforeToolCallHook implementations.
 // Hooks can modify event.Args to change the tool input.
 func (r *Registry) FireBeforeToolCall(
 	ctx context.Context,
@@ -205,11 +214,10 @@ func (r *Registry) FireBeforeToolCall(
 
 // FireAfterToolCall dispatches an AfterToolCallEvent to all registered
 // AfterToolCallHook implementations.
-// This is informational only; errors from hooks are not propagated.
 func (r *Registry) FireAfterToolCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterToolCallEvent,
+	event *gent.AfterToolCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterToolCallHook); ok {

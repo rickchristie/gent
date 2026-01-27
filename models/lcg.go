@@ -56,15 +56,20 @@ func (m *LCGWrapper) GenerateContent(
 ) (*gent.ContentResponse, error) {
 	ctx := execCtx.Context()
 
-	// Fire BeforeModelCall hook
-	execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
+	// Fire BeforeModelCall hook — hooks may modify event.Request
+	// for ephemeral dynamic context injection.
+	beforeEvent := &gent.BeforeModelCallEvent{
 		Model:   m.modelName,
 		Request: messages,
-	})
+	}
+	execCtx.FireBeforeModelCall(ctx, beforeEvent)
 
+	// Use event.Request (possibly modified by hooks)
 	// Call the underlying model
 	startTime := time.Now()
-	lcgResponse, err := m.model.GenerateContent(ctx, messages, options...)
+	lcgResponse, err := m.model.GenerateContent(
+		ctx, beforeEvent.Request, options...,
+	)
 	duration := time.Since(startTime)
 
 	// Convert response
@@ -73,10 +78,10 @@ func (m *LCGWrapper) GenerateContent(
 		response = convertLCGResponse(lcgResponse, duration)
 	}
 
-	// Fire AfterModelCall hook first (for logging)
-	execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
+	// Fire AfterModelCall hook (for logging)
+	execCtx.FireAfterModelCall(ctx, &gent.AfterModelCallEvent{
 		Model:    m.modelName,
-		Request:  messages,
+		Request:  beforeEvent.Request,
 		Response: response,
 		Duration: duration,
 		Error:    err,
@@ -103,7 +108,7 @@ func (m *LCGWrapper) GenerateContent(
 	// Then trace for aggregation
 	trace := gent.ModelCallTrace{
 		Model:    m.modelName,
-		Request:  messages,
+		Request:  beforeEvent.Request,
 		Response: response,
 		Duration: duration,
 		Error:    err,
@@ -277,11 +282,16 @@ func (m *LCGWrapper) GenerateContentStream(
 ) (gent.Stream, error) {
 	ctx := execCtx.Context()
 
-	// Fire BeforeModelCall hook
-	execCtx.FireBeforeModelCall(ctx, gent.BeforeModelCallEvent{
+	// Fire BeforeModelCall hook — hooks may modify event.Request
+	// for ephemeral dynamic context injection.
+	beforeEvent := &gent.BeforeModelCallEvent{
 		Model:   m.modelName,
 		Request: messages,
-	})
+	}
+	execCtx.FireBeforeModelCall(ctx, beforeEvent)
+
+	// Use event.Request (possibly modified by hooks)
+	messages = beforeEvent.Request
 
 	// Create stream with duration tracking
 	stream := gent.NewStreamWithDuration()
@@ -344,7 +354,7 @@ func (m *LCGWrapper) GenerateContentStream(
 		}
 
 		// Fire AfterModelCall hook and trace
-		execCtx.FireAfterModelCall(ctx, gent.AfterModelCallEvent{
+		execCtx.FireAfterModelCall(ctx, &gent.AfterModelCallEvent{
 			Model:    m.modelName,
 			Request:  messages,
 			Response: response,

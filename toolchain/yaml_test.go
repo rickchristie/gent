@@ -1818,14 +1818,14 @@ type yamlTestRegistry struct {
 func (r *yamlTestRegistry) FireBeforeModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeModelCallEvent,
+	event *gent.BeforeModelCallEvent,
 ) {
 }
 
 func (r *yamlTestRegistry) FireAfterModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterModelCallEvent,
+	event *gent.AfterModelCallEvent,
 ) {
 }
 
@@ -1845,7 +1845,7 @@ func (r *yamlTestRegistry) FireBeforeToolCall(
 func (r *yamlTestRegistry) FireAfterToolCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterToolCallEvent,
+	event *gent.AfterToolCallEvent,
 ) {
 }
 

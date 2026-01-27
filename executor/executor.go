@@ -116,7 +116,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 		execCtx.CloseStreams()
 
 		if beforeExecutionCalled && e.hooks != nil {
-			event := gent.AfterExecutionEvent{
+			event := &gent.AfterExecutionEvent{
 				TerminationReason: execCtx.TerminationReason(),
 				Error:             execCtx.Error(),
 			}
@@ -128,7 +128,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 	// BeforeExecution hook
 	ctx := execCtx.Context()
 	if e.hooks != nil {
-		event := gent.BeforeExecutionEvent{}
+		event := &gent.BeforeExecutionEvent{}
 		e.hooks.FireBeforeExecution(ctx, execCtx, event)
 	}
 	beforeExecutionCalled = true
@@ -158,7 +158,9 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 
 		// BeforeIteration hook
 		if e.hooks != nil {
-			event := gent.BeforeIterationEvent{Iteration: execCtx.Iteration()}
+			event := &gent.BeforeIterationEvent{
+				Iteration: execCtx.Iteration(),
+			}
 			e.hooks.FireBeforeIteration(ctx, execCtx, event)
 		}
 
@@ -193,7 +195,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 
 		// AfterIteration hook
 		if e.hooks != nil {
-			event := gent.AfterIterationEvent{
+			event := &gent.AfterIterationEvent{
 				Iteration: execCtx.Iteration(),
 				Result:    loopResult,
 				Duration:  iterDuration,

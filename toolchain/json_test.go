@@ -1717,14 +1717,14 @@ type jsonTestRegistry struct {
 func (r *jsonTestRegistry) FireBeforeModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeModelCallEvent,
+	event *gent.BeforeModelCallEvent,
 ) {
 }
 
 func (r *jsonTestRegistry) FireAfterModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterModelCallEvent,
+	event *gent.AfterModelCallEvent,
 ) {
 }
 
@@ -1744,7 +1744,7 @@ func (r *jsonTestRegistry) FireBeforeToolCall(
 func (r *jsonTestRegistry) FireAfterToolCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterToolCallEvent,
+	event *gent.AfterToolCallEvent,
 ) {
 }
 

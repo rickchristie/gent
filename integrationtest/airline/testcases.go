@@ -373,20 +373,19 @@ func newStreamingOutputHook(w io.Writer) *streamingOutputHook {
 func (h *streamingOutputHook) OnBeforeIteration(
 	_ context.Context,
 	_ *gent.ExecutionContext,
-	event gent.BeforeIterationEvent,
-) error {
+	event *gent.BeforeIterationEvent,
+) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.currentIter = event.Iteration
 	h.iterHeaderShown = false
-	return nil
 }
 
 // OnAfterToolCall is called after each tool execution.
 func (h *streamingOutputHook) OnAfterToolCall(
 	_ context.Context,
 	_ *gent.ExecutionContext,
-	event gent.AfterToolCallEvent,
+	event *gent.AfterToolCallEvent,
 ) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

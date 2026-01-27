@@ -7,16 +7,33 @@ import (
 	"time"
 )
 
-// HookFirer is an interface for firing hooks from within framework components.
-// This is implemented by hooks.Registry and set on ExecutionContext by the Executor.
+// HookFirer is an interface for firing hooks from within framework
+// components. This is implemented by hooks.Registry and set on
+// ExecutionContext by the Executor.
 type HookFirer interface {
 	// Model call hooks
-	FireBeforeModelCall(ctx context.Context, execCtx *ExecutionContext, event BeforeModelCallEvent)
-	FireAfterModelCall(ctx context.Context, execCtx *ExecutionContext, event AfterModelCallEvent)
+	FireBeforeModelCall(
+		ctx context.Context,
+		execCtx *ExecutionContext,
+		event *BeforeModelCallEvent,
+	)
+	FireAfterModelCall(
+		ctx context.Context,
+		execCtx *ExecutionContext,
+		event *AfterModelCallEvent,
+	)
 
 	// Tool call hooks
-	FireBeforeToolCall(ctx context.Context, execCtx *ExecutionContext, event *BeforeToolCallEvent)
-	FireAfterToolCall(ctx context.Context, execCtx *ExecutionContext, event AfterToolCallEvent)
+	FireBeforeToolCall(
+		ctx context.Context,
+		execCtx *ExecutionContext,
+		event *BeforeToolCallEvent,
+	)
+	FireAfterToolCall(
+		ctx context.Context,
+		execCtx *ExecutionContext,
+		event *AfterToolCallEvent,
+	)
 }
 
 // ExecutionContext is the central context passed through all framework components.
@@ -317,10 +334,12 @@ func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
 	return false
 }
 
-// FireBeforeModelCall fires the BeforeModelCall hook if a hook firer is set.
+// FireBeforeModelCall fires the BeforeModelCall hook if a hook firer
+// is set. Hooks may modify event.Request for ephemeral context
+// injection.
 func (ctx *ExecutionContext) FireBeforeModelCall(
 	goCtx context.Context,
-	event BeforeModelCallEvent,
+	event *BeforeModelCallEvent,
 ) {
 	ctx.mu.RLock()
 	firer := ctx.hookFirer
@@ -331,10 +350,11 @@ func (ctx *ExecutionContext) FireBeforeModelCall(
 	}
 }
 
-// FireAfterModelCall fires the AfterModelCall hook if a hook firer is set.
+// FireAfterModelCall fires the AfterModelCall hook if a hook firer
+// is set.
 func (ctx *ExecutionContext) FireAfterModelCall(
 	goCtx context.Context,
-	event AfterModelCallEvent,
+	event *AfterModelCallEvent,
 ) {
 	ctx.mu.RLock()
 	firer := ctx.hookFirer
@@ -345,7 +365,8 @@ func (ctx *ExecutionContext) FireAfterModelCall(
 	}
 }
 
-// FireBeforeToolCall fires the BeforeToolCall hook if a hook firer is set.
+// FireBeforeToolCall fires the BeforeToolCall hook if a hook firer
+// is set.
 func (ctx *ExecutionContext) FireBeforeToolCall(
 	goCtx context.Context,
 	event *BeforeToolCallEvent,
@@ -359,10 +380,11 @@ func (ctx *ExecutionContext) FireBeforeToolCall(
 	}
 }
 
-// FireAfterToolCall fires the AfterToolCall hook if a hook firer is set.
+// FireAfterToolCall fires the AfterToolCall hook if a hook firer
+// is set.
 func (ctx *ExecutionContext) FireAfterToolCall(
 	goCtx context.Context,
-	event AfterToolCallEvent,
+	event *AfterToolCallEvent,
 ) {
 	ctx.mu.RLock()
 	firer := ctx.hookFirer

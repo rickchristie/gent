@@ -59,7 +59,7 @@ func (h *LoggerHook) logYAML(v any) {
 func (h *LoggerHook) OnBeforeExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeExecutionEvent,
+	event *gent.BeforeExecutionEvent,
 ) {
 	h.logEvent("BeforeExecution")
 	h.log("================================================================================")
@@ -83,7 +83,7 @@ func (h *LoggerHook) OnBeforeExecution(
 func (h *LoggerHook) OnAfterExecution(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterExecutionEvent,
+	event *gent.AfterExecutionEvent,
 ) {
 	h.logEvent("AfterExecution")
 	h.log("================================================================================")
@@ -117,7 +117,7 @@ func (h *LoggerHook) OnAfterExecution(
 func (h *LoggerHook) OnBeforeIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeIterationEvent,
+	event *gent.BeforeIterationEvent,
 ) {
 	h.logEvent(fmt.Sprintf("BeforeIteration %d", event.Iteration))
 	h.log("--------------------------------------------------------------------------------")
@@ -129,7 +129,7 @@ func (h *LoggerHook) OnBeforeIteration(
 func (h *LoggerHook) OnAfterIteration(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterIterationEvent,
+	event *gent.AfterIterationEvent,
 ) {
 	h.logEvent(fmt.Sprintf("AfterIteration %d", event.Iteration))
 	h.log("--------------------------------------------------------------------------------")
@@ -165,7 +165,7 @@ func (h *LoggerHook) OnAfterIteration(
 func (h *LoggerHook) OnError(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.ErrorEvent,
+	event *gent.ErrorEvent,
 ) {
 	h.logEvent("Error")
 	h.logYAML(map[string]any{
@@ -178,7 +178,7 @@ func (h *LoggerHook) OnError(
 func (h *LoggerHook) OnBeforeModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.BeforeModelCallEvent,
+	event *gent.BeforeModelCallEvent,
 ) {
 	h.logEvent(fmt.Sprintf("BeforeModelCall: %s", event.Model))
 
@@ -203,7 +203,7 @@ func (h *LoggerHook) OnBeforeModelCall(
 func (h *LoggerHook) OnAfterModelCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterModelCallEvent,
+	event *gent.AfterModelCallEvent,
 ) {
 	h.logEvent(fmt.Sprintf("AfterModelCall: %s (duration: %s)", event.Model, event.Duration))
 
@@ -251,7 +251,7 @@ func (h *LoggerHook) OnBeforeToolCall(
 func (h *LoggerHook) OnAfterToolCall(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	event gent.AfterToolCallEvent,
+	event *gent.AfterToolCallEvent,
 ) {
 	h.logEvent(fmt.Sprintf("AfterToolCall: %s (duration: %s)", event.ToolName, event.Duration))
 
