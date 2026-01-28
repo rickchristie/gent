@@ -103,6 +103,19 @@ func (s *mockCommonEventSubscriber) OnCommonEvent(
 	s.event = e
 }
 
+type mockCommonDiffEventSubscriber struct {
+	called bool
+	event  *gent.CommonDiffEvent
+}
+
+func (s *mockCommonDiffEventSubscriber) OnCommonDiffEvent(
+	_ *gent.ExecutionContext,
+	e *gent.CommonDiffEvent,
+) {
+	s.called = true
+	s.event = e
+}
+
 // multiSubscriber implements multiple interfaces
 type multiSubscriber struct {
 	beforeExecCalled   bool
@@ -287,6 +300,24 @@ func TestRegistry_Dispatch_CommonEvent(t *testing.T) {
 	event := &gent.CommonEvent{
 		Description: "test event",
 		Data:        "test data",
+	}
+
+	registry.Dispatch(execCtx, event)
+
+	assert.True(t, sub.called)
+	assert.Equal(t, event, sub.event)
+}
+
+func TestRegistry_Dispatch_CommonDiffEvent(t *testing.T) {
+	registry := NewRegistry()
+	sub := &mockCommonDiffEventSubscriber{}
+	registry.Subscribe(sub)
+
+	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+	event := &gent.CommonDiffEvent{
+		Before: map[string]int{"a": 1},
+		After:  map[string]int{"a": 2},
+		Diff:   "-a: 1\n+a: 2",
 	}
 
 	registry.Dispatch(execCtx, event)

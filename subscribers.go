@@ -96,3 +96,9 @@ type ErrorSubscriber interface {
 type CommonEventSubscriber interface {
 	OnCommonEvent(execCtx *ExecutionContext, event *CommonEvent)
 }
+
+// CommonDiffEventSubscriber receives CommonDiffEvent events.
+// This is useful for receiving state change events with automatic diff generation.
+type CommonDiffEventSubscriber interface {
+	OnCommonDiffEvent(execCtx *ExecutionContext, event *CommonDiffEvent)
+}

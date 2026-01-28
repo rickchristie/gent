@@ -178,6 +178,12 @@ func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
 				sub.OnCommonEvent(execCtx, e)
 			}
 		}
+	case *gent.CommonDiffEvent:
+		for _, s := range r.subscribers {
+			if sub, ok := s.(gent.CommonDiffEventSubscriber); ok {
+				sub.OnCommonDiffEvent(execCtx, e)
+			}
+		}
 	}
 }
 

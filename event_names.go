@@ -44,6 +44,10 @@ const (
 	// Child context lifecycle (published as CommonEvent)
 	EventNameChildSpawn    = "gent:child:spawn"
 	EventNameChildComplete = "gent:child:complete"
+
+	// State change events (published as CommonDiffEvent)
+	EventNameIterationHistoryChange = "gent:iteration_history:change"
+	EventNameScratchPadChange       = "gent:scratchpad:change"
 )
 
 // ParseErrorType categorizes the source of a parse error.
