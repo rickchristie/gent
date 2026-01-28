@@ -975,20 +975,24 @@ gent/
 
 ### Migration Tests
 
-1. **Backward compatibility** — Verify existing behavior preserved
-2. **JSON serialization** — Verify events serialize correctly
+1. **JSON serialization** — Verify events serialize correctly with EventName
 
 ## Rollout Plan
 
-1. Implement Phase 1-2 (core types, no breaking changes)
-2. Implement Phase 3 with backward compatibility shim
+1. Implement Phase 1-2 (core types)
+2. Implement Phase 3 (ExecutionContext integration)
 3. Implement Phase 4-5 (framework updates, docs)
 4. Implement Phase 6 (tests)
-5. Remove backward compatibility shim (breaking change)
-6. Phase 7 cleanup
+5. Phase 7 cleanup
 
-## Open Questions
+This is a breaking change. The old `Trace()` method and hook interfaces will be removed.
 
-1. Should we keep `Trace()` as an alias for `Publish()` during migration?
-2. Should `CommonEvent` support pattern-based subscribers (e.g., "myapp:*")?
-3. Should we add `PublishAsync()` for non-blocking event publishing?
+## Design Decisions
+
+1. **No backward compatibility shim** — `Trace()` will be removed entirely, not aliased to `Publish()`.
+   Users must migrate to `PublishXXX()` methods.
+
+2. **CommonEvent requires EventName** — `PublishCommonEvent(eventName, description, data)` requires
+   the caller to specify an event name. No pattern-based subscribers (e.g., "myapp:*").
+
+3. **No async publishing** — All event publishing is synchronous. Keep it simple.
