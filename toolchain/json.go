@@ -130,13 +130,9 @@ func (c *JSON) AvailableToolsPrompt() string {
 func (c *JSON) ParseSection(execCtx *gent.ExecutionContext, content string) (any, error) {
 	result, err := c.doParse(content)
 	if err != nil {
-		// Trace parse error (auto-updates stats)
+		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "toolchain",
-				RawContent: content,
-				Error:      err,
-			})
+			execCtx.PublishParseError("toolchain", content, err)
 		}
 		return nil, err
 	}
@@ -262,13 +258,9 @@ func (c *JSON) Execute(
 				Name:    call.Name,
 				Content: fmt.Sprintf("Error: %v", raw.Errors[i]),
 			})
-			// Trace the failed call if execCtx is provided
+			// Publish AfterToolCall for the failed call
 			if execCtx != nil {
-				execCtx.Trace(gent.ToolCallTrace{
-					ToolName: call.Name,
-					Input:    call.Args,
-					Error:    raw.Errors[i],
-				})
+				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, raw.Errors[i])
 			}
 			continue
 		}
@@ -283,19 +275,8 @@ func (c *JSON) Execute(
 				})
 
 				if execCtx != nil {
-					// Fire AfterToolCall with validation error
-					execCtx.FireAfterToolCall(&gent.AfterToolCallEvent{
-						ToolName: call.Name,
-						Args:     nil,
-						Error:    validationErr,
-					})
-
-					// Trace the validation failure
-					execCtx.Trace(gent.ToolCallTrace{
-						ToolName: call.Name,
-						Input:    call.Args,
-						Error:    validationErr,
-					})
+					// Publish AfterToolCall with validation error
+					execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, validationErr)
 				}
 				continue
 			}
@@ -310,31 +291,17 @@ func (c *JSON) Execute(
 				Content: fmt.Sprintf("Error: %v", transformErr),
 			})
 			if execCtx != nil {
-				execCtx.FireAfterToolCall(&gent.AfterToolCallEvent{
-					ToolName: call.Name,
-					Args:     nil,
-					Error:    transformErr,
-				})
-				execCtx.Trace(gent.ToolCallTrace{
-					ToolName: call.Name,
-					Input:    call.Args,
-					Error:    transformErr,
-				})
+				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, transformErr)
 			}
 			continue
 		}
 
-		// Fire BeforeToolCall hook with typed input (may modify args)
-		beforeEvent := &gent.BeforeToolCallEvent{
-			ToolName: call.Name,
-			Args:     typedInput,
-		}
+		// Publish BeforeToolCall event (may modify args)
+		inputToUse := typedInput
 		if execCtx != nil {
-			execCtx.FireBeforeToolCall(beforeEvent)
+			beforeEvent := execCtx.PublishBeforeToolCall(call.Name, typedInput)
+			inputToUse = beforeEvent.Args
 		}
-
-		// Use potentially modified typed input
-		inputToUse := beforeEvent.Args
 
 		startTime := time.Now()
 		output, err := CallToolWithTypedInputReflect(ctx, tool, inputToUse)
@@ -390,28 +357,13 @@ func (c *JSON) Execute(
 			}
 		}
 
-		// Fire AfterToolCall hook with typed input
+		// Publish AfterToolCall event
 		var outputVal any
 		if output != nil {
 			outputVal = output.Text
 		}
 		if execCtx != nil {
-			execCtx.FireAfterToolCall(&gent.AfterToolCallEvent{
-				ToolName: call.Name,
-				Args:     inputToUse,
-				Output:   outputVal,
-				Duration: duration,
-				Error:    err,
-			})
-
-			// Automatic tracing
-			execCtx.Trace(gent.ToolCallTrace{
-				ToolName: call.Name,
-				Input:    inputToUse,
-				Output:   outputVal,
-				Duration: duration,
-				Error:    err,
-			})
+			execCtx.PublishAfterToolCall(call.Name, inputToUse, outputVal, duration, err)
 		}
 	}
 

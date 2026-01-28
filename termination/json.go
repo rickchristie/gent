@@ -149,13 +149,9 @@ func (t *JSON[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 	var result T
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
 		parseErr := fmt.Errorf("%w: %v", gent.ErrInvalidJSON, err)
-		// Trace parse error (auto-updates stats)
+		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "termination",
-				RawContent: content,
-				Error:      parseErr,
-			})
+			execCtx.PublishParseError("termination", content, parseErr)
 		}
 		return nil, parseErr
 	}
@@ -178,10 +174,9 @@ func (t *JSON[T]) SetValidator(validator gent.AnswerValidator) {
 // The result is returned as a TextContent containing the re-serialized JSON.
 // Panics if execCtx is nil.
 //
-// When a validator is set, this method traces CommonTraceEvent with:
-//   - EventIdValidatorCalled: When the validator is invoked
-//   - EventIdValidatorAccepted: When the validator accepts the answer
-//   - EventIdValidatorRejected: When the validator rejects the answer
+// When a validator is set, this method publishes:
+//   - ValidatorCalledEvent: When the validator is invoked
+//   - ValidatorResultEvent: When the validator returns (accepted or rejected)
 func (t *JSON[T]) ShouldTerminate(
 	execCtx *gent.ExecutionContext,
 	content string,
@@ -204,33 +199,13 @@ func (t *JSON[T]) ShouldTerminate(
 	if t.validator != nil {
 		validatorName := t.validator.Name()
 
-		// Trace validator called
-		execCtx.Trace(gent.CommonTraceEvent{
-			EventId:     gent.EventIdValidatorCalled,
-			Description: "Validator '" + validatorName + "' called",
-			Data: gent.ValidatorCalledData{
-				ValidatorName: validatorName,
-				Answer:        result,
-			},
-		})
+		// Publish validator called event
+		execCtx.PublishValidatorCalled(validatorName, result)
 
 		validationResult := t.validator.Validate(execCtx, result)
 		if !validationResult.Accepted {
-			// Track rejection stats
-			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
-			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+validatorName, 1)
-
-			// Trace validator rejected
-			execCtx.Trace(gent.CommonTraceEvent{
-				EventId:     gent.EventIdValidatorRejected,
-				Description: "Validator '" + validatorName + "' rejected answer",
-				Data: gent.ValidatorResultData{
-					ValidatorName: validatorName,
-					Answer:        result,
-					Accepted:      false,
-					Feedback:      validationResult.Feedback,
-				},
-			})
+			// Publish validator result (rejection) - updates stats automatically
+			execCtx.PublishValidatorResult(validatorName, result, false, validationResult.Feedback)
 
 			// Convert feedback to ContentPart
 			var feedback []gent.ContentPart
@@ -245,16 +220,8 @@ func (t *JSON[T]) ShouldTerminate(
 			}
 		}
 
-		// Trace validator accepted
-		execCtx.Trace(gent.CommonTraceEvent{
-			EventId:     gent.EventIdValidatorAccepted,
-			Description: "Validator '" + validatorName + "' accepted answer",
-			Data: gent.ValidatorResultData{
-				ValidatorName: validatorName,
-				Answer:        result,
-				Accepted:      true,
-			},
-		})
+		// Publish validator result (acceptance)
+		execCtx.PublishValidatorResult(validatorName, result, true, nil)
 	}
 
 	// Re-serialize to ensure consistent formatting

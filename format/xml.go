@@ -191,13 +191,9 @@ func (f *XML) DescribeStructure() string {
 func (f *XML) Parse(execCtx *gent.ExecutionContext, output string) (map[string][]string, error) {
 	result, err := f.doParse(output)
 	if err != nil {
-		// Trace parse error (auto-updates stats)
+		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "format",
-				RawContent: output,
-				Error:      err,
-			})
+			execCtx.PublishParseError("format", output, err)
 		}
 		return nil, err
 	}

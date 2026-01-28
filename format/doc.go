@@ -44,7 +44,7 @@
 //
 // # Parsing and Error Handling
 //
-// Both formats trace parse errors via [gent.ParseErrorTrace] when provided
+// Both formats publish parse errors via [gent.ParseErrorEvent] when provided
 // an ExecutionContext. This enables automatic tracking of consecutive parse
 // errors for limit enforcement:
 //
@@ -76,7 +76,7 @@
 //	    output string,
 //	) (map[string][]string, error) {
 //	    // Parse output into section map
-//	    // Trace errors via execCtx.Trace() if execCtx != nil
+//	    // Publish errors via execCtx.PublishParseError() if execCtx != nil
 //	}
 //
 //	func (f *MyFormat) FormatSections(sections []gent.FormattedSection) string {

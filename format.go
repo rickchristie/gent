@@ -67,14 +67,13 @@ type FormattedSection struct {
 //	    // Format sections for LLM input
 //	}
 //
-// # Tracing Requirements
+// # Event Publishing Requirements
 //
-// Parse MUST handle tracing for stats tracking:
+// Parse MUST publish events for stats tracking:
 //
 // On parse error:
-//   - Trace a ParseErrorTrace with ErrorType="format"
-//   - The RawContent should contain the full output that failed to parse
-//   - Stats are auto-updated when ParseErrorTrace is traced
+//   - Call execCtx.PublishParseError("format", rawContent, err)
+//   - Stats are auto-updated when the event is published
 //
 // On successful parse:
 //   - Call execCtx.Stats().ResetCounter(KeyFormatParseErrorConsecutive)
@@ -85,11 +84,7 @@ type FormattedSection struct {
 //	    result, err := f.doParse(output)
 //	    if err != nil {
 //	        if execCtx != nil {
-//	            execCtx.Trace(ParseErrorTrace{
-//	                ErrorType:  "format",
-//	                RawContent: output,
-//	                Error:      err,
-//	            })
+//	            execCtx.PublishParseError("format", output, err)
 //	        }
 //	        return nil, err
 //	    }

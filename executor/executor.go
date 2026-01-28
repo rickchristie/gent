@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/rickchristie/gent/hooks"
+	"github.com/rickchristie/gent/events"
 )
 
 // Config holds configuration options for the Executor.
 type Config struct {
-	// Reserved for future configuration options.
-	// Limits are now configured on ExecutionContext via SetLimits().
+	// Events is the event registry for subscribers.
+	// If nil, a new registry is created automatically.
+	Events *events.Registry
 }
 
 // DefaultConfig returns a config with sensible defaults.
@@ -20,11 +21,11 @@ func DefaultConfig() Config {
 }
 
 // Executor orchestrates the execution of an AgentLoop, managing the lifecycle,
-// hooks, and trace collection via ExecutionContext.
+// event publishing, and trace collection via ExecutionContext.
 //
 // The Executor is responsible for:
 //   - Running the AgentLoop repeatedly until it returns [gent.LATerminate]
-//   - Invoking lifecycle hooks at appropriate points
+//   - Publishing lifecycle events at appropriate points
 //   - Handling context cancellation and limit exceeded signals
 //
 // Limits are configured on the ExecutionContext, not the Executor. This allows
@@ -33,63 +34,67 @@ func DefaultConfig() Config {
 type Executor[Data gent.LoopData] struct {
 	loop   gent.AgentLoop[Data]
 	config Config
-	hooks  *hooks.Registry
+	events *events.Registry
 }
 
 // New creates a new Executor with the given AgentLoop and configuration.
 func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor[Data] {
+	registry := config.Events
+	if registry == nil {
+		registry = events.NewRegistry()
+	}
 	return &Executor[Data]{
 		loop:   loop,
 		config: config,
-		hooks:  hooks.NewRegistry(),
+		events: registry,
 	}
 }
 
-// WithHooks replaces the executor's hook registry with the provided one.
+// WithEvents replaces the executor's event registry with the provided one.
 // Use this when you need to share a registry across multiple executors.
 // Returns the executor for chaining.
 //
 // Example:
 //
-//	// Share hooks across multiple executors
-//	sharedRegistry := hooks.NewRegistry()
-//	sharedRegistry.Register(&MetricsHook{})
+//	// Share events across multiple executors
+//	sharedRegistry := events.NewRegistry()
+//	sharedRegistry.Subscribe(&MetricsSubscriber{})
 //
-//	exec1 := executor.New(loop1, config).WithHooks(sharedRegistry)
-//	exec2 := executor.New(loop2, config).WithHooks(sharedRegistry)
-func (e *Executor[Data]) WithHooks(h *hooks.Registry) *Executor[Data] {
-	e.hooks = h
+//	exec1 := executor.New(loop1, config).WithEvents(sharedRegistry)
+//	exec2 := executor.New(loop2, config).WithEvents(sharedRegistry)
+func (e *Executor[Data]) WithEvents(registry *events.Registry) *Executor[Data] {
+	e.events = registry
 	return e
 }
 
-// RegisterHook adds a hook to the executor's existing hook registry.
-// The hook can implement any combination of hook interfaces
-// (BeforeExecutionHook, AfterToolCallHook, etc.).
+// Subscribe adds a subscriber to the executor's existing event registry.
+// The subscriber can implement any combination of subscriber interfaces
+// (BeforeExecutionSubscriber, AfterToolCallSubscriber, etc.).
 // Returns the executor for chaining.
 //
-// This is the simpler option when you don't need to share hooks across executors.
-// For sharing hooks, use WithHooks instead.
+// This is the simpler option when you don't need to share subscribers across executors.
+// For sharing, use WithEvents instead.
 //
 // Example:
 //
 //	exec := executor.New(loop, config).
-//	    RegisterHook(&LoggerHook{}).
-//	    RegisterHook(&MetricsHook{})
-func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
-	e.hooks.Register(hook)
+//	    Subscribe(&LoggerSubscriber{}).
+//	    Subscribe(&MetricsSubscriber{})
+func (e *Executor[Data]) Subscribe(subscriber any) *Executor[Data] {
+	e.events.Subscribe(subscriber)
 	return e
 }
 
 // Execute runs the AgentLoop until termination.
 //
 // The execution flow:
-//  1. Call BeforeExecution hook (if set)
+//  1. Publish BeforeExecutionEvent
 //  2. Repeatedly call AgentLoop.Next until:
 //     - It returns LATerminate
 //     - A limit is exceeded (context cancelled)
 //     - Context is canceled
 //     - An error occurs
-//  3. Call AfterExecution hook (if set)
+//  3. Publish AfterExecutionEvent
 //
 // The result is stored in execCtx.Result() after execution completes.
 // Check execCtx.Result().Error for any errors that occurred.
@@ -104,32 +109,25 @@ func (e *Executor[Data]) RegisterHook(hook any) *Executor[Data] {
 //	    // handle error
 //	}
 func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
-	// Set hook firer for model call hooks
-	if e.hooks != nil {
-		execCtx.SetHookFirer(e.hooks)
+	// Set event publisher for event dispatching
+	if e.events != nil {
+		execCtx.SetEventPublisher(e.events)
 	}
 
-	// Ensure streams are closed and AfterExecution is always called if BeforeExecution was called
-	beforeExecutionCalled := false
+	// Ensure streams are closed and AfterExecution is always published if BeforeExecution was
+	beforeExecutionPublished := false
 	defer func() {
 		// Always close streams when execution ends
 		execCtx.CloseStreams()
 
-		if beforeExecutionCalled && e.hooks != nil {
-			event := &gent.AfterExecutionEvent{
-				TerminationReason: execCtx.TerminationReason(),
-				Error:             execCtx.Error(),
-			}
-			e.hooks.FireAfterExecution(execCtx, event)
+		if beforeExecutionPublished {
+			execCtx.PublishAfterExecution(execCtx.TerminationReason(), execCtx.Error())
 		}
 	}()
 
-	// BeforeExecution hook
-	if e.hooks != nil {
-		event := &gent.BeforeExecutionEvent{}
-		e.hooks.FireBeforeExecution(execCtx, event)
-	}
-	beforeExecutionCalled = true
+	// BeforeExecution event
+	execCtx.PublishBeforeExecution()
+	beforeExecutionPublished = true
 
 	// Main execution loop
 	for {
@@ -154,17 +152,11 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 			return
 		}
 
-		// Start iteration (increments counter and records IterationStartTrace)
-		execCtx.StartIteration()
+		// Start iteration: increment counter and publish BeforeIterationEvent
+		// (BeforeIterationEvent updates KeyIterations stat)
+		execCtx.IncrementIteration()
 		iterStart := time.Now()
-
-		// BeforeIteration hook
-		if e.hooks != nil {
-			event := &gent.BeforeIterationEvent{
-				Iteration: execCtx.Iteration(),
-			}
-			e.hooks.FireBeforeIteration(execCtx, event)
-		}
+		execCtx.PublishBeforeIteration()
 
 		// Execute the AgentLoop iteration
 		loopResult, loopErr := e.loop.Next(execCtx)
@@ -172,7 +164,10 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 
 		// Handle loop error - check if it was due to limit exceeded
 		if loopErr != nil {
-			execCtx.EndIteration(gent.LATerminate, iterDuration)
+			execCtx.PublishAfterIteration(
+				&gent.AgentLoopResult{Action: gent.LATerminate},
+				iterDuration,
+			)
 			if execCtx.ExceededLimit() != nil {
 				execCtx.SetTermination(
 					gent.TerminationLimitExceeded,
@@ -192,18 +187,8 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 			return
 		}
 
-		// End iteration (records IterationEndTrace)
-		execCtx.EndIteration(loopResult.Action, iterDuration)
-
-		// AfterIteration hook
-		if e.hooks != nil {
-			event := &gent.AfterIterationEvent{
-				Iteration: execCtx.Iteration(),
-				Result:    loopResult,
-				Duration:  iterDuration,
-			}
-			e.hooks.FireAfterIteration(execCtx, event)
-		}
+		// Publish AfterIterationEvent
+		execCtx.PublishAfterIteration(loopResult, iterDuration)
 
 		// Check for termination
 		if loopResult.Action == gent.LATerminate {

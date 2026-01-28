@@ -9,7 +9,7 @@ import (
 )
 
 // LCGWrapper wraps an llms.Model and implements gent's Model interface.
-// It normalizes token usage across providers and automatically traces model calls
+// It normalizes token usage across providers and automatically publishes model call events
 // when an ExecutionContext is provided.
 //
 // Example usage:
@@ -17,11 +17,11 @@ import (
 //	llm, _ := openai.New(openai.WithToken(apiKey))
 //	model := models.NewLCGWrapper(llm).WithModelName("gpt-4")
 //
-//	// Generate content with tracing and streaming support
+//	// Generate content with event publishing and streaming support
 //	response, err := model.GenerateContent(execCtx, "req-1", "llm", messages)
 type LCGWrapper struct {
 	model     llms.Model
-	modelName string // Optional model name for tracing
+	modelName string // Optional model name for events
 }
 
 // NewLCGWrapper creates a new LCGWrapper wrapping the given llms.Model.
@@ -31,7 +31,7 @@ func NewLCGWrapper(model llms.Model) *LCGWrapper {
 	}
 }
 
-// WithModelName sets the model name used in trace events.
+// WithModelName sets the model name used in events.
 // Returns the model for chaining.
 func (m *LCGWrapper) WithModelName(name string) *LCGWrapper {
 	m.modelName = name
@@ -44,7 +44,7 @@ func (m *LCGWrapper) Unwrap() llms.Model {
 }
 
 // GenerateContent implements gent.Model.GenerateContent.
-// When execCtx is provided, the call is automatically traced with token counts and duration,
+// When execCtx is provided, BeforeModelCallEvent and AfterModelCallEvent are published,
 // and a chunk is emitted for streaming subscribers.
 // Token usage is automatically normalized across providers.
 func (m *LCGWrapper) GenerateContent(
@@ -54,21 +54,21 @@ func (m *LCGWrapper) GenerateContent(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
-	// Fire BeforeModelCall hook — hooks may modify event.Request
+	// Publish BeforeModelCall event — subscribers may modify event.Request
 	// for ephemeral dynamic context injection.
-	beforeEvent := &gent.BeforeModelCallEvent{
-		Model:   m.modelName,
-		Request: messages,
-	}
-	execCtx.FireBeforeModelCall(beforeEvent)
+	beforeEvent := execCtx.PublishBeforeModelCall(m.modelName, messages)
 
-	// Use event.Request (possibly modified by hooks)
+	// Use event.Request (possibly modified by subscribers)
+	// Type assert back to []llms.MessageContent
+	requestMessages := messages
+	if modifiedRequest, ok := beforeEvent.Request.([]llms.MessageContent); ok {
+		requestMessages = modifiedRequest
+	}
+
 	// Call the underlying model
 	ctx := execCtx.Context()
 	startTime := time.Now()
-	lcgResponse, err := m.model.GenerateContent(
-		ctx, beforeEvent.Request, options...,
-	)
+	lcgResponse, err := m.model.GenerateContent(ctx, requestMessages, options...)
 	duration := time.Since(startTime)
 
 	// Convert response
@@ -77,14 +77,8 @@ func (m *LCGWrapper) GenerateContent(
 		response = convertLCGResponse(lcgResponse, duration)
 	}
 
-	// Fire AfterModelCall hook (for logging)
-	execCtx.FireAfterModelCall(&gent.AfterModelCallEvent{
-		Model:    m.modelName,
-		Request:  beforeEvent.Request,
-		Response: response,
-		Duration: duration,
-		Error:    err,
-	})
+	// Publish AfterModelCall event (also updates stats for tokens)
+	execCtx.PublishAfterModelCall(m.modelName, requestMessages, response, duration, err)
 
 	// Emit chunk for streaming subscribers (single chunk with complete content)
 	if response != nil && len(response.Choices) > 0 {
@@ -103,20 +97,6 @@ func (m *LCGWrapper) GenerateContent(
 			Err:           err,
 		})
 	}
-
-	// Then trace for aggregation
-	trace := gent.ModelCallTrace{
-		Model:    m.modelName,
-		Request:  beforeEvent.Request,
-		Response: response,
-		Duration: duration,
-		Error:    err,
-	}
-	if response != nil && response.Info != nil {
-		trace.InputTokens = response.Info.InputTokens
-		trace.OutputTokens = response.Info.OutputTokens
-	}
-	execCtx.Trace(trace)
 
 	return response, err
 }
@@ -279,16 +259,17 @@ func (m *LCGWrapper) GenerateContentStream(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (gent.Stream, error) {
-	// Fire BeforeModelCall hook — hooks may modify event.Request
+	// Publish BeforeModelCall event — subscribers may modify event.Request
 	// for ephemeral dynamic context injection.
-	beforeEvent := &gent.BeforeModelCallEvent{
-		Model:   m.modelName,
-		Request: messages,
-	}
-	execCtx.FireBeforeModelCall(beforeEvent)
+	beforeEvent := execCtx.PublishBeforeModelCall(m.modelName, messages)
 
-	// Use event.Request (possibly modified by hooks)
-	messages = beforeEvent.Request
+	// Use event.Request (possibly modified by subscribers)
+	// Type assert back to []llms.MessageContent
+	requestMessages := messages
+	if modifiedRequest, ok := beforeEvent.Request.([]llms.MessageContent); ok {
+		requestMessages = modifiedRequest
+	}
+
 	ctx := execCtx.Context()
 
 	// Create stream with duration tracking
@@ -331,7 +312,7 @@ func (m *LCGWrapper) GenerateContentStream(
 
 	// Start the model call in a goroutine
 	go func() {
-		lcgResponse, err := m.model.GenerateContent(ctx, messages, opts...)
+		lcgResponse, err := m.model.GenerateContent(ctx, requestMessages, opts...)
 		duration := stream.Duration()
 
 		// Convert response
@@ -351,14 +332,8 @@ func (m *LCGWrapper) GenerateContentStream(
 			}
 		}
 
-		// Fire AfterModelCall hook and trace
-		execCtx.FireAfterModelCall(&gent.AfterModelCallEvent{
-			Model:    m.modelName,
-			Request:  messages,
-			Response: response,
-			Duration: duration,
-			Error:    err,
-		})
+		// Publish AfterModelCall event (also updates stats for tokens)
+		execCtx.PublishAfterModelCall(m.modelName, requestMessages, response, duration, err)
 
 		// Emit error chunk if error occurred
 		if err != nil {
@@ -368,19 +343,6 @@ func (m *LCGWrapper) GenerateContentStream(
 				Err:           err,
 			})
 		}
-
-		trace := gent.ModelCallTrace{
-			Model:    m.modelName,
-			Request:  messages,
-			Response: response,
-			Duration: duration,
-			Error:    err,
-		}
-		if response != nil && response.Info != nil {
-			trace.InputTokens = response.Info.InputTokens
-			trace.OutputTokens = response.Info.OutputTokens
-		}
-		execCtx.Trace(trace)
 
 		// Complete the stream
 		stream.Complete(response, err)

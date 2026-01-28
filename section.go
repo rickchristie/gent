@@ -37,13 +37,9 @@ package gent
 //	func (s *MySection) ParseSection(execCtx *ExecutionContext, content string) (any, error) {
 //	    parsed, err := s.doParse(content)
 //	    if err != nil {
-//	        // Trace error for stats (see Tracing Requirements below)
+//	        // Publish error for stats (see Event Requirements below)
 //	        if execCtx != nil {
-//	            execCtx.Trace(ParseErrorTrace{
-//	                ErrorType:  "section",
-//	                RawContent: content,
-//	                Error:      err,
-//	            })
+//	            execCtx.PublishParseError("section", content, err)
 //	        }
 //	        return nil, err
 //	    }
@@ -56,11 +52,11 @@ package gent
 //
 // # Tracing Requirements
 //
-// ParseSection MUST handle tracing for stats tracking:
+// ParseSection MUST handle events for stats tracking:
 //
 // On parse error:
-//   - Trace a ParseErrorTrace with the appropriate ErrorType
-//   - Stats are auto-updated when ParseErrorTrace is traced
+//   - Call execCtx.PublishParseError() with the appropriate ErrorType
+//   - Stats are auto-updated when ParseErrorEvent is published
 //
 // Supported ErrorTypes and their corresponding keys:
 //   - "section": [KeySectionParseErrorConsecutive] (for generic sections)

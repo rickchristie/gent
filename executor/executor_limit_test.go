@@ -2,6 +2,7 @@ package executor_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -14,6 +15,40 @@ import (
 // -----------------------------------------------------------------------------
 // Mock Infrastructure
 // -----------------------------------------------------------------------------
+
+// errContextCanceled is returned when context is canceled during model call.
+var errContextCanceled = errors.New("context canceled during model call")
+
+// simulateModelCall simulates a real model call with proper event publishing.
+// It publishes BeforeModelCall, checks for context cancellation, then publishes AfterModelCall.
+// Returns error if context is canceled before AfterModelCall can be published.
+func simulateModelCall(
+	execCtx *gent.ExecutionContext,
+	model string,
+	inputTokens, outputTokens int,
+) error {
+	// Publish BeforeModelCall first (like real model calls do)
+	execCtx.PublishBeforeModelCall(model, nil)
+
+	// Check if context is already canceled (limit exceeded during BeforeModelCall or earlier)
+	select {
+	case <-execCtx.Context().Done():
+		// Context canceled, don't publish AfterModelCall
+		return errContextCanceled
+	default:
+		// Continue with model call
+	}
+
+	// Simulate successful model response
+	response := &gent.ContentResponse{
+		Info: &gent.GenerationInfo{
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+		},
+	}
+	execCtx.PublishAfterModelCall(model, nil, response, 0, nil)
+	return nil
+}
 
 // mockLoopData implements gent.LoopData for testing.
 type mockLoopData struct {
@@ -70,13 +105,11 @@ func (m *mockAgentLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopRes
 	outputTokens := m.outputTokens
 	m.mu.Unlock()
 
-	// Trace model call to update stats
+	// Simulate model call to update stats via event
 	if inputTokens > 0 || outputTokens > 0 {
-		execCtx.Trace(gent.ModelCallTrace{
-			Model:        "test-model",
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-		})
+		if err := simulateModelCall(execCtx, "test-model", inputTokens, outputTokens); err != nil {
+			return nil, err
+		}
 	}
 
 	// Custom function takes precedence
@@ -99,6 +132,49 @@ func (m *mockAgentLoop) GetCalls() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.calls
+}
+
+// -----------------------------------------------------------------------------
+// Event Counting Helpers
+// -----------------------------------------------------------------------------
+
+// eventCounts holds counts of different event types for test assertions.
+type eventCounts struct {
+	BeforeIteration int
+	AfterIteration  int
+	BeforeModelCall int
+	AfterModelCall  int
+}
+
+// countEvents counts events by type from an ExecutionContext (not including children).
+func countEvents(execCtx *gent.ExecutionContext) eventCounts {
+	counts := eventCounts{}
+	for _, event := range execCtx.Events() {
+		switch event.(type) {
+		case *gent.BeforeIterationEvent:
+			counts.BeforeIteration++
+		case *gent.AfterIterationEvent:
+			counts.AfterIteration++
+		case *gent.BeforeModelCallEvent:
+			counts.BeforeModelCall++
+		case *gent.AfterModelCallEvent:
+			counts.AfterModelCall++
+		}
+	}
+	return counts
+}
+
+// countEventsWithChildren counts events by type from an ExecutionContext and all its children.
+func countEventsWithChildren(execCtx *gent.ExecutionContext) eventCounts {
+	counts := countEvents(execCtx)
+	for _, child := range execCtx.Children() {
+		childCounts := countEventsWithChildren(child)
+		counts.BeforeIteration += childCounts.BeforeIteration
+		counts.AfterIteration += childCounts.AfterIteration
+		counts.BeforeModelCall += childCounts.BeforeModelCall
+		counts.AfterModelCall += childCounts.AfterModelCall
+	}
+	return counts
 }
 
 // -----------------------------------------------------------------------------
@@ -213,52 +289,99 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 
 func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 	tests := []struct {
-		name              string
-		inputTokens       int
-		outputTokens      int
-		maxInputTokens    float64
-		maxOutputTokens   float64
-		expectedCalls     int
-		expectedKey       string
-		expectedTerminate gent.TerminationReason
+		name     string
+		input    struct{ inputTokens, outputTokens int }
+		limits   struct{ maxInput, maxOutput float64 }
+		expected struct {
+			calls           int
+			iteration       int
+			key             string
+			reason          gent.TerminationReason
+			beforeIteration int
+			afterIteration  int
+			beforeModelCall int
+			afterModelCall  int
+		}
 	}{
 		{
-			name:              "input token limit exceeded",
-			inputTokens:       1000,
-			outputTokens:      100,
-			maxInputTokens:    2500,
-			maxOutputTokens:   10000,
-			expectedCalls:     3,
-			expectedKey:       gent.KeyInputTokens,
-			expectedTerminate: gent.TerminationLimitExceeded,
+			name:   "input token limit exceeded",
+			input:  struct{ inputTokens, outputTokens int }{1000, 100},
+			limits: struct{ maxInput, maxOutput float64 }{2500, 10000},
+			expected: struct {
+				calls           int
+				iteration       int
+				key             string
+				reason          gent.TerminationReason
+				beforeIteration int
+				afterIteration  int
+				beforeModelCall int
+				afterModelCall  int
+			}{
+				calls:           3,
+				iteration:       3,
+				key:             gent.KeyInputTokens,
+				reason:          gent.TerminationLimitExceeded,
+				beforeIteration: 3,
+				afterIteration:  3,
+				beforeModelCall: 3,
+				afterModelCall:  3, // All 3 complete; limit exceeded on 3rd AfterModelCall
+			},
 		},
 		{
-			name:              "output token limit exceeded",
-			inputTokens:       100,
-			outputTokens:      500,
-			maxInputTokens:    10000,
-			maxOutputTokens:   1200,
-			expectedCalls:     3,
-			expectedKey:       gent.KeyOutputTokens,
-			expectedTerminate: gent.TerminationLimitExceeded,
+			name:   "output token limit exceeded",
+			input:  struct{ inputTokens, outputTokens int }{100, 500},
+			limits: struct{ maxInput, maxOutput float64 }{10000, 1200},
+			expected: struct {
+				calls           int
+				iteration       int
+				key             string
+				reason          gent.TerminationReason
+				beforeIteration int
+				afterIteration  int
+				beforeModelCall int
+				afterModelCall  int
+			}{
+				calls:           3,
+				iteration:       3,
+				key:             gent.KeyOutputTokens,
+				reason:          gent.TerminationLimitExceeded,
+				beforeIteration: 3,
+				afterIteration:  3,
+				beforeModelCall: 3,
+				afterModelCall:  3, // All 3 complete; limit exceeded on 3rd AfterModelCall
+			},
 		},
 		{
-			name:              "input tokens check comes first when both exceeded",
-			inputTokens:       1000,
-			outputTokens:      1000,
-			maxInputTokens:    1500,
-			maxOutputTokens:   1500,
-			expectedCalls:     2,
-			expectedKey:       gent.KeyInputTokens, // first limit in list
-			expectedTerminate: gent.TerminationLimitExceeded,
+			name:   "input tokens check comes first when both exceeded",
+			input:  struct{ inputTokens, outputTokens int }{1000, 1000},
+			limits: struct{ maxInput, maxOutput float64 }{1500, 1500},
+			expected: struct {
+				calls           int
+				iteration       int
+				key             string
+				reason          gent.TerminationReason
+				beforeIteration int
+				afterIteration  int
+				beforeModelCall int
+				afterModelCall  int
+			}{
+				calls:           2,
+				iteration:       2,
+				key:             gent.KeyInputTokens, // first limit in list
+				reason:          gent.TerminationLimitExceeded,
+				beforeIteration: 2,
+				afterIteration:  2,
+				beforeModelCall: 2,
+				afterModelCall:  2, // Both complete; limit exceeded on 2nd AfterModelCall
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			loop := &mockAgentLoop{
-				inputTokens:  tt.inputTokens,
-				outputTokens: tt.outputTokens,
+				inputTokens:  tt.input.inputTokens,
+				outputTokens: tt.input.outputTokens,
 			}
 			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
 
@@ -266,19 +389,30 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: tt.maxInputTokens},
-				{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: tt.maxOutputTokens},
+				{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: tt.limits.maxInput},
+				{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: tt.limits.maxOutput},
 				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
 			})
 
 			exec.Execute(execCtx)
 
+			// Verify termination
 			result := execCtx.Result()
 			assert.NotNil(t, result)
-			assert.Equal(t, tt.expectedTerminate, result.TerminationReason)
+			assert.Equal(t, tt.expected.reason, result.TerminationReason)
 			assert.NotNil(t, result.ExceededLimit)
-			assert.Equal(t, tt.expectedKey, result.ExceededLimit.Key)
-			assert.Equal(t, tt.expectedCalls, loop.GetCalls())
+			assert.Equal(t, tt.expected.key, result.ExceededLimit.Key)
+
+			// Verify iteration and call counts
+			assert.Equal(t, tt.expected.calls, loop.GetCalls())
+			assert.Equal(t, tt.expected.iteration, execCtx.Iteration())
+
+			// Verify event counts
+			counts := countEvents(execCtx)
+			assert.Equal(t, tt.expected.beforeIteration, counts.BeforeIteration)
+			assert.Equal(t, tt.expected.afterIteration, counts.AfterIteration)
+			assert.Equal(t, tt.expected.beforeModelCall, counts.BeforeModelCall)
+			assert.Equal(t, tt.expected.afterModelCall, counts.AfterModelCall)
 		})
 	}
 }
@@ -290,18 +424,16 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 	loop := &mockAgentLoop{
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-			// Trace to different model names
+			// Simulate model calls to different model names
 			iteration := execCtx.Iteration()
+			var err error
 			if iteration%2 == 1 {
-				execCtx.Trace(gent.ModelCallTrace{
-					Model:       "model-a",
-					InputTokens: 1000,
-				})
+				err = simulateModelCall(execCtx, "model-a", 1000, 0)
 			} else {
-				execCtx.Trace(gent.ModelCallTrace{
-					Model:       "model-b",
-					InputTokens: 500,
-				})
+				err = simulateModelCall(execCtx, "model-b", 500, 0)
+			}
+			if err != nil {
+				return nil, err
 			}
 			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 		},
@@ -319,6 +451,7 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 
 	exec.Execute(execCtx)
 
+	// Verify termination
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
@@ -329,6 +462,15 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 	// So should terminate after iteration 5
 	stats := execCtx.Stats()
 	assert.Equal(t, int64(3000), stats.GetCounter(gent.KeyInputTokensFor+"model-a"))
+
+	// Verify iteration and event counts
+	// Iterations: 1(a:1000), 2(b:500), 3(a:2000), 4(b:1000), 5(a:3000 > 2500, limit!)
+	assert.Equal(t, 5, execCtx.Iteration())
+	counts := countEvents(execCtx)
+	assert.Equal(t, 5, counts.BeforeIteration)
+	assert.Equal(t, 5, counts.AfterIteration)
+	assert.Equal(t, 5, counts.BeforeModelCall)
+	assert.Equal(t, 5, counts.AfterModelCall) // All 5 complete; limit exceeded on 5th
 }
 
 // -----------------------------------------------------------------------------
@@ -344,19 +486,16 @@ func TestLimits_ParallelChildren_AggregateToParent(t *testing.T) {
 			numChildren := 5
 			tokensPerChild := 500
 
-			for i := 0; i < numChildren; i++ {
+			for i := range numChildren {
 				wg.Add(1)
 				childData := newMockLoopData()
 				child := execCtx.SpawnChild("child", childData)
-				go func(c *gent.ExecutionContext, tokens int) {
+				go func(c *gent.ExecutionContext, tokens int, childNum int) {
 					defer wg.Done()
 					defer execCtx.CompleteChild(c)
-					// Each child traces tokens
-					c.Trace(gent.ModelCallTrace{
-						Model:       "child-model",
-						InputTokens: tokens,
-					})
-				}(child, tokensPerChild)
+					// Each child simulates a model call (ignoring error in goroutine)
+					_ = simulateModelCall(c, "child-model", tokens, 0)
+				}(child, tokensPerChild, i)
 			}
 			wg.Wait()
 
@@ -378,19 +517,37 @@ func TestLimits_ParallelChildren_AggregateToParent(t *testing.T) {
 
 	exec.Execute(execCtx)
 
+	// Verify termination
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
 
-	// Parent should have aggregated 5 * 500 = 2500 tokens
+	// Verify stats: Parent should have aggregated 5 * 500 = 2500 tokens
 	stats := execCtx.Stats()
 	assert.Equal(t, int64(2500), stats.GetTotalInputTokens())
+
+	// Verify iteration count
+	assert.Equal(t, 1, execCtx.Iteration())
+
+	// Verify parent event counts (1 iteration)
+	parentCounts := countEvents(execCtx)
+	assert.Equal(t, 1, parentCounts.BeforeIteration)
+	assert.Equal(t, 1, parentCounts.AfterIteration)
+	assert.Equal(t, 0, parentCounts.BeforeModelCall) // Parent doesn't call models
+	assert.Equal(t, 0, parentCounts.AfterModelCall)
+
+	// Verify child event counts (5 children, each with 1 model call)
+	allCounts := countEventsWithChildren(execCtx)
+	assert.Equal(t, 1, allCounts.BeforeIteration)  // Only parent has iteration events
+	assert.Equal(t, 1, allCounts.AfterIteration)
+	assert.Equal(t, 5, allCounts.BeforeModelCall)  // 5 children each call model
+	assert.Equal(t, 5, allCounts.AfterModelCall)   // All 5 complete (no limit exceeded)
 }
 
 func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 	// Children running in parallel all trace tokens.
-	// Limit check happens at StartIteration which is BEFORE Next() is called.
-	// So if limit is exceeded during iteration N, it's detected at iteration N+1's StartIteration.
+	// Limit check happens immediately when stats are updated (as child stats propagate to root).
+	// So if limit is exceeded during iteration N, context is cancelled immediately during N.
 	iterCount := 0
 	loop := &mockAgentLoop{
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
@@ -398,18 +555,16 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 			var wg sync.WaitGroup
 
 			// Each iteration spawns 5 children, each tracing 200 tokens = 1000 per iteration
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				wg.Add(1)
 				childData := newMockLoopData()
 				child := execCtx.SpawnChild("child", childData)
-				go func(c *gent.ExecutionContext) {
+				go func(c *gent.ExecutionContext, childNum int) {
 					defer wg.Done()
 					defer execCtx.CompleteChild(c)
-					c.Trace(gent.ModelCallTrace{
-						Model:       "child-model",
-						InputTokens: 200,
-					})
-				}(child)
+					// Ignoring error - context cancellation stops further AfterModelCall
+					_ = simulateModelCall(c, "child-model", 200, 0)
+				}(child, i)
 			}
 			wg.Wait()
 
@@ -424,22 +579,45 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 	execCtx.SetLimits([]gent.Limit{
 		// Each iteration: 5 children * 200 = 1000 tokens
 		// Iter 1: 1000 tokens (< 1500, OK)
-		// Iter 2: 2000 tokens (> 1500, but check happens at iter 3 start after tokens traced)
-		// Iter 3: StartIteration checks 2000 > 1500 → cancel → Next() still called
-		// Iter 4: ctx.Err() detected at top of loop → terminate
+		// Iter 2: During execution, when cumulative tokens exceed 1500, context cancelled immediately
+		// Iter 3: ctx.Err() detected at top of loop → terminate
 		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1500},
 		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
 
+	// Verify termination
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.NotNil(t, result.ExceededLimit)
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
-	// Iterations 1, 2, 3 complete Next() before context cancelled is detected at iter 4
-	assert.Equal(t, 3, iterCount)
+
+	// Verify iteration counts
+	// Iter 1, 2 call Next(); limit exceeded during iter 2, detected at iter 3 start
+	assert.Equal(t, 2, iterCount)
+	assert.Equal(t, 2, execCtx.Iteration())
+
+	// Verify parent event counts (2 iterations)
+	parentCounts := countEvents(execCtx)
+	assert.Equal(t, 2, parentCounts.BeforeIteration)
+	assert.Equal(t, 2, parentCounts.AfterIteration)
+
+	// Verify child event counts
+	// Iter 1: 5 children * (BeforeModelCall + AfterModelCall) = 10 events
+	// Iter 2: 5 children start, but limit exceeded after some AfterModelCall events
+	// The exact number depends on timing, but:
+	// - All 10 BeforeModelCall should fire (5 per iteration)
+	// - Iter 1: 5 AfterModelCall (1000 tokens)
+	// - Iter 2: At least 3 AfterModelCall needed to exceed 1500 (1000 + 600 > 1500)
+	allCounts := countEventsWithChildren(execCtx)
+	assert.Equal(t, 2, allCounts.BeforeIteration)
+	assert.Equal(t, 2, allCounts.AfterIteration)
+	assert.Equal(t, 10, allCounts.BeforeModelCall) // 5 children * 2 iterations
+	// AfterModelCall: 5 from iter 1 + some from iter 2 (at least 3 to trigger limit)
+	assert.GreaterOrEqual(t, allCounts.AfterModelCall, 8) // At least 5 + 3
+	assert.LessOrEqual(t, allCounts.AfterModelCall, 10)   // At most all 10
 }
 
 // -----------------------------------------------------------------------------
@@ -448,8 +626,8 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 
 func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 	// Each iteration spawns a serial child that traces 500 tokens.
-	// Limit check at StartIteration sees stats from PREVIOUS iterations.
-	// So after iter 3 traces 1500 tokens (> 1200), the limit is detected at iter 4's StartIteration.
+	// Limit check happens immediately when stats are updated.
+	// So when iter 3 traces 1500 tokens (> 1200), the limit is detected immediately.
 	callCount := 0
 	loop := &mockAgentLoop{
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
@@ -457,11 +635,11 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 			// Spawn a child that uses 500 tokens
 			childData := newMockLoopData()
 			child := execCtx.SpawnChild("serial-child", childData)
-			child.Trace(gent.ModelCallTrace{
-				Model:       "child-model",
-				InputTokens: 500,
-			})
+			err := simulateModelCall(child, "child-model", 500, 0)
 			execCtx.CompleteChild(child)
+			if err != nil {
+				return nil, err
+			}
 
 			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 		},
@@ -472,22 +650,38 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		// Iter 1: 500 tokens, Iter 2: 1000 tokens, Iter 3: 1500 > 1200
-		// Limit exceeded after iter 3 traces, detected at iter 4's StartIteration
-		// But iter 4's Next() is still called before ctx.Err() is checked at iter 5
+		// Iter 1: 500 tokens (< 1200, OK)
+		// Iter 2: 1000 tokens (< 1200, OK)
+		// Iter 3: 1500 tokens (> 1200, limit detected during AfterModelCall)
+		// Iter 4: ctx.Err() detected at top of loop → terminate
 		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1200},
 		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
 
+	// Verify termination
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
-	// Iter 1: 500, Iter 2: 1000, Iter 3: 1500 > 1200 (detected at iter 4 start)
-	// Iter 4 still calls Next() since ctx.Err() check is before StartIteration
-	assert.Equal(t, 4, callCount)
+
+	// Iter 1: 500, Iter 2: 1000, Iter 3: 1500 > 1200 (detected during iter 3)
+	// Iter 4 never starts since ctx.Err() is detected at top of loop
+	assert.Equal(t, 3, callCount)
+	assert.Equal(t, 3, execCtx.Iteration())
+
+	// Verify parent event counts
+	parentCounts := countEvents(execCtx)
+	assert.Equal(t, 3, parentCounts.BeforeIteration)
+	assert.Equal(t, 3, parentCounts.AfterIteration)
+
+	// Verify child event counts (3 children, each with 1 model call)
+	allCounts := countEventsWithChildren(execCtx)
+	assert.Equal(t, 3, allCounts.BeforeIteration)
+	assert.Equal(t, 3, allCounts.AfterIteration)
+	assert.Equal(t, 3, allCounts.BeforeModelCall)
+	assert.Equal(t, 3, allCounts.AfterModelCall) // All 3 complete, limit on 3rd
 }
 
 // -----------------------------------------------------------------------------
@@ -497,7 +691,7 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 	// Parent runs iterations, each spawns parallel children.
 	// Each iteration: 3 children * 100 tokens = 300 tokens.
-	// Limit check at StartIteration sees stats from PREVIOUS iterations.
+	// Limit check happens immediately when stats are updated.
 	iterCount := 0
 	loop := &mockAgentLoop{
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
@@ -505,18 +699,16 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 			var wg sync.WaitGroup
 
 			// Each iteration spawns 3 parallel children
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				wg.Add(1)
 				childData := newMockLoopData()
 				child := execCtx.SpawnChild("parallel-child", childData)
-				go func(c *gent.ExecutionContext) {
+				go func(c *gent.ExecutionContext, childNum int) {
 					defer wg.Done()
 					defer execCtx.CompleteChild(c)
-					c.Trace(gent.ModelCallTrace{
-						Model:       "child-model",
-						InputTokens: 100,
-					})
-				}(child)
+					// Ignoring error - context cancellation stops further AfterModelCall
+					_ = simulateModelCall(c, "child-model", 100, 0)
+				}(child, i)
 			}
 			wg.Wait()
 
@@ -530,22 +722,42 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
 		// Each iteration: 3 children * 100 = 300 tokens
-		// Iter 1: 300, Iter 2: 600, Iter 3: 900, Iter 4: 1200 > 1000
-		// Limit exceeded after iter 4, detected at iter 5's StartIteration
-		// But iter 5's Next() is still called
+		// Iter 1: 300 (< 1000, OK)
+		// Iter 2: 600 (< 1000, OK)
+		// Iter 3: 900 (< 1000, OK)
+		// Iter 4: During execution, when cumulative > 1000, limit detected immediately
+		// Iter 5: ctx.Err() detected at top of loop → terminate
 		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
 		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
 
+	// Verify termination
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
-	// Iter 1: 300, Iter 2: 600, Iter 3: 900, Iter 4: 1200 > 1000 (detected at iter 5 start)
-	// Iter 5 still calls Next() before ctx.Err() is checked at iter 6
-	assert.Equal(t, 5, iterCount)
+
+	// Iter 1: 300, Iter 2: 600, Iter 3: 900, Iter 4: >1000 (detected during iter 4)
+	// Iter 5 never starts since ctx.Err() is detected at top of loop
+	assert.Equal(t, 4, iterCount)
+	assert.Equal(t, 4, execCtx.Iteration())
+
+	// Verify parent event counts
+	parentCounts := countEvents(execCtx)
+	assert.Equal(t, 4, parentCounts.BeforeIteration)
+	assert.Equal(t, 4, parentCounts.AfterIteration)
+
+	// Verify child event counts
+	// 4 iterations * 3 children = 12 total children
+	allCounts := countEventsWithChildren(execCtx)
+	assert.Equal(t, 4, allCounts.BeforeIteration)
+	assert.Equal(t, 4, allCounts.AfterIteration)
+	assert.Equal(t, 12, allCounts.BeforeModelCall) // 3 children * 4 iterations
+	// AfterModelCall: iter 1-3 complete (9), iter 4 partial (at least 1 to exceed 1000)
+	assert.GreaterOrEqual(t, allCounts.AfterModelCall, 10) // At least 9 + 1
+	assert.LessOrEqual(t, allCounts.AfterModelCall, 12)    // At most all 12
 }
 
 // -----------------------------------------------------------------------------
@@ -602,11 +814,22 @@ func TestLimits_EdgeCase_ZeroMaxValue(t *testing.T) {
 
 	exec.Execute(execCtx)
 
+	// Verify termination
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
-	assert.Equal(t, 1, loop.GetCalls()) // Limit triggered on first iteration
+
+	// Limit triggered on first iteration during AfterModelCall
+	assert.Equal(t, 1, loop.GetCalls())
+	assert.Equal(t, 1, execCtx.Iteration())
+
+	// Verify event counts
+	counts := countEvents(execCtx)
+	assert.Equal(t, 1, counts.BeforeIteration)
+	assert.Equal(t, 1, counts.AfterIteration)
+	assert.Equal(t, 1, counts.BeforeModelCall)
+	assert.Equal(t, 1, counts.AfterModelCall) // Limit exceeded on this event
 }
 
 func TestLimits_EdgeCase_ExactlyAtLimit(t *testing.T) {
@@ -630,6 +853,14 @@ func TestLimits_EdgeCase_ExactlyAtLimit(t *testing.T) {
 	assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
 	assert.Nil(t, result.ExceededLimit)
 	assert.Equal(t, int64(1000), execCtx.Stats().GetTotalInputTokens())
+
+	// Verify iteration and event counts
+	assert.Equal(t, 2, execCtx.Iteration())
+	counts := countEvents(execCtx)
+	assert.Equal(t, 2, counts.BeforeIteration)
+	assert.Equal(t, 2, counts.AfterIteration)
+	assert.Equal(t, 2, counts.BeforeModelCall)
+	assert.Equal(t, 2, counts.AfterModelCall) // Both complete, no limit exceeded
 }
 
 func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
@@ -656,6 +887,16 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	// First limit in the list should be the one reported
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+
+	// Verify iteration and event counts
+	// Both input (1000) and output (1000) tokens exceed their limits (500) on first iteration
+	assert.Equal(t, 1, loop.GetCalls())
+	assert.Equal(t, 1, execCtx.Iteration())
+	counts := countEvents(execCtx)
+	assert.Equal(t, 1, counts.BeforeIteration)
+	assert.Equal(t, 1, counts.AfterIteration)
+	assert.Equal(t, 1, counts.BeforeModelCall)
+	assert.Equal(t, 1, counts.AfterModelCall) // Limit exceeded on this event
 }
 
 func TestLimits_EdgeCase_ContextAlreadyCancelled(t *testing.T) {
@@ -690,11 +931,7 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 			errorCount++
 			// Simulate format parse error
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "format",
-				RawContent: "invalid content",
-				Error:      nil,
-			})
+			execCtx.PublishParseError("format", "invalid content", nil)
 			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 		},
 	}
@@ -723,11 +960,7 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 			errorCount++
 			// Simulate toolchain parse error
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "toolchain",
-				RawContent: "invalid yaml",
-				Error:      nil,
-			})
+			execCtx.PublishParseError("toolchain", "invalid yaml", nil)
 			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 		},
 	}
@@ -758,11 +991,7 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 			callCount++
 			if callCount%2 == 1 {
 				// Odd iterations: parse error
-				execCtx.Trace(gent.ParseErrorTrace{
-					ErrorType:  "format",
-					RawContent: "invalid",
-					Error:      nil,
-				})
+				execCtx.PublishParseError("format", "invalid", nil)
 			} else {
 				// Even iterations: success (reset consecutive counter)
 				execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
@@ -1101,21 +1330,15 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 	// Comprehensive test that verifies stats are accurately aggregated
 	loop := &mockAgentLoop{
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-			// Parent traces some tokens
-			execCtx.Trace(gent.ModelCallTrace{
-				Model:        "parent-model",
-				InputTokens:  100,
-				OutputTokens: 50,
-			})
+			// Parent simulates a model call
+			if err := simulateModelCall(execCtx, "parent-model", 100, 50); err != nil {
+				return nil, err
+			}
 
-			// Spawn child that also traces
+			// Spawn child that also simulates a model call
 			childData := newMockLoopData()
 			child := execCtx.SpawnChild("child", childData)
-			child.Trace(gent.ModelCallTrace{
-				Model:        "child-model",
-				InputTokens:  200,
-				OutputTokens: 100,
-			})
+			_ = simulateModelCall(child, "child-model", 200, 100) // Ignore error for child
 			execCtx.CompleteChild(child)
 
 			return &gent.AgentLoopResult{
@@ -1141,4 +1364,19 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 	// Per-model stats
 	assert.Equal(t, int64(100), stats.GetCounter(gent.KeyInputTokensFor+"parent-model"))
 	assert.Equal(t, int64(200), stats.GetCounter(gent.KeyInputTokensFor+"child-model"))
+
+	// Verify iteration and event counts
+	assert.Equal(t, 1, execCtx.Iteration())
+	parentCounts := countEvents(execCtx)
+	assert.Equal(t, 1, parentCounts.BeforeIteration)
+	assert.Equal(t, 1, parentCounts.AfterIteration)
+	assert.Equal(t, 1, parentCounts.BeforeModelCall)  // Parent's model call
+	assert.Equal(t, 1, parentCounts.AfterModelCall)
+
+	// Verify total event counts (parent + child)
+	allCounts := countEventsWithChildren(execCtx)
+	assert.Equal(t, 1, allCounts.BeforeIteration)    // Only parent has iterations
+	assert.Equal(t, 1, allCounts.AfterIteration)
+	assert.Equal(t, 2, allCounts.BeforeModelCall)    // Parent + child
+	assert.Equal(t, 2, allCounts.AfterModelCall)     // Both complete
 }

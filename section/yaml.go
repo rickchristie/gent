@@ -53,7 +53,7 @@ import (
 //
 // # Parse Error Handling
 //
-// When YAML parsing fails, a [gent.ParseErrorTrace] is emitted and the error
+// When YAML parsing fails, a [gent.ParseErrorEvent] is published and the error
 // is returned. The framework tracks consecutive parse errors via
 // [gent.KeySectionParseErrorConsecutive] for limit enforcement.
 type YAML[T any] struct {
@@ -133,13 +133,9 @@ func (y *YAML[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 	var result T
 	if err := yaml.Unmarshal([]byte(content), &result); err != nil {
 		parseErr := fmt.Errorf("%w: %v", gent.ErrInvalidYAML, err)
-		// Trace parse error (auto-updates stats)
+		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "section",
-				RawContent: content,
-				Error:      parseErr,
-			})
+			execCtx.PublishParseError("section", content, parseErr)
 		}
 		return nil, parseErr
 	}

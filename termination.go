@@ -144,33 +144,13 @@ type ValidationResult struct {
 //	    if t.validator != nil {
 //	        validatorName := t.validator.Name()
 //
-//	        // REQUIRED: Trace validator called
-//	        execCtx.Trace(CommonTraceEvent{
-//	            EventId:     EventIdValidatorCalled,
-//	            Description: "Validator '" + validatorName + "' called",
-//	            Data: ValidatorCalledData{
-//	                ValidatorName: validatorName,
-//	                Answer:        content,
-//	            },
-//	        })
+//	        // REQUIRED: Publish validator called event
+//	        execCtx.PublishValidatorCalled(validatorName, content)
 //
 //	        result := t.validator.Validate(execCtx, content)
 //	        if !result.Accepted {
-//	            // Update stats
-//	            execCtx.Stats().IncrCounter(KeyAnswerRejectedTotal, 1)
-//	            execCtx.Stats().IncrCounter(KeyAnswerRejectedBy+validatorName, 1)
-//
-//	            // REQUIRED: Trace validator rejected
-//	            execCtx.Trace(CommonTraceEvent{
-//	                EventId:     EventIdValidatorRejected,
-//	                Description: "Validator '" + validatorName + "' rejected answer",
-//	                Data: ValidatorResultData{
-//	                    ValidatorName: validatorName,
-//	                    Answer:        content,
-//	                    Accepted:      false,
-//	                    Feedback:      result.Feedback,
-//	                },
-//	            })
+//	            // REQUIRED: Publish validator result (stats auto-updated)
+//	            execCtx.PublishValidatorResult(validatorName, content, false, result.Feedback)
 //
 //	            return &TerminationResult{
 //	                Status:  TerminationAnswerRejected,
@@ -178,16 +158,8 @@ type ValidationResult struct {
 //	            }
 //	        }
 //
-//	        // REQUIRED: Trace validator accepted
-//	        execCtx.Trace(CommonTraceEvent{
-//	            EventId:     EventIdValidatorAccepted,
-//	            Description: "Validator '" + validatorName + "' accepted answer",
-//	            Data: ValidatorResultData{
-//	                ValidatorName: validatorName,
-//	                Answer:        content,
-//	                Accepted:      true,
-//	            },
-//	        })
+//	        // REQUIRED: Publish validator accepted
+//	        execCtx.PublishValidatorResult(validatorName, content, true, nil)
 //	    }
 //
 //	    return &TerminationResult{
@@ -198,18 +170,15 @@ type ValidationResult struct {
 //
 //	func (t *MyTermination) SetValidator(v AnswerValidator) { t.validator = v }
 //
-// # Validator Tracing Requirements
+// # Validator Event Publishing Requirements
 //
-// Custom Termination implementations MUST trace [CommonTraceEvent] when calling
-// validators. This enables debugging and observability of the validation flow.
-// Use the well-known EventIds:
+// Custom Termination implementations MUST publish events when calling validators.
+// This enables debugging and observability of the validation flow. Use:
 //
-//   - [EventIdValidatorCalled]: Trace before calling validator
-//   - [EventIdValidatorAccepted]: Trace when validator accepts
-//   - [EventIdValidatorRejected]: Trace when validator rejects
+//   - [ExecutionContext.PublishValidatorCalled]: Before calling validator
+//   - [ExecutionContext.PublishValidatorResult]: After validator returns (with accepted=true/false)
 //
-// The Data field should use [ValidatorCalledData] and [ValidatorResultData]
-// for consistency with the built-in implementations.
+// Stats are automatically updated when publishing ValidatorResultEvent.
 //
 // # Available Implementations
 //

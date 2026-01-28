@@ -164,21 +164,21 @@
 //
 // See [TextSection] and the section package for details.
 //
-// # Hooks & Events
+// # Events & Subscribers
 //
-// Hooks allow observing and intercepting execution at various points. Implement the
-// appropriate hook interface and register with the executor:
+// Subscribers allow observing and intercepting execution at various points. Implement the
+// appropriate subscriber interface and register with the executor:
 //
-//	type LoggingHook struct{}
+//	type LoggingSubscriber struct{}
 //
-//	func (h *LoggingHook) OnBeforeIteration(
+//	func (s *LoggingSubscriber) OnBeforeIteration(
 //	    execCtx *ExecutionContext,
 //	    e *BeforeIterationEvent,
 //	) {
 //	    log.Printf("Starting iteration %d", e.Iteration)
 //	}
 //
-//	func (h *LoggingHook) OnAfterModelCall(
+//	func (s *LoggingSubscriber) OnAfterModelCall(
 //	    execCtx *ExecutionContext,
 //	    e *AfterModelCallEvent,
 //	) {
@@ -189,45 +189,44 @@
 //	    )
 //	}
 //
-//	// Register hooks
-//	registry := hooks.NewRegistry()
-//	registry.Register(&LoggingHook{})
-//	exec := executor.New(agent, executor.Config{Hooks: registry})
+//	// Register subscribers
+//	registry := events.NewRegistry()
+//	registry.Subscribe(&LoggingSubscriber{})
+//	exec := executor.New(agent, executor.Config{Events: registry})
 //
-// Available hook interfaces:
-//   - [BeforeExecutionHook], [AfterExecutionHook]: Execution lifecycle
-//   - [BeforeIterationHook], [AfterIterationHook]: Iteration lifecycle
-//   - [BeforeModelCallHook], [AfterModelCallHook]: Model API calls
-//   - [BeforeToolCallHook], [AfterToolCallHook]: Tool executions
-//   - [ErrorHook]: Error handling
+// Available subscriber interfaces:
+//   - [BeforeExecutionSubscriber], [AfterExecutionSubscriber]: Execution lifecycle
+//   - [BeforeIterationSubscriber], [AfterIterationSubscriber]: Iteration lifecycle
+//   - [BeforeModelCallSubscriber], [AfterModelCallSubscriber]: Model API calls
+//   - [BeforeToolCallSubscriber], [AfterToolCallSubscriber]: Tool executions
+//   - [ErrorSubscriber]: Error handling
 //
-// See hooks.go for hook interfaces and events.go for event types.
+// See subscribers.go for subscriber interfaces and events.go for event types.
 //
-// # Traces
+// # Events
 //
-// Traces are automatically recorded during execution for debugging and analysis.
+// Events are automatically recorded during execution for debugging and analysis.
 // Access them via ExecutionContext:
 //
 //	events := execCtx.Events()
 //	for _, event := range events {
 //	    switch e := event.(type) {
-//	    case gent.ModelCallTrace:
+//	    case *gent.AfterModelCallEvent:
 //	        fmt.Printf("Model %s: %d input, %d output tokens\n",
 //	            e.Model, e.InputTokens, e.OutputTokens)
-//	    case gent.ToolCallTrace:
-//	        fmt.Printf("Tool %s called with %v\n", e.ToolName, e.Input)
-//	    case gent.ParseErrorTrace:
+//	    case *gent.AfterToolCallEvent:
+//	        fmt.Printf("Tool %s called with %v\n", e.ToolName, e.Args)
+//	    case *gent.ParseErrorEvent:
 //	        fmt.Printf("Parse error (%s): %v\n", e.ErrorType, e.Error)
 //	    }
 //	}
 //
-// Trace types include:
-//   - [ModelCallTrace]: LLM API calls with token counts
-//   - [ToolCallTrace]: Tool executions with inputs/outputs
-//   - [ParseErrorTrace]: Format/toolchain/termination parse errors
-//   - [IterationStartTrace], [IterationEndTrace]: Iteration boundaries
-//   - [ChildSpawnTrace], [ChildCompleteTrace]: Nested context lifecycle
-//   - [CommonTraceEvent]: Informational events (framework and custom)
+// Event types include:
+//   - [AfterModelCallEvent]: LLM API calls with token counts
+//   - [AfterToolCallEvent]: Tool executions with inputs/outputs
+//   - [ParseErrorEvent]: Format/toolchain/termination parse errors
+//   - [BeforeIterationEvent], [AfterIterationEvent]: Iteration boundaries
+//   - [CommonEvent]: User-defined events
 //
 // # Stats and Limits
 //

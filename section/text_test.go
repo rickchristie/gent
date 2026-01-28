@@ -253,7 +253,7 @@ func TestText_ParseSection_WithExecutionContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			result, err := section.ParseSection(execCtx, tt.input)
 

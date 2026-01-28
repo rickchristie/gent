@@ -81,14 +81,10 @@ func (m *limitTestModel) GenerateContent(
 		}
 	}
 
-	// Trace the model call with token counts (mimics real model behavior)
-	// Use the model's configured name for tracing
-	if execCtx != nil && resp.Info != nil {
-		execCtx.Trace(gent.ModelCallTrace{
-			Model:        m.name,
-			InputTokens:  resp.Info.InputTokens,
-			OutputTokens: resp.Info.OutputTokens,
-		})
+	// Publish model call event with token counts (mimics real model behavior)
+	// Use the model's configured name for the event
+	if execCtx != nil {
+		execCtx.PublishAfterModelCall(m.name, nil, resp, 0, nil)
 	}
 
 	return resp, nil
@@ -156,11 +152,7 @@ func (tc *limitTestToolChain) ParseSection(
 	if idx < len(tc.parseErrors) && tc.parseErrors[idx] != nil {
 		err := tc.parseErrors[idx]
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "toolchain",
-				RawContent: content,
-				Error:      err,
-			})
+			execCtx.PublishParseError("toolchain", content, err)
 		}
 		return nil, err
 	}
@@ -181,13 +173,9 @@ func (tc *limitTestToolChain) Execute(
 
 	if idx < len(tc.parseErrors) && tc.parseErrors[idx] != nil {
 		err := tc.parseErrors[idx]
-		// Trace parse error for stats tracking
+		// Publish parse error for stats tracking
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "toolchain",
-				RawContent: content,
-				Error:      err,
-			})
+			execCtx.PublishParseError("toolchain", content, err)
 		}
 		return nil, err
 	}
@@ -210,7 +198,12 @@ func (tc *limitTestToolChain) Execute(
 		}
 	}
 
-	// Trace the tool call
+	// Publish before tool call event (increments KeyToolCalls)
+	if execCtx != nil {
+		execCtx.PublishBeforeToolCall(toolName, nil)
+	}
+
+	// Execute the tool
 	var toolErr error
 	var output string
 	if fn, ok := tc.tools[toolName]; ok {
@@ -219,14 +212,9 @@ func (tc *limitTestToolChain) Execute(
 		output = "tool executed"
 	}
 
-	// Trace tool call
+	// Publish after tool call event
 	if execCtx != nil {
-		execCtx.Trace(gent.ToolCallTrace{
-			ToolName: toolName,
-			Input:    nil,
-			Output:   output,
-			Error:    toolErr,
-		})
+		execCtx.PublishAfterToolCall(toolName, nil, output, 0, toolErr)
 
 		// Reset consecutive error counters on success
 		if toolErr == nil {
@@ -286,11 +274,7 @@ func (t *limitTestTermination) ParseSection(
 	if idx < len(t.parseErrors) && t.parseErrors[idx] != nil {
 		err := t.parseErrors[idx]
 		if execCtx != nil {
-			execCtx.Trace(gent.ParseErrorTrace{
-				ErrorType:  "termination",
-				RawContent: content,
-				Error:      err,
-			})
+			execCtx.PublishParseError("termination", content, err)
 		}
 		return nil, err
 	}
@@ -387,11 +371,7 @@ func (f *limitTestFormat) Parse(
 		call := f.calls[idx]
 		if call.err != nil {
 			if execCtx != nil {
-				execCtx.Trace(gent.ParseErrorTrace{
-					ErrorType:  "format",
-					RawContent: output,
-					Error:      call.err,
-				})
+				execCtx.PublishParseError("format", output, call.err)
 			}
 			return nil, call.err
 		}

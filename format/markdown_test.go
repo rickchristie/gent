@@ -350,7 +350,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 		}
 	}{
 		{
-			name:  "parse error traces ParseErrorTrace",
+			name:  "parse error publishes ParseErrorEvent",
 			input: "no markdown headers here",
 			expected: struct {
 				shouldError           bool
@@ -388,7 +388,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {

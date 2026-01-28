@@ -510,7 +510,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			if tt.input.presetCounter {
 				execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 1)

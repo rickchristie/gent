@@ -11,8 +11,8 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
+	"github.com/rickchristie/gent/events"
 	"github.com/rickchristie/gent/executor"
-	"github.com/rickchristie/gent/hooks"
 	"github.com/rickchristie/gent/integrationtest/loggers"
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/toolchain"
@@ -37,8 +37,8 @@ type AirlineTestConfig struct {
 	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
 	ShowIterationHistory bool
-	// ShowTraceEvents prints all trace events at the end.
-	ShowTraceEvents bool
+	// ShowEvents prints all events at the end.
+	ShowEvents bool
 	// LogWriter is an optional writer for full debug logging (like test mode).
 	// When set, logs are written here in addition to normal output.
 	LogWriter io.Writer
@@ -50,7 +50,7 @@ func TestConfig() AirlineTestConfig {
 		ToolChain:            ToolChainYAML,
 		UseStreaming:         false,
 		ShowIterationHistory: true,
-		ShowTraceEvents:      true,
+		ShowEvents:      true,
 	}
 }
 
@@ -60,7 +60,7 @@ func TestConfigJSON() AirlineTestConfig {
 		ToolChain:            ToolChainJSON,
 		UseStreaming:         false,
 		ShowIterationHistory: true,
-		ShowTraceEvents:      true,
+		ShowEvents:      true,
 	}
 }
 
@@ -70,7 +70,7 @@ func InteractiveConfig() AirlineTestConfig {
 		ToolChain:            ToolChainYAML,
 		UseStreaming:         true,
 		ShowIterationHistory: false,
-		ShowTraceEvents:      false,
+		ShowEvents:      false,
 	}
 }
 
@@ -80,7 +80,7 @@ func InteractiveConfigJSON() AirlineTestConfig {
 		ToolChain:            ToolChainJSON,
 		UseStreaming:         true,
 		ShowIterationHistory: false,
-		ShowTraceEvents:      false,
+		ShowEvents:      false,
 	}
 }
 
@@ -213,15 +213,15 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
 	})
 
-	// Create hook registry
-	hookRegistry := hooks.NewRegistry()
+	// Create event registry
+	registry := events.NewRegistry()
 
-	// Set up hooks based on mode
+	// Set up subscribers based on mode
 	var streamWg sync.WaitGroup
 	if config.UseStreaming {
-		// CLI mode: use streaming output hook
+		// CLI mode: use streaming output subscriber
 		streamingHook := newStreamingOutputHook(w)
-		hookRegistry.Register(streamingHook)
+		registry.Subscribe(streamingHook)
 
 		// Subscribe to LLM response stream
 		chunks, unsubscribe := execCtx.SubscribeToTopic("llm-response")
@@ -237,19 +237,19 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 			streamWg.Wait()
 		}()
 	} else {
-		// Test mode: use logger hook for full debugging output
-		loggerHook := loggers.NewLoggerHookWithWriter(w)
-		hookRegistry.Register(loggerHook)
+		// Test mode: use logger subscriber for full debugging output
+		loggerSubscriber := loggers.NewSubscriberWithWriter(w)
+		registry.Subscribe(loggerSubscriber)
 	}
 
-	// If LogWriter is set, also register a logger hook for file logging
+	// If LogWriter is set, also register a logger subscriber for file logging
 	if config.LogWriter != nil {
-		fileLoggerHook := loggers.NewLoggerHookWithWriter(config.LogWriter)
-		hookRegistry.Register(fileLoggerHook)
+		fileLoggerSubscriber := loggers.NewSubscriberWithWriter(config.LogWriter)
+		registry.Subscribe(fileLoggerSubscriber)
 	}
 
 	// Create executor
-	exec := executor.New[*gent.BasicLoopData](loop, executor.Config{}).WithHooks(hookRegistry)
+	exec := executor.New[*gent.BasicLoopData](loop, executor.Config{}).WithEvents(registry)
 
 	// Print header
 	printHeader(w, "AIRLINE RESCHEDULE SCENARIO")
@@ -317,36 +317,36 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 		}
 	}
 
-	// Print trace events if configured
-	if config.ShowTraceEvents {
+	// Print events if configured
+	if config.ShowEvents {
 		fmt.Fprintln(w)
-		printHeader(w, "ALL TRACE EVENTS")
+		printHeader(w, "ALL EVENTS")
 
 		for i, event := range execCtx.Events() {
 			fmt.Fprintf(w, "\n[%d] ", i+1)
 			switch e := event.(type) {
-			case gent.IterationStartTrace:
-				fmt.Fprintf(w, "IterationStart: iteration=%d\n", e.Iteration)
-			case gent.IterationEndTrace:
-				fmt.Fprintf(w, "IterationEnd: iteration=%d, action=%s, duration=%s\n",
-					e.Iteration, e.Action, e.Duration)
-			case gent.ModelCallTrace:
-				fmt.Fprintf(w, "ModelCall: model=%s, input=%d, output=%d, duration=%s\n",
+			case *gent.BeforeIterationEvent:
+				fmt.Fprintf(w, "BeforeIteration: iteration=%d\n", e.Iteration)
+			case *gent.AfterIterationEvent:
+				fmt.Fprintf(w, "AfterIteration: iteration=%d, duration=%s\n",
+					e.Iteration, e.Duration)
+			case *gent.AfterModelCallEvent:
+				fmt.Fprintf(w, "AfterModelCall: model=%s, input=%d, output=%d, duration=%s\n",
 					e.Model, e.InputTokens, e.OutputTokens, e.Duration)
-			case gent.ToolCallTrace:
+			case *gent.AfterToolCallEvent:
 				outputJSON, _ := json.Marshal(e.Output)
 				outputStr := string(outputJSON)
 				if len(outputStr) > 200 {
 					outputStr = outputStr[:200] + "..."
 				}
-				fmt.Fprintf(w, "ToolCall: tool=%s, duration=%s\n", e.ToolName, e.Duration)
-				fmt.Fprintf(w, "          input=%v\n", e.Input)
-				fmt.Fprintf(w, "          output=%s\n", outputStr)
+				fmt.Fprintf(w, "AfterToolCall: tool=%s, duration=%s\n", e.ToolName, e.Duration)
+				fmt.Fprintf(w, "               args=%v\n", e.Args)
+				fmt.Fprintf(w, "               output=%s\n", outputStr)
 				if e.Error != nil {
-					fmt.Fprintf(w, "          error=%v\n", e.Error)
+					fmt.Fprintf(w, "               error=%v\n", e.Error)
 				}
 			default:
-				fmt.Fprintf(w, "Unknown event type: %T\n", event)
+				fmt.Fprintf(w, "%T\n", event)
 			}
 		}
 	}
@@ -565,18 +565,18 @@ SkyWings is an international airline. Reply with customer's language.
 		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
 	})
 
-	// Create hook registry
-	hookRegistry := hooks.NewRegistry()
+	// Create event registry
+	registry := events.NewRegistry()
 
-	// Set up streaming hook
+	// Set up streaming subscriber
 	var streamWg sync.WaitGroup
 	streamingHook := newStreamingOutputHook(s.Writer)
-	hookRegistry.Register(streamingHook)
+	registry.Subscribe(streamingHook)
 
-	// If LogWriter is set, also register a logger hook for file logging
+	// If LogWriter is set, also register a logger subscriber for file logging
 	if s.Config.LogWriter != nil {
-		fileLoggerHook := loggers.NewLoggerHookWithWriter(s.Config.LogWriter)
-		hookRegistry.Register(fileLoggerHook)
+		fileLoggerSubscriber := loggers.NewSubscriberWithWriter(s.Config.LogWriter)
+		registry.Subscribe(fileLoggerSubscriber)
 	}
 
 	// Subscribe to LLM response stream
@@ -594,7 +594,7 @@ SkyWings is an international airline. Reply with customer's language.
 	}()
 
 	// Create executor
-	exec := executor.New[*gent.BasicLoopData](loop, executor.Config{}).WithHooks(hookRegistry)
+	exec := executor.New[*gent.BasicLoopData](loop, executor.Config{}).WithEvents(registry)
 
 	// Print user input
 	fmt.Fprintln(s.Writer)

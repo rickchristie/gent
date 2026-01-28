@@ -1,4 +1,4 @@
-// Package loggers provides reusable logging hooks for integration testing.
+// Package loggers provides reusable logging subscribers for integration testing.
 package loggers
 
 import (
@@ -13,39 +13,39 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoggerHook implements all hook interfaces to log everything that happens during execution.
+// LoggerSubscriber implements all subscriber interfaces to log everything that happens during execution.
 // All structs are logged as YAML with block scalars for easy reading.
 // Nothing is truncated - full content is always logged.
-type LoggerHook struct {
+type LoggerSubscriber struct {
 	out io.Writer
 }
 
-// NewLoggerHook creates a new LoggerHook that writes to stdout.
-func NewLoggerHook() *LoggerHook {
-	return &LoggerHook{
+// NewSubscriber creates a new LoggerSubscriber that writes to stdout.
+func NewSubscriber() *LoggerSubscriber {
+	return &LoggerSubscriber{
 		out: os.Stdout,
 	}
 }
 
-// NewLoggerHookWithWriter creates a new LoggerHook that writes to the given writer.
-func NewLoggerHookWithWriter(w io.Writer) *LoggerHook {
-	return &LoggerHook{
+// NewSubscriberWithWriter creates a new LoggerSubscriber that writes to the given writer.
+func NewSubscriberWithWriter(w io.Writer) *LoggerSubscriber {
+	return &LoggerSubscriber{
 		out: w,
 	}
 }
 
 // logEvent logs an event header with timestamp.
-func (h *LoggerHook) logEvent(name string) {
+func (h *LoggerSubscriber) logEvent(name string) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
 	fmt.Fprintf(h.out, "\n>>> [%s]: %s\n", name, timestamp)
 }
 
 // log writes a line without any prefix.
-func (h *LoggerHook) log(format string, args ...any) {
+func (h *LoggerSubscriber) log(format string, args ...any) {
 	fmt.Fprintf(h.out, format+"\n", args...)
 }
 
-func (h *LoggerHook) logYAML(v any) {
+func (h *LoggerSubscriber) logYAML(v any) {
 	data, err := yaml.Marshal(v)
 	if err != nil {
 		h.log("(failed to marshal: %v)", err)
@@ -55,7 +55,7 @@ func (h *LoggerHook) logYAML(v any) {
 }
 
 // OnBeforeExecution logs execution start with original input.
-func (h *LoggerHook) OnBeforeExecution(
+func (h *LoggerSubscriber) OnBeforeExecution(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeExecutionEvent,
 ) {
@@ -78,7 +78,7 @@ func (h *LoggerHook) OnBeforeExecution(
 }
 
 // OnAfterExecution logs execution completion with final stats.
-func (h *LoggerHook) OnAfterExecution(
+func (h *LoggerSubscriber) OnAfterExecution(
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterExecutionEvent,
 ) {
@@ -111,7 +111,7 @@ func (h *LoggerHook) OnAfterExecution(
 }
 
 // OnBeforeIteration logs iteration start.
-func (h *LoggerHook) OnBeforeIteration(
+func (h *LoggerSubscriber) OnBeforeIteration(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeIterationEvent,
 ) {
@@ -122,7 +122,7 @@ func (h *LoggerHook) OnBeforeIteration(
 }
 
 // OnAfterIteration logs iteration end with the AgentLoopResult.
-func (h *LoggerHook) OnAfterIteration(
+func (h *LoggerSubscriber) OnAfterIteration(
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterIterationEvent,
 ) {
@@ -157,28 +157,28 @@ func (h *LoggerHook) OnAfterIteration(
 }
 
 // OnError logs errors that occur during execution.
-func (h *LoggerHook) OnError(
+func (h *LoggerSubscriber) OnError(
 	execCtx *gent.ExecutionContext,
 	event *gent.ErrorEvent,
 ) {
 	h.logEvent("Error")
 	h.logYAML(map[string]any{
 		"iteration": event.Iteration,
-		"error":     event.Err.Error(),
+		"error":     event.Error.Error(),
 	})
 }
 
 // OnBeforeModelCall logs the request before a model call.
-func (h *LoggerHook) OnBeforeModelCall(
+func (h *LoggerSubscriber) OnBeforeModelCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeModelCallEvent,
 ) {
 	h.logEvent(fmt.Sprintf("BeforeModelCall: %s", event.Model))
 
-	// Log request messages
-	if len(event.Request) > 0 {
+	// Log request messages (type assert to []llms.MessageContent)
+	if messages, ok := event.Request.([]llms.MessageContent); ok && len(messages) > 0 {
 		h.log("Request:")
-		for i, msg := range event.Request {
+		for i, msg := range messages {
 			h.log("  [%d] Role: %s", i, msg.Role)
 			for _, part := range msg.Parts {
 				if tc, ok := part.(llms.TextContent); ok {
@@ -193,7 +193,7 @@ func (h *LoggerHook) OnBeforeModelCall(
 }
 
 // OnAfterModelCall logs the response after a model call.
-func (h *LoggerHook) OnAfterModelCall(
+func (h *LoggerSubscriber) OnAfterModelCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterModelCallEvent,
 ) {
@@ -229,7 +229,7 @@ func (h *LoggerHook) OnAfterModelCall(
 }
 
 // OnBeforeToolCall logs the tool call before execution.
-func (h *LoggerHook) OnBeforeToolCall(
+func (h *LoggerSubscriber) OnBeforeToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -239,7 +239,7 @@ func (h *LoggerHook) OnBeforeToolCall(
 }
 
 // OnAfterToolCall logs the tool call result after execution.
-func (h *LoggerHook) OnAfterToolCall(
+func (h *LoggerSubscriber) OnAfterToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {
@@ -254,15 +254,15 @@ func (h *LoggerHook) OnAfterToolCall(
 	h.logYAML(event.Output)
 }
 
-// Compile-time checks that LoggerHook implements all hook interfaces.
+// Compile-time checks that LoggerSubscriber implements all subscriber interfaces.
 var (
-	_ gent.BeforeExecutionHook = (*LoggerHook)(nil)
-	_ gent.AfterExecutionHook  = (*LoggerHook)(nil)
-	_ gent.BeforeIterationHook = (*LoggerHook)(nil)
-	_ gent.AfterIterationHook  = (*LoggerHook)(nil)
-	_ gent.ErrorHook           = (*LoggerHook)(nil)
-	_ gent.BeforeModelCallHook = (*LoggerHook)(nil)
-	_ gent.AfterModelCallHook  = (*LoggerHook)(nil)
-	_ gent.BeforeToolCallHook  = (*LoggerHook)(nil)
-	_ gent.AfterToolCallHook   = (*LoggerHook)(nil)
+	_ gent.BeforeExecutionSubscriber = (*LoggerSubscriber)(nil)
+	_ gent.AfterExecutionSubscriber  = (*LoggerSubscriber)(nil)
+	_ gent.BeforeIterationSubscriber = (*LoggerSubscriber)(nil)
+	_ gent.AfterIterationSubscriber  = (*LoggerSubscriber)(nil)
+	_ gent.ErrorSubscriber           = (*LoggerSubscriber)(nil)
+	_ gent.BeforeModelCallSubscriber = (*LoggerSubscriber)(nil)
+	_ gent.AfterModelCallSubscriber  = (*LoggerSubscriber)(nil)
+	_ gent.BeforeToolCallSubscriber  = (*LoggerSubscriber)(nil)
+	_ gent.AfterToolCallSubscriber   = (*LoggerSubscriber)(nil)
 )

@@ -87,35 +87,22 @@ func (s *ExecutionStats) IncrCounter(key string, delta int64) {
 	s.incrCounterInternal(key, delta)
 }
 
-// incrCounterNoLimitCheck increments a counter without triggering limit checks.
-// Used internally when limit checks will be triggered separately (e.g., from Trace).
-func (s *ExecutionStats) incrCounterNoLimitCheck(key string, delta int64) {
-	s.mu.Lock()
-	s.counters[key] += delta
-	s.mu.Unlock()
-
-	// Propagate to parent in real-time
-	if s.parent != nil {
-		s.parent.incrCounterNoLimitCheck(key, delta)
-	}
-	// Note: limit check NOT triggered here
-}
-
 // incrCounterInternal increments a counter without protection checks.
-// Used internally by the executor for protected keys like iterations.
+// Used internally for updating stats from events.
+// Each context checks its own limits, then propagates to parent.
 func (s *ExecutionStats) incrCounterInternal(key string, delta int64) {
 	s.mu.Lock()
 	s.counters[key] += delta
 	s.mu.Unlock()
 
-	// Propagate to parent in real-time
-	if s.parent != nil {
-		s.parent.incrCounterInternal(key, delta)
+	// Check limits on this context
+	if s.execCtx != nil {
+		s.execCtx.checkLimits()
 	}
 
-	// Trigger limit check on root context
-	if s.rootCtx != nil {
-		s.rootCtx.checkLimitsIfRoot()
+	// Propagate to parent (which will check its own limits)
+	if s.parent != nil {
+		s.parent.incrCounterInternal(key, delta)
 	}
 }
 
@@ -150,34 +137,21 @@ func (s *ExecutionStats) ResetCounter(key string) {
 
 // IncrGauge increments a gauge by delta. Creates the gauge if it doesn't exist.
 // The increment propagates to parent stats in real-time for hierarchical aggregation.
+// Each context checks its own limits, then propagates to parent.
 func (s *ExecutionStats) IncrGauge(key string, delta float64) {
 	s.mu.Lock()
 	s.gauges[key] += delta
 	s.mu.Unlock()
 
-	// Propagate to parent in real-time
+	// Check limits on this context
+	if s.execCtx != nil {
+		s.execCtx.checkLimits()
+	}
+
+	// Propagate to parent (which will check its own limits)
 	if s.parent != nil {
 		s.parent.IncrGauge(key, delta)
 	}
-
-	// Trigger limit check on root context
-	if s.rootCtx != nil {
-		s.rootCtx.checkLimitsIfRoot()
-	}
-}
-
-// incrGaugeNoLimitCheck increments a gauge without triggering limit checks.
-// Used internally when limit checks will be triggered separately (e.g., from Trace).
-func (s *ExecutionStats) incrGaugeNoLimitCheck(key string, delta float64) {
-	s.mu.Lock()
-	s.gauges[key] += delta
-	s.mu.Unlock()
-
-	// Propagate to parent in real-time
-	if s.parent != nil {
-		s.parent.incrGaugeNoLimitCheck(key, delta)
-	}
-	// Note: limit check NOT triggered here
 }
 
 // SetGauge sets a gauge to a specific value.
@@ -188,9 +162,9 @@ func (s *ExecutionStats) SetGauge(key string, value float64) {
 	s.gauges[key] = value
 	s.mu.Unlock()
 
-	// Trigger limit check on root context
-	if s.rootCtx != nil {
-		s.rootCtx.checkLimitsIfRoot()
+	// Check limits on this context
+	if s.execCtx != nil {
+		s.execCtx.checkLimits()
 	}
 }
 

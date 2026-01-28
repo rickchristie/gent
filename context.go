@@ -7,37 +7,22 @@ import (
 	"time"
 )
 
-// HookFirer is an interface for firing hooks from within framework
-// components. This is implemented by hooks.Registry and set on
-// ExecutionContext by the Executor.
-type HookFirer interface {
-	// Model call hooks
-	FireBeforeModelCall(
-		execCtx *ExecutionContext,
-		event *BeforeModelCallEvent,
-	)
-	FireAfterModelCall(
-		execCtx *ExecutionContext,
-		event *AfterModelCallEvent,
-	)
+// EventPublisher is an interface for dispatching events to subscribers.
+// This is implemented by events.Registry and set on ExecutionContext by the Executor.
+type EventPublisher interface {
+	// Dispatch sends an event to all matching subscribers.
+	Dispatch(execCtx *ExecutionContext, event Event)
 
-	// Tool call hooks
-	FireBeforeToolCall(
-		execCtx *ExecutionContext,
-		event *BeforeToolCallEvent,
-	)
-	FireAfterToolCall(
-		execCtx *ExecutionContext,
-		event *AfterToolCallEvent,
-	)
+	// MaxRecursion returns the maximum allowed event recursion depth.
+	MaxRecursion() int
 }
 
 // ExecutionContext is the central context passed through all framework components.
 //
 // # Key Features
 //
-//   - Automatic tracing: Trace() records events with timestamps and iteration info
-//   - Stats tracking: Stats are auto-updated from traces and propagate hierarchically
+//   - Automatic event publishing: PublishXXX() methods record events and update stats
+//   - Stats tracking: Stats are auto-updated from events and propagate hierarchically
 //   - Limit enforcement: Execution terminates when limits are exceeded
 //   - Cancellation: Propagates to all child contexts and ongoing operations
 //   - Nested loops: Child contexts share stats with parents for aggregate limits
@@ -59,8 +44,8 @@ type HookFirer interface {
 //	    // Check current iteration
 //	    fmt.Printf("Iteration %d\n", execCtx.Iteration())
 //
-//	    // Record custom trace
-//	    execCtx.TraceEvent("myapp:my_event", "Something happened", myData)
+//	    // Record custom event
+//	    execCtx.PublishCommonEvent("myapp:my_event", "Something happened", myData)
 //
 //	    // Use standard context for model calls
 //	    response, err := model.GenerateContent(execCtx, ...)
@@ -83,7 +68,7 @@ type HookFirer interface {
 //
 // # Thread Safety
 //
-// All methods are safe for concurrent use. Multiple goroutines can trace events,
+// All methods are safe for concurrent use. Multiple goroutines can publish events,
 // update stats, and access data concurrently.
 type ExecutionContext struct {
 	mu sync.RWMutex
@@ -109,10 +94,10 @@ type ExecutionContext struct {
 	iteration int
 	depth     int // nesting level (0 for root)
 
-	// All trace events (append-only log)
-	events []TraceEvent
+	// All events (append-only log)
+	events []Event
 
-	// Aggregates (auto-updated when certain events are traced)
+	// Aggregates (auto-updated when certain events are published)
 	stats *ExecutionStats
 
 	// Nesting support
@@ -128,8 +113,9 @@ type ExecutionContext struct {
 	finalResult       []ContentPart
 	err               error
 
-	// Hook firer for model/tool call hooks (set by Executor)
-	hookFirer HookFirer
+	// Event publisher for dispatching events to subscribers (set by Executor)
+	eventPublisher EventPublisher
+	eventDepth     int // tracks recursion depth for event publishing
 
 	// Streaming support
 	streamHub *streamHub
@@ -151,7 +137,7 @@ func NewExecutionContext(ctx context.Context, name string, data LoopData) *Execu
 		name:      name,
 		data:      data,
 		depth:     0,
-		events:    make([]TraceEvent, 0),
+		events:    make([]Event, 0),
 		startTime: time.Now(),
 		streamHub: newStreamHub(),
 	}
@@ -178,12 +164,12 @@ func (ctx *ExecutionContext) Name() string {
 	return ctx.name
 }
 
-// SetHookFirer sets the hook firer for model call hooks.
-// This is called by the Executor to enable model call hook firing.
-func (ctx *ExecutionContext) SetHookFirer(firer HookFirer) {
+// SetEventPublisher sets the event publisher for dispatching events to subscribers.
+// This is called by the Executor to enable event publishing.
+func (ctx *ExecutionContext) SetEventPublisher(publisher EventPublisher) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
-	ctx.hookFirer = firer
+	ctx.eventPublisher = publisher
 }
 
 // -----------------------------------------------------------------------------
@@ -242,15 +228,10 @@ func (ctx *ExecutionContext) Result() *ExecutionResult {
 // Limit Checking (internal)
 // -----------------------------------------------------------------------------
 
-// checkLimitsIfRoot checks limits only on the root context.
+// checkLimits checks if any limits are exceeded on this context.
 // This is called by ExecutionStats when counters/gauges are updated.
-// Limit checking happens on the root because it has the aggregated stats from all children.
-func (ctx *ExecutionContext) checkLimitsIfRoot() {
-	// Only check on root context (has aggregated stats)
-	if ctx.parent != nil {
-		return
-	}
-
+// Each context in the hierarchy checks its own limits as stats propagate up.
+func (ctx *ExecutionContext) checkLimits() {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 
@@ -330,63 +311,6 @@ func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
 	return false
 }
 
-// FireBeforeModelCall fires the BeforeModelCall hook if a hook firer
-// is set. Hooks may modify event.Request for ephemeral context
-// injection.
-func (ctx *ExecutionContext) FireBeforeModelCall(
-	event *BeforeModelCallEvent,
-) {
-	ctx.mu.RLock()
-	firer := ctx.hookFirer
-	ctx.mu.RUnlock()
-
-	if firer != nil {
-		firer.FireBeforeModelCall(ctx, event)
-	}
-}
-
-// FireAfterModelCall fires the AfterModelCall hook if a hook firer
-// is set.
-func (ctx *ExecutionContext) FireAfterModelCall(
-	event *AfterModelCallEvent,
-) {
-	ctx.mu.RLock()
-	firer := ctx.hookFirer
-	ctx.mu.RUnlock()
-
-	if firer != nil {
-		firer.FireAfterModelCall(ctx, event)
-	}
-}
-
-// FireBeforeToolCall fires the BeforeToolCall hook if a hook firer
-// is set.
-func (ctx *ExecutionContext) FireBeforeToolCall(
-	event *BeforeToolCallEvent,
-) {
-	ctx.mu.RLock()
-	firer := ctx.hookFirer
-	ctx.mu.RUnlock()
-
-	if firer != nil {
-		firer.FireBeforeToolCall(ctx, event)
-	}
-}
-
-// FireAfterToolCall fires the AfterToolCall hook if a hook firer
-// is set.
-func (ctx *ExecutionContext) FireAfterToolCall(
-	event *AfterToolCallEvent,
-) {
-	ctx.mu.RLock()
-	firer := ctx.hookFirer
-	ctx.mu.RUnlock()
-
-	if firer != nil {
-		firer.FireAfterToolCall(ctx, event)
-	}
-}
-
 // -----------------------------------------------------------------------------
 // Iteration Management
 // -----------------------------------------------------------------------------
@@ -399,180 +323,393 @@ func (ctx *ExecutionContext) Iteration() int {
 	return ctx.iteration
 }
 
-// StartIteration begins a new iteration, recording an IterationStartTrace.
-// Called by the Executor at the start of each iteration.
-// This also updates the protected KeyIterations stat counter for limit checking.
-func (ctx *ExecutionContext) StartIteration() {
+// IncrementIteration increments the iteration counter.
+// Called by the Executor at the start of each iteration before publishing BeforeIterationEvent.
+func (ctx *ExecutionContext) IncrementIteration() {
 	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
 	ctx.iteration++
-	// Increment the protected iteration counter in stats (using no-limit-check to avoid deadlock)
-	ctx.stats.incrCounterNoLimitCheck(KeyIterations, 1)
-	ctx.appendEventLocked(IterationStartTrace{
-		BaseTrace: ctx.baseTraceLocked(),
-	})
-	ctx.mu.Unlock()
-
-	// Trigger limit check after releasing lock to avoid deadlock
-	ctx.checkLimitsIfRoot()
-}
-
-// EndIteration completes the current iteration, recording an IterationEndTrace.
-// Called by the Executor at the end of each iteration.
-func (ctx *ExecutionContext) EndIteration(action LoopAction, duration time.Duration) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	ctx.appendEventLocked(IterationEndTrace{
-		BaseTrace: ctx.baseTraceLocked(),
-		Duration:  duration,
-		Action:    action,
-	})
 }
 
 // -----------------------------------------------------------------------------
-// Tracing
+// Event Publishing
 // -----------------------------------------------------------------------------
 
-// Trace records a trace event and auto-updates aggregates based on event type.
-func (ctx *ExecutionContext) Trace(event TraceEvent) {
+// publish is the internal implementation for all event publishing.
+// It records the event, updates stats, checks limits, and dispatches to subscribers.
+func (ctx *ExecutionContext) publish(event Event) {
 	ctx.mu.Lock()
-	ctx.traceEventLocked(event)
+
+	// Check recursion depth
+	if ctx.eventPublisher != nil && ctx.eventDepth >= ctx.eventPublisher.MaxRecursion() {
+		ctx.mu.Unlock()
+		panic(fmt.Sprintf("event recursion depth exceeded maximum (%d)",
+			ctx.eventPublisher.MaxRecursion()))
+	}
+	ctx.eventDepth++
+
+	// Populate base event fields
+	ctx.populateBaseEvent(event)
+
+	// Append to event log
+	ctx.events = append(ctx.events, event)
+
+	publisher := ctx.eventPublisher
 	ctx.mu.Unlock()
 
-	// Trigger limit check after releasing lock to avoid deadlock
-	ctx.checkLimitsIfRoot()
-}
+	// Update stats based on event type (outside lock because incrCounterInternal calls checkLimits)
+	ctx.updateStatsForEvent(event)
 
-// TraceEvent is a convenience method for recording CommonTraceEvent events.
-func (ctx *ExecutionContext) TraceEvent(eventId string, description string, data any) {
+	// Dispatch to subscribers
+	if publisher != nil {
+		publisher.Dispatch(ctx, event)
+	}
+
 	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	ctx.appendEventLocked(CommonTraceEvent{
-		BaseTrace:   ctx.baseTraceLocked(),
-		EventId:     eventId,
-		Description: description,
-		Data:        data,
-	})
+	ctx.eventDepth--
+	ctx.mu.Unlock()
 }
 
-// traceEventLocked records an event and updates stats. Must be called with lock held.
-// Note: Uses internal no-limit-check versions to avoid deadlock. Caller must trigger
-// limit checks after releasing the lock.
-func (ctx *ExecutionContext) traceEventLocked(event TraceEvent) {
-	// Update BaseTrace fields if the event has them
-	event = ctx.populateBaseTrace(event)
+// Publish records a custom event, updates stats, checks limits, and dispatches to subscribers.
+// Use this for user-defined Event types. For framework events, use the typed PublishXXX methods.
+func (ctx *ExecutionContext) Publish(event Event) {
+	ctx.publish(event)
+}
 
-	// Update stats based on event type (auto-aggregation)
-	// Use no-limit-check versions to avoid deadlock (limit check done after lock release)
+// populateBaseEvent fills in BaseEvent fields.
+// Must be called with lock held.
+func (ctx *ExecutionContext) populateBaseEvent(event Event) {
 	switch e := event.(type) {
-	case ModelCallTrace:
-		ctx.stats.incrCounterNoLimitCheck(KeyInputTokens, int64(e.InputTokens))
-		ctx.stats.incrCounterNoLimitCheck(KeyOutputTokens, int64(e.OutputTokens))
-		if e.Model != "" {
-			ctx.stats.incrCounterNoLimitCheck(KeyInputTokensFor+e.Model, int64(e.InputTokens))
-			ctx.stats.incrCounterNoLimitCheck(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
-		}
-	case ToolCallTrace:
-		ctx.stats.incrCounterNoLimitCheck(KeyToolCalls, 1)
+	case *BeforeExecutionEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *AfterExecutionEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *BeforeIterationEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *AfterIterationEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *BeforeModelCallEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *AfterModelCallEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *BeforeToolCallEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *AfterToolCallEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *ParseErrorEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *ValidatorCalledEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *ValidatorResultEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *ErrorEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *CommonEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	}
+}
+
+// updateStatsForEvent updates stats based on event type.
+// Must be called with lock held.
+func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
+	switch e := event.(type) {
+	// Increment BEFORE events (for prevention/limits)
+	case *BeforeIterationEvent:
+		ctx.stats.incrCounterInternal(KeyIterations, 1)
+
+	case *BeforeToolCallEvent:
+		ctx.stats.incrCounterInternal(KeyToolCalls, 1)
 		if e.ToolName != "" {
-			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsFor+e.ToolName, 1)
+			ctx.stats.incrCounterInternal(KeyToolCallsFor+e.ToolName, 1)
 		}
+
+	// Increment AFTER events (for recording)
+	case *AfterModelCallEvent:
+		ctx.stats.incrCounterInternal(KeyInputTokens, int64(e.InputTokens))
+		ctx.stats.incrCounterInternal(KeyOutputTokens, int64(e.OutputTokens))
+		if e.Model != "" {
+			ctx.stats.incrCounterInternal(KeyInputTokensFor+e.Model, int64(e.InputTokens))
+			ctx.stats.incrCounterInternal(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
+		}
+
+	case *AfterToolCallEvent:
 		if e.Error != nil {
-			// Track error stats
-			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorTotal, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorConsecutive, 1)
+			ctx.stats.incrCounterInternal(KeyToolCallsErrorTotal, 1)
+			ctx.stats.incrCounterInternal(KeyToolCallsErrorConsecutive, 1)
 			if e.ToolName != "" {
-				ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorFor+e.ToolName, 1)
-				ctx.stats.incrCounterNoLimitCheck(KeyToolCallsErrorConsecutiveFor+e.ToolName, 1)
+				ctx.stats.incrCounterInternal(KeyToolCallsErrorFor+e.ToolName, 1)
+				ctx.stats.incrCounterInternal(KeyToolCallsErrorConsecutiveFor+e.ToolName, 1)
 			}
 		}
-		// Note: Consecutive error counters are reset by toolchain implementations
-		// when a tool call succeeds, matching the pattern used by parse error stats.
-	case ParseErrorTrace:
+
+	case *ParseErrorEvent:
 		iteration := fmt.Sprintf("%d", ctx.iteration)
 		switch e.ErrorType {
 		case "format":
-			ctx.stats.incrCounterNoLimitCheck(KeyFormatParseErrorTotal, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyFormatParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyFormatParseErrorConsecutive, 1)
+			ctx.stats.incrCounterInternal(KeyFormatParseErrorTotal, 1)
+			ctx.stats.incrCounterInternal(KeyFormatParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterInternal(KeyFormatParseErrorConsecutive, 1)
 		case "toolchain":
-			ctx.stats.incrCounterNoLimitCheck(KeyToolchainParseErrorTotal, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyToolchainParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyToolchainParseErrorConsecutive, 1)
+			ctx.stats.incrCounterInternal(KeyToolchainParseErrorTotal, 1)
+			ctx.stats.incrCounterInternal(KeyToolchainParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterInternal(KeyToolchainParseErrorConsecutive, 1)
 		case "termination":
-			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorTotal, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeyTerminationParseErrorConsecutive, 1)
+			ctx.stats.incrCounterInternal(KeyTerminationParseErrorTotal, 1)
+			ctx.stats.incrCounterInternal(KeyTerminationParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterInternal(KeyTerminationParseErrorConsecutive, 1)
 		case "section":
-			ctx.stats.incrCounterNoLimitCheck(KeySectionParseErrorTotal, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeySectionParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterNoLimitCheck(KeySectionParseErrorConsecutive, 1)
+			ctx.stats.incrCounterInternal(KeySectionParseErrorTotal, 1)
+			ctx.stats.incrCounterInternal(KeySectionParseErrorAt+iteration, 1)
+			ctx.stats.incrCounterInternal(KeySectionParseErrorConsecutive, 1)
+		}
+
+	case *ValidatorResultEvent:
+		if !e.Accepted {
+			ctx.stats.incrCounterInternal(KeyAnswerRejectedTotal, 1)
+			if e.ValidatorName != "" {
+				ctx.stats.incrCounterInternal(KeyAnswerRejectedBy+e.ValidatorName, 1)
+			}
 		}
 	}
-
-	ctx.appendEventLocked(event)
 }
 
-// populateBaseTrace fills in BaseTrace fields if not set.
-func (ctx *ExecutionContext) populateBaseTrace(event TraceEvent) TraceEvent {
-	switch e := event.(type) {
-	case ModelCallTrace:
-		if e.Timestamp.IsZero() {
-			e.Timestamp = time.Now()
-		}
-		if e.Iteration == 0 {
-			e.Iteration = ctx.iteration
-		}
-		if e.Depth == 0 {
-			e.Depth = ctx.depth
-		}
-		return e
-	case ToolCallTrace:
-		if e.Timestamp.IsZero() {
-			e.Timestamp = time.Now()
-		}
-		if e.Iteration == 0 {
-			e.Iteration = ctx.iteration
-		}
-		if e.Depth == 0 {
-			e.Depth = ctx.depth
-		}
-		return e
-	case CommonTraceEvent:
-		if e.Timestamp.IsZero() {
-			e.Timestamp = time.Now()
-		}
-		if e.Iteration == 0 {
-			e.Iteration = ctx.iteration
-		}
-		if e.Depth == 0 {
-			e.Depth = ctx.depth
-		}
-		return e
+// Events returns a copy of all recorded events.
+func (ctx *ExecutionContext) Events() []Event {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	result := make([]Event, len(ctx.events))
+	copy(result, ctx.events)
+	return result
+}
+
+// -----------------------------------------------------------------------------
+// PublishXXX Convenience Methods
+// -----------------------------------------------------------------------------
+
+// PublishBeforeExecution publishes a BeforeExecutionEvent.
+func (ctx *ExecutionContext) PublishBeforeExecution() *BeforeExecutionEvent {
+	event := &BeforeExecutionEvent{
+		BaseEvent: BaseEvent{EventName: EventNameExecutionBefore},
 	}
+	ctx.publish(event)
 	return event
 }
 
-// appendEventLocked appends an event to the log. Must be called with lock held.
-func (ctx *ExecutionContext) appendEventLocked(event TraceEvent) {
-	ctx.events = append(ctx.events, event)
-}
-
-// baseTraceLocked creates a BaseTrace with current context. Must be called with lock held.
-func (ctx *ExecutionContext) baseTraceLocked() BaseTrace {
-	return BaseTrace{
-		Timestamp: time.Now(),
-		Iteration: ctx.iteration,
-		Depth:     ctx.depth,
+// PublishAfterExecution publishes an AfterExecutionEvent.
+func (ctx *ExecutionContext) PublishAfterExecution(
+	reason TerminationReason,
+	err error,
+) *AfterExecutionEvent {
+	event := &AfterExecutionEvent{
+		BaseEvent:         BaseEvent{EventName: EventNameExecutionAfter},
+		TerminationReason: reason,
+		Error:             err,
 	}
+	ctx.publish(event)
+	return event
 }
 
-// Events returns a copy of all recorded trace events.
-func (ctx *ExecutionContext) Events() []TraceEvent {
-	ctx.mu.RLock()
-	defer ctx.mu.RUnlock()
-	result := make([]TraceEvent, len(ctx.events))
-	copy(result, ctx.events)
-	return result
+// PublishBeforeIteration publishes a BeforeIterationEvent.
+// Stats updated: Iterations counter is incremented.
+func (ctx *ExecutionContext) PublishBeforeIteration() *BeforeIterationEvent {
+	event := &BeforeIterationEvent{
+		BaseEvent: BaseEvent{EventName: EventNameIterationBefore},
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishAfterIteration publishes an AfterIterationEvent.
+func (ctx *ExecutionContext) PublishAfterIteration(
+	result *AgentLoopResult,
+	duration time.Duration,
+) *AfterIterationEvent {
+	event := &AfterIterationEvent{
+		BaseEvent: BaseEvent{EventName: EventNameIterationAfter},
+		Result:    result,
+		Duration:  duration,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishBeforeModelCall publishes a BeforeModelCallEvent.
+// Returns the event so callers can use the (potentially modified) Request field.
+func (ctx *ExecutionContext) PublishBeforeModelCall(
+	model string,
+	request any,
+) *BeforeModelCallEvent {
+	event := &BeforeModelCallEvent{
+		BaseEvent: BaseEvent{EventName: EventNameModelCallBefore},
+		Model:     model,
+		Request:   request,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishAfterModelCall publishes an AfterModelCallEvent.
+// Stats updated: InputTokens, OutputTokens (and per-model variants).
+func (ctx *ExecutionContext) PublishAfterModelCall(
+	model string,
+	request any,
+	response *ContentResponse,
+	duration time.Duration,
+	err error,
+) *AfterModelCallEvent {
+	event := &AfterModelCallEvent{
+		BaseEvent: BaseEvent{EventName: EventNameModelCallAfter},
+		Model:     model,
+		Request:   request,
+		Response:  response,
+		Duration:  duration,
+		Error:     err,
+	}
+	if response != nil && response.Info != nil {
+		event.InputTokens = response.Info.InputTokens
+		event.OutputTokens = response.Info.OutputTokens
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishBeforeToolCall publishes a BeforeToolCallEvent.
+// Returns the event so callers can use the (potentially modified) Args field.
+// Stats updated: ToolCalls (and per-tool variants).
+func (ctx *ExecutionContext) PublishBeforeToolCall(
+	toolName string,
+	args any,
+) *BeforeToolCallEvent {
+	event := &BeforeToolCallEvent{
+		BaseEvent: BaseEvent{EventName: EventNameToolCallBefore},
+		ToolName:  toolName,
+		Args:      args,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishAfterToolCall publishes an AfterToolCallEvent.
+// Stats updated: ToolCallsErrorTotal, ToolCallsErrorConsecutive (on error).
+func (ctx *ExecutionContext) PublishAfterToolCall(
+	toolName string,
+	args any,
+	output any,
+	duration time.Duration,
+	err error,
+) *AfterToolCallEvent {
+	event := &AfterToolCallEvent{
+		BaseEvent: BaseEvent{EventName: EventNameToolCallAfter},
+		ToolName:  toolName,
+		Args:      args,
+		Output:    output,
+		Duration:  duration,
+		Error:     err,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishParseError publishes a ParseErrorEvent.
+// Stats updated: Based on errorType - format, toolchain, termination, or section errors.
+func (ctx *ExecutionContext) PublishParseError(
+	errorType string,
+	rawContent string,
+	err error,
+) *ParseErrorEvent {
+	event := &ParseErrorEvent{
+		BaseEvent:  BaseEvent{EventName: EventNameParseError},
+		ErrorType:  errorType,
+		RawContent: rawContent,
+		Error:      err,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishValidatorCalled publishes a ValidatorCalledEvent.
+func (ctx *ExecutionContext) PublishValidatorCalled(
+	validatorName string,
+	answer any,
+) *ValidatorCalledEvent {
+	event := &ValidatorCalledEvent{
+		BaseEvent:     BaseEvent{EventName: EventNameValidatorCalled},
+		ValidatorName: validatorName,
+		Answer:        answer,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishValidatorResult publishes a ValidatorResultEvent.
+// Stats updated: AnswerRejectedTotal, AnswerRejectedBy (when rejected).
+func (ctx *ExecutionContext) PublishValidatorResult(
+	validatorName string,
+	answer any,
+	accepted bool,
+	feedback []FormattedSection,
+) *ValidatorResultEvent {
+	event := &ValidatorResultEvent{
+		BaseEvent:     BaseEvent{EventName: EventNameValidatorResult},
+		ValidatorName: validatorName,
+		Answer:        answer,
+		Accepted:      accepted,
+		Feedback:      feedback,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishError publishes an ErrorEvent.
+func (ctx *ExecutionContext) PublishError(err error) *ErrorEvent {
+	event := &ErrorEvent{
+		BaseEvent: BaseEvent{EventName: EventNameError},
+		Error:     err,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishCommonEvent publishes a CommonEvent for user-defined events.
+// The eventName should use the format "namespace:event_name" (e.g., "myapp:cache_hit").
+func (ctx *ExecutionContext) PublishCommonEvent(
+	eventName string,
+	description string,
+	data any,
+) *CommonEvent {
+	event := &CommonEvent{
+		BaseEvent:   BaseEvent{EventName: eventName},
+		Description: description,
+		Data:        data,
+	}
+	ctx.publish(event)
+	return event
 }
 
 // Stats returns the execution stats for this context.
@@ -580,7 +717,7 @@ func (ctx *ExecutionContext) Events() []TraceEvent {
 // Thread Safety:
 //   - Safe to call from any goroutine
 //   - All ExecutionStats methods handle their own locking
-//   - Safe to read during hook execution (hooks run synchronously)
+//   - Safe to read during subscriber execution (subscribers run synchronously)
 func (ctx *ExecutionContext) Stats() *ExecutionStats {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
@@ -612,7 +749,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 		data:      data,
 		depth:     ctx.depth + 1,
 		parent:    ctx,
-		events:    make([]TraceEvent, 0),
+		events:    make([]Event, 0),
 		startTime: time.Now(),
 		streamHub: newStreamHub(),
 	}
@@ -621,10 +758,19 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	child.stats = newExecutionStatsWithContextAndParent(child, ctx.stats)
 
 	ctx.children = append(ctx.children, child)
-	ctx.appendEventLocked(ChildSpawnTrace{
-		BaseTrace: ctx.baseTraceLocked(),
-		ChildName: name,
-	})
+
+	// Record child spawn event
+	spawnEvent := &CommonEvent{
+		BaseEvent: BaseEvent{
+			EventName: "gent:child:spawn",
+			Timestamp: time.Now(),
+			Iteration: ctx.iteration,
+			Depth:     ctx.depth,
+		},
+		Description: "Child context spawned",
+		Data:        map[string]any{"child_name": name},
+	}
+	ctx.events = append(ctx.events, spawnEvent)
 
 	return child
 }
@@ -633,7 +779,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 // This should be called via defer after SpawnChild.
 //
 // Note: Stats aggregation happens in real-time via parent reference,
-// so this method only records the completion trace event.
+// so this method only records the completion event.
 func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
@@ -642,14 +788,25 @@ func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
 	child.endTime = time.Now()
 	childDuration := child.endTime.Sub(child.startTime)
 	childReason := child.terminationReason
+	childName := child.name
 	child.mu.Unlock()
 
-	ctx.appendEventLocked(ChildCompleteTrace{
-		BaseTrace:         ctx.baseTraceLocked(),
-		ChildName:         child.name,
-		TerminationReason: childReason,
-		Duration:          childDuration,
-	})
+	// Record child complete event
+	completeEvent := &CommonEvent{
+		BaseEvent: BaseEvent{
+			EventName: "gent:child:complete",
+			Timestamp: time.Now(),
+			Iteration: ctx.iteration,
+			Depth:     ctx.depth,
+		},
+		Description: "Child context completed",
+		Data: map[string]any{
+			"child_name":         childName,
+			"termination_reason": childReason,
+			"duration":           childDuration,
+		},
+	}
+	ctx.events = append(ctx.events, completeEvent)
 }
 
 // Parent returns the parent context, or nil if this is the root.

@@ -1440,18 +1440,18 @@ func getOutputString(output any) string {
 }
 
 // -----------------------------------------------------------------------------
-// BeforeToolCallHook Argument Modification Tests
+// BeforeToolCallSubscriber Argument Modification Tests
 // -----------------------------------------------------------------------------
 
-// jsonArgModifyHook is a test hook that modifies tool arguments.
+// jsonArgModifySubscriber is a test subscriber that modifies tool arguments.
 // For tools using map[string]any as input, Args is typed as map[string]any.
-type jsonArgModifyHook struct {
+type jsonArgModifySubscriber struct {
 	modifyFunc func(args map[string]any) map[string]any
 	called     bool
 	seenArgs   map[string]any
 }
 
-func (h *jsonArgModifyHook) OnBeforeToolCall(
+func (h *jsonArgModifySubscriber) OnBeforeToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1489,7 +1489,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "hook modifies args in place",
+			name: "subscriber modifies args in place",
 			input: input{
 				content: `{"tool": "test", "args": {"value": "original"}}`,
 				modifyFunc: func(args map[string]any) map[string]any {
@@ -1505,7 +1505,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "hook replaces entire args map",
+			name: "subscriber replaces entire args map",
 			input: input{
 				content: `{"tool": "test", "args": {"value": "original"}}`,
 				modifyFunc: func(args map[string]any) map[string]any {
@@ -1520,7 +1520,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "hook adds new args",
+			name: "subscriber adds new args",
 			input: input{
 				content: `{"tool": "test", "args": {"value": "original"}}`,
 				modifyFunc: func(args map[string]any) map[string]any {
@@ -1536,7 +1536,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "hook removes args",
+			name: "subscriber removes args",
 			input: input{
 				content: `{"tool": "test", "args": {"value": "original", "remove": "this"}}`,
 				modifyFunc: func(args map[string]any) map[string]any {
@@ -1552,7 +1552,7 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "hook does not modify args",
+			name: "subscriber does not modify args",
 			input: input{
 				content:    `{"tool": "test", "args": {"value": "unchanged"}}`,
 				modifyFunc: nil,
@@ -1584,22 +1584,22 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			)
 			tc.RegisterTool(tool)
 
-			// Create hook
-			hook := &jsonArgModifyHook{modifyFunc: tt.input.modifyFunc}
+			// Create subscriber
+			sub := &jsonArgModifySubscriber{modifyFunc: tt.input.modifyFunc}
 
-			// Create execution context with hooks
+			// Create execution context with events
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			registry := &jsonTestRegistry{hook: hook}
-			execCtx.SetHookFirer(registry)
-			execCtx.StartIteration()
+			registry := &jsonTestRegistry{subscriber: sub}
+			execCtx.SetEventPublisher(registry)
+			execCtx.IncrementIteration()
 
 			// Execute
 			result, err := tc.Execute(execCtx, tt.input.content, testFormat())
 
 			require.NoError(t, err)
-			assert.True(t, hook.called, "hook should have been called")
-			assert.Equal(t, tt.expected.originalArgs, hook.seenArgs,
-				"hook should have seen original args")
+			assert.True(t, sub.called, "subscriber should have been called")
+			assert.Equal(t, tt.expected.originalArgs, sub.seenArgs,
+				"subscriber should have seen original args")
 			assert.Equal(t, tt.expected.toolReceived, receivedArgs,
 				"tool should have received modified args")
 			assert.NoError(t, result.Raw.Errors[0])
@@ -1625,7 +1625,7 @@ func TestJSON_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "hook modifies args for each tool independently",
+			name: "subscriber modifies args for each tool independently",
 			input: input{
 				content: `[
 					{"tool": "tool1", "args": {"value": "first"}},
@@ -1667,13 +1667,13 @@ func TestJSON_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 				},
 			))
 
-			// Create hook that tracks tool name
-			hook := &jsonMultiToolHook{modifyFunc: tt.input.modifyFunc}
+			// Create subscriber that tracks tool name
+			sub := &jsonMultiToolSubscriber{modifyFunc: tt.input.modifyFunc}
 
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			registry := &jsonTestRegistry{multiHook: hook}
-			execCtx.SetHookFirer(registry)
-			execCtx.StartIteration()
+			registry := &jsonTestRegistry{multiSubscriber: sub}
+			execCtx.SetEventPublisher(registry)
+			execCtx.IncrementIteration()
 
 			result, err := tc.Execute(execCtx, tt.input.content, testFormat())
 
@@ -1686,13 +1686,13 @@ func TestJSON_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 	}
 }
 
-// jsonMultiToolHook is a test hook that modifies args based on tool name.
+// jsonMultiToolSubscriber is a test subscriber that modifies args based on tool name.
 // For tools using map[string]any as input, Args is typed as map[string]any.
-type jsonMultiToolHook struct {
+type jsonMultiToolSubscriber struct {
 	modifyFunc func(toolName string, args map[string]any) map[string]any
 }
 
-func (h *jsonMultiToolHook) OnBeforeToolCall(
+func (h *jsonMultiToolSubscriber) OnBeforeToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1706,40 +1706,26 @@ func (h *jsonMultiToolHook) OnBeforeToolCall(
 	}
 }
 
-// jsonTestRegistry implements HookFirer for testing.
+// jsonTestRegistry implements EventPublisher for testing.
 type jsonTestRegistry struct {
-	hook      *jsonArgModifyHook
-	multiHook *jsonMultiToolHook
+	subscriber      *jsonArgModifySubscriber
+	multiSubscriber *jsonMultiToolSubscriber
 }
 
-func (r *jsonTestRegistry) FireBeforeModelCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.BeforeModelCallEvent,
-) {
-}
-
-func (r *jsonTestRegistry) FireAfterModelCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.AfterModelCallEvent,
-) {
-}
-
-func (r *jsonTestRegistry) FireBeforeToolCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.BeforeToolCallEvent,
-) {
-	if r.hook != nil {
-		r.hook.OnBeforeToolCall(execCtx, event)
-	}
-	if r.multiHook != nil {
-		r.multiHook.OnBeforeToolCall(execCtx, event)
+func (r *jsonTestRegistry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
+	switch e := event.(type) {
+	case *gent.BeforeToolCallEvent:
+		if r.subscriber != nil {
+			r.subscriber.OnBeforeToolCall(execCtx, e)
+		}
+		if r.multiSubscriber != nil {
+			r.multiSubscriber.OnBeforeToolCall(execCtx, e)
+		}
 	}
 }
 
-func (r *jsonTestRegistry) FireAfterToolCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.AfterToolCallEvent,
-) {
+func (r *jsonTestRegistry) MaxRecursion() int {
+	return 10
 }
 
 func TestJSON_ParseSection_TracesErrors(t *testing.T) {
@@ -1754,7 +1740,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 		}
 	}{
 		{
-			name:  "parse error traces ParseErrorTrace",
+			name:  "parse error publishes ParseErrorEvent",
 			input: "{invalid json",
 			expected: struct {
 				shouldError              bool
@@ -1791,7 +1777,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {
@@ -1856,7 +1842,7 @@ func TestJSON_Execute_TracesToolCallErrors(t *testing.T) {
 		tc.RegisterTool(tool)
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 
 		_, err := tc.Execute(execCtx, `{"tool": "failing_tool", "args": {}}`, testFormat())
 		require.NoError(t, err)
@@ -1893,7 +1879,7 @@ func TestJSON_Execute_TracesToolCallErrors(t *testing.T) {
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
 		// First iteration: tool fails
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err := tc.Execute(execCtx, `{"tool": "test_tool", "args": {}}`, testFormat())
 		require.NoError(t, err)
 
@@ -1907,7 +1893,7 @@ func TestJSON_Execute_TracesToolCallErrors(t *testing.T) {
 			"after first call: error consecutive for tool mismatch")
 
 		// Second iteration: tool succeeds
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err = tc.Execute(execCtx, `{"tool": "test_tool", "args": {}}`, testFormat())
 		require.NoError(t, err)
 
@@ -1937,7 +1923,7 @@ func TestJSON_Execute_TracesToolCallErrors(t *testing.T) {
 
 		// Three consecutive failures
 		for i := 1; i <= 3; i++ {
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 			_, err := tc.Execute(execCtx, `{"tool": "always_fails", "args": {}}`, testFormat())
 			require.NoError(t, err)
 
@@ -1985,7 +1971,7 @@ func TestJSON_Execute_TracesToolCallErrors_UnknownTool(t *testing.T) {
 			// Don't register any tools
 
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			_, err := tc.Execute(execCtx, tt.input.content, testFormat())
 			require.NoError(t, err) // Execute returns nil, errors are in Raw.Errors
@@ -2053,7 +2039,7 @@ func TestJSON_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 			tc.RegisterTool(tool)
 
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			_, err := tc.Execute(execCtx, tt.input.content, testFormat())
 			require.NoError(t, err)
@@ -2093,7 +2079,7 @@ func TestJSON_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		))
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 
 		content := `[
 			{"tool": "success_tool", "args": {}},
@@ -2149,7 +2135,7 @@ func TestJSON_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
 		// First iteration: both tools fail
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err := tc.Execute(execCtx, `[
 			{"tool": "tool1", "args": {}},
 			{"tool": "tool2", "args": {}}
@@ -2169,7 +2155,7 @@ func TestJSON_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 			"iteration 1: tool2 consecutive")
 
 		// Second iteration: tool1 succeeds, tool2 still fails
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err = tc.Execute(execCtx, `[
 			{"tool": "tool1", "args": {}},
 			{"tool": "tool2", "args": {}}

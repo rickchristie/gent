@@ -65,51 +65,33 @@ func (r *ToolChainResult) AsContentParts() []ContentPart {
 //  3. Implement AvailableToolsPrompt to generate the tool catalog
 //  4. Implement Execute with proper tracing and error handling
 //
-// # Tracing Requirements
+// # Event Publishing Requirements
 //
-// Execute MUST trace tool calls for stats tracking:
+// Execute MUST publish tool call events for stats tracking and subscriber notification:
 //
 //	// For each tool call:
+//	beforeEvent := execCtx.PublishBeforeToolCall(toolName, input)
+//	input = beforeEvent.Args // subscribers can modify args
+//
 //	startTime := time.Now()
 //	output, err := tool.Call(execCtx.Context(), input)
-//	execCtx.Trace(ToolCallTrace{
-//	    ToolName: toolName,
-//	    Input:    input,
-//	    Output:   output,
-//	    Duration: time.Since(startTime),
-//	    Error:    err,
-//	})
+//
+//	execCtx.PublishAfterToolCall(toolName, input, output, time.Since(startTime), err)
 //
 // This enables automatic stat updates: [KeyToolCalls], [KeyToolCallsFor],
 // [KeyToolCallsErrorTotal], [KeyToolCallsErrorConsecutive], etc.
 //
 // # Parse Error Handling
 //
-// Execute MUST trace parse errors:
+// Execute MUST publish parse errors:
 //
 //	if parseErr != nil {
-//	    execCtx.Trace(ParseErrorTrace{
-//	        ErrorType:  "toolchain",
-//	        RawContent: content,
-//	        Error:      parseErr,
-//	    })
+//	    execCtx.PublishParseError("toolchain", content, parseErr)
 //	}
 //
 // On successful parse, reset the consecutive error counter:
 //
 //	execCtx.Stats().ResetCounter(KeyToolchainParseErrorConsecutive)
-//
-// # Hook Integration
-//
-// Execute SHOULD fire tool call hooks if a HookFirer is available:
-//
-//	// Before tool call
-//	beforeEvent := &BeforeToolCallEvent{ToolName: name, Args: input}
-//	execCtx.FireBeforeToolCall(beforeEvent)
-//	input = beforeEvent.Args // hooks can modify args
-//
-//	// After tool call
-//	execCtx.FireAfterToolCall(AfterToolCallEvent{...})
 //
 // # Available Implementations
 //

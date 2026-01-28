@@ -575,7 +575,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 		}
 	}{
 		{
-			name:  "parse error traces ParseErrorTrace",
+			name:  "parse error publishes ParseErrorEvent",
 			input: "{invalid json",
 			expected: struct {
 				shouldError                 bool
@@ -612,7 +612,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {
@@ -642,7 +642,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 }
 
 func TestJSON_ValidatorTracing(t *testing.T) {
-	t.Run("validator accepted traces CommonTraceEvent", func(t *testing.T) {
+	t.Run("validator accepted publishes ValidatorCalledEvent and ValidatorResultEvent", func(t *testing.T) {
 		term := NewJSON[SimpleStruct]("answer")
 		term.SetValidator(&mockJSONValidator{
 			name:     "test_validator",
@@ -654,39 +654,29 @@ func TestJSON_ValidatorTracing(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
 
-		// Check trace events
+		// Check events
 		events := execCtx.Events()
-		assert.Len(t, events, 2, "expected 2 trace events (called + accepted)")
+		assert.Len(t, events, 2, "expected 2 events (called + result)")
 
 		// First event: validator called
-		calledEvent, ok := events[0].(gent.CommonTraceEvent)
-		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[0])
-		assert.Equal(t, gent.EventIdValidatorCalled, calledEvent.EventId)
-		assert.Equal(t, "Validator 'test_validator' called", calledEvent.Description)
-
-		calledData, ok := calledEvent.Data.(gent.ValidatorCalledData)
-		assert.True(t, ok, "expected ValidatorCalledData, got %T", calledEvent.Data)
-		assert.Equal(t, "test_validator", calledData.ValidatorName)
+		calledEvent, ok := events[0].(*gent.ValidatorCalledEvent)
+		assert.True(t, ok, "expected *ValidatorCalledEvent, got %T", events[0])
+		assert.Equal(t, "test_validator", calledEvent.ValidatorName)
 		// For JSON, the answer is the parsed struct
-		parsedAnswer, ok := calledData.Answer.(SimpleStruct)
-		assert.True(t, ok, "expected SimpleStruct, got %T", calledData.Answer)
+		parsedAnswer, ok := calledEvent.Answer.(SimpleStruct)
+		assert.True(t, ok, "expected SimpleStruct, got %T", calledEvent.Answer)
 		assert.Equal(t, "test", parsedAnswer.Name)
 		assert.Equal(t, 42, parsedAnswer.Value)
 
-		// Second event: validator accepted
-		acceptedEvent, ok := events[1].(gent.CommonTraceEvent)
-		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[1])
-		assert.Equal(t, gent.EventIdValidatorAccepted, acceptedEvent.EventId)
-		assert.Equal(t, "Validator 'test_validator' accepted answer", acceptedEvent.Description)
-
-		acceptedData, ok := acceptedEvent.Data.(gent.ValidatorResultData)
-		assert.True(t, ok, "expected ValidatorResultData, got %T", acceptedEvent.Data)
-		assert.Equal(t, "test_validator", acceptedData.ValidatorName)
-		assert.True(t, acceptedData.Accepted)
-		assert.Nil(t, acceptedData.Feedback)
+		// Second event: validator result (accepted)
+		resultEvent, ok := events[1].(*gent.ValidatorResultEvent)
+		assert.True(t, ok, "expected *ValidatorResultEvent, got %T", events[1])
+		assert.Equal(t, "test_validator", resultEvent.ValidatorName)
+		assert.True(t, resultEvent.Accepted)
+		assert.Nil(t, resultEvent.Feedback)
 	})
 
-	t.Run("validator rejected traces CommonTraceEvent with feedback", func(t *testing.T) {
+	t.Run("validator rejected publishes ValidatorResultEvent with feedback", func(t *testing.T) {
 		feedback := []gent.FormattedSection{
 			{Name: "error", Content: "Invalid value"},
 			{Name: "hint", Content: "Value must be positive"},
@@ -703,30 +693,21 @@ func TestJSON_ValidatorTracing(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationAnswerRejected, result.Status)
 
-		// Check trace events
+		// Check events
 		events := execCtx.Events()
-		assert.Len(t, events, 2, "expected 2 trace events (called + rejected)")
+		assert.Len(t, events, 2, "expected 2 events (called + result)")
 
 		// First event: validator called
-		calledEvent, ok := events[0].(gent.CommonTraceEvent)
-		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[0])
-		assert.Equal(t, gent.EventIdValidatorCalled, calledEvent.EventId)
+		calledEvent, ok := events[0].(*gent.ValidatorCalledEvent)
+		assert.True(t, ok, "expected *ValidatorCalledEvent, got %T", events[0])
+		assert.Equal(t, "value_checker", calledEvent.ValidatorName)
 
-		calledData, ok := calledEvent.Data.(gent.ValidatorCalledData)
-		assert.True(t, ok, "expected ValidatorCalledData, got %T", calledEvent.Data)
-		assert.Equal(t, "value_checker", calledData.ValidatorName)
-
-		// Second event: validator rejected
-		rejectedEvent, ok := events[1].(gent.CommonTraceEvent)
-		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[1])
-		assert.Equal(t, gent.EventIdValidatorRejected, rejectedEvent.EventId)
-		assert.Equal(t, "Validator 'value_checker' rejected answer", rejectedEvent.Description)
-
-		rejectedData, ok := rejectedEvent.Data.(gent.ValidatorResultData)
-		assert.True(t, ok, "expected ValidatorResultData, got %T", rejectedEvent.Data)
-		assert.Equal(t, "value_checker", rejectedData.ValidatorName)
-		assert.False(t, rejectedData.Accepted)
-		assert.Equal(t, feedback, rejectedData.Feedback)
+		// Second event: validator result (rejected)
+		resultEvent, ok := events[1].(*gent.ValidatorResultEvent)
+		assert.True(t, ok, "expected *ValidatorResultEvent, got %T", events[1])
+		assert.Equal(t, "value_checker", resultEvent.ValidatorName)
+		assert.False(t, resultEvent.Accepted)
+		assert.Equal(t, feedback, resultEvent.Feedback)
 	})
 
 	t.Run("no validator means no trace events", func(t *testing.T) {

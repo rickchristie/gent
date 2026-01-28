@@ -21,13 +21,9 @@ const KeyIterations = "gent:iterations"
 
 // Token tracking keys.
 //
-// These are auto-updated when ModelCallTrace is traced:
+// These are auto-updated when AfterModelCallEvent is published:
 //
-//	execCtx.Trace(ModelCallTrace{
-//	    Model:        "gpt-4",
-//	    InputTokens:  1500,
-//	    OutputTokens: 500,
-//	})
+//	execCtx.PublishAfterModelCall("gpt-4", request, response, duration, nil)
 //	// Auto-increments: KeyInputTokens, KeyInputTokensFor+"gpt-4",
 //	//                  KeyOutputTokens, KeyOutputTokensFor+"gpt-4"
 //
@@ -43,9 +39,9 @@ const (
 
 // Tool call tracking keys.
 //
-// These are auto-updated when ToolCallTrace is traced:
+// These are auto-updated when BeforeToolCallEvent is published:
 //
-//	execCtx.Trace(ToolCallTrace{ToolName: "search", ...})
+//	execCtx.PublishBeforeToolCall("search", args)
 //	// Auto-increments: KeyToolCalls, KeyToolCallsFor+"search"
 //
 // Use for per-tool limits:
@@ -62,7 +58,7 @@ const (
 
 // Tool call error tracking keys.
 //
-// Auto-updated when ToolCallTrace with Error is traced. Includes both total
+// Auto-updated when AfterToolCallEvent with Error is published. Includes both total
 // counters and consecutive counters (reset on success).
 //
 // Consecutive counters are useful for detecting stuck loops where the same
@@ -78,7 +74,7 @@ const (
 
 // Format parse error tracking keys.
 //
-// Auto-updated when ParseErrorTrace with ErrorType="format" is traced.
+// Auto-updated when ParseErrorEvent with ErrorType="format" is published.
 // These track errors when the TextFormat fails to parse LLM output structure.
 //
 // Default limit: 3 consecutive errors (see DefaultLimits).
@@ -90,7 +86,7 @@ const (
 
 // Toolchain parse error tracking keys.
 //
-// Auto-updated when ParseErrorTrace with ErrorType="toolchain" is traced.
+// Auto-updated when ParseErrorEvent with ErrorType="toolchain" is published.
 // These track errors when the ToolChain fails to parse tool calls (YAML/JSON).
 //
 // Default limit: 3 consecutive errors (see DefaultLimits).
@@ -102,7 +98,7 @@ const (
 
 // Termination parse error tracking keys.
 //
-// Auto-updated when ParseErrorTrace with ErrorType="termination" is traced.
+// Auto-updated when ParseErrorEvent with ErrorType="termination" is published.
 // These track errors when the Termination fails to parse answer content.
 //
 // Default limit: 3 consecutive errors (see DefaultLimits).
@@ -114,7 +110,7 @@ const (
 
 // Section parse error tracking keys.
 //
-// Auto-updated when ParseErrorTrace with ErrorType="section" is traced.
+// Auto-updated when ParseErrorEvent with ErrorType="section" is published.
 // These track errors when generic TextSections fail to parse content.
 //
 // Default limit: 3 consecutive errors (see DefaultLimits).

@@ -3,7 +3,13 @@
 - Always use table-driven tests for functions with multiple scenarios.
 - For table driven tests, create explicit `input`, `mocks` (if needed), and `expected` structs.
 - The expected struct should contain all expected outputs, including errors.
-- Expected output must be FULL matches, e.g. for strings, compare entire string, not substrings.
+- Expected output must be FULL matches, for example:
+  - For strings, compare entire string, not substrings.
+  - For structs, compare entire struct, not just individual fields.
+  - For fields that contains timestamps, assert >= expected time instead of exact match.
+- The process being tested MUST be close to real-world as possible.
+  Avoid changing internals to simulate scenarios, i.e. call public methods instead of changing private fields.
+- No vanity tests. Tests must validate real functionality/feature that user expects.
 - Use testify's `assert` package for assertions.
 
 **Testing Stats & Limits**

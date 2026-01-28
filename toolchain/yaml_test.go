@@ -1528,18 +1528,18 @@ For strings with special characters (colons, quotes) or multiple lines, use doub
 }
 
 // -----------------------------------------------------------------------------
-// BeforeToolCallHook Argument Modification Tests
+// BeforeToolCallSubscriber Argument Modification Tests
 // -----------------------------------------------------------------------------
 
-// yamlArgModifyHook is a test hook that modifies tool arguments.
+// yamlArgModifySubscriber is a test subscriber that modifies tool arguments.
 // For tools using map[string]any as input, Args is typed as map[string]any.
-type yamlArgModifyHook struct {
+type yamlArgModifySubscriber struct {
 	modifyFunc func(args map[string]any) map[string]any
 	called     bool
 	seenArgs   map[string]any
 }
 
-func (h *yamlArgModifyHook) OnBeforeToolCall(
+func (h *yamlArgModifySubscriber) OnBeforeToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1577,7 +1577,7 @@ func TestYAML_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "hook modifies args in place",
+			name: "subscriber modifies args in place",
 			input: input{
 				content: `tool: test
 args:
@@ -1595,7 +1595,7 @@ args:
 			},
 		},
 		{
-			name: "hook replaces entire args map",
+			name: "subscriber replaces entire args map",
 			input: input{
 				content: `tool: test
 args:
@@ -1612,7 +1612,7 @@ args:
 			},
 		},
 		{
-			name: "hook adds new args",
+			name: "subscriber adds new args",
 			input: input{
 				content: `tool: test
 args:
@@ -1630,7 +1630,7 @@ args:
 			},
 		},
 		{
-			name: "hook removes args",
+			name: "subscriber removes args",
 			input: input{
 				content: `tool: test
 args:
@@ -1649,7 +1649,7 @@ args:
 			},
 		},
 		{
-			name: "hook does not modify args",
+			name: "subscriber does not modify args",
 			input: input{
 				content: `tool: test
 args:
@@ -1683,22 +1683,22 @@ args:
 			)
 			tc.RegisterTool(tool)
 
-			// Create hook
-			hook := &yamlArgModifyHook{modifyFunc: tt.input.modifyFunc}
+			// Create subscriber
+			sub := &yamlArgModifySubscriber{modifyFunc: tt.input.modifyFunc}
 
-			// Create execution context with hooks
+			// Create execution context with events
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			registry := &yamlTestRegistry{hook: hook}
-			execCtx.SetHookFirer(registry)
-			execCtx.StartIteration()
+			registry := &yamlTestRegistry{subscriber: sub}
+			execCtx.SetEventPublisher(registry)
+			execCtx.IncrementIteration()
 
 			// Execute
 			result, err := tc.Execute(execCtx, tt.input.content, yamlTestFormat())
 
 			require.NoError(t, err)
-			assert.True(t, hook.called, "hook should have been called")
-			assert.Equal(t, tt.expected.originalArgs, hook.seenArgs,
-				"hook should have seen original args")
+			assert.True(t, sub.called, "subscriber should have been called")
+			assert.Equal(t, tt.expected.originalArgs, sub.seenArgs,
+				"subscriber should have seen original args")
 			assert.Equal(t, tt.expected.toolReceived, receivedArgs,
 				"tool should have received modified args")
 			assert.NoError(t, result.Raw.Errors[0])
@@ -1724,7 +1724,7 @@ func TestYAML_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "hook modifies args for each tool independently",
+			name: "subscriber modifies args for each tool independently",
 			input: input{
 				content: `- tool: tool1
   args:
@@ -1768,13 +1768,13 @@ func TestYAML_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 				},
 			))
 
-			// Create hook that tracks tool name
-			hook := &yamlMultiToolHook{modifyFunc: tt.input.modifyFunc}
+			// Create subscriber that tracks tool name
+			sub := &yamlMultiToolSubscriber{modifyFunc: tt.input.modifyFunc}
 
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			registry := &yamlTestRegistry{multiHook: hook}
-			execCtx.SetHookFirer(registry)
-			execCtx.StartIteration()
+			registry := &yamlTestRegistry{multiSubscriber: sub}
+			execCtx.SetEventPublisher(registry)
+			execCtx.IncrementIteration()
 
 			result, err := tc.Execute(execCtx, tt.input.content, yamlTestFormat())
 
@@ -1787,13 +1787,13 @@ func TestYAML_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 	}
 }
 
-// yamlMultiToolHook is a test hook that modifies args based on tool name.
+// yamlMultiToolSubscriber is a test subscriber that modifies args based on tool name.
 // For tools using map[string]any as input, Args is typed as map[string]any.
-type yamlMultiToolHook struct {
+type yamlMultiToolSubscriber struct {
 	modifyFunc func(toolName string, args map[string]any) map[string]any
 }
 
-func (h *yamlMultiToolHook) OnBeforeToolCall(
+func (h *yamlMultiToolSubscriber) OnBeforeToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1807,40 +1807,26 @@ func (h *yamlMultiToolHook) OnBeforeToolCall(
 	}
 }
 
-// yamlTestRegistry implements HookFirer for testing.
+// yamlTestRegistry implements EventPublisher for testing.
 type yamlTestRegistry struct {
-	hook      *yamlArgModifyHook
-	multiHook *yamlMultiToolHook
+	subscriber      *yamlArgModifySubscriber
+	multiSubscriber *yamlMultiToolSubscriber
 }
 
-func (r *yamlTestRegistry) FireBeforeModelCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.BeforeModelCallEvent,
-) {
-}
-
-func (r *yamlTestRegistry) FireAfterModelCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.AfterModelCallEvent,
-) {
-}
-
-func (r *yamlTestRegistry) FireBeforeToolCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.BeforeToolCallEvent,
-) {
-	if r.hook != nil {
-		r.hook.OnBeforeToolCall(execCtx, event)
-	}
-	if r.multiHook != nil {
-		r.multiHook.OnBeforeToolCall(execCtx, event)
+func (r *yamlTestRegistry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
+	switch e := event.(type) {
+	case *gent.BeforeToolCallEvent:
+		if r.subscriber != nil {
+			r.subscriber.OnBeforeToolCall(execCtx, e)
+		}
+		if r.multiSubscriber != nil {
+			r.multiSubscriber.OnBeforeToolCall(execCtx, e)
+		}
 	}
 }
 
-func (r *yamlTestRegistry) FireAfterToolCall(
-	execCtx *gent.ExecutionContext,
-	event *gent.AfterToolCallEvent,
-) {
+func (r *yamlTestRegistry) MaxRecursion() int {
+	return 10
 }
 
 func TestYAML_ParseSection_TracesErrors(t *testing.T) {
@@ -1855,7 +1841,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 		}
 	}{
 		{
-			name:  "parse error traces ParseErrorTrace",
+			name:  "parse error publishes ParseErrorEvent",
 			input: "invalid: yaml: [",
 			expected: struct {
 				shouldError              bool
@@ -1892,7 +1878,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 
 			// Create execution context with iteration 1
 			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {
@@ -2018,7 +2004,7 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 		tc.RegisterTool(tool)
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 
 		_, err := tc.Execute(execCtx, "tool: failing_tool\nargs: {}", yamlTestFormat())
 		require.NoError(t, err)
@@ -2055,7 +2041,7 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
 		// First iteration: tool fails
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err := tc.Execute(execCtx, "tool: test_tool\nargs: {}", yamlTestFormat())
 		require.NoError(t, err)
 
@@ -2069,7 +2055,7 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 			"after first call: error consecutive for tool mismatch")
 
 		// Second iteration: tool succeeds
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err = tc.Execute(execCtx, "tool: test_tool\nargs: {}", yamlTestFormat())
 		require.NoError(t, err)
 
@@ -2099,7 +2085,7 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 
 		// Three consecutive failures
 		for i := 1; i <= 3; i++ {
-			execCtx.StartIteration()
+			execCtx.IncrementIteration()
 			_, err := tc.Execute(execCtx, "tool: always_fails\nargs: {}", yamlTestFormat())
 			require.NoError(t, err)
 
@@ -2118,7 +2104,7 @@ func TestYAML_Execute_TracesToolCallErrors_UnknownTool(t *testing.T) {
 		// Don't register any tools
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 
 		_, err := tc.Execute(execCtx, "tool: nonexistent\nargs: {}", yamlTestFormat())
 		require.NoError(t, err) // Execute returns nil, errors are in Raw.Errors
@@ -2153,7 +2139,7 @@ func TestYAML_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 		tc.RegisterTool(tool)
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 
 		_, err := tc.Execute(execCtx, "tool: validated_tool\nargs: {}", yamlTestFormat())
 		require.NoError(t, err)
@@ -2189,7 +2175,7 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		))
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 
 		content := `- tool: success_tool
   args: {}
@@ -2245,7 +2231,7 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
 		// First iteration: both tools fail
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		content := `- tool: tool1
   args: {}
 - tool: tool2
@@ -2266,7 +2252,7 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 			"iteration 1: tool2 consecutive")
 
 		// Second iteration: tool1 succeeds, tool2 still fails
-		execCtx.StartIteration()
+		execCtx.IncrementIteration()
 		_, err = tc.Execute(execCtx, content, yamlTestFormat())
 		require.NoError(t, err)
 
