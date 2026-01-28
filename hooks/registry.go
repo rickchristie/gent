@@ -1,8 +1,6 @@
 package hooks
 
 import (
-	"context"
-
 	"github.com/rickchristie/gent"
 )
 
@@ -13,10 +11,11 @@ import (
 // Registry is the central coordination point for hooks. It:
 //   - Stores registered hooks in order
 //   - Dispatches events to hooks that implement the relevant interface
-//   - Passes ExecutionContext to hooks for access to stats, data, and tracing
+//   - Passes ExecutionContext to hooks for access to stats, data,
+//     and tracing
 //
-// Hooks can implement any combination of hook interfaces - they only receive
-// events for the interfaces they implement.
+// Hooks can implement any combination of hook interfaces - they only
+// receive events for the interfaces they implement.
 //
 // # Creating and Using
 //
@@ -37,7 +36,6 @@ import (
 //	}
 //
 //	func (h *FullHook) OnBeforeExecution(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    e *gent.BeforeExecutionEvent,
 //	) {
@@ -45,7 +43,6 @@ import (
 //	}
 //
 //	func (h *FullHook) OnAfterToolCall(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    e *gent.AfterToolCallEvent,
 //	) {
@@ -66,7 +63,6 @@ import (
 // Example:
 //
 //	func (h *MyHook) OnAfterIteration(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    e *gent.AfterIterationEvent,
 //	) {
@@ -76,8 +72,8 @@ import (
 //
 // # Thread Safety
 //
-// Registry is NOT thread-safe. Register all hooks before starting execution.
-// Fire methods should only be called by the executor.
+// Registry is NOT thread-safe. Register all hooks before starting
+// execution. Fire methods should only be called by the executor.
 type Registry struct {
 	hooks []any
 }
@@ -89,8 +85,9 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Register adds a hook to the registry. The hook can implement any combination
-// of hook interfaces (BeforeExecutionHook, AfterExecutionHook, etc.).
+// Register adds a hook to the registry. The hook can implement any
+// combination of hook interfaces (BeforeExecutionHook,
+// AfterExecutionHook, etc.).
 //
 // Hooks are called in the order they are registered.
 func (r *Registry) Register(hook any) *Registry {
@@ -101,13 +98,12 @@ func (r *Registry) Register(hook any) *Registry {
 // FireBeforeExecution dispatches a BeforeExecutionEvent to all
 // registered BeforeExecutionHook implementations.
 func (r *Registry) FireBeforeExecution(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeExecutionEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeExecutionHook); ok {
-			hook.OnBeforeExecution(ctx, execCtx, event)
+			hook.OnBeforeExecution(execCtx, event)
 		}
 	}
 }
@@ -115,13 +111,12 @@ func (r *Registry) FireBeforeExecution(
 // FireAfterExecution dispatches an AfterExecutionEvent to all
 // registered AfterExecutionHook implementations.
 func (r *Registry) FireAfterExecution(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterExecutionEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterExecutionHook); ok {
-			hook.OnAfterExecution(ctx, execCtx, event)
+			hook.OnAfterExecution(execCtx, event)
 		}
 	}
 }
@@ -129,13 +124,12 @@ func (r *Registry) FireAfterExecution(
 // FireBeforeIteration dispatches a BeforeIterationEvent to all
 // registered BeforeIterationHook implementations.
 func (r *Registry) FireBeforeIteration(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeIterationEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeIterationHook); ok {
-			hook.OnBeforeIteration(ctx, execCtx, event)
+			hook.OnBeforeIteration(execCtx, event)
 		}
 	}
 }
@@ -143,13 +137,12 @@ func (r *Registry) FireBeforeIteration(
 // FireAfterIteration dispatches an AfterIterationEvent to all
 // registered AfterIterationHook implementations.
 func (r *Registry) FireAfterIteration(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterIterationEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterIterationHook); ok {
-			hook.OnAfterIteration(ctx, execCtx, event)
+			hook.OnAfterIteration(execCtx, event)
 		}
 	}
 }
@@ -157,13 +150,12 @@ func (r *Registry) FireAfterIteration(
 // FireError dispatches an ErrorEvent to all registered ErrorHook
 // implementations.
 func (r *Registry) FireError(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.ErrorEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.ErrorHook); ok {
-			hook.OnError(ctx, execCtx, event)
+			hook.OnError(execCtx, event)
 		}
 	}
 }
@@ -172,13 +164,12 @@ func (r *Registry) FireError(
 // registered BeforeModelCallHook implementations.
 // Hooks can modify event.Request for ephemeral context injection.
 func (r *Registry) FireBeforeModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeModelCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeModelCallHook); ok {
-			hook.OnBeforeModelCall(ctx, execCtx, event)
+			hook.OnBeforeModelCall(execCtx, event)
 		}
 	}
 }
@@ -186,13 +177,12 @@ func (r *Registry) FireBeforeModelCall(
 // FireAfterModelCall dispatches an AfterModelCallEvent to all
 // registered AfterModelCallHook implementations.
 func (r *Registry) FireAfterModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterModelCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterModelCallHook); ok {
-			hook.OnAfterModelCall(ctx, execCtx, event)
+			hook.OnAfterModelCall(execCtx, event)
 		}
 	}
 }
@@ -201,13 +191,12 @@ func (r *Registry) FireAfterModelCall(
 // registered BeforeToolCallHook implementations.
 // Hooks can modify event.Args to change the tool input.
 func (r *Registry) FireBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.BeforeToolCallHook); ok {
-			hook.OnBeforeToolCall(ctx, execCtx, event)
+			hook.OnBeforeToolCall(execCtx, event)
 		}
 	}
 }
@@ -215,13 +204,12 @@ func (r *Registry) FireBeforeToolCall(
 // FireAfterToolCall dispatches an AfterToolCallEvent to all registered
 // AfterToolCallHook implementations.
 func (r *Registry) FireAfterToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {
 	for _, h := range r.hooks {
 		if hook, ok := h.(gent.AfterToolCallHook); ok {
-			hook.OnAfterToolCall(ctx, execCtx, event)
+			hook.OnAfterToolCall(execCtx, event)
 		}
 	}
 }

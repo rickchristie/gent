@@ -172,7 +172,6 @@
 //	type LoggingHook struct{}
 //
 //	func (h *LoggingHook) OnBeforeIteration(
-//	    ctx context.Context,
 //	    execCtx *ExecutionContext,
 //	    e *BeforeIterationEvent,
 //	) {
@@ -180,7 +179,6 @@
 //	}
 //
 //	func (h *LoggingHook) OnAfterModelCall(
-//	    ctx context.Context,
 //	    execCtx *ExecutionContext,
 //	    e *AfterModelCallEvent,
 //	) {

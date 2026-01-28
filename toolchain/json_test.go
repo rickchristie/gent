@@ -1452,7 +1452,6 @@ type jsonArgModifyHook struct {
 }
 
 func (h *jsonArgModifyHook) OnBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1694,7 +1693,6 @@ type jsonMultiToolHook struct {
 }
 
 func (h *jsonMultiToolHook) OnBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1715,34 +1713,30 @@ type jsonTestRegistry struct {
 }
 
 func (r *jsonTestRegistry) FireBeforeModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeModelCallEvent,
 ) {
 }
 
 func (r *jsonTestRegistry) FireAfterModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterModelCallEvent,
 ) {
 }
 
 func (r *jsonTestRegistry) FireBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
 	if r.hook != nil {
-		r.hook.OnBeforeToolCall(ctx, execCtx, event)
+		r.hook.OnBeforeToolCall(execCtx, event)
 	}
 	if r.multiHook != nil {
-		r.multiHook.OnBeforeToolCall(ctx, execCtx, event)
+		r.multiHook.OnBeforeToolCall(execCtx, event)
 	}
 }
 
 func (r *jsonTestRegistry) FireAfterToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {

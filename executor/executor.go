@@ -120,24 +120,22 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 				TerminationReason: execCtx.TerminationReason(),
 				Error:             execCtx.Error(),
 			}
-			ctx := execCtx.Context()
-			e.hooks.FireAfterExecution(ctx, execCtx, event)
+			e.hooks.FireAfterExecution(execCtx, event)
 		}
 	}()
 
 	// BeforeExecution hook
-	ctx := execCtx.Context()
 	if e.hooks != nil {
 		event := &gent.BeforeExecutionEvent{}
-		e.hooks.FireBeforeExecution(ctx, execCtx, event)
+		e.hooks.FireBeforeExecution(execCtx, event)
 	}
 	beforeExecutionCalled = true
 
 	// Main execution loop
 	for {
 		// Check context cancellation (handles both user cancel and limit exceeded)
-		ctx = execCtx.Context()
-		if ctx.Err() != nil {
+		goCtx := execCtx.Context()
+		if goCtx.Err() != nil {
 			if execCtx.ExceededLimit() != nil {
 				execCtx.SetTermination(
 					gent.TerminationLimitExceeded,
@@ -147,7 +145,11 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 						execCtx.ExceededLimit().MaxValue),
 				)
 			} else {
-				execCtx.SetTermination(gent.TerminationContextCanceled, nil, ctx.Err())
+				execCtx.SetTermination(
+					gent.TerminationContextCanceled,
+					nil,
+					goCtx.Err(),
+				)
 			}
 			return
 		}
@@ -161,7 +163,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 			event := &gent.BeforeIterationEvent{
 				Iteration: execCtx.Iteration(),
 			}
-			e.hooks.FireBeforeIteration(ctx, execCtx, event)
+			e.hooks.FireBeforeIteration(execCtx, event)
 		}
 
 		// Execute the AgentLoop iteration
@@ -200,7 +202,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 				Result:    loopResult,
 				Duration:  iterDuration,
 			}
-			e.hooks.FireAfterIteration(ctx, execCtx, event)
+			e.hooks.FireAfterIteration(execCtx, event)
 		}
 
 		// Check for termination

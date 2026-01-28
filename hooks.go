@@ -1,14 +1,11 @@
 package gent
 
-import (
-	"context"
-)
-
 // -----------------------------------------------------------------------------
 // Executor Hook Interfaces
 // -----------------------------------------------------------------------------
 //
-// Hooks allow observing and intercepting execution at various points. To use hooks:
+// Hooks allow observing and intercepting execution at various points.
+// To use hooks:
 //
 //  1. Implement the desired hook interface(s)
 //  2. Register with hooks.Registry
@@ -20,12 +17,23 @@ import (
 //	    logger *log.Logger
 //	}
 //
-//	func (h *LoggingHook) OnBeforeIteration(ctx context.Context, execCtx *ExecutionContext, e BeforeIterationEvent) {
+//	func (h *LoggingHook) OnBeforeIteration(
+//	    execCtx *ExecutionContext,
+//	    e *BeforeIterationEvent,
+//	) {
 //	    h.logger.Printf("Starting iteration %d", e.Iteration)
 //	}
 //
-//	func (h *LoggingHook) OnAfterModelCall(ctx context.Context, execCtx *ExecutionContext, e AfterModelCallEvent) {
-//	    h.logger.Printf("Model %s: %d tokens in %v", e.Model, e.Response.Info.InputTokens, e.Duration)
+//	func (h *LoggingHook) OnAfterModelCall(
+//	    execCtx *ExecutionContext,
+//	    e *AfterModelCallEvent,
+//	) {
+//	    h.logger.Printf(
+//	        "Model %s: %d tokens in %v",
+//	        e.Model,
+//	        e.Response.Info.InputTokens,
+//	        e.Duration,
+//	    )
 //	}
 //
 //	// Register and use
@@ -33,10 +41,15 @@ import (
 //	registry.Register(&LoggingHook{logger: log.Default()})
 //	exec := executor.New(agent, executor.Config{Hooks: registry})
 //
+// Hooks receive *ExecutionContext which provides access to the
+// underlying context.Context via execCtx.Context(). Use this for
+// cancellation checks or passing to external APIs.
+//
 // # Hook Execution Order
 //
-// Hooks are called in registration order. For paired hooks (Before/After), the After
-// hook is always called if the Before hook was called, even on error.
+// Hooks are called in registration order. For paired hooks
+// (Before/After), the After hook is always called if the Before
+// hook was called, even on error.
 //
 // # Error Handling
 //
@@ -44,7 +57,8 @@ import (
 //   - Before hooks: Execution stops, panic propagates
 //   - After hooks: Panic propagates after cleanup
 //
-// Implement proper error recovery if you need to handle errors gracefully.
+// Implement proper error recovery if you need to handle errors
+// gracefully.
 //
 // # Available Hooks
 //
@@ -67,7 +81,6 @@ import (
 // Example:
 //
 //	func (h *MyHook) OnBeforeExecution(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    event *gent.BeforeExecutionEvent,
 //	) {
@@ -76,7 +89,6 @@ import (
 type BeforeExecutionHook interface {
 	// OnBeforeExecution is called once before the first iteration.
 	OnBeforeExecution(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *BeforeExecutionEvent,
 	)
@@ -94,7 +106,6 @@ type BeforeExecutionHook interface {
 // Example:
 //
 //	func (h *MyHook) OnAfterExecution(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    event *gent.AfterExecutionEvent,
 //	) {
@@ -110,7 +121,6 @@ type AfterExecutionHook interface {
 	// (successfully or with error). This is always called if
 	// OnBeforeExecution was called, even on error.
 	OnAfterExecution(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *AfterExecutionEvent,
 	)
@@ -124,7 +134,6 @@ type AfterExecutionHook interface {
 // that persist across iterations:
 //
 //	func (h *ReminderHook) OnBeforeIteration(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    event *gent.BeforeIterationEvent,
 //	) {
@@ -155,7 +164,6 @@ type AfterExecutionHook interface {
 type BeforeIterationHook interface {
 	// OnBeforeIteration is called before each AgentLoop.Next call.
 	OnBeforeIteration(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *BeforeIterationEvent,
 	)
@@ -170,7 +178,6 @@ type BeforeIterationHook interface {
 // depends on the iteration result:
 //
 //	func (h *SteeringHook) OnAfterIteration(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    event *gent.AfterIterationEvent,
 //	) {
@@ -202,7 +209,6 @@ type BeforeIterationHook interface {
 type AfterIterationHook interface {
 	// OnAfterIteration is called after each AgentLoop.Next call.
 	OnAfterIteration(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *AfterIterationEvent,
 	)
@@ -216,7 +222,6 @@ type ErrorHook interface {
 	// OnError is called when an error occurs during execution.
 	// The error will still be returned from Execute.
 	OnError(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *ErrorEvent,
 	)
@@ -235,7 +240,6 @@ type ErrorHook interface {
 // but are NOT persisted to the scratchpad or iteration history:
 //
 //	func (h *GuardrailHook) OnBeforeModelCall(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    event *gent.BeforeModelCallEvent,
 //	) {
@@ -269,7 +273,6 @@ type BeforeModelCallHook interface {
 	// OnBeforeModelCall is called before each model API call.
 	// Hooks can modify event.Request for ephemeral context injection.
 	OnBeforeModelCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *BeforeModelCallEvent,
 	)
@@ -283,7 +286,6 @@ type BeforeModelCallHook interface {
 type AfterModelCallHook interface {
 	// OnAfterModelCall is called after each model API call completes.
 	OnAfterModelCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *AfterModelCallEvent,
 	)
@@ -302,7 +304,6 @@ type BeforeToolCallHook interface {
 	// OnBeforeToolCall is called before each tool execution.
 	// The hook can modify event.Args to change the input.
 	OnBeforeToolCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *BeforeToolCallEvent,
 	)
@@ -316,7 +317,6 @@ type BeforeToolCallHook interface {
 type AfterToolCallHook interface {
 	// OnAfterToolCall is called after each tool execution completes.
 	OnAfterToolCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *AfterToolCallEvent,
 	)

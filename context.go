@@ -13,24 +13,20 @@ import (
 type HookFirer interface {
 	// Model call hooks
 	FireBeforeModelCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *BeforeModelCallEvent,
 	)
 	FireAfterModelCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *AfterModelCallEvent,
 	)
 
 	// Tool call hooks
 	FireBeforeToolCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *BeforeToolCallEvent,
 	)
 	FireAfterToolCall(
-		ctx context.Context,
 		execCtx *ExecutionContext,
 		event *AfterToolCallEvent,
 	)
@@ -338,7 +334,6 @@ func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
 // is set. Hooks may modify event.Request for ephemeral context
 // injection.
 func (ctx *ExecutionContext) FireBeforeModelCall(
-	goCtx context.Context,
 	event *BeforeModelCallEvent,
 ) {
 	ctx.mu.RLock()
@@ -346,14 +341,13 @@ func (ctx *ExecutionContext) FireBeforeModelCall(
 	ctx.mu.RUnlock()
 
 	if firer != nil {
-		firer.FireBeforeModelCall(goCtx, ctx, event)
+		firer.FireBeforeModelCall(ctx, event)
 	}
 }
 
 // FireAfterModelCall fires the AfterModelCall hook if a hook firer
 // is set.
 func (ctx *ExecutionContext) FireAfterModelCall(
-	goCtx context.Context,
 	event *AfterModelCallEvent,
 ) {
 	ctx.mu.RLock()
@@ -361,14 +355,13 @@ func (ctx *ExecutionContext) FireAfterModelCall(
 	ctx.mu.RUnlock()
 
 	if firer != nil {
-		firer.FireAfterModelCall(goCtx, ctx, event)
+		firer.FireAfterModelCall(ctx, event)
 	}
 }
 
 // FireBeforeToolCall fires the BeforeToolCall hook if a hook firer
 // is set.
 func (ctx *ExecutionContext) FireBeforeToolCall(
-	goCtx context.Context,
 	event *BeforeToolCallEvent,
 ) {
 	ctx.mu.RLock()
@@ -376,14 +369,13 @@ func (ctx *ExecutionContext) FireBeforeToolCall(
 	ctx.mu.RUnlock()
 
 	if firer != nil {
-		firer.FireBeforeToolCall(goCtx, ctx, event)
+		firer.FireBeforeToolCall(ctx, event)
 	}
 }
 
 // FireAfterToolCall fires the AfterToolCall hook if a hook firer
 // is set.
 func (ctx *ExecutionContext) FireAfterToolCall(
-	goCtx context.Context,
 	event *AfterToolCallEvent,
 ) {
 	ctx.mu.RLock()
@@ -391,7 +383,7 @@ func (ctx *ExecutionContext) FireAfterToolCall(
 	ctx.mu.RUnlock()
 
 	if firer != nil {
-		firer.FireAfterToolCall(goCtx, ctx, event)
+		firer.FireAfterToolCall(ctx, event)
 	}
 }
 

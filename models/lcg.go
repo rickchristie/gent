@@ -54,18 +54,17 @@ func (m *LCGWrapper) GenerateContent(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
-	ctx := execCtx.Context()
-
 	// Fire BeforeModelCall hook — hooks may modify event.Request
 	// for ephemeral dynamic context injection.
 	beforeEvent := &gent.BeforeModelCallEvent{
 		Model:   m.modelName,
 		Request: messages,
 	}
-	execCtx.FireBeforeModelCall(ctx, beforeEvent)
+	execCtx.FireBeforeModelCall(beforeEvent)
 
 	// Use event.Request (possibly modified by hooks)
 	// Call the underlying model
+	ctx := execCtx.Context()
 	startTime := time.Now()
 	lcgResponse, err := m.model.GenerateContent(
 		ctx, beforeEvent.Request, options...,
@@ -79,7 +78,7 @@ func (m *LCGWrapper) GenerateContent(
 	}
 
 	// Fire AfterModelCall hook (for logging)
-	execCtx.FireAfterModelCall(ctx, &gent.AfterModelCallEvent{
+	execCtx.FireAfterModelCall(&gent.AfterModelCallEvent{
 		Model:    m.modelName,
 		Request:  beforeEvent.Request,
 		Response: response,
@@ -280,18 +279,17 @@ func (m *LCGWrapper) GenerateContentStream(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (gent.Stream, error) {
-	ctx := execCtx.Context()
-
 	// Fire BeforeModelCall hook — hooks may modify event.Request
 	// for ephemeral dynamic context injection.
 	beforeEvent := &gent.BeforeModelCallEvent{
 		Model:   m.modelName,
 		Request: messages,
 	}
-	execCtx.FireBeforeModelCall(ctx, beforeEvent)
+	execCtx.FireBeforeModelCall(beforeEvent)
 
 	// Use event.Request (possibly modified by hooks)
 	messages = beforeEvent.Request
+	ctx := execCtx.Context()
 
 	// Create stream with duration tracking
 	stream := gent.NewStreamWithDuration()
@@ -354,7 +352,7 @@ func (m *LCGWrapper) GenerateContentStream(
 		}
 
 		// Fire AfterModelCall hook and trace
-		execCtx.FireAfterModelCall(ctx, &gent.AfterModelCallEvent{
+		execCtx.FireAfterModelCall(&gent.AfterModelCallEvent{
 			Model:    m.modelName,
 			Request:  messages,
 			Response: response,

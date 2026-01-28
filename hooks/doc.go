@@ -35,7 +35,6 @@
 //	type MetricsHook struct{}
 //
 //	func (h *MetricsHook) OnAfterToolCall(
-//	    ctx context.Context,
 //	    execCtx *gent.ExecutionContext,
 //	    event *gent.AfterToolCallEvent,
 //	) {

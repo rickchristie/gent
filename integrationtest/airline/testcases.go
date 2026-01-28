@@ -371,7 +371,6 @@ func newStreamingOutputHook(w io.Writer) *streamingOutputHook {
 
 // OnBeforeIteration is called before each iteration.
 func (h *streamingOutputHook) OnBeforeIteration(
-	_ context.Context,
 	_ *gent.ExecutionContext,
 	event *gent.BeforeIterationEvent,
 ) {
@@ -383,7 +382,6 @@ func (h *streamingOutputHook) OnBeforeIteration(
 
 // OnAfterToolCall is called after each tool execution.
 func (h *streamingOutputHook) OnAfterToolCall(
-	_ context.Context,
 	_ *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {

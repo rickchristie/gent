@@ -2,7 +2,6 @@
 package loggers
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -57,7 +56,6 @@ func (h *LoggerHook) logYAML(v any) {
 
 // OnBeforeExecution logs execution start with original input.
 func (h *LoggerHook) OnBeforeExecution(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeExecutionEvent,
 ) {
@@ -81,7 +79,6 @@ func (h *LoggerHook) OnBeforeExecution(
 
 // OnAfterExecution logs execution completion with final stats.
 func (h *LoggerHook) OnAfterExecution(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterExecutionEvent,
 ) {
@@ -115,7 +112,6 @@ func (h *LoggerHook) OnAfterExecution(
 
 // OnBeforeIteration logs iteration start.
 func (h *LoggerHook) OnBeforeIteration(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeIterationEvent,
 ) {
@@ -127,7 +123,6 @@ func (h *LoggerHook) OnBeforeIteration(
 
 // OnAfterIteration logs iteration end with the AgentLoopResult.
 func (h *LoggerHook) OnAfterIteration(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterIterationEvent,
 ) {
@@ -163,7 +158,6 @@ func (h *LoggerHook) OnAfterIteration(
 
 // OnError logs errors that occur during execution.
 func (h *LoggerHook) OnError(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.ErrorEvent,
 ) {
@@ -176,7 +170,6 @@ func (h *LoggerHook) OnError(
 
 // OnBeforeModelCall logs the request before a model call.
 func (h *LoggerHook) OnBeforeModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeModelCallEvent,
 ) {
@@ -201,7 +194,6 @@ func (h *LoggerHook) OnBeforeModelCall(
 
 // OnAfterModelCall logs the response after a model call.
 func (h *LoggerHook) OnAfterModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterModelCallEvent,
 ) {
@@ -238,7 +230,6 @@ func (h *LoggerHook) OnAfterModelCall(
 
 // OnBeforeToolCall logs the tool call before execution.
 func (h *LoggerHook) OnBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -249,7 +240,6 @@ func (h *LoggerHook) OnBeforeToolCall(
 
 // OnAfterToolCall logs the tool call result after execution.
 func (h *LoggerHook) OnAfterToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {

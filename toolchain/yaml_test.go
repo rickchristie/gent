@@ -1540,7 +1540,6 @@ type yamlArgModifyHook struct {
 }
 
 func (h *yamlArgModifyHook) OnBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1795,7 +1794,6 @@ type yamlMultiToolHook struct {
 }
 
 func (h *yamlMultiToolHook) OnBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
@@ -1816,34 +1814,30 @@ type yamlTestRegistry struct {
 }
 
 func (r *yamlTestRegistry) FireBeforeModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeModelCallEvent,
 ) {
 }
 
 func (r *yamlTestRegistry) FireAfterModelCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterModelCallEvent,
 ) {
 }
 
 func (r *yamlTestRegistry) FireBeforeToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.BeforeToolCallEvent,
 ) {
 	if r.hook != nil {
-		r.hook.OnBeforeToolCall(ctx, execCtx, event)
+		r.hook.OnBeforeToolCall(execCtx, event)
 	}
 	if r.multiHook != nil {
-		r.multiHook.OnBeforeToolCall(ctx, execCtx, event)
+		r.multiHook.OnBeforeToolCall(execCtx, event)
 	}
 }
 
 func (r *yamlTestRegistry) FireAfterToolCall(
-	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {
