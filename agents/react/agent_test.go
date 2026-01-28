@@ -304,7 +304,7 @@ func TestLoopData_GetTask(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data := NewLoopData(tt.input.task)
+			data := gent.NewLoopData(tt.input.task)
 
 			result := data.GetTask()
 
@@ -318,7 +318,7 @@ func TestLoopData_GetTask(t *testing.T) {
 }
 
 func TestLoopData_IterationHistory(t *testing.T) {
-	data := NewLoopData(nil)
+	data := gent.NewLoopData(nil)
 
 	assert.Empty(t, data.GetIterationHistory(), "expected empty history initially")
 
@@ -335,7 +335,7 @@ func TestLoopData_IterationHistory(t *testing.T) {
 }
 
 func TestLoopData_ScratchPad(t *testing.T) {
-	data := NewLoopData(nil)
+	data := gent.NewLoopData(nil)
 
 	assert.Empty(t, data.GetScratchPad(), "expected empty scratchpad initially")
 
@@ -414,7 +414,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithToolChain(tc).
 			WithTermination(term)
 
-		data := NewLoopData(&gent.Task{Text: "Hello"})
+		data := gent.NewLoopData(&gent.Task{Text: "Hello"})
 
 		messages := loop.buildMessages(data, "output prompt", "tools prompt")
 
@@ -448,7 +448,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithToolChain(tc).
 			WithTermination(term)
 
-		data := NewLoopData(&gent.Task{Text: "Do something"})
+		data := gent.NewLoopData(&gent.Task{Text: "Do something"})
 
 		// Add scratchpad with one iteration (AI response + observation)
 		iter := &gent.Iteration{
@@ -493,7 +493,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithToolChain(tc).
 			WithTermination(term)
 
-		data := NewLoopData(&gent.Task{Text: "", Media: nil})
+		data := gent.NewLoopData(&gent.Task{Text: "", Media: nil})
 
 		assert.Panics(t, func() {
 			loop.buildMessages(data, "output prompt", "tools prompt")
@@ -511,7 +511,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithToolChain(tc).
 			WithTermination(term)
 
-		data := NewLoopData(nil)
+		data := gent.NewLoopData(nil)
 
 		assert.Panics(t, func() {
 			loop.buildMessages(data, "output prompt", "tools prompt")
@@ -536,7 +536,7 @@ func TestAgent_Next_Termination(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "What is 6*7?"})
+	data := gent.NewLoopData(&gent.Task{Text: "What is 6*7?"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -573,7 +573,7 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Search for test"})
+	data := gent.NewLoopData(&gent.Task{Text: "Search for test"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -607,7 +607,7 @@ func TestAgent_Next_ToolError(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Use broken tool"})
+	data := gent.NewLoopData(&gent.Task{Text: "Use broken tool"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -627,7 +627,7 @@ func TestAgent_Next_ModelError(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Hello"})
+	data := gent.NewLoopData(&gent.Task{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(execCtx)
 
@@ -653,7 +653,7 @@ func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Hello"})
+	data := gent.NewLoopData(&gent.Task{Text: "Hello"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -683,7 +683,7 @@ func TestAgent_Next_ParseError_TracesError(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Test"})
+	data := gent.NewLoopData(&gent.Task{Text: "Test"})
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(execCtx)
 
@@ -865,7 +865,7 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 				WithTermination(term)
 
 			// Execute
-			data := NewLoopData(&gent.Task{Text: "Test task"})
+			data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 			execCtx := newTestExecCtx(data)
 			result, err := loop.Next(execCtx)
 
@@ -956,7 +956,7 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 		WithToolChain(tc).
 		WithTermination(term)
 
-	data := NewLoopData(&gent.Task{Text: "Use tools a and b"})
+	data := gent.NewLoopData(&gent.Task{Text: "Use tools a and b"})
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
@@ -1113,7 +1113,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 				WithToolChain(tc).
 				WithTermination(term)
 
-			data := NewLoopData(&gent.Task{Text: "Execute the task"})
+			data := gent.NewLoopData(&gent.Task{Text: "Execute the task"})
 			execCtx := newTestExecCtx(data)
 
 			result, err := loop.Next(execCtx)
@@ -1258,7 +1258,7 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 			WithTermination(term).
 			WithSystemPromptBuilder(customBuilder)
 
-		data := NewLoopData(&gent.Task{Text: "Hello"})
+		data := gent.NewLoopData(&gent.Task{Text: "Hello"})
 		messages := loop.buildMessages(data, "output", "tools")
 
 		// First message should be our custom system prompt
@@ -1298,7 +1298,7 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 			WithTermination(term).
 			WithSystemPromptBuilder(multiMessageBuilder)
 
-		data := NewLoopData(&gent.Task{Text: "Hello"})
+		data := gent.NewLoopData(&gent.Task{Text: "Hello"})
 		messages := loop.buildMessages(data, "output", "tools")
 
 		// Should have: 3 from builder + 1 task + 1 BEGIN!
@@ -1337,7 +1337,7 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 			WithCriticalRules("No lies").
 			WithSystemPromptBuilder(capturingBuilder)
 
-		data := NewLoopData(&gent.Task{Text: "Hello"})
+		data := gent.NewLoopData(&gent.Task{Text: "Hello"})
 		loop.buildMessages(data, "output prompt", "tools prompt")
 
 		assert.Equal(t, format, capturedCtx.Format)

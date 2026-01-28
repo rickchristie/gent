@@ -640,3 +640,106 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestJSON_ValidatorTracing(t *testing.T) {
+	t.Run("validator accepted traces CommonTraceEvent", func(t *testing.T) {
+		term := NewJSON[SimpleStruct]("answer")
+		term.SetValidator(&mockJSONValidator{
+			name:     "test_validator",
+			accepted: true,
+		})
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, `{"name":"test","value":42}`)
+
+		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
+
+		// Check trace events
+		events := execCtx.Events()
+		assert.Len(t, events, 2, "expected 2 trace events (called + accepted)")
+
+		// First event: validator called
+		calledEvent, ok := events[0].(gent.CommonTraceEvent)
+		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[0])
+		assert.Equal(t, gent.EventIdValidatorCalled, calledEvent.EventId)
+		assert.Equal(t, "Validator 'test_validator' called", calledEvent.Description)
+
+		calledData, ok := calledEvent.Data.(gent.ValidatorCalledData)
+		assert.True(t, ok, "expected ValidatorCalledData, got %T", calledEvent.Data)
+		assert.Equal(t, "test_validator", calledData.ValidatorName)
+		// For JSON, the answer is the parsed struct
+		parsedAnswer, ok := calledData.Answer.(SimpleStruct)
+		assert.True(t, ok, "expected SimpleStruct, got %T", calledData.Answer)
+		assert.Equal(t, "test", parsedAnswer.Name)
+		assert.Equal(t, 42, parsedAnswer.Value)
+
+		// Second event: validator accepted
+		acceptedEvent, ok := events[1].(gent.CommonTraceEvent)
+		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[1])
+		assert.Equal(t, gent.EventIdValidatorAccepted, acceptedEvent.EventId)
+		assert.Equal(t, "Validator 'test_validator' accepted answer", acceptedEvent.Description)
+
+		acceptedData, ok := acceptedEvent.Data.(gent.ValidatorResultData)
+		assert.True(t, ok, "expected ValidatorResultData, got %T", acceptedEvent.Data)
+		assert.Equal(t, "test_validator", acceptedData.ValidatorName)
+		assert.True(t, acceptedData.Accepted)
+		assert.Nil(t, acceptedData.Feedback)
+	})
+
+	t.Run("validator rejected traces CommonTraceEvent with feedback", func(t *testing.T) {
+		feedback := []gent.FormattedSection{
+			{Name: "error", Content: "Invalid value"},
+			{Name: "hint", Content: "Value must be positive"},
+		}
+		term := NewJSON[SimpleStruct]("answer")
+		term.SetValidator(&mockJSONValidator{
+			name:     "value_checker",
+			accepted: false,
+			feedback: feedback,
+		})
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, `{"name":"test","value":-1}`)
+
+		assert.Equal(t, gent.TerminationAnswerRejected, result.Status)
+
+		// Check trace events
+		events := execCtx.Events()
+		assert.Len(t, events, 2, "expected 2 trace events (called + rejected)")
+
+		// First event: validator called
+		calledEvent, ok := events[0].(gent.CommonTraceEvent)
+		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[0])
+		assert.Equal(t, gent.EventIdValidatorCalled, calledEvent.EventId)
+
+		calledData, ok := calledEvent.Data.(gent.ValidatorCalledData)
+		assert.True(t, ok, "expected ValidatorCalledData, got %T", calledEvent.Data)
+		assert.Equal(t, "value_checker", calledData.ValidatorName)
+
+		// Second event: validator rejected
+		rejectedEvent, ok := events[1].(gent.CommonTraceEvent)
+		assert.True(t, ok, "expected CommonTraceEvent, got %T", events[1])
+		assert.Equal(t, gent.EventIdValidatorRejected, rejectedEvent.EventId)
+		assert.Equal(t, "Validator 'value_checker' rejected answer", rejectedEvent.Description)
+
+		rejectedData, ok := rejectedEvent.Data.(gent.ValidatorResultData)
+		assert.True(t, ok, "expected ValidatorResultData, got %T", rejectedEvent.Data)
+		assert.Equal(t, "value_checker", rejectedData.ValidatorName)
+		assert.False(t, rejectedData.Accepted)
+		assert.Equal(t, feedback, rejectedData.Feedback)
+	})
+
+	t.Run("no validator means no trace events", func(t *testing.T) {
+		term := NewJSON[SimpleStruct]("answer")
+		// No validator set
+
+		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+		result := term.ShouldTerminate(execCtx, `{"name":"test","value":42}`)
+
+		assert.Equal(t, gent.TerminationAnswerAccepted, result.Status)
+
+		// No trace events because no validator was called
+		events := execCtx.Events()
+		assert.Len(t, events, 0, "expected no trace events when no validator is set")
+	})
+}

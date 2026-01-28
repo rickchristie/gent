@@ -89,6 +89,11 @@ func (t *Text) SetValidator(validator gent.AnswerValidator) {
 // ShouldTerminate checks if the content indicates termination.
 // For Text termination, any non-empty content triggers termination (after validation).
 // Panics if execCtx is nil.
+//
+// When a validator is set, this method traces CommonTraceEvent with:
+//   - EventIdValidatorCalled: When the validator is invoked
+//   - EventIdValidatorAccepted: When the validator accepts the answer
+//   - EventIdValidatorRejected: When the validator rejects the answer
 func (t *Text) ShouldTerminate(
 	execCtx *gent.ExecutionContext,
 	content string,
@@ -104,11 +109,35 @@ func (t *Text) ShouldTerminate(
 
 	// Run validator if set
 	if t.validator != nil {
+		validatorName := t.validator.Name()
+
+		// Trace validator called
+		execCtx.Trace(gent.CommonTraceEvent{
+			EventId:     gent.EventIdValidatorCalled,
+			Description: "Validator '" + validatorName + "' called",
+			Data: gent.ValidatorCalledData{
+				ValidatorName: validatorName,
+				Answer:        trimmed,
+			},
+		})
+
 		result := t.validator.Validate(execCtx, trimmed)
 		if !result.Accepted {
 			// Track rejection stats
 			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
-			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+t.validator.Name(), 1)
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+validatorName, 1)
+
+			// Trace validator rejected
+			execCtx.Trace(gent.CommonTraceEvent{
+				EventId:     gent.EventIdValidatorRejected,
+				Description: "Validator '" + validatorName + "' rejected answer",
+				Data: gent.ValidatorResultData{
+					ValidatorName: validatorName,
+					Answer:        trimmed,
+					Accepted:      false,
+					Feedback:      result.Feedback,
+				},
+			})
 
 			// Convert feedback to ContentPart
 			var feedback []gent.ContentPart
@@ -122,6 +151,17 @@ func (t *Text) ShouldTerminate(
 				Content: feedback,
 			}
 		}
+
+		// Trace validator accepted
+		execCtx.Trace(gent.CommonTraceEvent{
+			EventId:     gent.EventIdValidatorAccepted,
+			Description: "Validator '" + validatorName + "' accepted answer",
+			Data: gent.ValidatorResultData{
+				ValidatorName: validatorName,
+				Answer:        trimmed,
+				Accepted:      true,
+			},
+		})
 	}
 
 	return &gent.TerminationResult{

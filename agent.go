@@ -118,6 +118,79 @@ type LoopData interface {
 	SetScratchPad([]*Iteration)
 }
 
+// BasicLoopData is the default implementation of [LoopData].
+//
+// It provides basic storage for task, iteration history, and scratchpad. This is used by
+// the built-in agent loops (e.g., agents/react) and can be used directly or embedded in
+// custom structs for additional data.
+//
+// # Direct Usage
+//
+//	data := gent.NewLoopData(task)
+//	execCtx := gent.NewExecutionContext(ctx, "my-agent", data)
+//
+// # Embedding for Custom Data
+//
+// Embed BasicLoopData to add custom fields while retaining all standard LoopData methods:
+//
+//	type MyLoopData struct {
+//	    gent.BasicLoopData
+//	    SessionID   string
+//	    UserContext map[string]any
+//	}
+//
+//	func NewMyLoopData(task *gent.Task, sessionID string) *MyLoopData {
+//	    return &MyLoopData{
+//	        BasicLoopData: *gent.NewLoopData(task),
+//	        SessionID:     sessionID,
+//	        UserContext:   make(map[string]any),
+//	    }
+//	}
+//
+// The embedded struct automatically satisfies [LoopData] and works with all agent loops.
+type BasicLoopData struct {
+	task             *Task
+	iterationHistory []*Iteration
+	scratchpad       []*Iteration
+}
+
+// NewLoopData creates a new [BasicLoopData] with the given task.
+func NewLoopData(task *Task) *BasicLoopData {
+	return &BasicLoopData{
+		task:             task,
+		iterationHistory: make([]*Iteration, 0),
+		scratchpad:       make([]*Iteration, 0),
+	}
+}
+
+// GetTask returns the original input provided by the user.
+func (d *BasicLoopData) GetTask() *Task {
+	return d.task
+}
+
+// GetIterationHistory returns all Iteration recorded, including compacted ones.
+func (d *BasicLoopData) GetIterationHistory() []*Iteration {
+	return d.iterationHistory
+}
+
+// AddIterationHistory adds a new Iteration to the full history.
+func (d *BasicLoopData) AddIterationHistory(iter *Iteration) {
+	d.iterationHistory = append(d.iterationHistory, iter)
+}
+
+// GetScratchPad returns all Iteration that will be used in next iteration.
+func (d *BasicLoopData) GetScratchPad() []*Iteration {
+	return d.scratchpad
+}
+
+// SetScratchPad sets the iterations to be used in next iteration.
+func (d *BasicLoopData) SetScratchPad(iterations []*Iteration) {
+	d.scratchpad = iterations
+}
+
+// Compile-time check that BasicLoopData implements LoopData.
+var _ LoopData = (*BasicLoopData)(nil)
+
 // Iteration represents a single iteration's message content.
 type Iteration struct {
 	Messages []MessageContent

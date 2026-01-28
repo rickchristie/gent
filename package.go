@@ -64,12 +64,12 @@
 //
 //	    // 7. Create execution context with task
 //	    task := &gent.Task{Text: "What's the status of order #12345?"}
-//	    data := react.NewLoopData(task)
+//	    data := gent.NewLoopData(task)
 //	    execCtx := gent.NewExecutionContext(context.Background(), "customer-service", data)
 //	    execCtx.SetLimits(limits)
 //
 //	    // 8. Run the agent
-//	    exec := executor.New[*react.LoopData](agent, executor.DefaultConfig())
+//	    exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 //	    exec.Execute(execCtx)
 //
 //	    // 9. Check results
@@ -227,7 +227,7 @@
 //   - [ParseErrorTrace]: Format/toolchain/termination parse errors
 //   - [IterationStartTrace], [IterationEndTrace]: Iteration boundaries
 //   - [ChildSpawnTrace], [ChildCompleteTrace]: Nested context lifecycle
-//   - [CustomTrace]: Custom trace data for your implementations
+//   - [CommonTraceEvent]: Informational events (framework and custom)
 //
 // # Stats and Limits
 //

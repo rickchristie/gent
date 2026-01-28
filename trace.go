@@ -34,11 +34,12 @@ const (
 //
 // # Creating Custom Traces
 //
-// Use [CustomTrace] for application-specific trace data:
+// Use [CommonTraceEvent] for application-specific trace data:
 //
-//	execCtx.Trace(CustomTrace{
-//	    Name: "cache_hit",
-//	    Data: map[string]any{"key": cacheKey, "ttl": ttl},
+//	execCtx.Trace(CommonTraceEvent{
+//	    EventId:     "myapp:cache_hit",
+//	    Description: "Cache lookup succeeded",
+//	    Data:        CacheHitData{Key: cacheKey, TTL: ttl},
 //	})
 //
 // For strongly-typed custom traces, embed [BaseTrace]:
@@ -61,6 +62,8 @@ const (
 //	    switch e := event.(type) {
 //	    case gent.ModelCallTrace:
 //	        log.Printf("Model %s used %d tokens", e.Model, e.InputTokens)
+//	    case gent.CommonTraceEvent:
+//	        log.Printf("Event %s: %s", e.EventId, e.Description)
 //	    case MyCacheTrace:
 //	        log.Printf("Cache %s: hit=%v", e.Key, e.Hit)
 //	    }
@@ -192,18 +195,85 @@ type ChildCompleteTrace struct {
 
 func (ChildCompleteTrace) traceEvent() {}
 
-// CustomTrace allows recording arbitrary trace data for custom AgentLoop implementations.
-type CustomTrace struct {
+// CommonTraceEvent records informational events during execution.
+//
+// This is used by the framework for events like termination validation, and can
+// be used by applications for custom events. The EventId field enables filtering
+// and categorization of events.
+//
+// # EventId Conventions
+//
+// Use namespaced IDs to avoid collisions:
+//   - Framework events: "gent:termination:validator_accepted"
+//   - Application events: "myapp:cache_hit", "myapp:external_api_called"
+//
+// # Usage
+//
+//	execCtx.Trace(gent.CommonTraceEvent{
+//	    EventId:     "myapp:order_lookup",
+//	    Description: "Retrieved order from database",
+//	    Data:        OrderData{OrderId: "12345", Status: "shipped"},
+//	})
+type CommonTraceEvent struct {
 	BaseTrace
 
-	// Name identifies this custom trace type.
-	Name string
+	// EventId identifies this event type. Use namespaced IDs like
+	// "gent:termination:validator_accepted" or "myapp:cache_hit".
+	EventId string
 
-	// Data contains arbitrary trace data.
-	Data map[string]any
+	// Description is a human-readable description of what happened.
+	Description string
+
+	// Data contains event-specific data. Can be any type.
+	Data any
 }
 
-func (CustomTrace) traceEvent() {}
+func (CommonTraceEvent) traceEvent() {}
+
+// -----------------------------------------------------------------------------
+// Well-Known EventIds for CommonTraceEvent
+// -----------------------------------------------------------------------------
+
+// EventId constants for termination validation events.
+// These are traced by Termination implementations when validators are invoked.
+const (
+	// EventIdValidatorCalled is traced when a validator is invoked.
+	// Data: ValidatorCalledData
+	EventIdValidatorCalled = "gent:termination:validator_called"
+
+	// EventIdValidatorAccepted is traced when a validator accepts the answer.
+	// Data: ValidatorResultData
+	EventIdValidatorAccepted = "gent:termination:validator_accepted"
+
+	// EventIdValidatorRejected is traced when a validator rejects the answer.
+	// Data: ValidatorResultData
+	EventIdValidatorRejected = "gent:termination:validator_rejected"
+)
+
+// ValidatorCalledData contains data for EventIdValidatorCalled events.
+type ValidatorCalledData struct {
+	// ValidatorName is the name of the validator being called.
+	ValidatorName string
+
+	// Answer is the parsed answer being validated.
+	Answer any
+}
+
+// ValidatorResultData contains data for validator result events
+// (EventIdValidatorAccepted and EventIdValidatorRejected).
+type ValidatorResultData struct {
+	// ValidatorName is the name of the validator.
+	ValidatorName string
+
+	// Answer is the parsed answer that was validated.
+	Answer any
+
+	// Accepted is true if the validator accepted the answer.
+	Accepted bool
+
+	// Feedback contains the rejection feedback (only set when rejected).
+	Feedback []FormattedSection
+}
 
 // ParseErrorTrace records a parse error (format or toolchain).
 // When traced, auto-updates parse error counters based on ErrorType.

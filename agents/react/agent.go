@@ -12,50 +12,6 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// LoopData implements gent.LoopData for the ReAct agent loop.
-type LoopData struct {
-	task             *gent.Task
-	iterationHistory []*gent.Iteration
-	scratchpad       []*gent.Iteration
-}
-
-// NewLoopData creates a new LoopData with the given task.
-func NewLoopData(task *gent.Task) *LoopData {
-	return &LoopData{
-		task:             task,
-		iterationHistory: make([]*gent.Iteration, 0),
-		scratchpad:       make([]*gent.Iteration, 0),
-	}
-}
-
-// GetTask returns the original input provided by the user.
-func (d *LoopData) GetTask() *gent.Task {
-	return d.task
-}
-
-// GetIterationHistory returns all Iteration recorded, including compacted ones.
-func (d *LoopData) GetIterationHistory() []*gent.Iteration {
-	return d.iterationHistory
-}
-
-// AddIterationHistory adds a new Iteration to the full history.
-func (d *LoopData) AddIterationHistory(iter *gent.Iteration) {
-	d.iterationHistory = append(d.iterationHistory, iter)
-}
-
-// GetScratchPad returns all Iteration that will be used in next iteration.
-func (d *LoopData) GetScratchPad() []*gent.Iteration {
-	return d.scratchpad
-}
-
-// SetScratchPad sets the iterations to be used in next iteration.
-func (d *LoopData) SetScratchPad(iterations []*gent.Iteration) {
-	d.scratchpad = iterations
-}
-
-// Compile-time check that LoopData implements gent.LoopData.
-var _ gent.LoopData = (*LoopData)(nil)
-
 // ----------------------------------------------------------------------------
 // Agent - ReAct AgentLoop Implementation
 // ----------------------------------------------------------------------------
@@ -603,4 +559,4 @@ func (r *Agent) callModelStreaming(
 }
 
 // Compile-time check that Agent implements gent.AgentLoop.
-var _ gent.AgentLoop[*LoopData] = (*Agent)(nil)
+var _ gent.AgentLoop[*gent.BasicLoopData] = (*Agent)(nil)

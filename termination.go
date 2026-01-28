@@ -142,17 +142,52 @@ type ValidationResult struct {
 //
 //	    // Run validator if set
 //	    if t.validator != nil {
+//	        validatorName := t.validator.Name()
+//
+//	        // REQUIRED: Trace validator called
+//	        execCtx.Trace(CommonTraceEvent{
+//	            EventId:     EventIdValidatorCalled,
+//	            Description: "Validator '" + validatorName + "' called",
+//	            Data: ValidatorCalledData{
+//	                ValidatorName: validatorName,
+//	                Answer:        content,
+//	            },
+//	        })
+//
 //	        result := t.validator.Validate(execCtx, content)
 //	        if !result.Accepted {
 //	            // Update stats
 //	            execCtx.Stats().IncrCounter(KeyAnswerRejectedTotal, 1)
-//	            execCtx.Stats().IncrCounter(KeyAnswerRejectedBy+t.validator.Name(), 1)
-//	            // Return rejection with feedback
+//	            execCtx.Stats().IncrCounter(KeyAnswerRejectedBy+validatorName, 1)
+//
+//	            // REQUIRED: Trace validator rejected
+//	            execCtx.Trace(CommonTraceEvent{
+//	                EventId:     EventIdValidatorRejected,
+//	                Description: "Validator '" + validatorName + "' rejected answer",
+//	                Data: ValidatorResultData{
+//	                    ValidatorName: validatorName,
+//	                    Answer:        content,
+//	                    Accepted:      false,
+//	                    Feedback:      result.Feedback,
+//	                },
+//	            })
+//
 //	            return &TerminationResult{
 //	                Status:  TerminationAnswerRejected,
 //	                Content: formatFeedback(result.Feedback),
 //	            }
 //	        }
+//
+//	        // REQUIRED: Trace validator accepted
+//	        execCtx.Trace(CommonTraceEvent{
+//	            EventId:     EventIdValidatorAccepted,
+//	            Description: "Validator '" + validatorName + "' accepted answer",
+//	            Data: ValidatorResultData{
+//	                ValidatorName: validatorName,
+//	                Answer:        content,
+//	                Accepted:      true,
+//	            },
+//	        })
 //	    }
 //
 //	    return &TerminationResult{
@@ -162,6 +197,19 @@ type ValidationResult struct {
 //	}
 //
 //	func (t *MyTermination) SetValidator(v AnswerValidator) { t.validator = v }
+//
+// # Validator Tracing Requirements
+//
+// Custom Termination implementations MUST trace [CommonTraceEvent] when calling
+// validators. This enables debugging and observability of the validation flow.
+// Use the well-known EventIds:
+//
+//   - [EventIdValidatorCalled]: Trace before calling validator
+//   - [EventIdValidatorAccepted]: Trace when validator accepts
+//   - [EventIdValidatorRejected]: Trace when validator rejects
+//
+// The Data field should use [ValidatorCalledData] and [ValidatorResultData]
+// for consistency with the built-in implementations.
 //
 // # Available Implementations
 //

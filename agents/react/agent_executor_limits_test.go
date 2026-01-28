@@ -437,11 +437,11 @@ func runWithLimit(
 		WithToolChain(toolChain).
 		WithTermination(termination)
 
-	data := NewLoopData(&gent.Task{Text: "Test task"})
+	data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 	execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 	execCtx.SetLimits(limits)
 
-	exec := executor.New[*LoopData](agent, executor.DefaultConfig())
+	exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 	exec.Execute(execCtx)
 
 	return execCtx
@@ -1118,7 +1118,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorTotal, MaxValue: 2},
@@ -1127,7 +1127,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 		// Manually increment to simulate section parse errors
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorTotal, 3)
 
-		exec := executor.New[*LoopData](agent, executor.DefaultConfig())
+		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 		exec.Execute(execCtx)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
@@ -1154,7 +1154,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorTotal, MaxValue: 2},
@@ -1165,7 +1165,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 		// Since we manually control, increment 3 to exceed limit
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorTotal, 3)
 
-		exec := executor.New[*LoopData](agent, executor.DefaultConfig())
+		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 		exec.Execute(execCtx)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
@@ -1385,7 +1385,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
@@ -1394,7 +1394,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 		// Manually increment to simulate consecutive section parse errors
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 3)
 
-		exec := executor.New[*LoopData](agent, executor.DefaultConfig())
+		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 		exec.Execute(execCtx)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
@@ -1421,7 +1421,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
@@ -1430,7 +1430,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 		// Simulate: 2 successful iterations, then consecutive section errors (3 > limit of 2)
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 3)
 
-		exec := executor.New[*LoopData](agent, executor.DefaultConfig())
+		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 		exec.Execute(execCtx)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
@@ -1855,7 +1855,7 @@ func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
@@ -1866,7 +1866,7 @@ func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 		execCtx.Stats().ResetCounter(gent.KeySectionParseErrorConsecutive)   // reset
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 1) // fail
 
-		exec := executor.New[*LoopData](agent, executor.DefaultConfig())
+		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
 		exec.Execute(execCtx)
 
 		// Should complete because consecutive is 1, not 3

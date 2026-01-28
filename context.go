@@ -60,7 +60,7 @@ type HookFirer interface {
 //	    fmt.Printf("Iteration %d\n", execCtx.Iteration())
 //
 //	    // Record custom trace
-//	    execCtx.Trace(CustomTrace{Name: "my_event", Data: map[string]any{"key": "value"}})
+//	    execCtx.TraceEvent("myapp:my_event", "Something happened", myData)
 //
 //	    // Use standard context for model calls
 //	    response, err := model.GenerateContent(execCtx, ...)
@@ -442,14 +442,15 @@ func (ctx *ExecutionContext) Trace(event TraceEvent) {
 	ctx.checkLimitsIfRoot()
 }
 
-// TraceCustom is a convenience method for recording custom trace events.
-func (ctx *ExecutionContext) TraceCustom(name string, data map[string]any) {
+// TraceEvent is a convenience method for recording CommonTraceEvent events.
+func (ctx *ExecutionContext) TraceEvent(eventId string, description string, data any) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
-	ctx.appendEventLocked(CustomTrace{
-		BaseTrace: ctx.baseTraceLocked(),
-		Name:      name,
-		Data:      data,
+	ctx.appendEventLocked(CommonTraceEvent{
+		BaseTrace:   ctx.baseTraceLocked(),
+		EventId:     eventId,
+		Description: description,
+		Data:        data,
 	})
 }
 
@@ -536,7 +537,7 @@ func (ctx *ExecutionContext) populateBaseTrace(event TraceEvent) TraceEvent {
 			e.Depth = ctx.depth
 		}
 		return e
-	case CustomTrace:
+	case CommonTraceEvent:
 		if e.Timestamp.IsZero() {
 			e.Timestamp = time.Now()
 		}

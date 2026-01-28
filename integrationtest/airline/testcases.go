@@ -205,7 +205,7 @@ SkyWings is an international airline. Reply with customer's language.
 I have a flight booked for tomorrow (flight AA100 from JFK to LAX) but my meeting is running late.
 Can you help me reschedule to a later flight on the same day? I'd prefer an evening flight if possible.`
 
-	data := react.NewLoopData(&gent.Task{Text: customerRequest})
+	data := gent.NewLoopData(&gent.Task{Text: customerRequest})
 
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-reschedule", data)
@@ -249,7 +249,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	}
 
 	// Create executor
-	exec := executor.New[*react.LoopData](loop, executor.Config{}).WithHooks(hookRegistry)
+	exec := executor.New[*gent.BasicLoopData](loop, executor.Config{}).WithHooks(hookRegistry)
 
 	// Print header
 	printHeader(w, "AIRLINE RESCHEDULE SCENARIO")
@@ -557,7 +557,7 @@ SkyWings is an international airline. Reply with customer's language.
 
 	// Format message history as the task
 	taskContent := s.formatMessageHistory()
-	data := react.NewLoopData(&gent.Task{Text: taskContent})
+	data := gent.NewLoopData(&gent.Task{Text: taskContent})
 
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-chat", data)
@@ -594,7 +594,7 @@ SkyWings is an international airline. Reply with customer's language.
 	}()
 
 	// Create executor
-	exec := executor.New[*react.LoopData](loop, executor.Config{}).WithHooks(hookRegistry)
+	exec := executor.New[*gent.BasicLoopData](loop, executor.Config{}).WithHooks(hookRegistry)
 
 	// Print user input
 	fmt.Fprintln(s.Writer)

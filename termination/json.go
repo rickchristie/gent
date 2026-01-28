@@ -177,6 +177,11 @@ func (t *JSON[T]) SetValidator(validator gent.AnswerValidator) {
 // For JSON termination, valid JSON that parses into T triggers termination (after validation).
 // The result is returned as a TextContent containing the re-serialized JSON.
 // Panics if execCtx is nil.
+//
+// When a validator is set, this method traces CommonTraceEvent with:
+//   - EventIdValidatorCalled: When the validator is invoked
+//   - EventIdValidatorAccepted: When the validator accepts the answer
+//   - EventIdValidatorRejected: When the validator rejects the answer
 func (t *JSON[T]) ShouldTerminate(
 	execCtx *gent.ExecutionContext,
 	content string,
@@ -197,11 +202,35 @@ func (t *JSON[T]) ShouldTerminate(
 
 	// Run validator if set
 	if t.validator != nil {
+		validatorName := t.validator.Name()
+
+		// Trace validator called
+		execCtx.Trace(gent.CommonTraceEvent{
+			EventId:     gent.EventIdValidatorCalled,
+			Description: "Validator '" + validatorName + "' called",
+			Data: gent.ValidatorCalledData{
+				ValidatorName: validatorName,
+				Answer:        result,
+			},
+		})
+
 		validationResult := t.validator.Validate(execCtx, result)
 		if !validationResult.Accepted {
 			// Track rejection stats
 			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
-			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+t.validator.Name(), 1)
+			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+validatorName, 1)
+
+			// Trace validator rejected
+			execCtx.Trace(gent.CommonTraceEvent{
+				EventId:     gent.EventIdValidatorRejected,
+				Description: "Validator '" + validatorName + "' rejected answer",
+				Data: gent.ValidatorResultData{
+					ValidatorName: validatorName,
+					Answer:        result,
+					Accepted:      false,
+					Feedback:      validationResult.Feedback,
+				},
+			})
 
 			// Convert feedback to ContentPart
 			var feedback []gent.ContentPart
@@ -215,6 +244,17 @@ func (t *JSON[T]) ShouldTerminate(
 				Content: feedback,
 			}
 		}
+
+		// Trace validator accepted
+		execCtx.Trace(gent.CommonTraceEvent{
+			EventId:     gent.EventIdValidatorAccepted,
+			Description: "Validator '" + validatorName + "' accepted answer",
+			Data: gent.ValidatorResultData{
+				ValidatorName: validatorName,
+				Answer:        result,
+				Accepted:      true,
+			},
+		})
 	}
 
 	// Re-serialize to ensure consistent formatting
