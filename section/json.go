@@ -138,7 +138,7 @@ func (j *JSON[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 		parseErr := fmt.Errorf("%w: %v", gent.ErrInvalidJSON, err)
 		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.PublishParseError("section", content, parseErr)
+			execCtx.PublishParseError(gent.ParseErrorTypeSection, content, parseErr)
 		}
 		return nil, parseErr
 	}

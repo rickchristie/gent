@@ -139,10 +139,10 @@ func TestPublishParseError_SetsCorrectEventName(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 	execCtx.IncrementIteration()
 
-	event := execCtx.PublishParseError("format", "invalid content", assert.AnError)
+	event := execCtx.PublishParseError(ParseErrorTypeFormat, "invalid content", assert.AnError)
 
 	assert.Equal(t, EventNameParseError, event.EventName)
-	assert.Equal(t, "format", event.ErrorType)
+	assert.Equal(t, ParseErrorTypeFormat, event.ErrorType)
 	assert.Equal(t, "invalid content", event.RawContent)
 	assert.Equal(t, assert.AnError, event.Error)
 }

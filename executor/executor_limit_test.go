@@ -931,7 +931,7 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 			errorCount++
 			// Simulate format parse error
-			execCtx.PublishParseError("format", "invalid content", nil)
+			execCtx.PublishParseError(gent.ParseErrorTypeFormat, "invalid content", nil)
 			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 		},
 	}
@@ -960,7 +960,7 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 			errorCount++
 			// Simulate toolchain parse error
-			execCtx.PublishParseError("toolchain", "invalid yaml", nil)
+			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, "invalid yaml", nil)
 			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 		},
 	}
@@ -991,7 +991,7 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 			callCount++
 			if callCount%2 == 1 {
 				// Odd iterations: parse error
-				execCtx.PublishParseError("format", "invalid", nil)
+				execCtx.PublishParseError(gent.ParseErrorTypeFormat, "invalid", nil)
 			} else {
 				// Even iterations: success (reset consecutive counter)
 				execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)

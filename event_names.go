@@ -38,3 +38,20 @@ const (
 	EventNameValidatorResult = "gent:validator:result"
 	EventNameError           = "gent:error"
 )
+
+// ParseErrorType categorizes the source of a parse error.
+type ParseErrorType string
+
+const (
+	// ParseErrorTypeFormat indicates TextFormat failed to parse LLM output into sections.
+	ParseErrorTypeFormat ParseErrorType = "format"
+
+	// ParseErrorTypeToolchain indicates ToolChain failed to parse the action section.
+	ParseErrorTypeToolchain ParseErrorType = "toolchain"
+
+	// ParseErrorTypeTermination indicates Termination failed to parse the answer section.
+	ParseErrorTypeTermination ParseErrorType = "termination"
+
+	// ParseErrorTypeSection indicates a TextSection failed to parse its content.
+	ParseErrorTypeSection ParseErrorType = "section"
+)

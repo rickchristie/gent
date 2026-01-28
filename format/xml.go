@@ -193,7 +193,7 @@ func (f *XML) Parse(execCtx *gent.ExecutionContext, output string) (map[string][
 	if err != nil {
 		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.PublishParseError("format", output, err)
+			execCtx.PublishParseError(gent.ParseErrorTypeFormat, output, err)
 		}
 		return nil, err
 	}

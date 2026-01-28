@@ -255,12 +255,9 @@ type AfterToolCallEvent struct {
 type ParseErrorEvent struct {
 	BaseEvent
 
-	// ErrorType categorizes the parse error:
-	//   - "format": TextFormat failed to parse LLM output into sections
-	//   - "toolchain": ToolChain failed to parse the action section
-	//   - "termination": Termination failed to parse the answer section
-	//   - "section": A TextSection failed to parse its content
-	ErrorType string
+	// ErrorType categorizes the parse error.
+	// See ParseErrorType constants for possible values.
+	ErrorType ParseErrorType
 
 	// RawContent is the content that failed to parse.
 	RawContent string

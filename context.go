@@ -471,19 +471,19 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 	case *ParseErrorEvent:
 		iteration := fmt.Sprintf("%d", ctx.iteration)
 		switch e.ErrorType {
-		case "format":
+		case ParseErrorTypeFormat:
 			ctx.stats.incrCounterInternal(KeyFormatParseErrorTotal, 1)
 			ctx.stats.incrCounterInternal(KeyFormatParseErrorAt+iteration, 1)
 			ctx.stats.incrCounterInternal(KeyFormatParseErrorConsecutive, 1)
-		case "toolchain":
+		case ParseErrorTypeToolchain:
 			ctx.stats.incrCounterInternal(KeyToolchainParseErrorTotal, 1)
 			ctx.stats.incrCounterInternal(KeyToolchainParseErrorAt+iteration, 1)
 			ctx.stats.incrCounterInternal(KeyToolchainParseErrorConsecutive, 1)
-		case "termination":
+		case ParseErrorTypeTermination:
 			ctx.stats.incrCounterInternal(KeyTerminationParseErrorTotal, 1)
 			ctx.stats.incrCounterInternal(KeyTerminationParseErrorAt+iteration, 1)
 			ctx.stats.incrCounterInternal(KeyTerminationParseErrorConsecutive, 1)
-		case "section":
+		case ParseErrorTypeSection:
 			ctx.stats.incrCounterInternal(KeySectionParseErrorTotal, 1)
 			ctx.stats.incrCounterInternal(KeySectionParseErrorAt+iteration, 1)
 			ctx.stats.incrCounterInternal(KeySectionParseErrorConsecutive, 1)
@@ -639,7 +639,7 @@ func (ctx *ExecutionContext) PublishAfterToolCall(
 // PublishParseError publishes a ParseErrorEvent.
 // Stats updated: Based on errorType - format, toolchain, termination, or section errors.
 func (ctx *ExecutionContext) PublishParseError(
-	errorType string,
+	errorType ParseErrorType,
 	rawContent string,
 	err error,
 ) *ParseErrorEvent {

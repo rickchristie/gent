@@ -152,7 +152,7 @@ func (tc *limitTestToolChain) ParseSection(
 	if idx < len(tc.parseErrors) && tc.parseErrors[idx] != nil {
 		err := tc.parseErrors[idx]
 		if execCtx != nil {
-			execCtx.PublishParseError("toolchain", content, err)
+			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, content, err)
 		}
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (tc *limitTestToolChain) Execute(
 		err := tc.parseErrors[idx]
 		// Publish parse error for stats tracking
 		if execCtx != nil {
-			execCtx.PublishParseError("toolchain", content, err)
+			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, content, err)
 		}
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (t *limitTestTermination) ParseSection(
 	if idx < len(t.parseErrors) && t.parseErrors[idx] != nil {
 		err := t.parseErrors[idx]
 		if execCtx != nil {
-			execCtx.PublishParseError("termination", content, err)
+			execCtx.PublishParseError(gent.ParseErrorTypeTermination, content, err)
 		}
 		return nil, err
 	}
@@ -371,7 +371,7 @@ func (f *limitTestFormat) Parse(
 		call := f.calls[idx]
 		if call.err != nil {
 			if execCtx != nil {
-				execCtx.PublishParseError("format", output, call.err)
+				execCtx.PublishParseError(gent.ParseErrorTypeFormat, output, call.err)
 			}
 			return nil, call.err
 		}

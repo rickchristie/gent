@@ -167,7 +167,7 @@ func (c *YAML) ParseSection(execCtx *gent.ExecutionContext, content string) (any
 	if err != nil {
 		// Publish parse error event (auto-updates stats)
 		if execCtx != nil {
-			execCtx.PublishParseError("toolchain", content, err)
+			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, content, err)
 		}
 		return nil, err
 	}

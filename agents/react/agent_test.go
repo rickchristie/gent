@@ -143,7 +143,7 @@ func (m *mockTermination) Guidance() string { return m.guidance }
 func (m *mockTermination) ParseSection(execCtx *gent.ExecutionContext, content string) (any, error) {
 	if m.parseErr != nil {
 		if execCtx != nil {
-			execCtx.PublishParseError("termination", content, m.parseErr)
+			execCtx.PublishParseError(gent.ParseErrorTypeTermination, content, m.parseErr)
 		}
 		return nil, m.parseErr
 	}
@@ -218,7 +218,7 @@ func (m *mockFormat) Parse(
 	if m.parseErr != nil {
 		// Publish parse error (following the interface contract)
 		if execCtx != nil {
-			execCtx.PublishParseError("format", output, m.parseErr)
+			execCtx.PublishParseError(gent.ParseErrorTypeFormat, output, m.parseErr)
 		}
 		return nil, m.parseErr
 	}
