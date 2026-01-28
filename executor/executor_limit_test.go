@@ -1380,3 +1380,147 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 	assert.Equal(t, 2, allCounts.BeforeModelCall)    // Parent + child
 	assert.Equal(t, 2, allCounts.AfterModelCall)     // Both complete
 }
+
+// -----------------------------------------------------------------------------
+// LimitExceededEvent Tests
+// -----------------------------------------------------------------------------
+
+func TestLimits_LimitExceededEvent_PublishedOnIterationLimit(t *testing.T) {
+	loop := &mockAgentLoop{} // Never auto-terminates
+	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+	ctx := context.Background()
+	data := newMockLoopData()
+	execCtx := gent.NewExecutionContext(ctx, "test", data)
+	execCtx.SetLimits([]gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 3},
+	})
+
+	exec.Execute(execCtx)
+
+	// Verify termination
+	result := execCtx.Result()
+	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
+
+	// Find LimitExceededEvent
+	var limitEvent *gent.LimitExceededEvent
+	for _, event := range execCtx.Events() {
+		if e, ok := event.(*gent.LimitExceededEvent); ok {
+			limitEvent = e
+			break
+		}
+	}
+
+	assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
+	assert.Equal(t, gent.KeyIterations, limitEvent.Limit.Key)
+	assert.Equal(t, 3.0, limitEvent.Limit.MaxValue)
+	assert.Equal(t, 4.0, limitEvent.CurrentValue) // 4 > 3
+	assert.Equal(t, gent.KeyIterations, limitEvent.MatchedKey)
+}
+
+func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
+	loop := &mockAgentLoop{
+		inputTokens:  500,
+		outputTokens: 100,
+	}
+	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+	ctx := context.Background()
+	data := newMockLoopData()
+	execCtx := gent.NewExecutionContext(ctx, "test", data)
+	execCtx.SetLimits([]gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
+		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+	})
+
+	exec.Execute(execCtx)
+
+	// Verify termination
+	result := execCtx.Result()
+	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
+	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+
+	// Find LimitExceededEvent
+	var limitEvent *gent.LimitExceededEvent
+	for _, event := range execCtx.Events() {
+		if e, ok := event.(*gent.LimitExceededEvent); ok {
+			limitEvent = e
+			break
+		}
+	}
+
+	assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
+	assert.Equal(t, gent.KeyInputTokens, limitEvent.Limit.Key)
+	assert.Equal(t, 1000.0, limitEvent.Limit.MaxValue)
+	assert.Equal(t, 1500.0, limitEvent.CurrentValue) // 3 iterations * 500 = 1500 > 1000
+	assert.Equal(t, gent.KeyInputTokens, limitEvent.MatchedKey)
+}
+
+func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) {
+	loop := &mockAgentLoop{
+		nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+			// Alternate between two models
+			iteration := execCtx.Iteration()
+			var err error
+			if iteration%2 == 1 {
+				err = simulateModelCall(execCtx, "expensive-model", 1000, 0)
+			} else {
+				err = simulateModelCall(execCtx, "cheap-model", 100, 0)
+			}
+			if err != nil {
+				return nil, err
+			}
+			return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
+		},
+	}
+	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+	ctx := context.Background()
+	data := newMockLoopData()
+	execCtx := gent.NewExecutionContext(ctx, "test", data)
+	execCtx.SetLimits([]gent.Limit{
+		{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 2500},
+		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+	})
+
+	exec.Execute(execCtx)
+
+	// Find LimitExceededEvent
+	var limitEvent *gent.LimitExceededEvent
+	for _, event := range execCtx.Events() {
+		if e, ok := event.(*gent.LimitExceededEvent); ok {
+			limitEvent = e
+			break
+		}
+	}
+
+	assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
+	assert.Equal(t, gent.KeyInputTokensFor, limitEvent.Limit.Key)
+	// The matched key should be the specific model that exceeded
+	assert.Equal(t, gent.KeyInputTokensFor+"expensive-model", limitEvent.MatchedKey)
+	assert.Equal(t, 3000.0, limitEvent.CurrentValue) // 3 calls * 1000 = 3000 > 2500
+}
+
+func TestLimits_LimitExceededEvent_NotPublishedOnSuccess(t *testing.T) {
+	loop := &mockAgentLoop{terminateAt: 3}
+	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
+
+	ctx := context.Background()
+	data := newMockLoopData()
+	execCtx := gent.NewExecutionContext(ctx, "test", data)
+	execCtx.SetLimits([]gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 10},
+	})
+
+	exec.Execute(execCtx)
+
+	// Verify success
+	result := execCtx.Result()
+	assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
+
+	// Verify no LimitExceededEvent
+	for _, event := range execCtx.Events() {
+		_, isLimitExceeded := event.(*gent.LimitExceededEvent)
+		assert.False(t, isLimitExceeded, "LimitExceededEvent should not be published on success")
+	}
+}

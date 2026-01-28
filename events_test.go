@@ -27,6 +27,7 @@ func TestEvent_MarkerInterface(t *testing.T) {
 		&ValidatorCalledEvent{},
 		&ValidatorResultEvent{},
 		&ErrorEvent{},
+		&LimitExceededEvent{},
 		&CommonEvent{},
 	}
 
@@ -188,6 +189,41 @@ func TestPublishCommonEvent_SetsCustomEventName(t *testing.T) {
 	assert.Equal(t, "myapp:custom_event", event.EventName)
 	assert.Equal(t, "Something happened", event.Description)
 	assert.Equal(t, data, event.Data)
+}
+
+func TestPublishLimitExceeded_SetsCorrectEventName(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "test", nil)
+	execCtx.IncrementIteration()
+	limit := Limit{
+		Type:     LimitExactKey,
+		Key:      KeyIterations,
+		MaxValue: 5,
+	}
+
+	event := execCtx.PublishLimitExceeded(limit, 6.0, KeyIterations)
+
+	assert.Equal(t, EventNameLimitExceeded, event.EventName)
+	assert.Equal(t, limit, event.Limit)
+	assert.Equal(t, 6.0, event.CurrentValue)
+	assert.Equal(t, KeyIterations, event.MatchedKey)
+	assert.Equal(t, 1, event.Iteration)
+	assert.NotZero(t, event.Timestamp)
+}
+
+func TestPublishLimitExceeded_PrefixLimitMatchedKey(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "test", nil)
+	limit := Limit{
+		Type:     LimitKeyPrefix,
+		Key:      KeyInputTokensFor,
+		MaxValue: 1000,
+	}
+
+	event := execCtx.PublishLimitExceeded(limit, 1500.0, KeyInputTokensFor+"gpt-4")
+
+	assert.Equal(t, EventNameLimitExceeded, event.EventName)
+	assert.Equal(t, KeyInputTokensFor, event.Limit.Key)
+	assert.Equal(t, 1500.0, event.CurrentValue)
+	assert.Equal(t, KeyInputTokensFor+"gpt-4", event.MatchedKey)
 }
 
 // -----------------------------------------------------------------------------
@@ -571,4 +607,323 @@ func TestPublish_ConcurrentWithDifferentEventTypes(t *testing.T) {
 	assert.Equal(t, 50, afterModel, "should have 50 AfterModelCallEvent")
 	assert.Equal(t, 50, beforeTool, "should have 50 BeforeToolCallEvent")
 	assert.Equal(t, 50, common, "should have 50 CommonEvent")
+}
+
+// -----------------------------------------------------------------------------
+// LimitExceededEvent Tests
+// -----------------------------------------------------------------------------
+
+func TestLimitExceeded_PublishedWhenCounterExceedsLimit(t *testing.T) {
+	type input struct {
+		limitKey   string
+		limitMax   float64
+		counterVal int64
+	}
+
+	type expected struct {
+		eventPublished bool
+		currentValue   float64
+		matchedKey     string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "event published when counter exceeds limit",
+			input: input{
+				limitKey:   "test:counter",
+				limitMax:   5,
+				counterVal: 6,
+			},
+			expected: expected{
+				eventPublished: true,
+				currentValue:   6.0,
+				matchedKey:     "test:counter",
+			},
+		},
+		{
+			name: "no event when counter equals limit (not exceeded)",
+			input: input{
+				limitKey:   "test:counter",
+				limitMax:   5,
+				counterVal: 5,
+			},
+			expected: expected{
+				eventPublished: false,
+			},
+		},
+		{
+			name: "no event when counter below limit",
+			input: input{
+				limitKey:   "test:counter",
+				limitMax:   5,
+				counterVal: 3,
+			},
+			expected: expected{
+				eventPublished: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execCtx := NewExecutionContext(context.Background(), "test", nil)
+			execCtx.SetLimits([]Limit{
+				{Type: LimitExactKey, Key: tt.input.limitKey, MaxValue: tt.input.limitMax},
+			})
+
+			// Increment counter to trigger limit check
+			execCtx.Stats().IncrCounter(tt.input.limitKey, tt.input.counterVal)
+
+			// Find LimitExceededEvent in events
+			var limitEvent *LimitExceededEvent
+			for _, event := range execCtx.Events() {
+				if e, ok := event.(*LimitExceededEvent); ok {
+					limitEvent = e
+					break
+				}
+			}
+
+			if tt.expected.eventPublished {
+				assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
+				assert.Equal(t, tt.expected.currentValue, limitEvent.CurrentValue)
+				assert.Equal(t, tt.expected.matchedKey, limitEvent.MatchedKey)
+				assert.Equal(t, tt.input.limitKey, limitEvent.Limit.Key)
+				assert.Equal(t, tt.input.limitMax, limitEvent.Limit.MaxValue)
+			} else {
+				assert.Nil(t, limitEvent, "LimitExceededEvent should not be published")
+			}
+		})
+	}
+}
+
+func TestLimitExceeded_PublishedWhenGaugeExceedsLimit(t *testing.T) {
+	type input struct {
+		limitKey string
+		limitMax float64
+		gaugeVal float64
+	}
+
+	type expected struct {
+		eventPublished bool
+		currentValue   float64
+		matchedKey     string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "event published when gauge exceeds limit",
+			input: input{
+				limitKey: "test:gauge",
+				limitMax: 1.0,
+				gaugeVal: 1.5,
+			},
+			expected: expected{
+				eventPublished: true,
+				currentValue:   1.5,
+				matchedKey:     "test:gauge",
+			},
+		},
+		{
+			name: "no event when gauge equals limit (not exceeded)",
+			input: input{
+				limitKey: "test:gauge",
+				limitMax: 1.0,
+				gaugeVal: 1.0,
+			},
+			expected: expected{
+				eventPublished: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execCtx := NewExecutionContext(context.Background(), "test", nil)
+			execCtx.SetLimits([]Limit{
+				{Type: LimitExactKey, Key: tt.input.limitKey, MaxValue: tt.input.limitMax},
+			})
+
+			// Set gauge to trigger limit check
+			execCtx.Stats().IncrGauge(tt.input.limitKey, tt.input.gaugeVal)
+
+			// Find LimitExceededEvent in events
+			var limitEvent *LimitExceededEvent
+			for _, event := range execCtx.Events() {
+				if e, ok := event.(*LimitExceededEvent); ok {
+					limitEvent = e
+					break
+				}
+			}
+
+			if tt.expected.eventPublished {
+				assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
+				assert.InDelta(t, tt.expected.currentValue, limitEvent.CurrentValue, 0.001)
+				assert.Equal(t, tt.expected.matchedKey, limitEvent.MatchedKey)
+			} else {
+				assert.Nil(t, limitEvent, "LimitExceededEvent should not be published")
+			}
+		})
+	}
+}
+
+func TestLimitExceeded_PrefixLimit_MatchedKeyIsSpecificKey(t *testing.T) {
+	type input struct {
+		limitPrefix string
+		limitMax    float64
+		keys        map[string]int64 // key -> counter value
+	}
+
+	type expected struct {
+		eventPublished bool
+		matchedKey     string
+		currentValue   float64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "prefix limit reports specific key that exceeded",
+			input: input{
+				limitPrefix: KeyInputTokensFor,
+				limitMax:    1000,
+				keys: map[string]int64{
+					KeyInputTokensFor + "gpt-3.5": 500,
+					KeyInputTokensFor + "gpt-4":   1500, // This one exceeds
+				},
+			},
+			expected: expected{
+				eventPublished: true,
+				matchedKey:     KeyInputTokensFor + "gpt-4",
+				currentValue:   1500.0,
+			},
+		},
+		{
+			name: "no event when all keys under limit",
+			input: input{
+				limitPrefix: KeyInputTokensFor,
+				limitMax:    2000,
+				keys: map[string]int64{
+					KeyInputTokensFor + "gpt-3.5": 500,
+					KeyInputTokensFor + "gpt-4":   1500,
+				},
+			},
+			expected: expected{
+				eventPublished: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execCtx := NewExecutionContext(context.Background(), "test", nil)
+			execCtx.SetLimits([]Limit{
+				{Type: LimitKeyPrefix, Key: tt.input.limitPrefix, MaxValue: tt.input.limitMax},
+			})
+
+			// Set counters
+			for key, val := range tt.input.keys {
+				execCtx.Stats().IncrCounter(key, val)
+			}
+
+			// Find LimitExceededEvent in events
+			var limitEvent *LimitExceededEvent
+			for _, event := range execCtx.Events() {
+				if e, ok := event.(*LimitExceededEvent); ok {
+					limitEvent = e
+					break
+				}
+			}
+
+			if tt.expected.eventPublished {
+				assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
+				assert.Equal(t, tt.expected.matchedKey, limitEvent.MatchedKey)
+				assert.Equal(t, tt.expected.currentValue, limitEvent.CurrentValue)
+				assert.Equal(t, tt.input.limitPrefix, limitEvent.Limit.Key)
+			} else {
+				assert.Nil(t, limitEvent, "LimitExceededEvent should not be published")
+			}
+		})
+	}
+}
+
+func TestLimitExceeded_OnlyPublishedOnce(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "test", nil)
+	execCtx.SetLimits([]Limit{
+		{Type: LimitExactKey, Key: "test:counter", MaxValue: 2},
+	})
+
+	// Exceed limit multiple times
+	execCtx.Stats().IncrCounter("test:counter", 3) // Exceeds
+	execCtx.Stats().IncrCounter("test:counter", 1) // Would exceed again
+	execCtx.Stats().IncrCounter("test:counter", 1) // Would exceed again
+
+	// Count LimitExceededEvent occurrences
+	var count int
+	for _, event := range execCtx.Events() {
+		if _, ok := event.(*LimitExceededEvent); ok {
+			count++
+		}
+	}
+
+	assert.Equal(t, 1, count, "LimitExceededEvent should only be published once")
+}
+
+func TestLimitExceeded_EventContainsCorrectTimestamp(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "test", nil)
+	execCtx.SetLimits([]Limit{
+		{Type: LimitExactKey, Key: "test:counter", MaxValue: 0},
+	})
+
+	before := time.Now()
+	execCtx.Stats().IncrCounter("test:counter", 1)
+	after := time.Now()
+
+	var limitEvent *LimitExceededEvent
+	for _, event := range execCtx.Events() {
+		if e, ok := event.(*LimitExceededEvent); ok {
+			limitEvent = e
+			break
+		}
+	}
+
+	assert.NotNil(t, limitEvent)
+	assert.True(t, limitEvent.Timestamp.After(before) || limitEvent.Timestamp.Equal(before))
+	assert.True(t, limitEvent.Timestamp.Before(after) || limitEvent.Timestamp.Equal(after))
+}
+
+func TestLimitExceeded_EventContainsCorrectIterationAndDepth(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "root", nil)
+	execCtx.IncrementIteration()
+	execCtx.IncrementIteration() // iteration = 2
+
+	child := execCtx.SpawnChild("child", nil)
+	child.IncrementIteration() // child iteration = 1
+	child.SetLimits([]Limit{
+		{Type: LimitExactKey, Key: "test:counter", MaxValue: 0},
+	})
+
+	child.Stats().IncrCounter("test:counter", 1)
+
+	var limitEvent *LimitExceededEvent
+	for _, event := range child.Events() {
+		if e, ok := event.(*LimitExceededEvent); ok {
+			limitEvent = e
+			break
+		}
+	}
+
+	assert.NotNil(t, limitEvent)
+	assert.Equal(t, 1, limitEvent.Iteration, "should be child's iteration")
+	assert.Equal(t, 1, limitEvent.Depth, "should be child's depth")
 }

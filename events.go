@@ -313,6 +313,32 @@ type ErrorEvent struct {
 }
 
 // -----------------------------------------------------------------------------
+// Limit Exceeded Event
+// -----------------------------------------------------------------------------
+
+// LimitExceededEvent is published when a configured limit is exceeded.
+// This event is published at the exact moment the limit is exceeded,
+// before context cancellation propagates.
+//
+// Stats updated: None (this is an observability event only).
+type LimitExceededEvent struct {
+	BaseEvent
+
+	// Limit is the limit configuration that was exceeded.
+	Limit Limit
+
+	// CurrentValue is the value that exceeded the limit.
+	// For counters, this is the int64 value cast to float64.
+	// For gauges, this is the float64 value directly.
+	CurrentValue float64
+
+	// MatchedKey is the actual key that exceeded the limit.
+	// For exact key limits, this equals Limit.Key.
+	// For prefix limits, this is the specific key that matched and exceeded.
+	MatchedKey string
+}
+
+// -----------------------------------------------------------------------------
 // Common Event (User-Defined)
 // -----------------------------------------------------------------------------
 

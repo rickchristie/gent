@@ -228,75 +228,110 @@ func (ctx *ExecutionContext) Result() *ExecutionResult {
 // Limit Checking (internal)
 // -----------------------------------------------------------------------------
 
+// limitExceededInfo contains information about a limit that was exceeded.
+type limitExceededInfo struct {
+	limit        *Limit
+	currentValue float64
+	matchedKey   string
+}
+
 // checkLimits checks if any limits are exceeded on this context.
 // This is called by ExecutionStats when counters/gauges are updated.
 // Each context in the hierarchy checks its own limits as stats propagate up.
 func (ctx *ExecutionContext) checkLimits() {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
+	var info *limitExceededInfo
 
-	// Already exceeded, don't check again
-	if ctx.exceededLimit != nil {
+	ctx.updateContextState(func() {
+		// Already exceeded, don't check again
+		if ctx.exceededLimit != nil {
+			return
+		}
+
+		// Check all limits
+		info = ctx.evaluateLimitsLocked()
+		if info == nil {
+			return
+		}
+
+		ctx.exceededLimit = info.limit
+	})
+
+	if info == nil {
 		return
 	}
 
-	// Check all limits
-	if limit := ctx.evaluateLimitsLocked(); limit != nil {
-		ctx.exceededLimit = limit
-		ctx.cancel(fmt.Errorf("limit exceeded: %s > %v", limit.Key, limit.MaxValue))
-	}
+	// Publish event outside lock to avoid deadlock
+	ctx.PublishLimitExceeded(*info.limit, info.currentValue, info.matchedKey)
+
+	// Cancel context after publishing event
+	ctx.cancel(fmt.Errorf("limit exceeded: %s > %v", info.limit.Key, info.limit.MaxValue))
 }
 
 // evaluateLimitsLocked evaluates all limits against current stats.
-// Returns the first exceeded limit, or nil if all limits are within bounds.
+// Returns info about the first exceeded limit, or nil if all limits are within bounds.
 // Must be called with lock held.
-func (ctx *ExecutionContext) evaluateLimitsLocked() *Limit {
+func (ctx *ExecutionContext) evaluateLimitsLocked() *limitExceededInfo {
 	for i := range ctx.limits {
 		limit := &ctx.limits[i]
-		if ctx.isLimitExceededLocked(limit) {
-			return limit
+		if info := ctx.checkLimitLocked(limit); info != nil {
+			return info
 		}
 	}
 	return nil
 }
 
-// isLimitExceededLocked checks if a single limit is exceeded.
+// checkLimitLocked checks if a single limit is exceeded.
+// Returns info about the exceeded limit, or nil if not exceeded.
 // Must be called with lock held.
-func (ctx *ExecutionContext) isLimitExceededLocked(limit *Limit) bool {
+func (ctx *ExecutionContext) checkLimitLocked(limit *Limit) *limitExceededInfo {
 	switch limit.Type {
 	case LimitExactKey:
 		return ctx.checkExactKeyLimit(limit)
 	case LimitKeyPrefix:
 		return ctx.checkPrefixLimit(limit)
 	default:
-		return false
+		return nil
 	}
 }
 
 // checkExactKeyLimit checks if an exact key limit is exceeded.
-func (ctx *ExecutionContext) checkExactKeyLimit(limit *Limit) bool {
+// Returns info about the exceeded limit, or nil if not exceeded.
+func (ctx *ExecutionContext) checkExactKeyLimit(limit *Limit) *limitExceededInfo {
 	// Check counters first
 	if val := ctx.stats.GetCounter(limit.Key); val > 0 {
 		if float64(val) > limit.MaxValue {
-			return true
+			return &limitExceededInfo{
+				limit:        limit,
+				currentValue: float64(val),
+				matchedKey:   limit.Key,
+			}
 		}
 	}
 	// Check gauges
 	if val := ctx.stats.GetGauge(limit.Key); val > 0 {
 		if val > limit.MaxValue {
-			return true
+			return &limitExceededInfo{
+				limit:        limit,
+				currentValue: val,
+				matchedKey:   limit.Key,
+			}
 		}
 	}
-	return false
+	return nil
 }
 
 // checkPrefixLimit checks if any key with the given prefix exceeds the limit.
-func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
+// Returns info about the exceeded limit, or nil if not exceeded.
+func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) *limitExceededInfo {
 	// Check all counters with matching prefix
 	for key, val := range ctx.stats.Counters() {
 		if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
 			if float64(val) > limit.MaxValue {
-				return true
+				return &limitExceededInfo{
+					limit:        limit,
+					currentValue: float64(val),
+					matchedKey:   key,
+				}
 			}
 		}
 	}
@@ -304,11 +339,15 @@ func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) bool {
 	for key, val := range ctx.stats.Gauges() {
 		if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
 			if val > limit.MaxValue {
-				return true
+				return &limitExceededInfo{
+					limit:        limit,
+					currentValue: val,
+					matchedKey:   key,
+				}
 			}
 		}
 	}
-	return false
+	return nil
 }
 
 // -----------------------------------------------------------------------------
@@ -335,27 +374,35 @@ func (ctx *ExecutionContext) IncrementIteration() {
 // Event Publishing
 // -----------------------------------------------------------------------------
 
+// updateContextState executes the given function while holding the mutex lock.
+// The lock is always released via defer, ensuring safe cleanup even on panic.
+func (ctx *ExecutionContext) updateContextState(fn func()) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	fn()
+}
+
 // publish is the internal implementation for all event publishing.
 // It records the event, updates stats, checks limits, and dispatches to subscribers.
 func (ctx *ExecutionContext) publish(event Event) {
-	ctx.mu.Lock()
+	var publisher EventPublisher
 
-	// Check recursion depth
-	if ctx.eventPublisher != nil && ctx.eventDepth >= ctx.eventPublisher.MaxRecursion() {
-		ctx.mu.Unlock()
-		panic(fmt.Sprintf("event recursion depth exceeded maximum (%d)",
-			ctx.eventPublisher.MaxRecursion()))
-	}
-	ctx.eventDepth++
+	ctx.updateContextState(func() {
+		// Check recursion depth
+		if ctx.eventPublisher != nil && ctx.eventDepth >= ctx.eventPublisher.MaxRecursion() {
+			panic(fmt.Sprintf("event recursion depth exceeded maximum (%d)",
+				ctx.eventPublisher.MaxRecursion()))
+		}
+		ctx.eventDepth++
 
-	// Populate base event fields
-	ctx.populateBaseEvent(event)
+		// Populate base event fields
+		ctx.populateBaseEvent(event)
 
-	// Append to event log
-	ctx.events = append(ctx.events, event)
+		// Append to event log
+		ctx.events = append(ctx.events, event)
 
-	publisher := ctx.eventPublisher
-	ctx.mu.Unlock()
+		publisher = ctx.eventPublisher
+	})
 
 	// Update stats based on event type (outside lock because incrCounterInternal calls checkLimits)
 	ctx.updateStatsForEvent(event)
@@ -365,9 +412,9 @@ func (ctx *ExecutionContext) publish(event Event) {
 		publisher.Dispatch(ctx, event)
 	}
 
-	ctx.mu.Lock()
-	ctx.eventDepth--
-	ctx.mu.Unlock()
+	ctx.updateContextState(func() {
+		ctx.eventDepth--
+	})
 }
 
 // Publish records a custom event, updates stats, checks limits, and dispatches to subscribers.
@@ -429,6 +476,10 @@ func (ctx *ExecutionContext) populateBaseEvent(event Event) {
 		e.Iteration = ctx.iteration
 		e.Depth = ctx.depth
 	case *CommonEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
+	case *LimitExceededEvent:
 		e.Timestamp = time.Now()
 		e.Iteration = ctx.iteration
 		e.Depth = ctx.depth
@@ -696,6 +747,23 @@ func (ctx *ExecutionContext) PublishError(err error) *ErrorEvent {
 	return event
 }
 
+// PublishLimitExceeded publishes a LimitExceededEvent.
+// This is called automatically when a limit is exceeded during checkLimits().
+func (ctx *ExecutionContext) PublishLimitExceeded(
+	limit Limit,
+	currentValue float64,
+	matchedKey string,
+) *LimitExceededEvent {
+	event := &LimitExceededEvent{
+		BaseEvent:    BaseEvent{EventName: EventNameLimitExceeded},
+		Limit:        limit,
+		CurrentValue: currentValue,
+		MatchedKey:   matchedKey,
+	}
+	ctx.publish(event)
+	return event
+}
+
 // PublishCommonEvent publishes a CommonEvent for user-defined events.
 // The eventName should use the format "namespace:event_name" (e.g., "myapp:cache_hit").
 func (ctx *ExecutionContext) PublishCommonEvent(
@@ -762,7 +830,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	// Record child spawn event
 	spawnEvent := &CommonEvent{
 		BaseEvent: BaseEvent{
-			EventName: "gent:child:spawn",
+			EventName: EventNameChildSpawn,
 			Timestamp: time.Now(),
 			Iteration: ctx.iteration,
 			Depth:     ctx.depth,
@@ -794,7 +862,7 @@ func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
 	// Record child complete event
 	completeEvent := &CommonEvent{
 		BaseEvent: BaseEvent{
-			EventName: "gent:child:complete",
+			EventName: EventNameChildComplete,
 			Timestamp: time.Now(),
 			Iteration: ctx.iteration,
 			Depth:     ctx.depth,

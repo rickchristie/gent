@@ -37,6 +37,13 @@ const (
 	EventNameValidatorCalled = "gent:validator:called"
 	EventNameValidatorResult = "gent:validator:result"
 	EventNameError           = "gent:error"
+
+	// Limits
+	EventNameLimitExceeded = "gent:limit_exceeded"
+
+	// Child context lifecycle (published as CommonEvent)
+	EventNameChildSpawn    = "gent:child:spawn"
+	EventNameChildComplete = "gent:child:complete"
 )
 
 // ParseErrorType categorizes the source of a parse error.
