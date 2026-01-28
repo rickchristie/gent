@@ -50,7 +50,7 @@ func TestConfig() AirlineTestConfig {
 		ToolChain:            ToolChainYAML,
 		UseStreaming:         false,
 		ShowIterationHistory: true,
-		ShowEvents:      true,
+		ShowEvents:           true,
 	}
 }
 
@@ -60,7 +60,7 @@ func TestConfigJSON() AirlineTestConfig {
 		ToolChain:            ToolChainJSON,
 		UseStreaming:         false,
 		ShowIterationHistory: true,
-		ShowEvents:      true,
+		ShowEvents:           true,
 	}
 }
 
@@ -70,7 +70,7 @@ func InteractiveConfig() AirlineTestConfig {
 		ToolChain:            ToolChainYAML,
 		UseStreaming:         true,
 		ShowIterationHistory: false,
-		ShowEvents:      false,
+		ShowEvents:           false,
 	}
 }
 
@@ -80,7 +80,7 @@ func InteractiveConfigJSON() AirlineTestConfig {
 		ToolChain:            ToolChainJSON,
 		UseStreaming:         true,
 		ShowIterationHistory: false,
-		ShowEvents:      false,
+		ShowEvents:           false,
 	}
 }
 
@@ -205,7 +205,7 @@ SkyWings is an international airline. Reply with customer's language.
 I have a flight booked for tomorrow (flight AA100 from JFK to LAX) but my meeting is running late.
 Can you help me reschedule to a later flight on the same day? I'd prefer an evening flight if possible.`
 
-	data := gent.NewLoopData(&gent.Task{Text: customerRequest})
+	data := gent.NewBasicLoopData(&gent.Task{Text: customerRequest})
 
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-reschedule", data)
@@ -557,7 +557,7 @@ SkyWings is an international airline. Reply with customer's language.
 
 	// Format message history as the task
 	taskContent := s.formatMessageHistory()
-	data := gent.NewLoopData(&gent.Task{Text: taskContent})
+	data := gent.NewBasicLoopData(&gent.Task{Text: taskContent})
 
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-chat", data)

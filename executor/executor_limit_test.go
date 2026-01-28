@@ -85,6 +85,8 @@ func (d *mockLoopData) SetScratchPad(iters []*gent.Iteration) {
 	d.scratchpad = iters
 }
 
+func (d *mockLoopData) SetExecutionContext(ctx *gent.ExecutionContext) {}
+
 // mockAgentLoop implements gent.AgentLoop[*mockLoopData] for testing.
 type mockAgentLoop struct {
 	mu           sync.Mutex

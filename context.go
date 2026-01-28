@@ -147,6 +147,10 @@ func NewExecutionContext(ctx context.Context, name string, data LoopData) *Execu
 	}
 	// Create stats with back-reference for limit checking
 	execCtx.stats = newExecutionStatsWithContext(execCtx)
+	// Set execution context on LoopData for automatic event publishing
+	if data != nil {
+		data.SetExecutionContext(execCtx)
+	}
 	return execCtx
 }
 
@@ -908,6 +912,11 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	// Create stats with back-reference to child for limit checking
 	// Stats also link to parent stats for real-time aggregation
 	child.stats = newExecutionStatsWithContextAndParent(child, ctx.stats)
+
+	// Set execution context on LoopData for automatic event publishing
+	if data != nil {
+		data.SetExecutionContext(child)
+	}
 
 	ctx.children = append(ctx.children, child)
 

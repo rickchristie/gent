@@ -417,7 +417,7 @@ func runWithLimit(
 		WithToolChain(toolChain).
 		WithTermination(termination)
 
-	data := gent.NewLoopData(&gent.Task{Text: "Test task"})
+	data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 	execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 	execCtx.SetLimits(limits)
 
@@ -1098,7 +1098,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorTotal, MaxValue: 2},
@@ -1134,7 +1134,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorTotal, MaxValue: 2},
@@ -1365,7 +1365,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
@@ -1401,7 +1401,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
@@ -1835,7 +1835,7 @@ func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 			WithToolChain(toolChain).
 			WithTermination(termination)
 
-		data := gent.NewLoopData(&gent.Task{Text: "Test task"})
+		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		execCtx.SetLimits([]gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},

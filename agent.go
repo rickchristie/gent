@@ -116,6 +116,15 @@ type LoopData interface {
 	// [AgentLoop] implementations are free to call [GetScratchPad] and modify it how they want,
 	// then call this method to set the modified iterations to be used in the next iteration.
 	SetScratchPad([]*Iteration)
+
+	// SetExecutionContext sets the ExecutionContext for this LoopData.
+	// Called automatically by [NewExecutionContext] to enable automatic event publishing
+	// when iteration history or scratchpad changes.
+	//
+	// Implementations that embed [BasicLoopData] get this for free via method promotion.
+	// Custom implementations can use this to publish [CommonDiffEvent] on state changes,
+	// or implement as a no-op if event publishing is not needed.
+	SetExecutionContext(ctx *ExecutionContext)
 }
 
 // BasicLoopData is the default implementation of [LoopData].
@@ -152,10 +161,11 @@ type BasicLoopData struct {
 	task             *Task
 	iterationHistory []*Iteration
 	scratchpad       []*Iteration
+	execCtx          *ExecutionContext
 }
 
-// NewLoopData creates a new [BasicLoopData] with the given task.
-func NewLoopData(task *Task) *BasicLoopData {
+// NewBasicLoopData creates a new [BasicLoopData] with the given task.
+func NewBasicLoopData(task *Task) *BasicLoopData {
 	return &BasicLoopData{
 		task:             task,
 		iterationHistory: make([]*Iteration, 0),
@@ -174,8 +184,13 @@ func (d *BasicLoopData) GetIterationHistory() []*Iteration {
 }
 
 // AddIterationHistory adds a new Iteration to the full history.
+// Publishes a CommonDiffEvent if ExecutionContext is set.
 func (d *BasicLoopData) AddIterationHistory(iter *Iteration) {
+	before := d.iterationHistory
 	d.iterationHistory = append(d.iterationHistory, iter)
+	if d.execCtx != nil {
+		d.execCtx.PublishIterationHistoryChange(before, d.iterationHistory)
+	}
 }
 
 // GetScratchPad returns all Iteration that will be used in next iteration.
@@ -184,8 +199,18 @@ func (d *BasicLoopData) GetScratchPad() []*Iteration {
 }
 
 // SetScratchPad sets the iterations to be used in next iteration.
+// Publishes a CommonDiffEvent if ExecutionContext is set.
 func (d *BasicLoopData) SetScratchPad(iterations []*Iteration) {
+	before := d.scratchpad
 	d.scratchpad = iterations
+	if d.execCtx != nil {
+		d.execCtx.PublishScratchPadChange(before, iterations)
+	}
+}
+
+// SetExecutionContext sets the ExecutionContext for automatic event publishing.
+func (d *BasicLoopData) SetExecutionContext(ctx *ExecutionContext) {
+	d.execCtx = ctx
 }
 
 // Compile-time check that BasicLoopData implements LoopData.

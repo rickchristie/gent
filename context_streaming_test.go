@@ -12,11 +12,12 @@ import (
 // testLoopData is a simple LoopData implementation for testing.
 type testLoopData struct{}
 
-func (d *testLoopData) GetTask() *Task                        { return nil }
-func (d *testLoopData) GetIterationHistory() []*Iteration     { return nil }
-func (d *testLoopData) AddIterationHistory(iter *Iteration)   {}
-func (d *testLoopData) GetScratchPad() []*Iteration           { return nil }
-func (d *testLoopData) SetScratchPad(iterations []*Iteration) {}
+func (d *testLoopData) GetTask() *Task                           { return nil }
+func (d *testLoopData) GetIterationHistory() []*Iteration        { return nil }
+func (d *testLoopData) AddIterationHistory(iter *Iteration)      {}
+func (d *testLoopData) GetScratchPad() []*Iteration              { return nil }
+func (d *testLoopData) SetScratchPad(iterations []*Iteration)    {}
+func (d *testLoopData) SetExecutionContext(ctx *ExecutionContext) {}
 
 func TestExecutionContext_SubscribeAll(t *testing.T) {
 	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
