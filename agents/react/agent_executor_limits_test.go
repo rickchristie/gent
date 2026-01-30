@@ -7,407 +7,22 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/executor"
+	"github.com/rickchristie/gent/internal/tt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // ----------------------------------------------------------------------------
-// Mock Model with configurable token counts and model name
-// ----------------------------------------------------------------------------
-
-// limitTestModel is a mock model that supports configurable responses with token counts.
-type limitTestModel struct {
-	name      string // model name used for tracing
-	responses []*gent.ContentResponse
-	errors    []error
-	callCount int
-}
-
-func newLimitTestModel() *limitTestModel {
-	return &limitTestModel{name: "test-model"}
-}
-
-// WithName sets the model name for tracing.
-func (m *limitTestModel) WithName(name string) *limitTestModel {
-	m.name = name
-	return m
-}
-
-// AddResponse adds a response with specified content and token counts.
-func (m *limitTestModel) AddResponse(content string, inputTokens, outputTokens int) *limitTestModel {
-	m.responses = append(m.responses, &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: content}},
-		Info: &gent.GenerationInfo{
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-		},
-	})
-	return m
-}
-
-// AddError adds an error for the next call.
-func (m *limitTestModel) AddError(err error) *limitTestModel {
-	// Extend responses slice if needed to match errors length
-	for len(m.responses) <= len(m.errors) {
-		m.responses = append(m.responses, nil)
-	}
-	m.errors = append(m.errors, err)
-	return m
-}
-
-func (m *limitTestModel) GenerateContent(
-	execCtx *gent.ExecutionContext,
-	modelName string,
-	systemPrompt string,
-	messages []llms.MessageContent,
-	opts ...llms.CallOption,
-) (*gent.ContentResponse, error) {
-	idx := m.callCount
-	m.callCount++
-
-	if idx < len(m.errors) && m.errors[idx] != nil {
-		return nil, m.errors[idx]
-	}
-
-	var resp *gent.ContentResponse
-	if idx < len(m.responses) {
-		resp = m.responses[idx]
-	} else {
-		// Default: return termination response after all configured responses
-		resp = &gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: "<answer>done</answer>"}},
-			Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
-		}
-	}
-
-	// Publish model call event with token counts (mimics real model behavior)
-	// Use the model's configured name for the event
-	if execCtx != nil {
-		execCtx.PublishAfterModelCall(m.name, nil, resp, 0, nil)
-	}
-
-	return resp, nil
-}
-
-// ----------------------------------------------------------------------------
-// Mock ToolChain with configurable behavior
-// ----------------------------------------------------------------------------
-
-// limitTestToolFunc is a tool function that receives the execution context.
-type limitTestToolFunc func(execCtx *gent.ExecutionContext, args map[string]any) (string, error)
-
-type limitTestToolChain struct {
-	name        string
-	tools       map[string]limitTestToolFunc
-	parseErrors []error
-	callIdx     int
-}
-
-func newLimitTestToolChain() *limitTestToolChain {
-	return &limitTestToolChain{
-		name:  "action",
-		tools: make(map[string]limitTestToolFunc),
-	}
-}
-
-// WithTool adds a simple tool that doesn't need execution context.
-func (tc *limitTestToolChain) WithTool(
-	name string,
-	fn func(args map[string]any) (string, error),
-) *limitTestToolChain {
-	tc.tools[name] = func(_ *gent.ExecutionContext, args map[string]any) (string, error) {
-		return fn(args)
-	}
-	return tc
-}
-
-// WithToolCtx adds a tool that receives the execution context (for child model calls).
-func (tc *limitTestToolChain) WithToolCtx(
-	name string,
-	fn limitTestToolFunc,
-) *limitTestToolChain {
-	tc.tools[name] = fn
-	return tc
-}
-
-func (tc *limitTestToolChain) WithParseErrors(errs ...error) *limitTestToolChain {
-	tc.parseErrors = errs
-	return tc
-}
-
-func (tc *limitTestToolChain) Name() string     { return tc.name }
-func (tc *limitTestToolChain) Guidance() string { return "Use YAML format for tool calls." }
-func (tc *limitTestToolChain) AvailableToolsPrompt() string {
-	return "Available tools: test tools"
-}
-
-func (tc *limitTestToolChain) RegisterTool(_ any) gent.ToolChain { return tc }
-
-func (tc *limitTestToolChain) ParseSection(
-	execCtx *gent.ExecutionContext,
-	content string,
-) (any, error) {
-	idx := tc.callIdx
-	if idx < len(tc.parseErrors) && tc.parseErrors[idx] != nil {
-		err := tc.parseErrors[idx]
-		if execCtx != nil {
-			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, content, err)
-		}
-		return nil, err
-	}
-	// Success resets consecutive counter
-	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyToolchainParseErrorConsecutive)
-	}
-	return content, nil
-}
-
-func (tc *limitTestToolChain) Execute(
-	execCtx *gent.ExecutionContext,
-	content string,
-	format gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	idx := tc.callIdx
-	tc.callIdx++
-
-	if idx < len(tc.parseErrors) && tc.parseErrors[idx] != nil {
-		err := tc.parseErrors[idx]
-		// Publish parse error for stats tracking
-		if execCtx != nil {
-			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, content, err)
-		}
-		return nil, err
-	}
-
-	// Success resets consecutive counter
-	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyToolchainParseErrorConsecutive)
-	}
-
-	// Simple mock: parse "tool: <name>" pattern
-	toolName := "test_tool"
-	if len(content) > 6 && content[:6] == "tool: " {
-		toolName = content[6:]
-		// Strip any args section
-		for i, c := range toolName {
-			if c == '\n' || c == ' ' {
-				toolName = toolName[:i]
-				break
-			}
-		}
-	}
-
-	// Publish before tool call event (increments KeyToolCalls)
-	if execCtx != nil {
-		execCtx.PublishBeforeToolCall(toolName, nil)
-	}
-
-	// Execute the tool
-	var toolErr error
-	var output string
-	if fn, ok := tc.tools[toolName]; ok {
-		output, toolErr = fn(execCtx, nil)
-	} else {
-		output = "tool executed"
-	}
-
-	// Publish after tool call event
-	if execCtx != nil {
-		execCtx.PublishAfterToolCall(toolName, nil, output, 0, toolErr)
-
-		// Reset consecutive error counters on success
-		if toolErr == nil {
-			execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutive)
-			execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutiveFor + toolName)
-		}
-	}
-
-	var resultErr error
-	if toolErr != nil {
-		resultErr = toolErr
-	}
-
-	return &gent.ToolChainResult{
-		Text: "<observation>\n<" + toolName + ">\n" + output + "\n</" + toolName + ">\n</observation>",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: toolName, Args: nil}},
-			Results: []*gent.RawToolCallResult{{Name: toolName, Output: output}},
-			Errors:  []error{resultErr},
-		},
-	}, nil
-}
-
-// ----------------------------------------------------------------------------
-// Mock Termination with configurable parse errors
-// ----------------------------------------------------------------------------
-
-type limitTestTermination struct {
-	parseErrors []error
-	callIdx     int
-	validator   gent.AnswerValidator
-}
-
-func newLimitTestTermination() *limitTestTermination {
-	return &limitTestTermination{}
-}
-
-func (t *limitTestTermination) WithParseErrors(errs ...error) *limitTestTermination {
-	t.parseErrors = errs
-	return t
-}
-
-func (t *limitTestTermination) Name() string     { return "answer" }
-func (t *limitTestTermination) Guidance() string { return "Write your final answer." }
-
-func (t *limitTestTermination) SetValidator(validator gent.AnswerValidator) {
-	t.validator = validator
-}
-
-func (t *limitTestTermination) ParseSection(
-	execCtx *gent.ExecutionContext,
-	content string,
-) (any, error) {
-	idx := t.callIdx
-	t.callIdx++
-
-	if idx < len(t.parseErrors) && t.parseErrors[idx] != nil {
-		err := t.parseErrors[idx]
-		if execCtx != nil {
-			execCtx.PublishParseError(gent.ParseErrorTypeTermination, content, err)
-		}
-		return nil, err
-	}
-
-	// Success resets consecutive counter
-	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyTerminationParseErrorConsecutive)
-	}
-	return content, nil
-}
-
-func (t *limitTestTermination) ShouldTerminate(
-	execCtx *gent.ExecutionContext,
-	content string,
-) *gent.TerminationResult {
-	if execCtx == nil {
-		panic("limitTestTermination: ShouldTerminate called with nil ExecutionContext")
-	}
-
-	// Check if we had a parse error for this call
-	idx := t.callIdx - 1
-	if idx >= 0 && idx < len(t.parseErrors) && t.parseErrors[idx] != nil {
-		return &gent.TerminationResult{Status: gent.TerminationContinue}
-	}
-	if content == "" {
-		return &gent.TerminationResult{Status: gent.TerminationContinue}
-	}
-
-	// Run validator if set
-	if t.validator != nil {
-		result := t.validator.Validate(execCtx, content)
-		if !result.Accepted {
-			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedTotal, 1)
-			execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+t.validator.Name(), 1)
-
-			var feedback []gent.ContentPart
-			for _, section := range result.Feedback {
-				formatted := "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
-				feedback = append(feedback, llms.TextContent{Text: formatted})
-			}
-
-			return &gent.TerminationResult{
-				Status:  gent.TerminationAnswerRejected,
-				Content: feedback,
-			}
-		}
-	}
-
-	return &gent.TerminationResult{
-		Status:  gent.TerminationAnswerAccepted,
-		Content: []gent.ContentPart{llms.TextContent{Text: content}},
-	}
-}
-
-// ----------------------------------------------------------------------------
-// Mock Format with configurable parse errors
-// ----------------------------------------------------------------------------
-
-type limitTestFormatCall struct {
-	result map[string][]string
-	err    error
-}
-
-type limitTestFormat struct {
-	calls   []limitTestFormatCall
-	callIdx int
-}
-
-func newLimitTestFormat() *limitTestFormat {
-	return &limitTestFormat{}
-}
-
-func (f *limitTestFormat) AddParseResult(result map[string][]string) *limitTestFormat {
-	f.calls = append(f.calls, limitTestFormatCall{result: result})
-	return f
-}
-
-func (f *limitTestFormat) AddParseError(err error) *limitTestFormat {
-	f.calls = append(f.calls, limitTestFormatCall{err: err})
-	return f
-}
-
-func (f *limitTestFormat) RegisterSection(_ gent.TextSection) gent.TextFormat { return f }
-func (f *limitTestFormat) DescribeStructure() string                          { return "XML format" }
-
-func (f *limitTestFormat) Parse(
-	execCtx *gent.ExecutionContext,
-	output string,
-) (map[string][]string, error) {
-	idx := f.callIdx
-	f.callIdx++
-
-	if idx < len(f.calls) {
-		call := f.calls[idx]
-		if call.err != nil {
-			if execCtx != nil {
-				execCtx.PublishParseError(gent.ParseErrorTypeFormat, output, call.err)
-			}
-			return nil, call.err
-		}
-
-		// Success resets consecutive counter
-		if execCtx != nil {
-			execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
-		}
-		return call.result, nil
-	}
-
-	// Default: terminate
-	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
-	}
-	return map[string][]string{"answer": {"done"}}, nil
-}
-
-func (f *limitTestFormat) FormatSections(sections []gent.FormattedSection) string {
-	var result string
-	for _, s := range sections {
-		result += "<" + s.Name + ">\n" + s.Content + "\n</" + s.Name + ">\n"
-	}
-	return result
-}
-
-// ----------------------------------------------------------------------------
 // Helper to run executor with limit test
+// Uses mock types from internal/tt package
 // ----------------------------------------------------------------------------
 
 func runWithLimit(
 	t *testing.T,
-	model *limitTestModel,
-	format *limitTestFormat,
-	toolChain *limitTestToolChain,
-	termination *limitTestTermination,
+	model *tt.MockModel,
+	format *tt.MockFormat,
+	toolChain *tt.MockToolChain,
+	termination *tt.MockTermination,
 	limits []gent.Limit,
 ) *gent.ExecutionContext {
 	t.Helper()
@@ -433,20 +48,20 @@ func runWithLimit(
 
 func TestExecutorLimits_Iterations(t *testing.T) {
 	t.Run("stops when iteration limit exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 2},
@@ -467,18 +82,18 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 
 func TestExecutorLimits_InputTokens(t *testing.T) {
 	t.Run("stops when input token limit exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 500, 50).
 			AddResponse("<action>tool: test</action>", 600, 50). // Total: 1100
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
@@ -496,19 +111,19 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		// Alpha uses 400 tokens (under limit), beta uses 600 (exceeds 500 limit)
 
 		// Model beta is called by the tool and exceeds the limit
-		modelBeta := newLimitTestModel().WithName("beta").
+		modelBeta := tt.NewMockModel().WithName("beta").
 			AddResponse("child response", 600, 50) // Exceeds 500 limit
 
 		// Model alpha is the main agent model
-		modelAlpha := newLimitTestModel().WithName("alpha").
+		modelAlpha := tt.NewMockModel().WithName("alpha").
 			AddResponse("<action>tool: call_beta</action>", 600, 50). // Over limit, but not triggered
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithToolCtx("call_beta", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
 				// Create child execution context and call model beta
 				childCtx := execCtx.SpawnChild("beta-call", nil)
@@ -518,7 +133,7 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 				}
 				return resp.Choices[0].Content, nil
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		// Limit on model-specific input tokens - only beta should trigger this
 		limits := []gent.Limit{
@@ -537,20 +152,20 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		// Iteration 1: 300 tokens (total: 300)
 		// Iteration 2: 300 tokens (total: 600)
 		// Iteration 3: 500 tokens (total: 1100 > 1000 limit)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 300, 50).
 			AddResponse("<action>tool: test</action>", 300, 50).
 			AddResponse("<action>tool: test</action>", 500, 50). // Exceeds at iteration 3
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
@@ -566,24 +181,24 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 	t.Run("prefix limit exceeds at third iteration", func(t *testing.T) {
 		// Model beta is called multiple times via tool, accumulating tokens
 		betaCallCount := 0
-		modelBeta := newLimitTestModel().WithName("beta").
+		modelBeta := tt.NewMockModel().WithName("beta").
 			AddResponse("response1", 300, 50). // Call 1: 300 (total: 300)
 			AddResponse("response2", 300, 50). // Call 2: 300 (total: 600)
 			AddResponse("response3", 500, 50)  // Call 3: 500 (total: 1100 > 1000)
 
-		modelAlpha := newLimitTestModel().WithName("alpha").
+		modelAlpha := tt.NewMockModel().WithName("alpha").
 			AddResponse("<action>tool: call_beta</action>", 100, 50).
 			AddResponse("<action>tool: call_beta</action>", 100, 50).
 			AddResponse("<action>tool: call_beta</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithToolCtx("call_beta", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
 				childCtx := execCtx.SpawnChild("beta-call", nil)
 				resp, err := modelBeta.GenerateContent(childCtx, "beta", "", nil)
@@ -593,7 +208,7 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 				}
 				return resp.Choices[0].Content, nil
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor + "beta", MaxValue: 1000},
@@ -610,18 +225,18 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 
 func TestExecutorLimits_OutputTokens(t *testing.T) {
 	t.Run("stops when output token limit exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 500).
 			AddResponse("<action>tool: test</action>", 100, 600). // Total: 1100
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1000},
@@ -639,19 +254,19 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		// Alpha uses 50 output tokens (under limit), beta uses 600 (exceeds 500 limit)
 
 		// Model beta is called by the tool and exceeds the limit
-		modelBeta := newLimitTestModel().WithName("beta").
+		modelBeta := tt.NewMockModel().WithName("beta").
 			AddResponse("child response", 50, 600) // Output exceeds 500 limit
 
 		// Model alpha is the main agent model
-		modelAlpha := newLimitTestModel().WithName("alpha").
+		modelAlpha := tt.NewMockModel().WithName("alpha").
 			AddResponse("<action>tool: call_beta</action>", 100, 50). // Under limit
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithToolCtx("call_beta", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
 				// Create child execution context and call model beta
 				childCtx := execCtx.SpawnChild("beta-call", nil)
@@ -661,7 +276,7 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 				}
 				return resp.Choices[0].Content, nil
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		// Limit on model-specific output tokens - only beta should trigger this
 		limits := []gent.Limit{
@@ -680,20 +295,20 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		// Iteration 1: 300 output tokens (total: 300)
 		// Iteration 2: 300 output tokens (total: 600)
 		// Iteration 3: 500 output tokens (total: 1100 > 1000 limit)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 50, 300).
 			AddResponse("<action>tool: test</action>", 50, 300).
 			AddResponse("<action>tool: test</action>", 50, 500). // Exceeds at iteration 3
 			AddResponse("<answer>done</answer>", 50, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1000},
@@ -708,24 +323,24 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 
 	t.Run("prefix limit exceeds at third iteration", func(t *testing.T) {
 		// Model beta called multiple times, accumulating output tokens
-		modelBeta := newLimitTestModel().WithName("beta").
+		modelBeta := tt.NewMockModel().WithName("beta").
 			AddResponse("response1", 50, 300). // Call 1: 300 (total: 300)
 			AddResponse("response2", 50, 300). // Call 2: 300 (total: 600)
 			AddResponse("response3", 50, 500)  // Call 3: 500 (total: 1100 > 1000)
 
-		modelAlpha := newLimitTestModel().WithName("alpha").
+		modelAlpha := tt.NewMockModel().WithName("alpha").
 			AddResponse("<action>tool: call_beta</action>", 100, 50).
 			AddResponse("<action>tool: call_beta</action>", 100, 50).
 			AddResponse("<action>tool: call_beta</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"action": {"tool: call_beta"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithToolCtx("call_beta", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
 				childCtx := execCtx.SpawnChild("beta-call", nil)
 				resp, err := modelBeta.GenerateContent(childCtx, "beta", "", nil)
@@ -734,7 +349,7 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 				}
 				return resp.Choices[0].Content, nil
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyOutputTokensFor + "beta", MaxValue: 1000},
@@ -755,20 +370,20 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 
 func TestExecutorLimits_ToolCalls(t *testing.T) {
 	t.Run("stops when tool call limit exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCalls, MaxValue: 2},
@@ -784,7 +399,7 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		// Two tools: search and get_detail
 		// search is called 3 times (exceeds first), but limit is only on get_detail
 		// get_detail is called twice, with limit of 1
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50). // search: 3 calls (no limit)
@@ -792,7 +407,7 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 			AddResponse("<action>tool: get_detail</action>", 100, 50). // get_detail: 2 calls (limit 1)
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
@@ -800,8 +415,8 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: get_detail"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		// Only limit get_detail to 1 call
 		limits := []gent.Limit{
@@ -818,22 +433,22 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 
 	t.Run("exceeds limit at third iteration", func(t *testing.T) {
 		// 4 tool calls across iterations, limit is 3
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50). // 4th call exceeds limit
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCalls, MaxValue: 3},
@@ -848,22 +463,22 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 
 	t.Run("prefix limit exceeds at third iteration", func(t *testing.T) {
 		// Call "search" 4 times, limit is 3
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50). // 4th call exceeds
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsFor, MaxValue: 3},
@@ -883,20 +498,20 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 
 func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 	t.Run("stops when format parse error total exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("invalid1", 100, 50).
 			AddResponse("invalid2", 100, 50).
 			AddResponse("invalid3", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorTotal, MaxValue: 2},
@@ -914,7 +529,7 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 		// Iteration 3: parse error (total: 1)
 		// Iteration 4: parse error (total: 2)
 		// Iteration 5: parse error (total: 3 > limit of 2)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("invalid1", 100, 50).
@@ -922,7 +537,7 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 			AddResponse("invalid3", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseError(gent.ErrNoSectionsFound).
@@ -930,8 +545,8 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorTotal, MaxValue: 2},
@@ -947,21 +562,21 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 
 func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 	t.Run("stops when toolchain parse error total exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>invalid json</action>", 100, 50).
 			AddResponse("<action>invalid json</action>", 100, 50).
 			AddResponse("<action>invalid json</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"invalid json"}}).
 			AddParseResult(map[string][]string{"action": {"invalid json"}}).
 			AddParseResult(map[string][]string{"action": {"invalid json"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorTotal, MaxValue: 2},
@@ -976,7 +591,7 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: toolchain parse errors (3rd error exceeds limit of 2)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>bad1</action>", 100, 50).
@@ -984,7 +599,7 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 			AddResponse("<action>bad3</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"bad1"}}).
@@ -992,9 +607,9 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithParseErrors(nil, nil, gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorTotal, MaxValue: 2},
@@ -1010,20 +625,20 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 
 func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 	t.Run("stops when termination parse error total exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<answer>malformed</answer>", 100, 50).
 			AddResponse("<answer>malformed</answer>", 100, 50).
 			AddResponse("<answer>malformed</answer>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"malformed"}}).
 			AddParseResult(map[string][]string{"answer": {"malformed"}}).
 			AddParseResult(map[string][]string{"answer": {"malformed"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination().
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
 		limits := []gent.Limit{
@@ -1041,7 +656,7 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 		// Iteration 3-5: termination parse errors (3rd error exceeds limit of 2)
 		// Note: termination parsing only happens for answer sections, so parse error
 		// indices start at 0 for the first answer section
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>bad1</answer>", 100, 50).
@@ -1049,7 +664,7 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 			AddResponse("<answer>bad3</answer>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"bad1"}}).
@@ -1057,9 +672,9 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 			AddParseResult(map[string][]string{"answer": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
+		toolChain := tt.NewMockToolChain()
 		// Parse errors indices: 0=bad1, 1=bad2, 2=bad3, 3=done
-		termination := newLimitTestTermination().
+		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
 		limits := []gent.Limit{
@@ -1082,16 +697,16 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 		// Section parse errors would come from custom TextSection implementations.
 		// For now, we'll verify the limit works by manually incrementing the counter.
 
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		agent := NewAgent(model).
 			WithFormat(format).
@@ -1116,18 +731,18 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
 		// Simulate section parse errors occurring after 2 successful iterations
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		agent := NewAgent(model).
 			WithFormat(format).
@@ -1159,20 +774,20 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 
 func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 	t.Run("stops when format parse error consecutive exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("invalid1", 100, 50).
 			AddResponse("invalid2", 100, 50).
 			AddResponse("invalid3", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 2},
@@ -1187,7 +802,7 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: consecutive format parse errors (3rd error exceeds limit of 2)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("invalid1", 100, 50).
@@ -1195,7 +810,7 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 			AddResponse("invalid3", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseError(gent.ErrNoSectionsFound).
@@ -1203,8 +818,8 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 			AddParseError(gent.ErrNoSectionsFound).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 2},
@@ -1220,21 +835,21 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 
 func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 	t.Run("stops when toolchain parse error consecutive exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>invalid</action>", 100, 50).
 			AddResponse("<action>invalid</action>", 100, 50).
 			AddResponse("<action>invalid</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"invalid"}}).
 			AddParseResult(map[string][]string{"action": {"invalid"}}).
 			AddParseResult(map[string][]string{"action": {"invalid"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
@@ -1249,7 +864,7 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: consecutive toolchain parse errors (3rd error exceeds limit of 2)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>bad1</action>", 100, 50).
@@ -1257,7 +872,7 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 			AddResponse("<action>bad3</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"bad1"}}).
@@ -1265,9 +880,9 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithParseErrors(nil, nil, gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
@@ -1283,20 +898,20 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 
 func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 	t.Run("stops when termination parse error consecutive exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<answer>bad1</answer>", 100, 50).
 			AddResponse("<answer>bad2</answer>", 100, 50).
 			AddResponse("<answer>bad3</answer>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"bad1"}}).
 			AddParseResult(map[string][]string{"answer": {"bad2"}}).
 			AddParseResult(map[string][]string{"answer": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination().
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
 		limits := []gent.Limit{
@@ -1314,7 +929,7 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 		// Iteration 3-5: consecutive termination parse errors (3rd error exceeds limit of 2)
 		// Note: termination parsing only happens for answer sections, so parse error
 		// indices start at 0 for the first answer section
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>bad1</answer>", 100, 50).
@@ -1322,7 +937,7 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 			AddResponse("<answer>bad3</answer>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"bad1"}}).
@@ -1330,9 +945,9 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 			AddParseResult(map[string][]string{"answer": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
+		toolChain := tt.NewMockToolChain()
 		// Parse errors indices: 0=bad1, 1=bad2, 2=bad3, 3=done
-		termination := newLimitTestTermination().
+		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
 		limits := []gent.Limit{
@@ -1349,16 +964,16 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 
 func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 	t.Run("stops when section parse error consecutive exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		agent := NewAgent(model).
 			WithFormat(format).
@@ -1383,18 +998,18 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
 		// Simulate section parse errors occurring consecutively after 2 successful iterations
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		agent := NewAgent(model).
 			WithFormat(format).
@@ -1424,23 +1039,23 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 
 func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 	t.Run("stops when tool call error total exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: failing</action>", 100, 50).
 			AddResponse("<action>tool: failing</action>", 100, 50).
 			AddResponse("<action>tool: failing</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("failing", func(args map[string]any) (string, error) {
 				return "", errors.New("tool failed")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorTotal, MaxValue: 2},
@@ -1456,7 +1071,7 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: failing tool calls (3rd error exceeds limit of 2)
 		callCount := 0
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<action>tool: maybe</action>", 100, 50).
@@ -1464,7 +1079,7 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
@@ -1472,7 +1087,7 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("maybe", func(args map[string]any) (string, error) {
 				callCount++
 				if callCount <= 2 {
@@ -1480,7 +1095,7 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 				}
 				return "", errors.New("tool failed")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorTotal, MaxValue: 2},
@@ -1496,21 +1111,21 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 
 func TestExecutorLimits_ToolCallsErrorForTool(t *testing.T) {
 	t.Run("stops when tool-specific error limit exceeded (prefix)", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("broken", func(args map[string]any) (string, error) {
 				return "", errors.New("broken tool")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorFor, MaxValue: 1},
@@ -1526,21 +1141,21 @@ func TestExecutorLimits_ToolCallsErrorForTool(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-4: failing tool calls (2nd error exceeds limit of 1)
 		callCount := 0
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("broken", func(args map[string]any) (string, error) {
 				callCount++
 				if callCount <= 2 {
@@ -1548,7 +1163,7 @@ func TestExecutorLimits_ToolCallsErrorForTool(t *testing.T) {
 				}
 				return "", errors.New("broken tool")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorFor, MaxValue: 1},
@@ -1564,23 +1179,23 @@ func TestExecutorLimits_ToolCallsErrorForTool(t *testing.T) {
 
 func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 	t.Run("stops when tool call error consecutive exceeded", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: failing</action>", 100, 50).
 			AddResponse("<action>tool: failing</action>", 100, 50).
 			AddResponse("<action>tool: failing</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("failing", func(args map[string]any) (string, error) {
 				return "", errors.New("tool failed")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorConsecutive, MaxValue: 2},
@@ -1596,7 +1211,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: consecutive failing tool calls (3rd error exceeds limit of 2)
 		callCount := 0
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<action>tool: maybe</action>", 100, 50).
@@ -1604,7 +1219,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
@@ -1612,7 +1227,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: maybe"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("maybe", func(args map[string]any) (string, error) {
 				callCount++
 				if callCount <= 2 {
@@ -1620,7 +1235,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 				}
 				return "", errors.New("tool failed")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorConsecutive, MaxValue: 2},
@@ -1636,21 +1251,21 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 
 func TestExecutorLimits_ToolCallsErrorConsecutiveForTool(t *testing.T) {
 	t.Run("stops when tool-specific consecutive error limit exceeded (prefix)", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("flaky", func(args map[string]any) (string, error) {
 				return "", errors.New("flaky error")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorConsecutiveFor, MaxValue: 1},
@@ -1666,21 +1281,21 @@ func TestExecutorLimits_ToolCallsErrorConsecutiveForTool(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-4: consecutive failing tool calls (2nd error exceeds limit of 1)
 		callCount := 0
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("flaky", func(args map[string]any) (string, error) {
 				callCount++
 				if callCount <= 2 {
@@ -1688,7 +1303,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutiveForTool(t *testing.T) {
 				}
 				return "", errors.New("flaky error")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorConsecutiveFor, MaxValue: 1},
@@ -1712,22 +1327,22 @@ func TestExecutorLimits_ConsecutiveReset_FormatParseError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
 		// Sequence: fail, fail, success, fail
 		// With limit of 2, this should NOT trigger because consecutive resets after success
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("invalid1", 100, 50).                 // fail
 			AddResponse("invalid2", 100, 50).                 // fail (consecutive=2)
 			AddResponse("<action>tool: t</action>", 100, 50). // success (resets)
 			AddResponse("invalid3", 100, 50).                 // fail (consecutive=1)
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseError(gent.ErrNoSectionsFound).                     // fail
 			AddParseError(gent.ErrNoSectionsFound).                     // fail
 			AddParseResult(map[string][]string{"action": {"tool: t"}}). // success
 			AddParseError(gent.ErrNoSectionsFound).                     // fail
 			AddParseResult(map[string][]string{"answer": {"done"}})     // terminate
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 2},
@@ -1744,21 +1359,21 @@ func TestExecutorLimits_ConsecutiveReset_FormatParseError(t *testing.T) {
 func TestExecutorLimits_ConsecutiveReset_ToolchainParseError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
 		// Sequence: fail, fail, success, fail
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>bad1</action>", 100, 50).
 			AddResponse("<action>bad2</action>", 100, 50).
 			AddResponse("<action>tool: good</action>", 100, 50).
 			AddResponse("<action>bad3</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"bad1"}}).
 			AddParseResult(map[string][]string{"action": {"bad2"}}).
 			AddParseResult(map[string][]string{"action": {"tool: good"}}).
 			AddParseResult(map[string][]string{"action": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithParseErrors(
 				gent.ErrInvalidJSON, // fail
 				gent.ErrInvalidJSON, // fail (consecutive=2)
@@ -1766,7 +1381,7 @@ func TestExecutorLimits_ConsecutiveReset_ToolchainParseError(t *testing.T) {
 				gent.ErrInvalidJSON, // fail (consecutive=1)
 				nil,                 // N/A
 			)
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
@@ -1782,22 +1397,22 @@ func TestExecutorLimits_ConsecutiveReset_ToolchainParseError(t *testing.T) {
 func TestExecutorLimits_ConsecutiveReset_TerminationParseError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
 		// Sequence: fail, fail, success (action taken), fail, success
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<answer>bad1</answer>", 100, 50).
 			AddResponse("<answer>bad2</answer>", 100, 50).
 			AddResponse("<action>tool: t</action>", 100, 50). // action takes priority, no term parse
 			AddResponse("<answer>bad3</answer>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"bad1"}}).
 			AddParseResult(map[string][]string{"answer": {"bad2"}}).
 			AddParseResult(map[string][]string{"action": {"tool: t"}}).
 			AddParseResult(map[string][]string{"answer": {"bad3"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination().
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination().
 			WithParseErrors(
 				gent.ErrInvalidJSON, // fail
 				gent.ErrInvalidJSON, // fail (consecutive=2)
@@ -1819,16 +1434,16 @@ func TestExecutorLimits_ConsecutiveReset_TerminationParseError(t *testing.T) {
 
 func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
 		agent := NewAgent(model).
 			WithFormat(format).
@@ -1859,21 +1474,21 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
 		callCount := 0
 		// Sequence: fail, fail, success, fail
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("flaky", func(args map[string]any) (string, error) {
 				callCount++
 				// fail, fail, success, fail
@@ -1882,7 +1497,7 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallError(t *testing.T) {
 				}
 				return "", errors.New("flaky error")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorConsecutive, MaxValue: 2},
@@ -1899,21 +1514,21 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallErrorPerTool(t *testing.T) {
 	t.Run("per-tool consecutive counter resets on success - does not exceed prefix limit", func(t *testing.T) {
 		callCount := 0
 		// Sequence for specific tool: fail, fail, success, fail
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: specific</action>", 100, 50).
 			AddResponse("<action>tool: specific</action>", 100, 50).
 			AddResponse("<action>tool: specific</action>", 100, 50).
 			AddResponse("<action>tool: specific</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: specific"}}).
 			AddParseResult(map[string][]string{"action": {"tool: specific"}}).
 			AddParseResult(map[string][]string{"action": {"tool: specific"}}).
 			AddParseResult(map[string][]string{"action": {"tool: specific"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("specific", func(args map[string]any) (string, error) {
 				callCount++
 				if callCount == 3 {
@@ -1921,7 +1536,7 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallErrorPerTool(t *testing.T) {
 				}
 				return "", errors.New("specific error")
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		limits := []gent.Limit{
 			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorConsecutiveFor, MaxValue: 2},
@@ -1938,46 +1553,7 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallErrorPerTool(t *testing.T) {
 // Mock Answer Validator for testing
 // ----------------------------------------------------------------------------
 
-type limitTestValidator struct {
-	name        string
-	acceptances []bool
-	feedback    []gent.FormattedSection
-	callIdx     int
-}
-
-func newLimitTestValidator(name string) *limitTestValidator {
-	return &limitTestValidator{name: name}
-}
-
-func (v *limitTestValidator) WithAcceptances(acceptances ...bool) *limitTestValidator {
-	v.acceptances = acceptances
-	return v
-}
-
-func (v *limitTestValidator) WithFeedback(sections ...gent.FormattedSection) *limitTestValidator {
-	v.feedback = sections
-	return v
-}
-
-func (v *limitTestValidator) Name() string { return v.name }
-
-func (v *limitTestValidator) Validate(
-	execCtx *gent.ExecutionContext,
-	answer any,
-) *gent.ValidationResult {
-	idx := v.callIdx
-	v.callIdx++
-
-	accepted := true
-	if idx < len(v.acceptances) {
-		accepted = v.acceptances[idx]
-	}
-
-	if accepted {
-		return &gent.ValidationResult{Accepted: true}
-	}
-	return &gent.ValidationResult{Accepted: false, Feedback: v.feedback}
-}
+// Validator mock is provided by internal/tt package (tt.MockValidator)
 
 // ----------------------------------------------------------------------------
 // Test: Answer rejection total limit
@@ -1986,22 +1562,22 @@ func (v *limitTestValidator) Validate(
 func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 	t.Run("stops when answer rejected total exceeded", func(t *testing.T) {
 		// Model provides answers that get rejected
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<answer>bad answer 1</answer>", 100, 50).
 			AddResponse("<answer>bad answer 2</answer>", 100, 50).
 			AddResponse("<answer>bad answer 3</answer>", 100, 50).
 			AddResponse("<answer>good answer</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
 			AddParseResult(map[string][]string{"answer": {"bad answer 2"}}).
 			AddParseResult(map[string][]string{"answer": {"bad answer 3"}}).
 			AddParseResult(map[string][]string{"answer": {"good answer"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
-		validator := newLimitTestValidator("test_validator").
+		validator := tt.NewMockValidator("test_validator").
 			WithAcceptances(false, false, false, true).
 			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
 		termination.SetValidator(validator)
@@ -2019,7 +1595,7 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 	t.Run("exceeds limit at third iteration after successful tool calls", func(t *testing.T) {
 		// Iteration 1-2: tool calls (no answer)
 		// Iteration 3-5: answers rejected (3rd rejection exceeds limit of 2)
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<answer>bad answer 1</answer>", 100, 50).
@@ -2027,7 +1603,7 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 			AddResponse("<answer>bad answer 3</answer>", 100, 50).
 			AddResponse("<answer>good answer</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"action": {"tool: search"}}).
 			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
@@ -2035,13 +1611,13 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 			AddParseResult(map[string][]string{"answer": {"bad answer 3"}}).
 			AddParseResult(map[string][]string{"answer": {"good answer"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithTool("search", func(args map[string]any) (string, error) {
 				return "found something", nil
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
-		validator := newLimitTestValidator("test_validator").
+		validator := tt.NewMockValidator("test_validator").
 			WithAcceptances(false, false, false, true).
 			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
 		termination.SetValidator(validator)
@@ -2064,20 +1640,20 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 
 func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 	t.Run("stops when validator-specific rejection limit exceeded (prefix)", func(t *testing.T) {
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<answer>bad answer 1</answer>", 100, 50).
 			AddResponse("<answer>bad answer 2</answer>", 100, 50).
 			AddResponse("<answer>good answer</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
 			AddParseResult(map[string][]string{"answer": {"bad answer 2"}}).
 			AddParseResult(map[string][]string{"answer": {"good answer"}})
 
-		toolChain := newLimitTestToolChain()
-		termination := newLimitTestTermination()
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
 
-		validator := newLimitTestValidator("schema_validator").
+		validator := tt.NewMockValidator("schema_validator").
 			WithAcceptances(false, false, true).
 			WithFeedback(gent.FormattedSection{Name: "error", Content: "Schema validation failed"})
 		termination.SetValidator(validator)
@@ -2107,7 +1683,7 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 		// Iteration 5: tool call - simulates child agent rejection by child_validator -> LIMIT!
 
 		childCallCount := 0
-		model := newLimitTestModel().
+		model := tt.NewMockModel().
 			AddResponse("<answer>main bad 1</answer>", 100, 50).
 			AddResponse("<answer>main bad 2</answer>", 100, 50).
 			AddResponse("<action>tool: child_agent</action>", 100, 50).
@@ -2115,7 +1691,7 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 			AddResponse("<action>tool: child_agent</action>", 100, 50).
 			AddResponse("<answer>good answer</answer>", 100, 50)
 
-		format := newLimitTestFormat().
+		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"main bad 1"}}).
 			AddParseResult(map[string][]string{"answer": {"main bad 2"}}).
 			AddParseResult(map[string][]string{"action": {"tool: child_agent"}}).
@@ -2123,7 +1699,7 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: child_agent"}}).
 			AddParseResult(map[string][]string{"answer": {"good answer"}})
 
-		toolChain := newLimitTestToolChain().
+		toolChain := tt.NewMockToolChain().
 			WithToolCtx("child_agent", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
 				childCallCount++
 				// Simulate what a child agent termination would do when its validator rejects
@@ -2132,10 +1708,10 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 				execCtx.Stats().IncrCounter(gent.KeyAnswerRejectedBy+"child_validator", 1)
 				return "child agent completed with rejection", nil
 			})
-		termination := newLimitTestTermination()
+		termination := tt.NewMockTermination()
 
 		// Main loop uses main_validator - rejections tracked as main_validator
-		mainValidator := newLimitTestValidator("main_validator").
+		mainValidator := tt.NewMockValidator("main_validator").
 			WithAcceptances(false, false, false, true). // reject first 3, accept 4th
 			WithFeedback(gent.FormattedSection{Name: "error", Content: "Main validation failed"})
 		termination.SetValidator(mainValidator)
