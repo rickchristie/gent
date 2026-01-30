@@ -137,44 +137,170 @@ func (m *mockAgentLoop) GetCalls() int {
 }
 
 // -----------------------------------------------------------------------------
-// Event Counting Helpers
+// Event Assertion Helpers
 // -----------------------------------------------------------------------------
 
-// eventCounts holds counts of different event types for test assertions.
-type eventCounts struct {
-	BeforeIteration int
-	AfterIteration  int
-	BeforeModelCall int
-	AfterModelCall  int
+// isLifecycleEvent returns true if the event is a lifecycle event relevant for limit testing.
+// Filters out CommonDiffEvent and CommonEvent which are state change tracking events.
+func isLifecycleEvent(event gent.Event) bool {
+	switch event.(type) {
+	case *gent.BeforeExecutionEvent,
+		*gent.AfterExecutionEvent,
+		*gent.BeforeIterationEvent,
+		*gent.AfterIterationEvent,
+		*gent.BeforeModelCallEvent,
+		*gent.AfterModelCallEvent,
+		*gent.BeforeToolCallEvent,
+		*gent.AfterToolCallEvent,
+		*gent.LimitExceededEvent,
+		*gent.ParseErrorEvent,
+		*gent.ValidatorCalledEvent,
+		*gent.ValidatorResultEvent,
+		*gent.ErrorEvent:
+		return true
+	default:
+		return false
+	}
 }
 
-// countEvents counts events by type from an ExecutionContext (not including children).
-func countEvents(execCtx *gent.ExecutionContext) eventCounts {
-	counts := eventCounts{}
+// normalizeEvent creates a copy of the event with time-varying fields zeroed out.
+// This allows comparison of events ignoring Timestamp and Duration fields.
+func normalizeEvent(event gent.Event) gent.Event {
+	switch e := event.(type) {
+	case *gent.BeforeExecutionEvent:
+		return &gent.BeforeExecutionEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+		}
+	case *gent.AfterExecutionEvent:
+		return &gent.AfterExecutionEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+			TerminationReason: e.TerminationReason,
+			// Error is zeroed since it's dynamically created with fmt.Errorf
+		}
+	case *gent.BeforeIterationEvent:
+		return &gent.BeforeIterationEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+		}
+	case *gent.AfterIterationEvent:
+		return &gent.AfterIterationEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+			Result: e.Result,
+			// Duration zeroed
+		}
+	case *gent.BeforeModelCallEvent:
+		return &gent.BeforeModelCallEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+			Model:   e.Model,
+			Request: e.Request,
+		}
+	case *gent.AfterModelCallEvent:
+		return &gent.AfterModelCallEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+			Model:        e.Model,
+			Request:      e.Request,
+			Response:     e.Response,
+			InputTokens:  e.InputTokens,
+			OutputTokens: e.OutputTokens,
+			// Duration zeroed
+			Error: e.Error,
+		}
+	case *gent.LimitExceededEvent:
+		return &gent.LimitExceededEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+			Limit:        e.Limit,
+			CurrentValue: e.CurrentValue,
+			MatchedKey:   e.MatchedKey,
+		}
+	case *gent.ParseErrorEvent:
+		return &gent.ParseErrorEvent{
+			BaseEvent: gent.BaseEvent{
+				EventName: e.EventName,
+				Iteration: e.Iteration,
+				Depth:     e.Depth,
+			},
+			ErrorType:  e.ErrorType,
+			RawContent: e.RawContent,
+			Error:      e.Error,
+		}
+	default:
+		return event
+	}
+}
+
+// collectEvents collects all lifecycle events from an ExecutionContext (not including children).
+// Filters out CommonDiffEvent and CommonEvent which are state change tracking events.
+// Events are normalized (Timestamp and Duration zeroed) for comparison.
+func collectEvents(execCtx *gent.ExecutionContext) []gent.Event {
+	var result []gent.Event
 	for _, event := range execCtx.Events() {
-		switch event.(type) {
-		case *gent.BeforeIterationEvent:
-			counts.BeforeIteration++
-		case *gent.AfterIterationEvent:
-			counts.AfterIteration++
-		case *gent.BeforeModelCallEvent:
-			counts.BeforeModelCall++
-		case *gent.AfterModelCallEvent:
-			counts.AfterModelCall++
+		if isLifecycleEvent(event) {
+			result = append(result, normalizeEvent(event))
 		}
 	}
-	return counts
+	return result
 }
 
-// countEventsWithChildren counts events by type from an ExecutionContext and all its children.
-func countEventsWithChildren(execCtx *gent.ExecutionContext) eventCounts {
-	counts := countEvents(execCtx)
+// collectEventsWithChildren collects lifecycle events from ExecutionContext and all its children.
+// Filters out CommonDiffEvent and CommonEvent which are state change tracking events.
+// Events are normalized (Timestamp and Duration zeroed) for comparison.
+func collectEventsWithChildren(execCtx *gent.ExecutionContext) []gent.Event {
+	result := collectEvents(execCtx)
 	for _, child := range execCtx.Children() {
-		childCounts := countEventsWithChildren(child)
-		counts.BeforeIteration += childCounts.BeforeIteration
-		counts.AfterIteration += childCounts.AfterIteration
-		counts.BeforeModelCall += childCounts.BeforeModelCall
-		counts.AfterModelCall += childCounts.AfterModelCall
+		result = append(result, collectEventsWithChildren(child)...)
+	}
+	return result
+}
+
+// countEventTypes counts events by type name for tests with non-deterministic event ordering.
+func countEventTypes(events []gent.Event) map[string]int {
+	counts := make(map[string]int)
+	for _, event := range events {
+		switch event.(type) {
+		case *gent.BeforeExecutionEvent:
+			counts["BeforeExecutionEvent"]++
+		case *gent.AfterExecutionEvent:
+			counts["AfterExecutionEvent"]++
+		case *gent.BeforeIterationEvent:
+			counts["BeforeIterationEvent"]++
+		case *gent.AfterIterationEvent:
+			counts["AfterIterationEvent"]++
+		case *gent.BeforeModelCallEvent:
+			counts["BeforeModelCallEvent"]++
+		case *gent.AfterModelCallEvent:
+			counts["AfterModelCallEvent"]++
+		case *gent.LimitExceededEvent:
+			counts["LimitExceededEvent"]++
+		case *gent.ParseErrorEvent:
+			counts["ParseErrorEvent"]++
+		}
 	}
 	return counts
 }
@@ -187,29 +313,197 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 	// Note: Limits use > comparison, so if MaxValue=5, then 6 iterations run
 	// before the limit is exceeded (because 6 > 5). The loop detects the exceeded
 	// limit at the start of iteration N+1 when iteration counter exceeds MaxValue.
+	type input struct {
+		maxIterations float64
+	}
+
+	type expected struct {
+		calls         int // MaxValue + 1 because limit triggers when counter > MaxValue
+		terminate     gent.TerminationReason
+		exceededLimit gent.Limit
+		events        []gent.Event
+	}
+
 	tests := []struct {
-		name              string
-		maxIterations     float64
-		expectedCalls     int // MaxValue + 1 because limit triggers when counter > MaxValue
-		expectedTerminate gent.TerminationReason
+		name     string
+		input    input
+		expected expected
 	}{
 		{
-			name:              "limit at 5 iterations terminates after 6",
-			maxIterations:     5,
-			expectedCalls:     6,
-			expectedTerminate: gent.TerminationLimitExceeded,
+			name:  "limit at 5 iterations terminates after 6",
+			input: input{maxIterations: 5},
+			expected: expected{
+				calls:     6,
+				terminate: gent.TerminationLimitExceeded,
+				exceededLimit: gent.Limit{
+					Type:     gent.LimitExactKey,
+					Key:      gent.KeyIterations,
+					MaxValue: 5,
+				},
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 3}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 3},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 4}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 4},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 5}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 5},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 6}},
+					&gent.LimitExceededEvent{
+						BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 6},
+						Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 5},
+						CurrentValue: 6,
+						MatchedKey:   gent.KeyIterations,
+					},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 6},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 6},
+						TerminationReason: gent.TerminationLimitExceeded,
+					},
+				},
+			},
 		},
 		{
-			name:              "limit at 1 iteration terminates after 2",
-			maxIterations:     1,
-			expectedCalls:     2,
-			expectedTerminate: gent.TerminationLimitExceeded,
+			name:  "limit at 1 iteration terminates after 2",
+			input: input{maxIterations: 1},
+			expected: expected{
+				calls:     2,
+				terminate: gent.TerminationLimitExceeded,
+				exceededLimit: gent.Limit{
+					Type:     gent.LimitExactKey,
+					Key:      gent.KeyIterations,
+					MaxValue: 1,
+				},
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.LimitExceededEvent{
+						BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 2},
+						Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 1},
+						CurrentValue: 2,
+						MatchedKey:   gent.KeyIterations,
+					},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 2},
+						TerminationReason: gent.TerminationLimitExceeded,
+					},
+				},
+			},
 		},
 		{
-			name:              "limit at 10 iterations terminates after 11",
-			maxIterations:     10,
-			expectedCalls:     11,
-			expectedTerminate: gent.TerminationLimitExceeded,
+			name:  "limit at 10 iterations terminates after 11",
+			input: input{maxIterations: 10},
+			expected: expected{
+				calls:     11,
+				terminate: gent.TerminationLimitExceeded,
+				exceededLimit: gent.Limit{
+					Type:     gent.LimitExactKey,
+					Key:      gent.KeyIterations,
+					MaxValue: 10,
+				},
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 3}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 3},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 4}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 4},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 5}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 5},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 6}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 6},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 7}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 7},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 8}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 8},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 9}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 9},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 10}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 10},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 11}},
+					&gent.LimitExceededEvent{
+						BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 11},
+						Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 10},
+						CurrentValue: 11,
+						MatchedKey:   gent.KeyIterations,
+					},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 11},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 11},
+						TerminationReason: gent.TerminationLimitExceeded,
+					},
+				},
+			},
 		},
 	}
 
@@ -222,65 +516,143 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: tt.maxIterations},
+				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: tt.input.maxIterations},
 			})
 
 			exec.Execute(execCtx)
 
 			result := execCtx.Result()
 			assert.NotNil(t, result)
-			assert.Equal(t, tt.expectedTerminate, result.TerminationReason)
+			assert.Equal(t, tt.expected.terminate, result.TerminationReason)
 			assert.NotNil(t, result.ExceededLimit)
-			assert.Equal(t, gent.KeyIterations, result.ExceededLimit.Key)
-			assert.Equal(t, tt.maxIterations, result.ExceededLimit.MaxValue)
-			assert.Equal(t, tt.expectedCalls, loop.GetCalls())
+			assert.Equal(t, tt.expected.exceededLimit, *result.ExceededLimit)
+			assert.Equal(t, tt.expected.calls, loop.GetCalls())
+			assert.Equal(t, tt.expected.events, collectEvents(execCtx))
 		})
 	}
 }
 
 func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
+	type input struct {
+		maxIterations float64
+		terminateAt   int
+	}
+
+	type expected struct {
+		calls     int
+		terminate gent.TerminationReason
+		events    []gent.Event
+	}
+
 	tests := []struct {
-		name              string
-		maxIterations     float64
-		terminateAt       int
-		expectedCalls     int
-		expectedTerminate gent.TerminationReason
+		name     string
+		input    input
+		expected expected
 	}{
 		{
-			name:              "terminate before limit",
-			maxIterations:     10,
-			terminateAt:       3,
-			expectedCalls:     3,
-			expectedTerminate: gent.TerminationSuccess,
+			name: "terminate before limit",
+			input: input{
+				maxIterations: 10,
+				terminateAt:   3,
+			},
+			expected: expected{
+				calls:     3,
+				terminate: gent.TerminationSuccess,
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 3}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 3},
+						Result: &gent.AgentLoopResult{
+							Action: gent.LATerminate,
+							Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+						}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+						TerminationReason: gent.TerminationSuccess},
+				},
+			},
 		},
 		{
-			name:              "terminate at exactly limit value does not exceed",
-			maxIterations:     5,
-			terminateAt:       5,
-			expectedCalls:     5,
-			expectedTerminate: gent.TerminationSuccess,
+			name: "terminate at exactly limit value does not exceed",
+			input: input{
+				maxIterations: 5,
+				terminateAt:   5,
+			},
+			expected: expected{
+				calls:     5,
+				terminate: gent.TerminationSuccess,
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 3}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 3},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 4}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 4},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 5}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 5},
+						Result: &gent.AgentLoopResult{
+							Action: gent.LATerminate,
+							Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+						}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 5},
+						TerminationReason: gent.TerminationSuccess},
+				},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			loop := &mockAgentLoop{terminateAt: tt.terminateAt}
+			loop := &mockAgentLoop{terminateAt: tt.input.terminateAt}
 			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
 
 			ctx := context.Background()
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: tt.maxIterations},
+				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: tt.input.maxIterations},
 			})
 
 			exec.Execute(execCtx)
 
 			result := execCtx.Result()
 			assert.NotNil(t, result)
-			assert.Equal(t, tt.expectedTerminate, result.TerminationReason)
+			assert.Equal(t, tt.expected.terminate, result.TerminationReason)
 			assert.Nil(t, result.ExceededLimit)
-			assert.Equal(t, tt.expectedCalls, loop.GetCalls())
+			assert.Equal(t, tt.expected.calls, loop.GetCalls())
+			assert.Equal(t, tt.expected.events, collectEvents(execCtx))
 		})
 	}
 }
@@ -290,91 +662,201 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestLimits_TokenLimit_Exceeded(t *testing.T) {
+	type input struct {
+		inputTokens  int
+		outputTokens int
+	}
+
+	type limits struct {
+		maxInput  float64
+		maxOutput float64
+	}
+
+	type expected struct {
+		calls         int
+		iteration     int
+		exceededLimit gent.Limit
+		reason        gent.TerminationReason
+		events        []gent.Event
+	}
+
 	tests := []struct {
 		name     string
-		input    struct{ inputTokens, outputTokens int }
-		limits   struct{ maxInput, maxOutput float64 }
-		expected struct {
-			calls           int
-			iteration       int
-			key             string
-			reason          gent.TerminationReason
-			beforeIteration int
-			afterIteration  int
-			beforeModelCall int
-			afterModelCall  int
-		}
+		input    input
+		limits   limits
+		expected expected
 	}{
 		{
 			name:   "input token limit exceeded",
-			input:  struct{ inputTokens, outputTokens int }{1000, 100},
-			limits: struct{ maxInput, maxOutput float64 }{2500, 10000},
-			expected: struct {
-				calls           int
-				iteration       int
-				key             string
-				reason          gent.TerminationReason
-				beforeIteration int
-				afterIteration  int
-				beforeModelCall int
-				afterModelCall  int
-			}{
-				calls:           3,
-				iteration:       3,
-				key:             gent.KeyInputTokens,
-				reason:          gent.TerminationLimitExceeded,
-				beforeIteration: 3,
-				afterIteration:  3,
-				beforeModelCall: 3,
-				afterModelCall:  3, // All 3 complete; limit exceeded on 3rd AfterModelCall
+			input:  input{inputTokens: 1000, outputTokens: 100},
+			limits: limits{maxInput: 2500, maxOutput: 10000},
+			expected: expected{
+				calls:     3,
+				iteration: 3,
+				exceededLimit: gent.Limit{
+					Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 2500},
+				reason: gent.TerminationLimitExceeded,
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 1},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 1},
+						Model: "test-model", InputTokens: 1000, OutputTokens: 100,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 1000, OutputTokens: 100}}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 2},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 2},
+						Model: "test-model", InputTokens: 1000, OutputTokens: 100,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 1000, OutputTokens: 100}}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 3}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 3},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 3},
+						Model: "test-model", InputTokens: 1000, OutputTokens: 100,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 1000, OutputTokens: 100}}},
+					&gent.LimitExceededEvent{
+						BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 3},
+						Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 2500},
+						CurrentValue: 3000, MatchedKey: gent.KeyInputTokens},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 3},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+						TerminationReason: gent.TerminationLimitExceeded},
+				},
 			},
 		},
 		{
 			name:   "output token limit exceeded",
-			input:  struct{ inputTokens, outputTokens int }{100, 500},
-			limits: struct{ maxInput, maxOutput float64 }{10000, 1200},
-			expected: struct {
-				calls           int
-				iteration       int
-				key             string
-				reason          gent.TerminationReason
-				beforeIteration int
-				afterIteration  int
-				beforeModelCall int
-				afterModelCall  int
-			}{
-				calls:           3,
-				iteration:       3,
-				key:             gent.KeyOutputTokens,
-				reason:          gent.TerminationLimitExceeded,
-				beforeIteration: 3,
-				afterIteration:  3,
-				beforeModelCall: 3,
-				afterModelCall:  3, // All 3 complete; limit exceeded on 3rd AfterModelCall
+			input:  input{inputTokens: 100, outputTokens: 500},
+			limits: limits{maxInput: 10000, maxOutput: 1200},
+			expected: expected{
+				calls:     3,
+				iteration: 3,
+				exceededLimit: gent.Limit{
+					Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1200},
+				reason: gent.TerminationLimitExceeded,
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 1},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 1},
+						Model: "test-model", InputTokens: 100, OutputTokens: 500,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 100, OutputTokens: 500}}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 2},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 2},
+						Model: "test-model", InputTokens: 100, OutputTokens: 500,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 100, OutputTokens: 500}}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 3}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 3},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 3},
+						Model: "test-model", InputTokens: 100, OutputTokens: 500,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 100, OutputTokens: 500}}},
+					&gent.LimitExceededEvent{
+						BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 3},
+						Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1200},
+						CurrentValue: 1500, MatchedKey: gent.KeyOutputTokens},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 3},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+						TerminationReason: gent.TerminationLimitExceeded},
+				},
 			},
 		},
 		{
 			name:   "input tokens check comes first when both exceeded",
-			input:  struct{ inputTokens, outputTokens int }{1000, 1000},
-			limits: struct{ maxInput, maxOutput float64 }{1500, 1500},
-			expected: struct {
-				calls           int
-				iteration       int
-				key             string
-				reason          gent.TerminationReason
-				beforeIteration int
-				afterIteration  int
-				beforeModelCall int
-				afterModelCall  int
-			}{
-				calls:           2,
-				iteration:       2,
-				key:             gent.KeyInputTokens, // first limit in list
-				reason:          gent.TerminationLimitExceeded,
-				beforeIteration: 2,
-				afterIteration:  2,
-				beforeModelCall: 2,
-				afterModelCall:  2, // Both complete; limit exceeded on 2nd AfterModelCall
+			input:  input{inputTokens: 1000, outputTokens: 1000},
+			limits: limits{maxInput: 1500, maxOutput: 1500},
+			expected: expected{
+				calls:     2,
+				iteration: 2,
+				exceededLimit: gent.Limit{
+					Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1500},
+				reason: gent.TerminationLimitExceeded,
+				events: []gent.Event{
+					&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 1}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 1},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 1},
+						Model: "test-model", InputTokens: 1000, OutputTokens: 1000,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 1000, OutputTokens: 1000}}},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 1},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationBefore, Iteration: 2}},
+					&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallBefore, Iteration: 2},
+						Model: "test-model"},
+					&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameModelCallAfter, Iteration: 2},
+						Model: "test-model", InputTokens: 1000, OutputTokens: 1000,
+						Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+							InputTokens: 1000, OutputTokens: 1000}}},
+					&gent.LimitExceededEvent{
+						BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 2},
+						Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1500},
+						CurrentValue: 2000, MatchedKey: gent.KeyInputTokens},
+					&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+						EventName: gent.EventNameIterationAfter, Iteration: 2},
+						Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+					&gent.AfterExecutionEvent{
+						BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 2},
+						TerminationReason: gent.TerminationLimitExceeded},
+				},
 			},
 		},
 	}
@@ -403,18 +885,14 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 			assert.NotNil(t, result)
 			assert.Equal(t, tt.expected.reason, result.TerminationReason)
 			assert.NotNil(t, result.ExceededLimit)
-			assert.Equal(t, tt.expected.key, result.ExceededLimit.Key)
+			assert.Equal(t, tt.expected.exceededLimit, *result.ExceededLimit)
 
 			// Verify iteration and call counts
 			assert.Equal(t, tt.expected.calls, loop.GetCalls())
 			assert.Equal(t, tt.expected.iteration, execCtx.Iteration())
 
-			// Verify event counts
-			counts := countEvents(execCtx)
-			assert.Equal(t, tt.expected.beforeIteration, counts.BeforeIteration)
-			assert.Equal(t, tt.expected.afterIteration, counts.AfterIteration)
-			assert.Equal(t, tt.expected.beforeModelCall, counts.BeforeModelCall)
-			assert.Equal(t, tt.expected.afterModelCall, counts.AfterModelCall)
+			// Verify events
+			assert.Equal(t, tt.expected.events, collectEvents(execCtx))
 		})
 	}
 }
@@ -465,14 +943,78 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 	stats := execCtx.Stats()
 	assert.Equal(t, int64(3000), stats.GetCounter(gent.KeyInputTokensFor+"model-a"))
 
-	// Verify iteration and event counts
+	// Verify iteration count
 	// Iterations: 1(a:1000), 2(b:500), 3(a:2000), 4(b:1000), 5(a:3000 > 2500, limit!)
 	assert.Equal(t, 5, execCtx.Iteration())
-	counts := countEvents(execCtx)
-	assert.Equal(t, 5, counts.BeforeIteration)
-	assert.Equal(t, 5, counts.AfterIteration)
-	assert.Equal(t, 5, counts.BeforeModelCall)
-	assert.Equal(t, 5, counts.AfterModelCall) // All 5 complete; limit exceeded on 5th
+
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "model-a"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "model-a",
+			InputTokens: 1000, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 1000, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 2}, Model: "model-b"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 2}, Model: "model-b",
+			InputTokens: 500, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 500, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 3}, Model: "model-a"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 3}, Model: "model-a",
+			InputTokens: 1000, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 1000, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 4}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 4}, Model: "model-b"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 4}, Model: "model-b",
+			InputTokens: 500, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 500, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 4},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 5}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 5}, Model: "model-a"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 5}, Model: "model-a",
+			InputTokens: 1000, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 1000, OutputTokens: 0}}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 5},
+			Limit:        gent.Limit{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 2500},
+			CurrentValue: 3000, MatchedKey: gent.KeyInputTokensFor + "model-a"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 5},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 5},
+			TerminationReason: gent.TerminationLimitExceeded},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 // -----------------------------------------------------------------------------
@@ -531,19 +1073,44 @@ func TestLimits_ParallelChildren_AggregateToParent(t *testing.T) {
 	// Verify iteration count
 	assert.Equal(t, 1, execCtx.Iteration())
 
-	// Verify parent event counts (1 iteration)
-	parentCounts := countEvents(execCtx)
-	assert.Equal(t, 1, parentCounts.BeforeIteration)
-	assert.Equal(t, 1, parentCounts.AfterIteration)
-	assert.Equal(t, 0, parentCounts.BeforeModelCall) // Parent doesn't call models
-	assert.Equal(t, 0, parentCounts.AfterModelCall)
+	// Verify parent events (deterministic order)
+	expectedParentEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{
+				Action: gent.LATerminate,
+				Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+			}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 1},
+			TerminationReason: gent.TerminationSuccess},
+	}
+	assert.Equal(t, expectedParentEvents, collectEvents(execCtx))
 
-	// Verify child event counts (5 children, each with 1 model call)
-	allCounts := countEventsWithChildren(execCtx)
-	assert.Equal(t, 1, allCounts.BeforeIteration)  // Only parent has iteration events
-	assert.Equal(t, 1, allCounts.AfterIteration)
-	assert.Equal(t, 5, allCounts.BeforeModelCall)  // 5 children each call model
-	assert.Equal(t, 5, allCounts.AfterModelCall)   // All 5 complete (no limit exceeded)
+	// Verify total events including children
+	// Child events may arrive in any order due to parallelism, so count by type
+	allEvents := collectEventsWithChildren(execCtx)
+	eventTypeCounts := countEventTypes(allEvents)
+
+	assert.Equal(t, 1, eventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 1, eventTypeCounts["BeforeIterationEvent"])
+	assert.Equal(t, 1, eventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, eventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 5, eventTypeCounts["BeforeModelCallEvent"])  // 5 children each call model
+	assert.Equal(t, 5, eventTypeCounts["AfterModelCallEvent"])   // All 5 complete
+
+	// Verify each child event has the correct model and tokens
+	for _, e := range allEvents {
+		if afterModel, ok := e.(*gent.AfterModelCallEvent); ok {
+			assert.Equal(t, "child-model", afterModel.Model)
+			assert.Equal(t, 500, afterModel.InputTokens)
+			assert.Equal(t, 0, afterModel.OutputTokens)
+		}
+	}
 }
 
 func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
@@ -601,25 +1168,48 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 	assert.Equal(t, 2, iterCount)
 	assert.Equal(t, 2, execCtx.Iteration())
 
-	// Verify parent event counts (2 iterations)
-	parentCounts := countEvents(execCtx)
-	assert.Equal(t, 2, parentCounts.BeforeIteration)
-	assert.Equal(t, 2, parentCounts.AfterIteration)
+	// Verify parent events - LimitExceededEvent is published on parent when children exceed limits
+	// Since limit is exceeded during iteration 2 by children (parallel), order is:
+	// BeforeExecution -> BeforeIteration(1) -> AfterIteration(1) ->
+	// BeforeIteration(2) -> LimitExceeded -> AfterIteration(2) -> AfterExecution
+	parentEvents := collectEvents(execCtx)
+	parentEventTypeCounts := countEventTypes(parentEvents)
 
-	// Verify child event counts
-	// Iter 1: 5 children * (BeforeModelCall + AfterModelCall) = 10 events
-	// Iter 2: 5 children start, but limit exceeded after some AfterModelCall events
-	// The exact number depends on timing, but:
-	// - All 10 BeforeModelCall should fire (5 per iteration)
-	// - Iter 1: 5 AfterModelCall (1000 tokens)
-	// - Iter 2: At least 3 AfterModelCall needed to exceed 1500 (1000 + 600 > 1500)
-	allCounts := countEventsWithChildren(execCtx)
-	assert.Equal(t, 2, allCounts.BeforeIteration)
-	assert.Equal(t, 2, allCounts.AfterIteration)
-	assert.Equal(t, 10, allCounts.BeforeModelCall) // 5 children * 2 iterations
+	assert.Equal(t, 1, parentEventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 2, parentEventTypeCounts["BeforeIterationEvent"])
+	assert.Equal(t, 2, parentEventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, parentEventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 1, parentEventTypeCounts["LimitExceededEvent"])
+
+	// Verify LimitExceededEvent on parent has correct data
+	for _, e := range parentEvents {
+		if limitEvent, ok := e.(*gent.LimitExceededEvent); ok {
+			assert.Equal(t, 2, limitEvent.Iteration)
+			assert.Equal(t, gent.KeyInputTokens, limitEvent.Limit.Key)
+			assert.Equal(t, 1500.0, limitEvent.Limit.MaxValue)
+			assert.Greater(t, limitEvent.CurrentValue, 1500.0)
+			assert.Equal(t, gent.KeyInputTokens, limitEvent.MatchedKey)
+		}
+		if afterExec, ok := e.(*gent.AfterExecutionEvent); ok {
+			assert.Equal(t, gent.TerminationLimitExceeded, afterExec.TerminationReason)
+		}
+	}
+
+	// Verify total events including children
+	// Child events may arrive in any order due to parallelism, so count by type
+	allEvents := collectEventsWithChildren(execCtx)
+	eventTypeCounts := countEventTypes(allEvents)
+
+	assert.Equal(t, 1, eventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 2, eventTypeCounts["BeforeIterationEvent"])
+	assert.Equal(t, 2, eventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, eventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 10, eventTypeCounts["BeforeModelCallEvent"]) // 5 children * 2 iterations
 	// AfterModelCall: 5 from iter 1 + some from iter 2 (at least 3 to trigger limit)
-	assert.GreaterOrEqual(t, allCounts.AfterModelCall, 8) // At least 5 + 3
-	assert.LessOrEqual(t, allCounts.AfterModelCall, 10)   // At most all 10
+	assert.GreaterOrEqual(t, eventTypeCounts["AfterModelCallEvent"], 8) // At least 5 + 3
+	assert.LessOrEqual(t, eventTypeCounts["AfterModelCallEvent"], 10)   // At most all 10
+	// LimitExceededEvent should be present exactly once (on parent)
+	assert.Equal(t, 1, eventTypeCounts["LimitExceededEvent"])
 }
 
 // -----------------------------------------------------------------------------
@@ -673,17 +1263,48 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 	assert.Equal(t, 3, callCount)
 	assert.Equal(t, 3, execCtx.Iteration())
 
-	// Verify parent event counts
-	parentCounts := countEvents(execCtx)
-	assert.Equal(t, 3, parentCounts.BeforeIteration)
-	assert.Equal(t, 3, parentCounts.AfterIteration)
+	// Verify parent events - LimitExceededEvent is published on parent during iteration 3
+	// Order: BeforeExecution -> iter1 -> iter2 -> BeforeIter3 -> LimitExceeded -> AfterIter3 ->
+	// AfterExecution
+	expectedParentEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 3},
+			Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1200},
+			CurrentValue: 1500, MatchedKey: gent.KeyInputTokens},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+			TerminationReason: gent.TerminationLimitExceeded},
+	}
+	assert.Equal(t, expectedParentEvents, collectEvents(execCtx))
 
-	// Verify child event counts (3 children, each with 1 model call)
-	allCounts := countEventsWithChildren(execCtx)
-	assert.Equal(t, 3, allCounts.BeforeIteration)
-	assert.Equal(t, 3, allCounts.AfterIteration)
-	assert.Equal(t, 3, allCounts.BeforeModelCall)
-	assert.Equal(t, 3, allCounts.AfterModelCall) // All 3 complete, limit on 3rd
+	// Verify total events including children (serial, so deterministic order)
+	allEvents := collectEventsWithChildren(execCtx)
+	eventTypeCounts := countEventTypes(allEvents)
+
+	assert.Equal(t, 1, eventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 3, eventTypeCounts["BeforeIterationEvent"])
+	assert.Equal(t, 3, eventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, eventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 3, eventTypeCounts["BeforeModelCallEvent"])  // 3 children, 1 model call each
+	assert.Equal(t, 3, eventTypeCounts["AfterModelCallEvent"])   // All 3 complete, limit on 3rd
+	assert.Equal(t, 1, eventTypeCounts["LimitExceededEvent"])
 }
 
 // -----------------------------------------------------------------------------
@@ -746,20 +1367,45 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 	assert.Equal(t, 4, iterCount)
 	assert.Equal(t, 4, execCtx.Iteration())
 
-	// Verify parent event counts
-	parentCounts := countEvents(execCtx)
-	assert.Equal(t, 4, parentCounts.BeforeIteration)
-	assert.Equal(t, 4, parentCounts.AfterIteration)
+	// Verify parent events - LimitExceededEvent is published on parent when children exceed limits
+	// Since children run in parallel, exact position of LimitExceededEvent may vary within iter 4
+	parentEvents := collectEvents(execCtx)
+	parentEventTypeCounts := countEventTypes(parentEvents)
 
-	// Verify child event counts
-	// 4 iterations * 3 children = 12 total children
-	allCounts := countEventsWithChildren(execCtx)
-	assert.Equal(t, 4, allCounts.BeforeIteration)
-	assert.Equal(t, 4, allCounts.AfterIteration)
-	assert.Equal(t, 12, allCounts.BeforeModelCall) // 3 children * 4 iterations
+	assert.Equal(t, 1, parentEventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 4, parentEventTypeCounts["BeforeIterationEvent"])
+	assert.Equal(t, 4, parentEventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, parentEventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 1, parentEventTypeCounts["LimitExceededEvent"])
+
+	// Verify parent event sequence (iteration order is deterministic, LimitExceeded is in iter 4)
+	for _, e := range parentEvents {
+		if limitEvent, ok := e.(*gent.LimitExceededEvent); ok {
+			assert.Equal(t, 4, limitEvent.Iteration)
+			assert.Equal(t, gent.KeyInputTokens, limitEvent.Limit.Key)
+			assert.Equal(t, 1000.0, limitEvent.Limit.MaxValue)
+			assert.Greater(t, limitEvent.CurrentValue, 1000.0)
+			assert.Equal(t, gent.KeyInputTokens, limitEvent.MatchedKey)
+		}
+		if afterExec, ok := e.(*gent.AfterExecutionEvent); ok {
+			assert.Equal(t, gent.TerminationLimitExceeded, afterExec.TerminationReason)
+		}
+	}
+
+	// Verify total events including children
+	// Child events may arrive in any order due to parallelism, so count by type
+	allEvents := collectEventsWithChildren(execCtx)
+	eventTypeCounts := countEventTypes(allEvents)
+
+	assert.Equal(t, 1, eventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 4, eventTypeCounts["BeforeIterationEvent"])
+	assert.Equal(t, 4, eventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, eventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 12, eventTypeCounts["BeforeModelCallEvent"]) // 3 children * 4 iterations
 	// AfterModelCall: iter 1-3 complete (9), iter 4 partial (at least 1 to exceed 1000)
-	assert.GreaterOrEqual(t, allCounts.AfterModelCall, 10) // At least 9 + 1
-	assert.LessOrEqual(t, allCounts.AfterModelCall, 12)    // At most all 12
+	assert.GreaterOrEqual(t, eventTypeCounts["AfterModelCallEvent"], 10) // At least 9 + 1
+	assert.LessOrEqual(t, eventTypeCounts["AfterModelCallEvent"], 12)    // At most all 12
+	assert.Equal(t, 1, eventTypeCounts["LimitExceededEvent"])
 }
 
 // -----------------------------------------------------------------------------
@@ -826,12 +1472,30 @@ func TestLimits_EdgeCase_ZeroMaxValue(t *testing.T) {
 	assert.Equal(t, 1, loop.GetCalls())
 	assert.Equal(t, 1, execCtx.Iteration())
 
-	// Verify event counts
-	counts := countEvents(execCtx)
-	assert.Equal(t, 1, counts.BeforeIteration)
-	assert.Equal(t, 1, counts.AfterIteration)
-	assert.Equal(t, 1, counts.BeforeModelCall)
-	assert.Equal(t, 1, counts.AfterModelCall) // Limit exceeded on this event
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "test-model",
+			InputTokens: 100, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 0}}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 1},
+			Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 0},
+			CurrentValue: 100, MatchedKey: gent.KeyInputTokens},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 1},
+			TerminationReason: gent.TerminationLimitExceeded},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_EdgeCase_ExactlyAtLimit(t *testing.T) {
@@ -856,13 +1520,43 @@ func TestLimits_EdgeCase_ExactlyAtLimit(t *testing.T) {
 	assert.Nil(t, result.ExceededLimit)
 	assert.Equal(t, int64(1000), execCtx.Stats().GetTotalInputTokens())
 
-	// Verify iteration and event counts
+	// Verify iteration count
 	assert.Equal(t, 2, execCtx.Iteration())
-	counts := countEvents(execCtx)
-	assert.Equal(t, 2, counts.BeforeIteration)
-	assert.Equal(t, 2, counts.AfterIteration)
-	assert.Equal(t, 2, counts.BeforeModelCall)
-	assert.Equal(t, 2, counts.AfterModelCall) // Both complete, no limit exceeded
+
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "test-model",
+			InputTokens: 500, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 500, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 2}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 2}, Model: "test-model",
+			InputTokens: 500, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: 500, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{
+				Action: gent.LATerminate,
+				Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+			}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 2},
+			TerminationReason: gent.TerminationSuccess},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
@@ -890,15 +1584,36 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	// First limit in the list should be the one reported
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
 
-	// Verify iteration and event counts
+	// Verify iteration count
 	// Both input (1000) and output (1000) tokens exceed their limits (500) on first iteration
 	assert.Equal(t, 1, loop.GetCalls())
 	assert.Equal(t, 1, execCtx.Iteration())
-	counts := countEvents(execCtx)
-	assert.Equal(t, 1, counts.BeforeIteration)
-	assert.Equal(t, 1, counts.AfterIteration)
-	assert.Equal(t, 1, counts.BeforeModelCall)
-	assert.Equal(t, 1, counts.AfterModelCall) // Limit exceeded on this event
+
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "test-model",
+			InputTokens: 1000, OutputTokens: 1000,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 1000, OutputTokens: 1000}}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 1},
+			Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 500},
+			CurrentValue: 1000, MatchedKey: gent.KeyInputTokens},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 1},
+			TerminationReason: gent.TerminationLimitExceeded},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_EdgeCase_ContextAlreadyCancelled(t *testing.T) {
@@ -921,6 +1636,16 @@ func TestLimits_EdgeCase_ContextAlreadyCancelled(t *testing.T) {
 	assert.Equal(t, gent.TerminationContextCanceled, result.TerminationReason)
 	assert.Nil(t, result.ExceededLimit)
 	assert.Equal(t, 0, loop.GetCalls()) // No iterations should have run
+
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 0},
+			TerminationReason: gent.TerminationContextCanceled},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 // -----------------------------------------------------------------------------
@@ -954,6 +1679,53 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.Equal(t, gent.KeyFormatParseErrorConsecutive, result.ExceededLimit.Key)
 	assert.Equal(t, 4, errorCount) // 4 errors exceed the limit of 3
+
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 1},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid content"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 2},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid content"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 3},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid content"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 4}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 4},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid content"},
+		&gent.LimitExceededEvent{
+			BaseEvent: gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 4},
+			Limit: gent.Limit{
+				Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 3},
+			CurrentValue: 4, MatchedKey: gent.KeyFormatParseErrorConsecutive},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 4},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 4},
+			TerminationReason: gent.TerminationLimitExceeded},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
@@ -983,6 +1755,45 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.Equal(t, gent.KeyToolchainParseErrorConsecutive, result.ExceededLimit.Key)
 	assert.Equal(t, 3, errorCount) // 3 errors exceed the limit of 2
+
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 1},
+			ErrorType: gent.ParseErrorTypeToolchain, RawContent: "invalid yaml"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 2},
+			ErrorType: gent.ParseErrorTypeToolchain, RawContent: "invalid yaml"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 3},
+			ErrorType: gent.ParseErrorTypeToolchain, RawContent: "invalid yaml"},
+		&gent.LimitExceededEvent{
+			BaseEvent: gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 3},
+			Limit: gent.Limit{
+				Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
+			CurrentValue: 3, MatchedKey: gent.KeyToolchainParseErrorConsecutive},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+			TerminationReason: gent.TerminationLimitExceeded},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
@@ -1029,6 +1840,84 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 	// Total errors should be 5 (iterations 1, 3, 5, 7, 9)
 	stats := execCtx.Stats()
 	assert.Equal(t, int64(5), stats.GetFormatParseErrorTotal())
+
+	// Verify events - parse errors occur on odd iterations (1, 3, 5, 7, 9)
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 1},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 3},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 4}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 4},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 5}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 5},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 5},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 6}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 6},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 7}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 7},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 7},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 8}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 8},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 9}},
+		&gent.ParseErrorEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameParseError, Iteration: 9},
+			ErrorType: gent.ParseErrorTypeFormat, RawContent: "invalid"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 9},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 10}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 10},
+			Result: &gent.AgentLoopResult{
+				Action: gent.LATerminate,
+				Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+			}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 10},
+			TerminationReason: gent.TerminationSuccess},
+	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 // -----------------------------------------------------------------------------
@@ -1367,20 +2256,55 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 	assert.Equal(t, int64(100), stats.GetCounter(gent.KeyInputTokensFor+"parent-model"))
 	assert.Equal(t, int64(200), stats.GetCounter(gent.KeyInputTokensFor+"child-model"))
 
-	// Verify iteration and event counts
+	// Verify iteration count
 	assert.Equal(t, 1, execCtx.Iteration())
-	parentCounts := countEvents(execCtx)
-	assert.Equal(t, 1, parentCounts.BeforeIteration)
-	assert.Equal(t, 1, parentCounts.AfterIteration)
-	assert.Equal(t, 1, parentCounts.BeforeModelCall)  // Parent's model call
-	assert.Equal(t, 1, parentCounts.AfterModelCall)
 
-	// Verify total event counts (parent + child)
-	allCounts := countEventsWithChildren(execCtx)
-	assert.Equal(t, 1, allCounts.BeforeIteration)    // Only parent has iterations
-	assert.Equal(t, 1, allCounts.AfterIteration)
-	assert.Equal(t, 2, allCounts.BeforeModelCall)    // Parent + child
-	assert.Equal(t, 2, allCounts.AfterModelCall)     // Both complete
+	// Verify parent events (deterministic order)
+	expectedParentEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "parent-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "parent-model",
+			InputTokens: 100, OutputTokens: 50,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 100, OutputTokens: 50}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{
+				Action: gent.LATerminate,
+				Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+			}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 1},
+			TerminationReason: gent.TerminationSuccess},
+	}
+	assert.Equal(t, expectedParentEvents, collectEvents(execCtx))
+
+	// Verify total events including children
+	allEvents := collectEventsWithChildren(execCtx)
+	eventTypeCounts := countEventTypes(allEvents)
+
+	assert.Equal(t, 1, eventTypeCounts["BeforeExecutionEvent"])
+	assert.Equal(t, 1, eventTypeCounts["BeforeIterationEvent"]) // Only parent has iterations
+	assert.Equal(t, 1, eventTypeCounts["AfterIterationEvent"])
+	assert.Equal(t, 1, eventTypeCounts["AfterExecutionEvent"])
+	assert.Equal(t, 2, eventTypeCounts["BeforeModelCallEvent"]) // Parent + child
+	assert.Equal(t, 2, eventTypeCounts["AfterModelCallEvent"])  // Both complete
+
+	// Verify child events have correct data
+	childModelCallCount := 0
+	for _, e := range allEvents {
+		if afterModel, ok := e.(*gent.AfterModelCallEvent); ok && afterModel.Model == "child-model" {
+			childModelCallCount++
+			assert.Equal(t, 200, afterModel.InputTokens)
+			assert.Equal(t, 100, afterModel.OutputTokens)
+		}
+	}
+	assert.Equal(t, 1, childModelCallCount)
 }
 
 // -----------------------------------------------------------------------------
@@ -1404,20 +2328,39 @@ func TestLimits_LimitExceededEvent_PublishedOnIterationLimit(t *testing.T) {
 	result := execCtx.Result()
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 
-	// Find LimitExceededEvent
-	var limitEvent *gent.LimitExceededEvent
-	for _, event := range execCtx.Events() {
-		if e, ok := event.(*gent.LimitExceededEvent); ok {
-			limitEvent = e
-			break
-		}
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 4}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 4},
+			Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 3},
+			CurrentValue: 4, MatchedKey: gent.KeyIterations},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 4},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 4},
+			TerminationReason: gent.TerminationLimitExceeded},
 	}
-
-	assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
-	assert.Equal(t, gent.KeyIterations, limitEvent.Limit.Key)
-	assert.Equal(t, 3.0, limitEvent.Limit.MaxValue)
-	assert.Equal(t, 4.0, limitEvent.CurrentValue) // 4 > 3
-	assert.Equal(t, gent.KeyIterations, limitEvent.MatchedKey)
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
@@ -1442,20 +2385,55 @@ func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
 
-	// Find LimitExceededEvent
-	var limitEvent *gent.LimitExceededEvent
-	for _, event := range execCtx.Events() {
-		if e, ok := event.(*gent.LimitExceededEvent); ok {
-			limitEvent = e
-			break
-		}
+	// Verify events
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "test-model",
+			InputTokens: 500, OutputTokens: 100,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 500, OutputTokens: 100}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 2}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 2}, Model: "test-model",
+			InputTokens: 500, OutputTokens: 100,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 500, OutputTokens: 100}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 3}, Model: "test-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 3}, Model: "test-model",
+			InputTokens: 500, OutputTokens: 100,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 500, OutputTokens: 100}}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 3},
+			Limit:        gent.Limit{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
+			CurrentValue: 1500, MatchedKey: gent.KeyInputTokens},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+			TerminationReason: gent.TerminationLimitExceeded},
 	}
-
-	assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
-	assert.Equal(t, gent.KeyInputTokens, limitEvent.Limit.Key)
-	assert.Equal(t, 1000.0, limitEvent.Limit.MaxValue)
-	assert.Equal(t, 1500.0, limitEvent.CurrentValue) // 3 iterations * 500 = 1500 > 1000
-	assert.Equal(t, gent.KeyInputTokens, limitEvent.MatchedKey)
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) {
@@ -1487,20 +2465,81 @@ func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) 
 
 	exec.Execute(execCtx)
 
-	// Find LimitExceededEvent
-	var limitEvent *gent.LimitExceededEvent
-	for _, event := range execCtx.Events() {
-		if e, ok := event.(*gent.LimitExceededEvent); ok {
-			limitEvent = e
-			break
-		}
+	// Verify events
+	// expensive-model: 1000 on iterations 1, 3, 5 -> 3000 > 2500 (limit on iter 5)
+	// cheap-model: 100 on iterations 2, 4 -> 200
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 1}, Model: "expensive-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 1}, Model: "expensive-model",
+			InputTokens: 1000, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 1000, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 2}, Model: "cheap-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 2}, Model: "cheap-model",
+			InputTokens: 100, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 100, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 3}, Model: "expensive-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 3}, Model: "expensive-model",
+			InputTokens: 1000, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 1000, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 4}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 4}, Model: "cheap-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 4}, Model: "cheap-model",
+			InputTokens: 100, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 100, OutputTokens: 0}}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 4},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 5}},
+		&gent.BeforeModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallBefore, Iteration: 5}, Model: "expensive-model"},
+		&gent.AfterModelCallEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameModelCallAfter, Iteration: 5}, Model: "expensive-model",
+			InputTokens: 1000, OutputTokens: 0,
+			Response: &gent.ContentResponse{Info: &gent.GenerationInfo{
+				InputTokens: 1000, OutputTokens: 0}}},
+		&gent.LimitExceededEvent{
+			BaseEvent:    gent.BaseEvent{EventName: gent.EventNameLimitExceeded, Iteration: 5},
+			Limit:        gent.Limit{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 2500},
+			CurrentValue: 3000, MatchedKey: gent.KeyInputTokensFor + "expensive-model"},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 5},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 5},
+			TerminationReason: gent.TerminationLimitExceeded},
 	}
-
-	assert.NotNil(t, limitEvent, "LimitExceededEvent should be published")
-	assert.Equal(t, gent.KeyInputTokensFor, limitEvent.Limit.Key)
-	// The matched key should be the specific model that exceeded
-	assert.Equal(t, gent.KeyInputTokensFor+"expensive-model", limitEvent.MatchedKey)
-	assert.Equal(t, 3000.0, limitEvent.CurrentValue) // 3 calls * 1000 = 3000 > 2500
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
 
 func TestLimits_LimitExceededEvent_NotPublishedOnSuccess(t *testing.T) {
@@ -1520,9 +2559,31 @@ func TestLimits_LimitExceededEvent_NotPublishedOnSuccess(t *testing.T) {
 	result := execCtx.Result()
 	assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
 
-	// Verify no LimitExceededEvent
-	for _, event := range execCtx.Events() {
-		_, isLimitExceeded := event.(*gent.LimitExceededEvent)
-		assert.False(t, isLimitExceeded, "LimitExceededEvent should not be published on success")
+	// Verify events - no LimitExceededEvent should be present
+	expectedEvents := []gent.Event{
+		&gent.BeforeExecutionEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameExecutionBefore, Iteration: 0}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 1}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 1},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 2}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 2},
+			Result: &gent.AgentLoopResult{Action: gent.LAContinue}},
+		&gent.BeforeIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationBefore, Iteration: 3}},
+		&gent.AfterIterationEvent{BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameIterationAfter, Iteration: 3},
+			Result: &gent.AgentLoopResult{
+				Action: gent.LATerminate,
+				Result: []gent.ContentPart{llms.TextContent{Text: "done"}},
+			}},
+		&gent.AfterExecutionEvent{
+			BaseEvent:         gent.BaseEvent{EventName: gent.EventNameExecutionAfter, Iteration: 3},
+			TerminationReason: gent.TerminationSuccess},
 	}
+	assert.Equal(t, expectedEvents, collectEvents(execCtx))
 }
