@@ -1,5 +1,38 @@
 package executor_test
 
+// =============================================================================
+// EXECUTOR LIMIT TESTS - RELATIONSHIP WITH AGENT TESTS
+// =============================================================================
+//
+// These tests verify the executor's limit-checking machinery works correctly:
+// - Basic limit mechanisms (counters, gauges, prefix matching)
+// - Context hierarchy (parallel/serial children, stats propagation)
+// - Edge cases (zero limits, empty limits, context cancellation)
+//
+// IMPORTANT: Each agent implementation has its own exhaustive limit tests.
+// See: agents/react/agent_executor_limits_test.go
+// See: agents/AGENT_LIMIT_TEST.md for the agent test standards.
+//
+// WHY SEPARATE TESTS?
+// Agents can have complex execution flows - tool calls, format parsing,
+// termination parsing, validators, child agent spawning, etc. Each agent
+// must thoroughly test that its specific execution paths correctly increment
+// stats and trigger limits. The executor tests here only prove the underlying
+// mechanism works; agent tests prove each agent uses it correctly.
+//
+// WHEN ADDING A NEW STAT:
+// 1. Add exhaustive tests to the agent's test file (e.g., agent_executor_limits_test.go)
+// 2. DO NOT add tests here - the executor already proves the mechanism works
+// 3. Exception: Only add tests here if introducing a new MECHANISM (new limit type,
+//    new storage type, new propagation behavior)
+//
+// WHEN ADDING A NEW AGENT:
+// 1. Create <agent>_executor_limits_test.go in the agent's package
+// 2. Follow standards in agents/AGENT_LIMIT_TEST.md
+// 3. Test all stats the agent can increment
+//
+// =============================================================================
+
 import (
 	"context"
 	"errors"
