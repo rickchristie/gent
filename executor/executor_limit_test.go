@@ -19,6 +19,9 @@ import (
 // errContextCanceled is returned when context is canceled during model call.
 var errContextCanceled = errors.New("context canceled during model call")
 
+// mockObservation is the NextPrompt returned by mockAgentLoop.Next() for Continue results.
+const mockObservation = "mock observation"
+
 // simulateModelCall simulates a real model call with proper event publishing.
 // It publishes BeforeModelCall, checks for context cancellation, then publishes AfterModelCall.
 // Returns error if context is canceled before AfterModelCall can be published.
@@ -124,7 +127,7 @@ func (m *mockAgentLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopRes
 		return tt.Terminate("done"), nil
 	}
 
-	return tt.Continue(), nil
+	return tt.ContinueWithPrompt(mockObservation), nil
 }
 
 func (m *mockAgentLoop) GetCalls() int {
@@ -171,20 +174,20 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 3),
-					tt.AfterIter(0, 3, tt.Continue()),
+					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 4),
-					tt.AfterIter(0, 4, tt.Continue()),
+					tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 5),
-					tt.AfterIter(0, 5, tt.Continue()),
+					tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 6),
 					tt.LimitExceeded(0, 6,
 						tt.ExactLimit(gent.KeyIterations, 5),
 						6, gent.KeyIterations),
-					tt.AfterIter(0, 6, tt.Continue()),
+					tt.AfterIter(0, 6, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 6, gent.TerminationLimitExceeded),
 				},
 			},
@@ -203,12 +206,12 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
 					tt.LimitExceeded(0, 2,
 						tt.ExactLimit(gent.KeyIterations, 1),
 						2, gent.KeyIterations),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
 				},
 			},
@@ -227,30 +230,30 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 3),
-					tt.AfterIter(0, 3, tt.Continue()),
+					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 4),
-					tt.AfterIter(0, 4, tt.Continue()),
+					tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 5),
-					tt.AfterIter(0, 5, tt.Continue()),
+					tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 6),
-					tt.AfterIter(0, 6, tt.Continue()),
+					tt.AfterIter(0, 6, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 7),
-					tt.AfterIter(0, 7, tt.Continue()),
+					tt.AfterIter(0, 7, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 8),
-					tt.AfterIter(0, 8, tt.Continue()),
+					tt.AfterIter(0, 8, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 9),
-					tt.AfterIter(0, 9, tt.Continue()),
+					tt.AfterIter(0, 9, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 10),
-					tt.AfterIter(0, 10, tt.Continue()),
+					tt.AfterIter(0, 10, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 11),
 					tt.LimitExceeded(0, 11,
 						tt.ExactLimit(gent.KeyIterations, 10),
 						11, gent.KeyIterations),
-					tt.AfterIter(0, 11, tt.Continue()),
+					tt.AfterIter(0, 11, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 11, gent.TerminationLimitExceeded),
 				},
 			},
@@ -311,9 +314,9 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 3),
 					tt.AfterIter(0, 3, tt.Terminate("done")),
 					tt.AfterExec(0, 3, gent.TerminationSuccess),
@@ -332,13 +335,13 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 3),
-					tt.AfterIter(0, 3, tt.Continue()),
+					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 4),
-					tt.AfterIter(0, 4, tt.Continue()),
+					tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 5),
 					tt.AfterIter(0, 5, tt.Terminate("done")),
 					tt.AfterExec(0, 5, gent.TerminationSuccess),
@@ -415,17 +418,17 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 					tt.BeforeIter(0, 1),
 					tt.BeforeModelCall(0, 1, "test-model"),
 					tt.AfterModelCall(0, 1, "test-model", 1000, 100),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
 					tt.BeforeModelCall(0, 2, "test-model"),
 					tt.AfterModelCall(0, 2, "test-model", 1000, 100),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 3),
 					tt.BeforeModelCall(0, 3, "test-model"),
 					tt.AfterModelCall(0, 3, "test-model", 1000, 100),
 					tt.LimitExceeded(0, 3,
 						tt.ExactLimit(gent.KeyInputTokens, 2500), 3000, gent.KeyInputTokens),
-					tt.AfterIter(0, 3, tt.Continue()),
+					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 				},
 			},
@@ -445,17 +448,17 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 					tt.BeforeIter(0, 1),
 					tt.BeforeModelCall(0, 1, "test-model"),
 					tt.AfterModelCall(0, 1, "test-model", 100, 500),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
 					tt.BeforeModelCall(0, 2, "test-model"),
 					tt.AfterModelCall(0, 2, "test-model", 100, 500),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 3),
 					tt.BeforeModelCall(0, 3, "test-model"),
 					tt.AfterModelCall(0, 3, "test-model", 100, 500),
 					tt.LimitExceeded(0, 3,
 						tt.ExactLimit(gent.KeyOutputTokens, 1200), 1500, gent.KeyOutputTokens),
-					tt.AfterIter(0, 3, tt.Continue()),
+					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 				},
 			},
@@ -474,13 +477,13 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 					tt.BeforeIter(0, 1),
 					tt.BeforeModelCall(0, 1, "test-model"),
 					tt.AfterModelCall(0, 1, "test-model", 1000, 1000),
-					tt.AfterIter(0, 1, tt.Continue()),
+					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
 					tt.BeforeModelCall(0, 2, "test-model"),
 					tt.AfterModelCall(0, 2, "test-model", 1000, 1000),
 					tt.LimitExceeded(0, 2,
 						tt.ExactLimit(gent.KeyInputTokens, 1500), 2000, gent.KeyInputTokens),
-					tt.AfterIter(0, 2, tt.Continue()),
+					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
 				},
 			},
@@ -541,7 +544,7 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -579,25 +582,25 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 		tt.BeforeIter(0, 1),
 		tt.BeforeModelCall(0, 1, "model-a"),
 		tt.AfterModelCall(0, 1, "model-a", 1000, 0),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
 		tt.BeforeModelCall(0, 2, "model-b"),
 		tt.AfterModelCall(0, 2, "model-b", 500, 0),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.BeforeModelCall(0, 3, "model-a"),
 		tt.AfterModelCall(0, 3, "model-a", 1000, 0),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 4),
 		tt.BeforeModelCall(0, 4, "model-b"),
 		tt.AfterModelCall(0, 4, "model-b", 500, 0),
-		tt.AfterIter(0, 4, tt.Continue()),
+		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 5),
 		tt.BeforeModelCall(0, 5, "model-a"),
 		tt.AfterModelCall(0, 5, "model-a", 1000, 0),
 		tt.LimitExceeded(0, 5,
 			tt.PrefixLimit(gent.KeyInputTokensFor, 2500), 3000, gent.KeyInputTokensFor+"model-a"),
-		tt.AfterIter(0, 5, tt.Continue()),
+		tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -711,7 +714,7 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 			}
 			wg.Wait()
 
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -807,7 +810,7 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 				return nil, err
 			}
 
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -843,13 +846,13 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 	expectedParentEvents := []gent.Event{
 		tt.BeforeExec(0, 0),
 		tt.BeforeIter(0, 1),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.LimitExceeded(0, 3,
 			tt.ExactLimit(gent.KeyInputTokens, 1200), 1500, gent.KeyInputTokens),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedParentEvents, tt.CollectLifecycleEvents(execCtx))
@@ -895,7 +898,7 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 			}
 			wg.Wait()
 
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1040,7 +1043,7 @@ func TestLimits_EdgeCase_ZeroMaxValue(t *testing.T) {
 		tt.AfterModelCall(0, 1, "test-model", 100, 0),
 		tt.LimitExceeded(0, 1,
 			tt.ExactLimit(gent.KeyInputTokens, 0), 100, gent.KeyInputTokens),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1077,7 +1080,7 @@ func TestLimits_EdgeCase_ExactlyAtLimit(t *testing.T) {
 		tt.BeforeIter(0, 1),
 		tt.BeforeModelCall(0, 1, "test-model"),
 		tt.AfterModelCall(0, 1, "test-model", 500, 0),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
 		tt.BeforeModelCall(0, 2, "test-model"),
 		tt.AfterModelCall(0, 2, "test-model", 500, 0),
@@ -1125,7 +1128,7 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 		tt.AfterModelCall(0, 1, "test-model", 1000, 1000),
 		tt.LimitExceeded(0, 1,
 			tt.ExactLimit(gent.KeyInputTokens, 500), 1000, gent.KeyInputTokens),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1171,7 +1174,7 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 			errorCount++
 			// Simulate format parse error
 			execCtx.PublishParseError(gent.ParseErrorTypeFormat, "invalid content", nil)
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1197,19 +1200,19 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 		tt.BeforeExec(0, 0),
 		tt.BeforeIter(0, 1),
 		tt.ParseError(0, 1, gent.ParseErrorTypeFormat, "invalid content"),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
 		tt.ParseError(0, 2, gent.ParseErrorTypeFormat, "invalid content"),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.ParseError(0, 3, gent.ParseErrorTypeFormat, "invalid content"),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 4),
 		tt.ParseError(0, 4, gent.ParseErrorTypeFormat, "invalid content"),
 		tt.LimitExceeded(0, 4,
 			tt.ExactLimit(gent.KeyFormatParseErrorConsecutive, 3), 4,
 			gent.KeyFormatParseErrorConsecutive),
-		tt.AfterIter(0, 4, tt.Continue()),
+		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1222,7 +1225,7 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 			errorCount++
 			// Simulate toolchain parse error
 			execCtx.PublishParseError(gent.ParseErrorTypeToolchain, "invalid yaml", nil)
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1248,16 +1251,16 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 		tt.BeforeExec(0, 0),
 		tt.BeforeIter(0, 1),
 		tt.ParseError(0, 1, gent.ParseErrorTypeToolchain, "invalid yaml"),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
 		tt.ParseError(0, 2, gent.ParseErrorTypeToolchain, "invalid yaml"),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.ParseError(0, 3, gent.ParseErrorTypeToolchain, "invalid yaml"),
 		tt.LimitExceeded(0, 3,
 			tt.ExactLimit(gent.KeyToolchainParseErrorConsecutive, 2), 3,
 			gent.KeyToolchainParseErrorConsecutive),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1280,7 +1283,7 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 			if callCount >= 10 {
 				return tt.Terminate("done"), nil
 			}
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1310,27 +1313,27 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 		tt.BeforeExec(0, 0),
 		tt.BeforeIter(0, 1),
 		tt.ParseError(0, 1, gent.ParseErrorTypeFormat, "invalid"),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.ParseError(0, 3, gent.ParseErrorTypeFormat, "invalid"),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 4),
-		tt.AfterIter(0, 4, tt.Continue()),
+		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 5),
 		tt.ParseError(0, 5, gent.ParseErrorTypeFormat, "invalid"),
-		tt.AfterIter(0, 5, tt.Continue()),
+		tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 6),
-		tt.AfterIter(0, 6, tt.Continue()),
+		tt.AfterIter(0, 6, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 7),
 		tt.ParseError(0, 7, gent.ParseErrorTypeFormat, "invalid"),
-		tt.AfterIter(0, 7, tt.Continue()),
+		tt.AfterIter(0, 7, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 8),
-		tt.AfterIter(0, 8, tt.Continue()),
+		tt.AfterIter(0, 8, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 9),
 		tt.ParseError(0, 9, gent.ParseErrorTypeFormat, "invalid"),
-		tt.AfterIter(0, 9, tt.Continue()),
+		tt.AfterIter(0, 9, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 10),
 		tt.AfterIter(0, 10, tt.Terminate("done")),
 		tt.AfterExec(0, 10, gent.TerminationSuccess),
@@ -1445,7 +1448,7 @@ func TestLimits_GaugeLimit_Exceeded(t *testing.T) {
 			loop := &mockAgentLoop{
 				nextFn: func(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 					execCtx.Stats().IncrGauge(tc.input.gaugeKey, tc.input.gaugeIncrement)
-					return tt.Continue(), nil
+					return tt.ContinueWithPrompt(mockObservation), nil
 				},
 			}
 			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1524,7 +1527,7 @@ func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
 					} else {
 						execCtx.Stats().IncrGauge(tc.input.gaugePrefix+"cheap", 0.01)
 					}
-					return tt.Continue(), nil
+					return tt.ContinueWithPrompt(mockObservation), nil
 				},
 			}
 			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1603,7 +1606,7 @@ func TestLimits_GaugeExactKey_NotExceededUntilOverThreshold(t *testing.T) {
 					if callCount >= tc.input.terminateAt {
 						return tt.Terminate("done"), nil
 					}
-					return tt.Continue(), nil
+					return tt.ContinueWithPrompt(mockObservation), nil
 				},
 			}
 			exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1730,14 +1733,14 @@ func TestLimits_LimitExceededEvent_PublishedOnIterationLimit(t *testing.T) {
 	expectedEvents := []gent.Event{
 		tt.BeforeExec(0, 0),
 		tt.BeforeIter(0, 1),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 4),
 		tt.LimitExceeded(0, 4, tt.ExactLimit(gent.KeyIterations, 3), 4, gent.KeyIterations),
-		tt.AfterIter(0, 4, tt.Continue()),
+		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1771,17 +1774,17 @@ func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
 		tt.BeforeIter(0, 1),
 		tt.BeforeModelCall(0, 1, "test-model"),
 		tt.AfterModelCall(0, 1, "test-model", 500, 100),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
 		tt.BeforeModelCall(0, 2, "test-model"),
 		tt.AfterModelCall(0, 2, "test-model", 500, 100),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.BeforeModelCall(0, 3, "test-model"),
 		tt.AfterModelCall(0, 3, "test-model", 500, 100),
 		tt.LimitExceeded(0, 3,
 			tt.ExactLimit(gent.KeyInputTokens, 1000), 1500, gent.KeyInputTokens),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1801,7 +1804,7 @@ func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) 
 			if err != nil {
 				return nil, err
 			}
-			return tt.Continue(), nil
+			return tt.ContinueWithPrompt(mockObservation), nil
 		},
 	}
 	exec := executor.New[*mockLoopData](loop, executor.DefaultConfig())
@@ -1824,26 +1827,26 @@ func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) 
 		tt.BeforeIter(0, 1),
 		tt.BeforeModelCall(0, 1, "expensive-model"),
 		tt.AfterModelCall(0, 1, "expensive-model", 1000, 0),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
 		tt.BeforeModelCall(0, 2, "cheap-model"),
 		tt.AfterModelCall(0, 2, "cheap-model", 100, 0),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.BeforeModelCall(0, 3, "expensive-model"),
 		tt.AfterModelCall(0, 3, "expensive-model", 1000, 0),
-		tt.AfterIter(0, 3, tt.Continue()),
+		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 4),
 		tt.BeforeModelCall(0, 4, "cheap-model"),
 		tt.AfterModelCall(0, 4, "cheap-model", 100, 0),
-		tt.AfterIter(0, 4, tt.Continue()),
+		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 5),
 		tt.BeforeModelCall(0, 5, "expensive-model"),
 		tt.AfterModelCall(0, 5, "expensive-model", 1000, 0),
 		tt.LimitExceeded(0, 5,
 			tt.PrefixLimit(gent.KeyInputTokensFor, 2500), 3000,
 			gent.KeyInputTokensFor+"expensive-model"),
-		tt.AfterIter(0, 5, tt.Continue()),
+		tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -1870,9 +1873,9 @@ func TestLimits_LimitExceededEvent_NotPublishedOnSuccess(t *testing.T) {
 	expectedEvents := []gent.Event{
 		tt.BeforeExec(0, 0),
 		tt.BeforeIter(0, 1),
-		tt.AfterIter(0, 1, tt.Continue()),
+		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 2),
-		tt.AfterIter(0, 2, tt.Continue()),
+		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.AfterIter(0, 3, tt.Terminate("done")),
 		tt.AfterExec(0, 3, gent.TerminationSuccess),

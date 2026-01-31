@@ -63,9 +63,8 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyIterations, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
@@ -73,6 +72,42 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 		assert.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, gent.KeyIterations, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 3, execCtx.Iteration()) // Attempted 3rd but stopped
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			// Execution starts
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool call succeeds
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: tool call succeeds
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: limit exceeded during BeforeIter stats update
+			tt.BeforeIter(0, 3),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyIterations),
+			// Agent continues despite cancelled context (mock doesn't check)
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Execution ends with limit exceeded
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 }
 
@@ -95,20 +130,46 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
-		}
+		limit := tt.ExactLimit(gent.KeyInputTokens, 1000)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyInputTokens, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: 500 input tokens (total: 500, <= 1000 OK)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 500, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: 600 input tokens (total: 1100 > 1000 EXCEEDED at AfterModelCall)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 600, 50),
+			tt.LimitExceeded(0, 2, limit, 1100, gent.KeyInputTokens),
+			// Agent continues despite cancelled context
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("stops when model-specific input token limit exceeded (prefix)", func(t *testing.T) {
 		// Test with two models: alpha (main agent) and beta (called by tool).
 		// Limit is set on gent:input_tokens:beta (via prefix gent:input_tokens:)
-		// Alpha uses 400 tokens (under limit), beta uses 600 (exceeds 500 limit)
+		// Alpha uses 600 tokens (under limit for beta), beta uses 600 (exceeds 500 limit)
 
 		// Model beta is called by the tool and exceeds the limit
 		modelBeta := tt.NewMockModel().WithName("beta").
@@ -136,9 +197,8 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		termination := tt.NewMockTermination()
 
 		// Limit on model-specific input tokens - only beta should trigger this
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor + "beta", MaxValue: 500},
-		}
+		limit := tt.PrefixLimit(gent.KeyInputTokensFor+"beta", 500)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
@@ -146,6 +206,37 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		require.NotNil(t, execCtx.ExceededLimit())
 		// Verify it was the beta model's tokens that triggered the limit
 		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "call_beta", "child response")
+
+		// Assert parent context events
+		expectedParentEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: alpha model call, then tool calls beta which exceeds limit
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "alpha"),
+			tt.AfterModelCall(0, 1, "alpha", 600, 50),
+			tt.BeforeToolCall(0, 1, "call_beta", nil),
+			// Limit exceeded propagates from child to parent during tool execution
+			tt.LimitExceeded(0, 1, limit, 600, gent.KeyInputTokensFor+"beta"),
+			tt.AfterToolCall(0, 1, "call_beta", nil, "child response", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		actualParentEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedParentEvents, actualParentEvents)
+
+		// Assert child context events (beta-call)
+		require.Len(t, execCtx.Children(), 1)
+		childCtx := execCtx.Children()[0]
+		expectedChildEvents := []gent.Event{
+			tt.BeforeModelCall(1, 0, "beta"),
+			tt.AfterModelCall(1, 0, "beta", 600, 50),
+			tt.LimitExceeded(1, 0, limit, 600, gent.KeyInputTokensFor+"beta"),
+		}
+		actualChildEvents := tt.CollectLifecycleEvents(childCtx)
+		tt.AssertEventsEqual(t, expectedChildEvents, actualChildEvents)
 	})
 
 	t.Run("exceeds limit at third iteration", func(t *testing.T) {
@@ -167,20 +258,51 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
-		}
+		limit := tt.ExactLimit(gent.KeyInputTokens, 1000)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyInputTokens, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 3, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: 300 tokens (total: 300 <= 1000)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 300, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: 300 tokens (total: 600 <= 1000)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 300, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: 500 tokens (total: 1100 > 1000 EXCEEDED at AfterModelCall)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 500, 50),
+			tt.LimitExceeded(0, 3, limit, 1100, gent.KeyInputTokens),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("prefix limit exceeds at third iteration", func(t *testing.T) {
 		// Model beta is called multiple times via tool, accumulating tokens
-		betaCallCount := 0
 		modelBeta := tt.NewMockModel().WithName("beta").
 			AddResponse("response1", 300, 50). // Call 1: 300 (total: 300)
 			AddResponse("response2", 300, 50). // Call 2: 300 (total: 600)
@@ -202,7 +324,6 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 			WithToolCtx("call_beta", func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
 				childCtx := execCtx.SpawnChild("beta-call", nil)
 				resp, err := modelBeta.GenerateContent(childCtx, "beta", "", nil)
-				betaCallCount++
 				if err != nil {
 					return "", err
 				}
@@ -210,9 +331,8 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor + "beta", MaxValue: 1000},
-		}
+		limit := tt.PrefixLimit(gent.KeyInputTokensFor+"beta", 1000)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
@@ -220,6 +340,71 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
 		assert.Equal(t, 3, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool executions
+		toolObs1 := tt.ToolObservation(format, toolChain, "call_beta", "response1")
+		toolObs2 := tt.ToolObservation(format, toolChain, "call_beta", "response2")
+		toolObs3 := tt.ToolObservation(format, toolChain, "call_beta", "response3")
+
+		// Assert parent context events
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: alpha call, then tool calls beta (child) -> 300 tokens (total: 300)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "alpha"),
+			tt.AfterModelCall(0, 1, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 1, "call_beta", nil),
+			tt.AfterToolCall(0, 1, "call_beta", nil, "response1", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs1)),
+			// Iteration 2: alpha call, then tool calls beta (child) -> 300 tokens (total: 600)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "alpha"),
+			tt.AfterModelCall(0, 2, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 2, "call_beta", nil),
+			tt.AfterToolCall(0, 2, "call_beta", nil, "response2", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs2)),
+			// Iteration 3: alpha call, then tool calls beta (child) -> 500 tokens (total: 1100 > 1000)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "alpha"),
+			tt.AfterModelCall(0, 3, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 3, "call_beta", nil),
+			// Limit exceeded propagates from child to parent
+			tt.LimitExceeded(0, 3, limit, 1100, gent.KeyInputTokensFor+"beta"),
+			tt.AfterToolCall(0, 3, "call_beta", nil, "response3", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs3)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
+
+		// Assert we have 3 child contexts (one per tool call)
+		require.Len(t, execCtx.Children(), 3)
+
+		// Child 1: beta call with 300 tokens (no limit exceeded)
+		child1Events := tt.CollectLifecycleEvents(execCtx.Children()[0])
+		expectedChild1 := []gent.Event{
+			tt.BeforeModelCall(1, 0, "beta"),
+			tt.AfterModelCall(1, 0, "beta", 300, 50),
+		}
+		tt.AssertEventsEqual(t, expectedChild1, child1Events)
+
+		// Child 2: beta call with 300 tokens (no limit exceeded)
+		child2Events := tt.CollectLifecycleEvents(execCtx.Children()[1])
+		expectedChild2 := []gent.Event{
+			tt.BeforeModelCall(1, 0, "beta"),
+			tt.AfterModelCall(1, 0, "beta", 300, 50),
+		}
+		tt.AssertEventsEqual(t, expectedChild2, child2Events)
+
+		// Child 3: beta call with 500 tokens
+		// Note: LimitExceeded is NOT on child - child's local stats are only 500 <= 1000
+		// The aggregated total of 1100 is only in the parent's stats
+		child3Events := tt.CollectLifecycleEvents(execCtx.Children()[2])
+		expectedChild3 := []gent.Event{
+			tt.BeforeModelCall(1, 0, "beta"),
+			tt.AfterModelCall(1, 0, "beta", 500, 50),
+		}
+		tt.AssertEventsEqual(t, expectedChild3, child3Events)
 	})
 }
 
@@ -238,14 +423,39 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1000},
-		}
+		limit := tt.ExactLimit(gent.KeyOutputTokens, 1000)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyOutputTokens, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: 500 output tokens (total: 500 <= 1000)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 500),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: 600 output tokens (total: 1100 > 1000 EXCEEDED)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 600),
+			tt.LimitExceeded(0, 2, limit, 1100, gent.KeyOutputTokens),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("stops when model-specific output token limit exceeded (prefix)", func(t *testing.T) {
@@ -279,9 +489,8 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		termination := tt.NewMockTermination()
 
 		// Limit on model-specific output tokens - only beta should trigger this
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyOutputTokensFor + "beta", MaxValue: 500},
-		}
+		limit := tt.PrefixLimit(gent.KeyOutputTokensFor+"beta", 500)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
@@ -289,6 +498,35 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		require.NotNil(t, execCtx.ExceededLimit())
 		// Verify it was the beta model's tokens that triggered the limit
 		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "call_beta", "child response")
+
+		// Assert parent context events
+		expectedParentEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "alpha"),
+			tt.AfterModelCall(0, 1, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 1, "call_beta", nil),
+			tt.LimitExceeded(0, 1, limit, 600, gent.KeyOutputTokensFor+"beta"),
+			tt.AfterToolCall(0, 1, "call_beta", nil, "child response", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		actualParentEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedParentEvents, actualParentEvents)
+
+		// Assert child context events
+		require.Len(t, execCtx.Children(), 1)
+		childCtx := execCtx.Children()[0]
+		expectedChildEvents := []gent.Event{
+			tt.BeforeModelCall(1, 0, "beta"),
+			tt.AfterModelCall(1, 0, "beta", 50, 600),
+			tt.LimitExceeded(1, 0, limit, 600, gent.KeyOutputTokensFor+"beta"),
+		}
+		actualChildEvents := tt.CollectLifecycleEvents(childCtx)
+		tt.AssertEventsEqual(t, expectedChildEvents, actualChildEvents)
 	})
 
 	t.Run("exceeds limit at third iteration", func(t *testing.T) {
@@ -310,15 +548,47 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1000},
-		}
+		limit := tt.ExactLimit(gent.KeyOutputTokens, 1000)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyOutputTokens, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 3, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: 300 output tokens (total: 300)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 50, 300),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: 300 output tokens (total: 600)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 50, 300),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: 500 output tokens (total: 1100 > 1000 EXCEEDED)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 50, 500),
+			tt.LimitExceeded(0, 3, limit, 1100, gent.KeyOutputTokens),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("prefix limit exceeds at third iteration", func(t *testing.T) {
@@ -351,9 +621,8 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyOutputTokensFor + "beta", MaxValue: 1000},
-		}
+		limit := tt.PrefixLimit(gent.KeyOutputTokensFor+"beta", 1000)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
@@ -361,6 +630,58 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
 		assert.Equal(t, 3, execCtx.Iteration())
+
+		// Build expected NextPrompts for tool executions
+		toolObs1 := tt.ToolObservation(format, toolChain, "call_beta", "response1")
+		toolObs2 := tt.ToolObservation(format, toolChain, "call_beta", "response2")
+		toolObs3 := tt.ToolObservation(format, toolChain, "call_beta", "response3")
+
+		// Assert parent context events
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: beta 300 output tokens (total: 300)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "alpha"),
+			tt.AfterModelCall(0, 1, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 1, "call_beta", nil),
+			tt.AfterToolCall(0, 1, "call_beta", nil, "response1", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs1)),
+			// Iteration 2: beta 300 output tokens (total: 600)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "alpha"),
+			tt.AfterModelCall(0, 2, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 2, "call_beta", nil),
+			tt.AfterToolCall(0, 2, "call_beta", nil, "response2", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs2)),
+			// Iteration 3: beta 500 output tokens (total: 1100 > 1000 EXCEEDED)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "alpha"),
+			tt.AfterModelCall(0, 3, "alpha", 100, 50),
+			tt.BeforeToolCall(0, 3, "call_beta", nil),
+			tt.LimitExceeded(0, 3, limit, 1100, gent.KeyOutputTokensFor+"beta"),
+			tt.AfterToolCall(0, 3, "call_beta", nil, "response3", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs3)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
+
+		// Assert 3 child contexts
+		require.Len(t, execCtx.Children(), 3)
+
+		// Child 1-2: no limit exceeded (local stats under limit)
+		for i := 0; i < 2; i++ {
+			childEvents := tt.CollectLifecycleEvents(execCtx.Children()[i])
+			assert.Len(t, childEvents, 2, "child %d should have 2 events", i)
+		}
+
+		// Child 3: no limit exceeded (local stats 500 <= 1000, only parent aggregated exceeds)
+		child3Events := tt.CollectLifecycleEvents(execCtx.Children()[2])
+		expectedChild3 := []gent.Event{
+			tt.BeforeModelCall(1, 0, "beta"),
+			tt.AfterModelCall(1, 0, "beta", 50, 500),
+		}
+		tt.AssertEventsEqual(t, expectedChild3, child3Events)
 	})
 }
 
@@ -385,26 +706,58 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCalls, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCalls, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolCalls, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		// Tool calls limit is checked during BeforeToolCall stats update
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool call 1 (1 <= 2 OK)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: tool call 2 (2 <= 2 OK)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: tool call 3 (3 > 2 EXCEEDED at BeforeToolCall)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyToolCalls),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("stops when tool-specific call limit exceeded (prefix)", func(t *testing.T) {
 		// Two tools: search and get_detail
-		// search is called 3 times (exceeds first), but limit is only on get_detail
-		// get_detail is called twice, with limit of 1
+		// search is called 3 times (no limit), get_detail has limit of 1
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50).
 			AddResponse("<action>tool: search</action>", 100, 50). // search: 3 calls (no limit)
 			AddResponse("<action>tool: get_detail</action>", 100, 50).
-			AddResponse("<action>tool: get_detail</action>", 100, 50). // get_detail: 2 calls (limit 1)
+			AddResponse("<action>tool: get_detail</action>", 100, 50). // get_detail: 2nd call exceeds
 			AddResponse("<answer>done</answer>", 100, 50)
 
 		format := tt.NewMockFormat().
@@ -419,9 +772,8 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		termination := tt.NewMockTermination()
 
 		// Only limit get_detail to 1 call
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsFor + "get_detail", MaxValue: 1},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsFor+"get_detail", 1)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
@@ -429,6 +781,54 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Contains(t, execCtx.ExceededLimit().Key, "get_detail")
 		assert.Equal(t, 5, execCtx.Iteration()) // Fails on 5th iteration (2nd get_detail call)
+
+		// Build expected NextPrompts for tool executions
+		searchObs := tt.ToolObservation(format, toolChain, "search", "tool executed")
+		getDetailObs := tt.ToolObservation(format, toolChain, "get_detail", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iterations 1-3: search calls (no limit)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "search", nil),
+			tt.AfterToolCall(0, 1, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(searchObs)),
+
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "search", nil),
+			tt.AfterToolCall(0, 2, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(searchObs)),
+
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "search", nil),
+			tt.AfterToolCall(0, 3, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(searchObs)),
+			// Iteration 4: get_detail call 1 (1 <= 1 OK)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "get_detail", nil),
+			tt.AfterToolCall(0, 4, "get_detail", nil, "tool executed", nil),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(getDetailObs)),
+			// Iteration 5: get_detail call 2 (2 > 1 EXCEEDED)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 5, "get_detail", nil),
+			tt.LimitExceeded(0, 5, limit, 2, gent.KeyToolCallsFor+"get_detail"),
+			tt.AfterToolCall(0, 5, "get_detail", nil, "tool executed", nil),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(getDetailObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("exceeds limit at third iteration", func(t *testing.T) {
@@ -450,15 +850,54 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCalls, MaxValue: 3},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCalls, 3)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolCalls, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 4, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iterations 1-3: tool calls 1-3 (OK)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 4: tool call 4 (4 > 3 EXCEEDED)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "test", nil),
+			tt.LimitExceeded(0, 4, limit, 4, gent.KeyToolCalls),
+			tt.AfterToolCall(0, 4, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("prefix limit exceeds at third iteration", func(t *testing.T) {
@@ -480,15 +919,54 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsFor, MaxValue: 3},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsFor, 3)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, 4, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		searchObs := tt.ToolObservation(format, toolChain, "search", "tool executed")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iterations 1-3: search calls 1-3 (OK)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "search", nil),
+			tt.AfterToolCall(0, 1, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(searchObs)),
+
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "search", nil),
+			tt.AfterToolCall(0, 2, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(searchObs)),
+
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "search", nil),
+			tt.AfterToolCall(0, 3, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(searchObs)),
+			// Iteration 4: search call 4 (4 > 3 EXCEEDED)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "search", nil),
+			tt.LimitExceeded(0, 4, limit, 4, gent.KeyToolCallsFor+"search"),
+			tt.AfterToolCall(0, 4, "search", nil, "tool executed", nil),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(searchObs)),
+			tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 }
 
@@ -513,14 +991,45 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyFormatParseErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyFormatParseErrorTotal, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompts for format parse errors
+		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
+		parseObs2 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid2")
+		parseObs3 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid3")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: parse error 1 (1 <= 2 OK)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeFormat, "invalid1"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(parseObs1)),
+			// Iteration 2: parse error 2 (2 <= 2 OK)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeFormat, "invalid2"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(parseObs2)),
+			// Iteration 3: parse error 3 (3 > 2 EXCEEDED)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeFormat, "invalid3"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyFormatParseErrorTotal),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(parseObs3)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
@@ -548,15 +1057,61 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyFormatParseErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyFormatParseErrorTotal, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
+		parseObs2 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid2")
+		parseObs3 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid3")
+
+		// Assert full event sequence
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iterations 1-2: successful tool calls
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: parse error 1
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeFormat, "invalid1"),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(parseObs1)),
+			// Iteration 4: parse error 2
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeFormat, "invalid2"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(parseObs2)),
+			// Iteration 5: parse error 3 (EXCEEDED)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeFormat, "invalid3"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyFormatParseErrorTotal),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(parseObs3)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		actualEvents := tt.CollectLifecycleEvents(execCtx)
+		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
 	})
 }
 
@@ -578,14 +1133,42 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolchainParseErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolchainParseErrorTotal, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for toolchain parse errors
+		tcObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
+
+		// Assert events: 3 iterations with toolchain parse errors, limit exceeded at 3rd
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: parse error (count: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeToolchain, "invalid json"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(tcObs)),
+			// Iteration 2: parse error (count: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeToolchain, "invalid json"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(tcObs)),
+			// Iteration 3: parse error (count: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeToolchain, "invalid json"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyToolchainParseErrorTotal),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(tcObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
@@ -611,15 +1194,58 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 			WithParseErrors(nil, nil, gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolchainParseErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolchainParseErrorTotal, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		tcObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
+
+		// Assert events: 2 successful iterations, then 3 with toolchain parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: parse error (count: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeToolchain, "bad1"),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(tcObs)),
+			// Iteration 4: parse error (count: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeToolchain, "bad2"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(tcObs)),
+			// Iteration 5: parse error (count: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeToolchain, "bad3"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyToolchainParseErrorTotal),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(tcObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -641,14 +1267,42 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyTerminationParseErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyTerminationParseErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyTerminationParseErrorTotal, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for termination parse error
+		termObs := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "malformed")
+
+		// Assert events: 3 iterations with termination parse errors, limit exceeded at 3rd
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: termination parse error (count: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeTermination, "malformed"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(termObs)),
+			// Iteration 2: termination parse error (count: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeTermination, "malformed"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(termObs)),
+			// Iteration 3: termination parse error (count: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeTermination, "malformed"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyTerminationParseErrorTotal),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(termObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
@@ -677,15 +1331,60 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyTerminationParseErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyTerminationParseErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyTerminationParseErrorTotal, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		termObs1 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad1")
+		termObs2 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad2")
+		termObs3 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad3")
+
+		// Assert events: 2 successful iterations, then 3 with termination parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: termination parse error (count: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeTermination, "bad1"),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(termObs1)),
+			// Iteration 4: termination parse error (count: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeTermination, "bad2"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(termObs2)),
+			// Iteration 5: termination parse error (count: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeTermination, "bad3"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyTerminationParseErrorTotal),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(termObs3)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -715,11 +1414,11 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
-		execCtx.SetLimits([]gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorTotal, MaxValue: 2},
-		})
+		limit := tt.ExactLimit(gent.KeySectionParseErrorTotal, 2)
+		execCtx.SetLimits([]gent.Limit{limit})
 
 		// Manually increment to simulate section parse errors
+		// This triggers limit check immediately
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorTotal, 3)
 
 		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
@@ -727,6 +1426,14 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeySectionParseErrorTotal, execCtx.ExceededLimit().Key)
+
+		// Limit already exceeded before Execute(), so execution stops immediately
+		expectedEvents := []gent.Event{
+			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorTotal),
+			tt.BeforeExec(0, 0),
+			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
@@ -751,9 +1458,8 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
-		execCtx.SetLimits([]gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorTotal, MaxValue: 2},
-		})
+		limit := tt.ExactLimit(gent.KeySectionParseErrorTotal, 2)
+		execCtx.SetLimits([]gent.Limit{limit})
 
 		// Simulate: 2 successful iterations, then section errors in 3rd iteration
 		// We'll increment errors after first two successful iterations would have run
@@ -765,6 +1471,14 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeySectionParseErrorTotal, execCtx.ExceededLimit().Key)
+
+		// Limit already exceeded before Execute(), so execution stops immediately
+		expectedEvents := []gent.Event{
+			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorTotal),
+			tt.BeforeExec(0, 0),
+			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -789,14 +1503,44 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyFormatParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyFormatParseErrorConsecutive, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompts for format parse errors
+		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
+		parseObs2 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid2")
+		parseObs3 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid3")
+
+		// Assert events: 3 iterations with consecutive format parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: parse error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeFormat, "invalid1"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(parseObs1)),
+			// Iteration 2: parse error (consecutive: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeFormat, "invalid2"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(parseObs2)),
+			// Iteration 3: parse error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeFormat, "invalid3"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyFormatParseErrorConsecutive),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(parseObs3)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
@@ -821,15 +1565,60 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyFormatParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyFormatParseErrorConsecutive, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
+		parseObs2 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid2")
+		parseObs3 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid3")
+
+		// Assert events: 2 successful iterations, then 3 consecutive format parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: parse error (consecutive: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeFormat, "invalid1"),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(parseObs1)),
+			// Iteration 4: parse error (consecutive: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeFormat, "invalid2"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(parseObs2)),
+			// Iteration 5: parse error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeFormat, "invalid3"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyFormatParseErrorConsecutive),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(parseObs3)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -851,14 +1640,42 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolchainParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolchainParseErrorConsecutive, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for toolchain parse error
+		errObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
+
+		// Assert events: 3 iterations with consecutive toolchain parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: parse error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeToolchain, "invalid"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(errObs)),
+			// Iteration 2: parse error (consecutive: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeToolchain, "invalid"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(errObs)),
+			// Iteration 3: parse error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeToolchain, "invalid"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyToolchainParseErrorConsecutive),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(errObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
@@ -884,15 +1701,58 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 			WithParseErrors(nil, nil, gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolchainParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolchainParseErrorConsecutive, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		errObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
+
+		// Assert events: 2 successful iterations, then 3 consecutive toolchain parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: parse error (consecutive: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeToolchain, "bad1"),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(errObs)),
+			// Iteration 4: parse error (consecutive: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeToolchain, "bad2"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(errObs)),
+			// Iteration 5: parse error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeToolchain, "bad3"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyToolchainParseErrorConsecutive),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(errObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -914,14 +1774,44 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyTerminationParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyTerminationParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyTerminationParseErrorConsecutive, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompts for termination parse errors
+		termObs1 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad1")
+		termObs2 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad2")
+		termObs3 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad3")
+
+		// Assert events: 3 iterations with consecutive termination parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: termination parse error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeTermination, "bad1"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(termObs1)),
+			// Iteration 2: termination parse error (consecutive: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeTermination, "bad2"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(termObs2)),
+			// Iteration 3: termination parse error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeTermination, "bad3"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyTerminationParseErrorConsecutive),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(termObs3)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
@@ -950,15 +1840,60 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 		termination := tt.NewMockTermination().
 			WithParseErrors(gent.ErrInvalidJSON, gent.ErrInvalidJSON, gent.ErrInvalidJSON, nil)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyTerminationParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyTerminationParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyTerminationParseErrorConsecutive, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		termObs1 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad1")
+		termObs2 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad2")
+		termObs3 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad3")
+
+		// Assert events: 2 successful iterations, then 3 consecutive termination parse errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: termination parse error (consecutive: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeTermination, "bad1"),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(termObs1)),
+			// Iteration 4: termination parse error (consecutive: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeTermination, "bad2"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(termObs2)),
+			// Iteration 5: termination parse error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeTermination, "bad3"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyTerminationParseErrorConsecutive),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(termObs3)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -982,9 +1917,8 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
-		execCtx.SetLimits([]gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
-		})
+		limit := tt.ExactLimit(gent.KeySectionParseErrorConsecutive, 2)
+		execCtx.SetLimits([]gent.Limit{limit})
 
 		// Manually increment to simulate consecutive section parse errors
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 3)
@@ -994,6 +1928,14 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeySectionParseErrorConsecutive, execCtx.ExceededLimit().Key)
+
+		// Limit already exceeded before Execute(), so execution stops immediately
+		expectedEvents := []gent.Event{
+			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorConsecutive),
+			tt.BeforeExec(0, 0),
+			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
@@ -1018,9 +1960,8 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
-		execCtx.SetLimits([]gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
-		})
+		limit := tt.ExactLimit(gent.KeySectionParseErrorConsecutive, 2)
+		execCtx.SetLimits([]gent.Limit{limit})
 
 		// Simulate: 2 successful iterations, then consecutive section errors (3 > limit of 2)
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 3)
@@ -1030,6 +1971,14 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeySectionParseErrorConsecutive, execCtx.ExceededLimit().Key)
+
+		// Limit already exceeded before Execute(), so execution stops immediately
+		expectedEvents := []gent.Event{
+			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorConsecutive),
+			tt.BeforeExec(0, 0),
+			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1051,26 +2000,59 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
+		toolErr := errors.New("tool failed")
 		toolChain := tt.NewMockToolChain().
 			WithTool("failing", func(args map[string]any) (string, error) {
-				return "", errors.New("tool failed")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCallsErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolCallsErrorTotal, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for tool error (empty output)
+		toolErrObs := tt.ToolObservation(format, toolChain, "failing", "")
+
+		// Assert events: 3 iterations with tool call errors, limit exceeded at 3rd
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool error (count: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "failing", nil),
+			tt.AfterToolCall(0, 1, "failing", nil, "", toolErr),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 2: tool error (count: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "failing", nil),
+			tt.AfterToolCall(0, 2, "failing", nil, "", toolErr),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 3: tool error (count: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "failing", nil),
+			tt.AfterToolCall(0, 3, "failing", nil, "", toolErr),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyToolCallsErrorTotal),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: failing tool calls (3rd error exceeds limit of 2)
 		callCount := 0
+		toolErr := errors.New("tool failed")
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<action>tool: maybe</action>", 100, 50).
@@ -1093,19 +2075,65 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 				if callCount <= 2 {
 					return "success", nil
 				}
-				return "", errors.New("tool failed")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCallsErrorTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolCallsErrorTotal, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		successObs := tt.ToolObservation(format, toolChain, "maybe", "success")
+		toolErrObs := tt.ToolObservation(format, toolChain, "maybe", "")
+
+		// Assert events: 2 successful iterations, then 3 with tool errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "maybe", nil),
+			tt.AfterToolCall(0, 1, "maybe", nil, "success", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(successObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "maybe", nil),
+			tt.AfterToolCall(0, 2, "maybe", nil, "success", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(successObs)),
+			// Iteration 3: tool error (count: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "maybe", nil),
+			tt.AfterToolCall(0, 3, "maybe", nil, "", toolErr),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 4: tool error (count: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "maybe", nil),
+			tt.AfterToolCall(0, 4, "maybe", nil, "", toolErr),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 5: tool error (count: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 5, "maybe", nil),
+			tt.AfterToolCall(0, 5, "maybe", nil, "", toolErr),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyToolCallsErrorTotal),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1121,26 +2149,53 @@ func TestExecutorLimits_ToolCallsErrorForTool(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: broken"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
+		toolErr := errors.New("broken tool")
 		toolChain := tt.NewMockToolChain().
 			WithTool("broken", func(args map[string]any) (string, error) {
-				return "", errors.New("broken tool")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorFor, MaxValue: 1},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsErrorFor, 1)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		require.NotNil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompt for tool error (empty output)
+		toolErrObs := tt.ToolObservation(format, toolChain, "broken", "")
+
+		// Assert events: 2 iterations with tool errors, limit exceeded at 2nd
+		matchedKey := gent.KeyToolCallsErrorFor + "broken"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool error (count: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "broken", nil),
+			tt.AfterToolCall(0, 1, "broken", nil, "", toolErr),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 2: tool error (count: 2 > limit 1)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "broken", nil),
+			tt.AfterToolCall(0, 2, "broken", nil, "", toolErr),
+			tt.LimitExceeded(0, 2, limit, 2, matchedKey),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("prefix limit exceeds at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-4: failing tool calls (2nd error exceeds limit of 1)
 		callCount := 0
+		toolErr := errors.New("broken tool")
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: broken</action>", 100, 50).
 			AddResponse("<action>tool: broken</action>", 100, 50).
@@ -1161,19 +2216,59 @@ func TestExecutorLimits_ToolCallsErrorForTool(t *testing.T) {
 				if callCount <= 2 {
 					return "success", nil
 				}
-				return "", errors.New("broken tool")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorFor, MaxValue: 1},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsErrorFor, 1)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, 4, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		successObs := tt.ToolObservation(format, toolChain, "broken", "success")
+		toolErrObs := tt.ToolObservation(format, toolChain, "broken", "")
+
+		// Assert events: 2 successful iterations, then 2 with tool errors
+		matchedKey := gent.KeyToolCallsErrorFor + "broken"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "broken", nil),
+			tt.AfterToolCall(0, 1, "broken", nil, "success", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(successObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "broken", nil),
+			tt.AfterToolCall(0, 2, "broken", nil, "success", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(successObs)),
+			// Iteration 3: tool error (count: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "broken", nil),
+			tt.AfterToolCall(0, 3, "broken", nil, "", toolErr),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 4: tool error (count: 2 > limit 1)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "broken", nil),
+			tt.AfterToolCall(0, 4, "broken", nil, "", toolErr),
+			tt.LimitExceeded(0, 4, limit, 2, matchedKey),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1191,26 +2286,59 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: failing"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
+		toolErr := errors.New("tool failed")
 		toolChain := tt.NewMockToolChain().
 			WithTool("failing", func(args map[string]any) (string, error) {
-				return "", errors.New("tool failed")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCallsErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolCallsErrorConsecutive, execCtx.ExceededLimit().Key)
+
+		// Build expected NextPrompt for tool error (empty output)
+		toolErrObs := tt.ToolObservation(format, toolChain, "failing", "")
+
+		// Assert events: 3 iterations with consecutive tool errors, limit exceeded at 3rd
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "failing", nil),
+			tt.AfterToolCall(0, 1, "failing", nil, "", toolErr),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 2: tool error (consecutive: 2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "failing", nil),
+			tt.AfterToolCall(0, 2, "failing", nil, "", toolErr),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 3: tool error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "failing", nil),
+			tt.AfterToolCall(0, 3, "failing", nil, "", toolErr),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyToolCallsErrorConsecutive),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-5: consecutive failing tool calls (3rd error exceeds limit of 2)
 		callCount := 0
+		toolErr := errors.New("tool failed")
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: maybe</action>", 100, 50).
 			AddResponse("<action>tool: maybe</action>", 100, 50).
@@ -1233,19 +2361,65 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 				if callCount <= 2 {
 					return "success", nil
 				}
-				return "", errors.New("tool failed")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCallsErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyToolCallsErrorConsecutive, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		successObs := tt.ToolObservation(format, toolChain, "maybe", "success")
+		toolErrObs := tt.ToolObservation(format, toolChain, "maybe", "")
+
+		// Assert events: 2 successful iterations, then 3 consecutive tool errors
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "maybe", nil),
+			tt.AfterToolCall(0, 1, "maybe", nil, "success", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(successObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "maybe", nil),
+			tt.AfterToolCall(0, 2, "maybe", nil, "success", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(successObs)),
+			// Iteration 3: tool error (consecutive: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "maybe", nil),
+			tt.AfterToolCall(0, 3, "maybe", nil, "", toolErr),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 4: tool error (consecutive: 2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "maybe", nil),
+			tt.AfterToolCall(0, 4, "maybe", nil, "", toolErr),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 5: tool error (consecutive: 3 > limit 2)
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 5, "maybe", nil),
+			tt.AfterToolCall(0, 5, "maybe", nil, "", toolErr),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyToolCallsErrorConsecutive),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1261,26 +2435,53 @@ func TestExecutorLimits_ToolCallsErrorConsecutiveForTool(t *testing.T) {
 			AddParseResult(map[string][]string{"action": {"tool: flaky"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
+		toolErr := errors.New("flaky error")
 		toolChain := tt.NewMockToolChain().
 			WithTool("flaky", func(args map[string]any) (string, error) {
-				return "", errors.New("flaky error")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorConsecutiveFor, MaxValue: 1},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsErrorConsecutiveFor, 1)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		require.NotNil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompt for tool error (empty output)
+		toolErrObs := tt.ToolObservation(format, toolChain, "flaky", "")
+
+		// Assert events: 2 iterations with consecutive tool errors, limit exceeded at 2nd
+		matchedKey := gent.KeyToolCallsErrorConsecutiveFor + "flaky"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "flaky", nil),
+			tt.AfterToolCall(0, 1, "flaky", nil, "", toolErr),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 2: tool error (consecutive: 2 > limit 1)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "flaky", nil),
+			tt.AfterToolCall(0, 2, "flaky", nil, "", toolErr),
+			tt.LimitExceeded(0, 2, limit, 2, matchedKey),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("prefix consecutive limit exceeds at third iteration after successful iterations", func(t *testing.T) {
 		// Iteration 1-2: successful tool calls
 		// Iteration 3-4: consecutive failing tool calls (2nd error exceeds limit of 1)
 		callCount := 0
+		toolErr := errors.New("flaky error")
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: flaky</action>", 100, 50).
 			AddResponse("<action>tool: flaky</action>", 100, 50).
@@ -1301,19 +2502,59 @@ func TestExecutorLimits_ToolCallsErrorConsecutiveForTool(t *testing.T) {
 				if callCount <= 2 {
 					return "success", nil
 				}
-				return "", errors.New("flaky error")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorConsecutiveFor, MaxValue: 1},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsErrorConsecutiveFor, 1)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, 4, execCtx.Iteration())
+
+		// Build expected NextPrompts
+		successObs := tt.ToolObservation(format, toolChain, "flaky", "success")
+		toolErrObs := tt.ToolObservation(format, toolChain, "flaky", "")
+
+		// Assert events: 2 successful iterations, then 2 consecutive tool errors
+		matchedKey := gent.KeyToolCallsErrorConsecutiveFor + "flaky"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: successful tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "flaky", nil),
+			tt.AfterToolCall(0, 1, "flaky", nil, "success", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(successObs)),
+			// Iteration 2: successful tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "flaky", nil),
+			tt.AfterToolCall(0, 2, "flaky", nil, "success", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(successObs)),
+			// Iteration 3: tool error (consecutive: 1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "flaky", nil),
+			tt.AfterToolCall(0, 3, "flaky", nil, "", toolErr),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 4: tool error (consecutive: 2 > limit 1)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "flaky", nil),
+			tt.AfterToolCall(0, 4, "flaky", nil, "", toolErr),
+			tt.LimitExceeded(0, 4, limit, 2, matchedKey),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolErrObs)),
+			tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1344,15 +2585,57 @@ func TestExecutorLimits_ConsecutiveReset_FormatParseError(t *testing.T) {
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyFormatParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		// Should complete successfully because consecutive never exceeded 2
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompts
+		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
+		parseObs2 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid2")
+		toolObs := tt.ToolObservation(format, toolChain, "t", "tool executed")
+		parseObs3 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid3")
+
+		// Assert events: fail, fail, success (tool), fail, success (answer)
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: parse error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeFormat, "invalid1"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(parseObs1)),
+			// Iteration 2: parse error (consecutive: 2, at limit but not exceeded)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeFormat, "invalid2"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(parseObs2)),
+			// Iteration 3: success - tool call (consecutive resets)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "t", nil),
+			tt.AfterToolCall(0, 3, "t", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 4: parse error (consecutive: 1, reset from success)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeFormat, "invalid3"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(parseObs3)),
+			// Iteration 5: success - terminate
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.AfterIter(0, 5, tt.Terminate("done")),
+			tt.AfterExec(0, 5, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1383,52 +2666,146 @@ func TestExecutorLimits_ConsecutiveReset_ToolchainParseError(t *testing.T) {
 			)
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolchainParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompts
+		errObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
+		toolObs := tt.ToolObservation(format, toolChain, "good", "tool executed")
+
+		// Assert events: fail, fail, success (tool), fail, success (answer)
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: toolchain parse error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeToolchain, "bad1"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(errObs)),
+			// Iteration 2: toolchain parse error (consecutive: 2, at limit)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeToolchain, "bad2"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(errObs)),
+			// Iteration 3: success - tool call (consecutive resets)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "good", nil),
+			tt.AfterToolCall(0, 3, "good", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 4: toolchain parse error (consecutive: 1, reset)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeToolchain, "bad3"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(errObs)),
+			// Iteration 5: success - terminate
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.AfterIter(0, 5, tt.Terminate("done")),
+			tt.AfterExec(0, 5, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
 func TestExecutorLimits_ConsecutiveReset_TerminationParseError(t *testing.T) {
-	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
-		// Sequence: fail, fail, success (action taken), fail, success
+	t.Run("consecutive counter resets on parse success - does not exceed limit", func(t *testing.T) {
+		// Termination parse error consecutive resets when termination parsing succeeds.
+		// Since successful termination parsing ends execution, we use a validator to reject
+		// the answer and continue the loop. This tests: fail, fail, success+reject, fail, done
 		model := tt.NewMockModel().
-			AddResponse("<answer>bad1</answer>", 100, 50).
-			AddResponse("<answer>bad2</answer>", 100, 50).
-			AddResponse("<action>tool: t</action>", 100, 50). // action takes priority, no term parse
-			AddResponse("<answer>bad3</answer>", 100, 50).
-			AddResponse("<answer>done</answer>", 100, 50)
+			AddResponse("<answer>bad1</answer>", 100, 50).       // parse error
+			AddResponse("<answer>bad2</answer>", 100, 50).       // parse error (consecutive=2)
+			AddResponse("<answer>rejected</answer>", 100, 50).   // parse OK, validator rejects
+			AddResponse("<answer>bad3</answer>", 100, 50).       // parse error (consecutive=1)
+			AddResponse("<answer>accepted</answer>", 100, 50)    // parse OK, validator accepts
 
 		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"bad1"}}).
 			AddParseResult(map[string][]string{"answer": {"bad2"}}).
-			AddParseResult(map[string][]string{"action": {"tool: t"}}).
+			AddParseResult(map[string][]string{"answer": {"rejected"}}).
 			AddParseResult(map[string][]string{"answer": {"bad3"}}).
-			AddParseResult(map[string][]string{"answer": {"done"}})
+			AddParseResult(map[string][]string{"answer": {"accepted"}})
 
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination().
 			WithParseErrors(
-				gent.ErrInvalidJSON, // fail
-				gent.ErrInvalidJSON, // fail (consecutive=2)
-				nil,                 // skipped (action taken)
-				gent.ErrInvalidJSON, // fail (consecutive=1 after action resets)
-				nil,                 // success
+				gent.ErrInvalidJSON, // iter 1: fail (consecutive=1)
+				gent.ErrInvalidJSON, // iter 2: fail (consecutive=2, at limit)
+				nil,                 // iter 3: success (consecutive resets)
+				gent.ErrInvalidJSON, // iter 4: fail (consecutive=1, after reset)
+				nil,                 // iter 5: success
 			)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyTerminationParseErrorConsecutive, MaxValue: 2},
-		}
+		// Validator rejects first valid answer, accepts second
+		validator := tt.NewMockValidator("test_validator").
+			WithAcceptances(false, true).
+			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
+		termination.SetValidator(validator)
+
+		limit := tt.ExactLimit(gent.KeyTerminationParseErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompts
+		termObs1 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad1")
+		termObs2 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad2")
+		rejectObs := tt.ValidatorFeedbackObservation(format,
+			gent.FormattedSection{Name: "error", Content: "Answer rejected"})
+		termObs3 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad3")
+
+		// Assert events: fail, fail, success+reject, fail, success+accept
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: termination parse error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeTermination, "bad1"),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(termObs1)),
+			// Iteration 2: termination parse error (consecutive: 2, at limit)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeTermination, "bad2"),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(termObs2)),
+			// Iteration 3: termination parse success, validator rejects (consecutive resets)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 3, "test_validator", "rejected"),
+			tt.ValidatorResult(0, 3, "test_validator", "rejected", false,
+				[]gent.FormattedSection{{Name: "error", Content: "Answer rejected"}}),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 4: termination parse error (consecutive: 1, reset from success)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeTermination, "bad3"),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(termObs3)),
+			// Iteration 5: termination parse success, validator accepts
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 5, "test_validator", "accepted"),
+			tt.ValidatorResult(0, 5, "test_validator", "accepted", true, nil),
+			tt.AfterIter(0, 5, tt.Terminate("accepted")),
+			tt.AfterExec(0, 5, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1452,9 +2829,8 @@ func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
-		execCtx.SetLimits([]gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeySectionParseErrorConsecutive, MaxValue: 2},
-		})
+		limit := tt.ExactLimit(gent.KeySectionParseErrorConsecutive, 2)
+		execCtx.SetLimits([]gent.Limit{limit})
 
 		// Simulate: fail, fail, reset, fail (consecutive should be 1, not 3)
 		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 2) // fail, fail
@@ -1467,12 +2843,35 @@ func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 		// Should complete because consecutive is 1, not 3
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert events: execution completes successfully
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: terminate
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.AfterIter(0, 2, tt.Terminate("done")),
+			tt.AfterExec(0, 2, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
 func TestExecutorLimits_ConsecutiveReset_ToolCallError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
 		callCount := 0
+		toolErr := errors.New("flaky error")
 		// Sequence: fail, fail, success, fail
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: flaky</action>", 100, 50).
@@ -1495,24 +2894,68 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallError(t *testing.T) {
 				if callCount == 3 {
 					return "success", nil
 				}
-				return "", errors.New("flaky error")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyToolCallsErrorConsecutive, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyToolCallsErrorConsecutive, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompts
+		toolErrObs := tt.ToolObservation(format, toolChain, "flaky", "")
+		successObs := tt.ToolObservation(format, toolChain, "flaky", "success")
+
+		// Assert events: fail, fail, success, fail, success (answer)
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "flaky", nil),
+			tt.AfterToolCall(0, 1, "flaky", nil, "", toolErr),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 2: tool error (consecutive: 2, at limit)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "flaky", nil),
+			tt.AfterToolCall(0, 2, "flaky", nil, "", toolErr),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 3: tool success (consecutive resets)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "flaky", nil),
+			tt.AfterToolCall(0, 3, "flaky", nil, "success", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(successObs)),
+			// Iteration 4: tool error (consecutive: 1, reset)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "flaky", nil),
+			tt.AfterToolCall(0, 4, "flaky", nil, "", toolErr),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 5: terminate
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.AfterIter(0, 5, tt.Terminate("done")),
+			tt.AfterExec(0, 5, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
 func TestExecutorLimits_ConsecutiveReset_ToolCallErrorPerTool(t *testing.T) {
 	t.Run("per-tool consecutive counter resets on success - does not exceed prefix limit", func(t *testing.T) {
 		callCount := 0
+		toolErr := errors.New("specific error")
 		// Sequence for specific tool: fail, fail, success, fail
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: specific</action>", 100, 50).
@@ -1534,18 +2977,61 @@ func TestExecutorLimits_ConsecutiveReset_ToolCallErrorPerTool(t *testing.T) {
 				if callCount == 3 {
 					return "success", nil
 				}
-				return "", errors.New("specific error")
+				return "", toolErr
 			})
 		termination := tt.NewMockTermination()
 
-		limits := []gent.Limit{
-			{Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsErrorConsecutiveFor, MaxValue: 2},
-		}
+		limit := tt.PrefixLimit(gent.KeyToolCallsErrorConsecutiveFor, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+
+		// Build expected NextPrompts
+		toolErrObs := tt.ToolObservation(format, toolChain, "specific", "")
+		successObs := tt.ToolObservation(format, toolChain, "specific", "success")
+
+		// Assert events: fail, fail, success, fail, success (answer)
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool error (consecutive: 1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "specific", nil),
+			tt.AfterToolCall(0, 1, "specific", nil, "", toolErr),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 2: tool error (consecutive: 2, at limit)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "specific", nil),
+			tt.AfterToolCall(0, 2, "specific", nil, "", toolErr),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 3: tool success (consecutive resets)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "specific", nil),
+			tt.AfterToolCall(0, 3, "specific", nil, "success", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(successObs)),
+			// Iteration 4: tool error (consecutive: 1, reset)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 4, "specific", nil),
+			tt.AfterToolCall(0, 4, "specific", nil, "", toolErr),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolErrObs)),
+			// Iteration 5: terminate
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.AfterIter(0, 5, tt.Terminate("done")),
+			tt.AfterExec(0, 5, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1590,6 +3076,38 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyAnswerRejectedTotal, execCtx.ExceededLimit().Key)
+
+		// Event assertions
+		feedback := []gent.FormattedSection{{Name: "error", Content: "Answer rejected"}}
+		rejectObs := tt.ValidatorFeedbackObservation(format, feedback...)
+		limit := tt.ExactLimit(gent.KeyAnswerRejectedTotal, 2)
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: answer rejected (count=1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 1, "test_validator", "bad answer 1"),
+			tt.ValidatorResult(0, 1, "test_validator", "bad answer 1", false, feedback),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 2: answer rejected (count=2)
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 2, "test_validator", "bad answer 2"),
+			tt.ValidatorResult(0, 2, "test_validator", "bad answer 2", false, feedback),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 3: answer rejected (count=3) -> limit exceeded
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 3, "test_validator", "bad answer 3"),
+			tt.ValidatorResult(0, 3, "test_validator", "bad answer 3", false, feedback),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeyAnswerRejectedTotal),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(rejectObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("exceeds limit at third iteration after successful tool calls", func(t *testing.T) {
@@ -1631,6 +3149,53 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, gent.KeyAnswerRejectedTotal, execCtx.ExceededLimit().Key)
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Event assertions
+		feedback := []gent.FormattedSection{{Name: "error", Content: "Answer rejected"}}
+		toolObs := tt.ToolObservation(format, toolChain, "search", "found something")
+		rejectObs := tt.ValidatorFeedbackObservation(format, feedback...)
+		limit := tt.ExactLimit(gent.KeyAnswerRejectedTotal, 2)
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "search", nil),
+			tt.AfterToolCall(0, 1, "search", nil, "found something", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "search", nil),
+			tt.AfterToolCall(0, 2, "search", nil, "found something", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: answer rejected (count=1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 3, "test_validator", "bad answer 1"),
+			tt.ValidatorResult(0, 3, "test_validator", "bad answer 1", false, feedback),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 4: answer rejected (count=2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 4, "test_validator", "bad answer 2"),
+			tt.ValidatorResult(0, 4, "test_validator", "bad answer 2", false, feedback),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 5: answer rejected (count=3) -> limit exceeded
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 5, "test_validator", "bad answer 3"),
+			tt.ValidatorResult(0, 5, "test_validator", "bad answer 3", false, feedback),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeyAnswerRejectedTotal),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(rejectObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }
 
@@ -1666,6 +3231,34 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		require.NotNil(t, execCtx.ExceededLimit())
+
+		// Event assertions
+		feedback := []gent.FormattedSection{
+			{Name: "error", Content: "Schema validation failed"},
+		}
+		rejectObs := tt.ValidatorFeedbackObservation(format, feedback...)
+		limit := tt.PrefixLimit(gent.KeyAnswerRejectedBy, 1)
+		matchedKey := gent.KeyAnswerRejectedBy + "schema_validator"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: answer rejected (count=1)
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 1, "schema_validator", "bad answer 1"),
+			tt.ValidatorResult(0, 1, "schema_validator", "bad answer 1", false, feedback),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 2: answer rejected (count=2) -> limit exceeded
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 2, "schema_validator", "bad answer 2"),
+			tt.ValidatorResult(0, 2, "schema_validator", "bad answer 2", false, feedback),
+			tt.LimitExceeded(0, 2, limit, 2, matchedKey),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(rejectObs)),
+			tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
 	t.Run("child model call validator exceeds limit while main validator does not", func(t *testing.T) {
@@ -1738,5 +3331,56 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 			int64(2),
 			execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"child_validator"))
 		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Event assertions
+		mainFeedback := []gent.FormattedSection{
+			{Name: "error", Content: "Main validation failed"},
+		}
+		mainRejectObs := tt.ValidatorFeedbackObservation(format, mainFeedback...)
+		childToolObs := tt.ToolObservation(format, toolChain,
+			"child_agent", "child agent completed with rejection")
+		limit := tt.ExactLimit(gent.KeyAnswerRejectedBy+"child_validator", 1)
+		matchedKey := gent.KeyAnswerRejectedBy + "child_validator"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: main answer rejected by main_validator
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 1, "main_validator", "main bad 1"),
+			tt.ValidatorResult(0, 1, "main_validator", "main bad 1", false, mainFeedback),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(mainRejectObs)),
+			// Iteration 2: main answer rejected by main_validator
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 2, "main_validator", "main bad 2"),
+			tt.ValidatorResult(0, 2, "main_validator", "main bad 2", false, mainFeedback),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(mainRejectObs)),
+			// Iteration 3: tool call (child count=1, no limit exceeded)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "child_agent", nil),
+			tt.AfterToolCall(0, 3, "child_agent", nil, "child agent completed with rejection", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(childToolObs)),
+			// Iteration 4: main answer rejected by main_validator
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 4, "main_validator", "main bad 3"),
+			tt.ValidatorResult(0, 4, "main_validator", "main bad 3", false, mainFeedback),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(mainRejectObs)),
+			// Iteration 5: tool call (child count=2) -> limit exceeded during tool exec
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 5, "child_agent", nil),
+			tt.LimitExceeded(0, 5, limit, 2, matchedKey),
+			tt.AfterToolCall(0, 5, "child_agent", nil, "child agent completed with rejection", nil),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(childToolObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 }

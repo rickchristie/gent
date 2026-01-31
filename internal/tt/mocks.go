@@ -267,6 +267,13 @@ func (tc *MockToolChain) Execute(
 	}, nil
 }
 
+// FormatToolResult returns the tool result text that MockToolChain.Execute generates.
+// This is useful for tests to build expected NextPrompt values.
+// The result format is: <observation>\n<toolname>\noutput\n</toolname>\n</observation>
+func (tc *MockToolChain) FormatToolResult(toolName, output string) string {
+	return "<observation>\n<" + toolName + ">\n" + output + "\n</" + toolName + ">\n</observation>"
+}
+
 // -----------------------------------------------------------------------------
 // MockTermination - implements gent.Termination with proper event publishing
 // -----------------------------------------------------------------------------

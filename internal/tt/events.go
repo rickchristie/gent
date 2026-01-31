@@ -10,9 +10,83 @@ import (
 // AgentLoopResult Helpers
 // -----------------------------------------------------------------------------
 
-// Continue creates an AgentLoopResult with LAContinue action.
-func Continue() *gent.AgentLoopResult {
-	return &gent.AgentLoopResult{Action: gent.LAContinue}
+// ContinueWithPrompt creates an AgentLoopResult with LAContinue action and specified NextPrompt.
+func ContinueWithPrompt(nextPrompt string) *gent.AgentLoopResult {
+	return &gent.AgentLoopResult{
+		Action:     gent.LAContinue,
+		NextPrompt: nextPrompt,
+	}
+}
+
+// ContinueWithObservation creates an AgentLoopResult with LAContinue action and NextPrompt
+// built from format.FormatSections with an "observation" section.
+func ContinueWithObservation(format gent.TextFormat, content string) *gent.AgentLoopResult {
+	return &gent.AgentLoopResult{
+		Action:     gent.LAContinue,
+		NextPrompt: Observation(format, content),
+	}
+}
+
+// Observation builds an observation section using the given format.
+func Observation(format gent.TextFormat, content string) string {
+	return format.FormatSections([]gent.FormattedSection{
+		{Name: "observation", Content: content},
+	})
+}
+
+// ToolObservation builds the expected NextPrompt for tool execution in the react agent.
+// The agent wraps the tool chain result in an observation section. The toolChain argument
+// should be a MockToolChain that provides FormatToolResult to build the inner tool result.
+func ToolObservation(format gent.TextFormat, toolChain *MockToolChain, toolName, output string) string {
+	toolResult := toolChain.FormatToolResult(toolName, output)
+	return Observation(format, toolResult)
+}
+
+// ValidatorFeedbackObservation builds the expected NextPrompt for validator rejection.
+// The validator formats feedback as <section>\nContent\n</section>.
+func ValidatorFeedbackObservation(format gent.TextFormat, feedbackSections ...gent.FormattedSection) string {
+	var feedback string
+	for _, section := range feedbackSections {
+		feedback += "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
+	}
+	return Observation(format, feedback)
+}
+
+// FormatParseErrorObservation builds the expected NextPrompt for format parse errors.
+// This matches the react agent's buildFormatErrorObservation output.
+func FormatParseErrorObservation(format gent.TextFormat, parseErr error, rawResponse string) string {
+	errorContent := "Format parse error: " + parseErr.Error() + "\n\n" +
+		"Your response could not be parsed. Please ensure your response follows the expected format.\n\n" +
+		"Your raw response was:\n" +
+		rawResponse + "\n\n" +
+		"Please try again with proper formatting."
+	return Observation(format, errorContent)
+}
+
+// ToolchainErrorObservation builds the expected NextPrompt for toolchain execution errors.
+// The error is formatted as <error>Error: {message}</error> wrapped in observation.
+func ToolchainErrorObservation(format gent.TextFormat, err error) string {
+	errorSection := format.FormatSections([]gent.FormattedSection{
+		{Name: "error", Content: "Error: " + err.Error()},
+	})
+	return Observation(format, errorSection)
+}
+
+// TerminationParseErrorObservation builds the expected NextPrompt for termination parse errors.
+// This matches the react agent's termination parse error feedback format.
+func TerminationParseErrorObservation(format gent.TextFormat, parseErr error, content string) string {
+	errorContent := "Termination parse error: " + parseErr.Error() + "\n" +
+		"Content: " + content + "\n\n" +
+		"Please try again with proper formatting."
+	return Observation(format, errorContent)
+}
+
+// ToolErrorObservation builds the expected NextPrompt for tool execution errors.
+// The MockToolChain formats errors differently from the real agent - it includes the empty
+// output in the observation rather than wrapping the error. This helper matches mock behavior.
+func ToolErrorObservation(toolChain *MockToolChain, toolName string) string {
+	// MockToolChain returns the tool result format even with errors, just with empty output
+	return toolChain.FormatToolResult(toolName, "")
 }
 
 // Terminate creates an AgentLoopResult with LATerminate action and text result.

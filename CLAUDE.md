@@ -29,3 +29,7 @@
 - MAX line length: 100 characters.
 - NEVER swallow errors. Errors must be either returned, or logged.
 </standards_convention>
+
+<critical_rules>
+**Never commit and push without asking permission!**
+</critical_rules>
