@@ -184,6 +184,21 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	// The format handles tracing of parse errors and resetting consecutive counter
 	parsed, parseErr := r.format.Parse(execCtx, responseContent)
 
+	// Process thinking section if configured and present
+	// This validates structured thinking output and tracks section parse errors.
+	// Section parse errors don't stop the current iteration, but the executor
+	// will terminate if section parse error limits are exceeded.
+	if r.thinkingSection != nil {
+		if thinkingContents, ok := parsed[r.thinkingSection.Name()]; ok {
+			for _, content := range thinkingContents {
+				// ParseSection handles stats tracking:
+				// - On error: publishes ParseErrorEvent, increments total/consecutive counters
+				// - On success: resets consecutive counter
+				_, _ = r.thinkingSection.ParseSection(execCtx, content)
+			}
+		}
+	}
+
 	// Check for action (tool calls) section first - actions take priority over termination
 	// This ensures tools are executed even if the model also outputs an answer
 	actionContents, hasActions := parsed[r.toolChain.Name()]

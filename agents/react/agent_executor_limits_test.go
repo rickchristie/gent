@@ -42,6 +42,33 @@ func runWithLimit(
 	return execCtx
 }
 
+func runWithLimitAndThinking(
+	t *testing.T,
+	model *tt.MockModel,
+	format *tt.MockFormat,
+	toolChain *tt.MockToolChain,
+	termination *tt.MockTermination,
+	thinkingSection *tt.MockSection,
+	limits []gent.Limit,
+) *gent.ExecutionContext {
+	t.Helper()
+
+	agent := NewAgent(model).
+		WithFormat(format).
+		WithToolChain(toolChain).
+		WithTermination(termination).
+		WithThinkingSection(thinkingSection)
+
+	data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
+	execCtx := gent.NewExecutionContext(context.Background(), "test", data)
+	execCtx.SetLimits(limits)
+
+	exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
+	exec.Execute(execCtx)
+
+	return execCtx
+}
+
 // ----------------------------------------------------------------------------
 // Test: Iteration limit
 // ----------------------------------------------------------------------------
@@ -1390,93 +1417,158 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 
 func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 	t.Run("stops when section parse error total exceeded", func(t *testing.T) {
-		// Section parse errors are traced by TextSection implementations.
-		// For this test, we'll use a custom section that traces errors.
-		// However, the react agent doesn't use custom sections directly.
-		// Section parse errors would come from custom TextSection implementations.
-		// For now, we'll verify the limit works by manually incrementing the counter.
+		// Section parse errors are triggered by thinking section ParseSection failures.
+		// The agent processes thinking content silently - errors track stats but don't
+		// provide feedback, so the iteration continues normally with tool calls.
 
 		model := tt.NewMockModel().
-			AddResponse("<action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
 		format := tt.NewMockFormat().
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		agent := NewAgent(model).
-			WithFormat(format).
-			WithToolChain(toolChain).
-			WithTermination(termination)
+		// MockSection configured to fail ParseSection with errors
+		thinkingSection := tt.NewMockSection("thinking").
+			WithParseErrors(gent.ErrInvalidYAML, gent.ErrInvalidYAML, gent.ErrInvalidYAML, nil)
 
-		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
-		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		limit := tt.ExactLimit(gent.KeySectionParseErrorTotal, 2)
-		execCtx.SetLimits([]gent.Limit{limit})
+		limits := []gent.Limit{limit}
 
-		// Manually increment to simulate section parse errors
-		// This triggers limit check immediately
-		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorTotal, 3)
-
-		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
-		exec.Execute(execCtx)
+		execCtx := runWithLimitAndThinking(t, model, format, toolChain, termination,
+			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, gent.KeySectionParseErrorTotal, execCtx.ExceededLimit().Key)
 
-		// Limit already exceeded before Execute(), so execution stops immediately
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Section parse errors are silent - don't affect NextPrompt
+		// The iteration continues normally with tool execution
 		expectedEvents := []gent.Event{
-			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorTotal),
 			tt.BeforeExec(0, 0),
-			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+			// Iteration 1: thinking parse error (total: 1 <= 2 OK), then tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: thinking parse error (total: 2 <= 2 OK), then tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: thinking parse error (total: 3 > 2 EXCEEDED), then tool call
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeSection, "bad"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeySectionParseErrorTotal),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
-	t.Run("exceeds limit at third iteration after successful iterations", func(t *testing.T) {
-		// Simulate section parse errors occurring after 2 successful iterations
+	t.Run("exceeds limit at fifth iteration after successful iterations", func(t *testing.T) {
+		// Iterations 1-2: thinking parses successfully, tool executes
+		// Iterations 3-5: thinking fails to parse (errors: 1, 2, 3 - exceeds limit of 2)
 		model := tt.NewMockModel().
-			AddResponse("<action>tool: test</action>", 100, 50).
-			AddResponse("<action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>good</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>good</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
 		format := tt.NewMockFormat().
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"good"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"good"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		agent := NewAgent(model).
-			WithFormat(format).
-			WithToolChain(toolChain).
-			WithTermination(termination)
+		// MockSection: first 2 calls succeed, then 3 consecutive failures
+		thinkingSection := tt.NewMockSection("thinking").
+			WithParseErrors(nil, nil, gent.ErrInvalidYAML, gent.ErrInvalidYAML, gent.ErrInvalidYAML, nil)
 
-		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
-		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		limit := tt.ExactLimit(gent.KeySectionParseErrorTotal, 2)
-		execCtx.SetLimits([]gent.Limit{limit})
+		limits := []gent.Limit{limit}
 
-		// Simulate: 2 successful iterations, then section errors in 3rd iteration
-		// We'll increment errors after first two successful iterations would have run
-		// Since we manually control, increment 3 to exceed limit
-		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorTotal, 3)
-
-		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
-		exec.Execute(execCtx)
+		execCtx := runWithLimitAndThinking(t, model, format, toolChain, termination,
+			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, gent.KeySectionParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, 5, execCtx.Iteration())
 
-		// Limit already exceeded before Execute(), so execution stops immediately
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
 		expectedEvents := []gent.Event{
-			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorTotal),
 			tt.BeforeExec(0, 0),
-			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+			// Iteration 1: thinking OK, tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: thinking OK, tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: thinking error (total: 1), tool call
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 4: thinking error (total: 2), tool call
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 4, "test", nil),
+			tt.AfterToolCall(0, 4, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 5: thinking error (total: 3 > 2 EXCEEDED), tool call
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeSection, "bad"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeySectionParseErrorTotal),
+			tt.BeforeToolCall(0, 5, "test", nil),
+			tt.AfterToolCall(0, 5, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
@@ -1899,84 +1991,156 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 
 func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 	t.Run("stops when section parse error consecutive exceeded", func(t *testing.T) {
+		// Section parse errors are triggered by thinking section ParseSection failures.
+		// Consecutive errors accumulate until limit is exceeded.
+
 		model := tt.NewMockModel().
-			AddResponse("<action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
 		format := tt.NewMockFormat().
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		agent := NewAgent(model).
-			WithFormat(format).
-			WithToolChain(toolChain).
-			WithTermination(termination)
+		// MockSection configured with consecutive parse errors
+		thinkingSection := tt.NewMockSection("thinking").
+			WithParseErrors(gent.ErrInvalidYAML, gent.ErrInvalidYAML, gent.ErrInvalidYAML, nil)
 
-		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
-		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		limit := tt.ExactLimit(gent.KeySectionParseErrorConsecutive, 2)
-		execCtx.SetLimits([]gent.Limit{limit})
+		limits := []gent.Limit{limit}
 
-		// Manually increment to simulate consecutive section parse errors
-		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 3)
-
-		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
-		exec.Execute(execCtx)
+		execCtx := runWithLimitAndThinking(t, model, format, toolChain, termination,
+			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, gent.KeySectionParseErrorConsecutive, execCtx.ExceededLimit().Key)
 
-		// Limit already exceeded before Execute(), so execution stops immediately
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Section parse errors are silent - don't affect NextPrompt
 		expectedEvents := []gent.Event{
-			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorConsecutive),
 			tt.BeforeExec(0, 0),
-			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+			// Iteration 1: thinking error (consecutive: 1), tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.ParseError(0, 1, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: thinking error (consecutive: 2), tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.ParseError(0, 2, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: thinking error (consecutive: 3 > 2 EXCEEDED), tool call
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeSection, "bad"),
+			tt.LimitExceeded(0, 3, limit, 3, gent.KeySectionParseErrorConsecutive),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
-	t.Run("exceeds consecutive limit at third iteration after successful iterations", func(t *testing.T) {
-		// Simulate section parse errors occurring consecutively after 2 successful iterations
+	t.Run("exceeds consecutive limit at fifth iteration after successful iterations", func(t *testing.T) {
+		// Iterations 1-2: thinking parses successfully, tool executes
+		// Iterations 3-5: thinking fails consecutively (consecutive: 1, 2, 3 > limit 2)
 		model := tt.NewMockModel().
-			AddResponse("<action>tool: test</action>", 100, 50).
-			AddResponse("<action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>good</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>good</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
+			AddResponse("<thinking>bad</thinking><action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
 
 		format := tt.NewMockFormat().
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"good"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"good"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad"}, "action": {"tool: test"}}).
 			AddParseResult(map[string][]string{"answer": {"done"}})
 
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		agent := NewAgent(model).
-			WithFormat(format).
-			WithToolChain(toolChain).
-			WithTermination(termination)
+		// MockSection: first 2 succeed, then 3 consecutive failures
+		thinkingSection := tt.NewMockSection("thinking").
+			WithParseErrors(nil, nil, gent.ErrInvalidYAML, gent.ErrInvalidYAML, gent.ErrInvalidYAML, nil)
 
-		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
-		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		limit := tt.ExactLimit(gent.KeySectionParseErrorConsecutive, 2)
-		execCtx.SetLimits([]gent.Limit{limit})
+		limits := []gent.Limit{limit}
 
-		// Simulate: 2 successful iterations, then consecutive section errors (3 > limit of 2)
-		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 3)
-
-		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
-		exec.Execute(execCtx)
+		execCtx := runWithLimitAndThinking(t, model, format, toolChain, termination,
+			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		require.NotNil(t, execCtx.ExceededLimit())
 		assert.Equal(t, gent.KeySectionParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, 5, execCtx.Iteration())
 
-		// Limit already exceeded before Execute(), so execution stops immediately
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
 		expectedEvents := []gent.Event{
-			tt.LimitExceeded(0, 0, limit, 3, gent.KeySectionParseErrorConsecutive),
 			tt.BeforeExec(0, 0),
-			tt.AfterExec(0, 0, gent.TerminationLimitExceeded),
+			// Iteration 1: thinking OK, tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: thinking OK, tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "test", nil),
+			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: thinking error (consecutive: 1), tool call
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ParseError(0, 3, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 3, "test", nil),
+			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 4: thinking error (consecutive: 2), tool call
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeSection, "bad"),
+			tt.BeforeToolCall(0, 4, "test", nil),
+			tt.AfterToolCall(0, 4, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 5: thinking error (consecutive: 3 > 2 EXCEEDED), tool call
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ParseError(0, 5, gent.ParseErrorTypeSection, "bad"),
+			tt.LimitExceeded(0, 5, limit, 3, gent.KeySectionParseErrorConsecutive),
+			tt.BeforeToolCall(0, 5, "test", nil),
+			tt.AfterToolCall(0, 5, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
@@ -2811,58 +2975,91 @@ func TestExecutorLimits_ConsecutiveReset_TerminationParseError(t *testing.T) {
 
 func TestExecutorLimits_ConsecutiveReset_SectionParseError(t *testing.T) {
 	t.Run("consecutive counter resets on success - does not exceed limit", func(t *testing.T) {
+		// Sequence: fail, fail, success, fail, success
+		// With limit of 2, this should NOT trigger because consecutive resets after success
+		// Iterations: 1 (fail consec=1), 2 (fail consec=2), 3 (success resets),
+		//             4 (fail consec=1), 5 (success terminates)
 		model := tt.NewMockModel().
-			AddResponse("<action>tool: test</action>", 100, 50).
-			AddResponse("<answer>done</answer>", 100, 50)
+			AddResponse("<thinking>bad1</thinking><action>tool: t</action>", 100, 50).
+			AddResponse("<thinking>bad2</thinking><action>tool: t</action>", 100, 50).
+			AddResponse("<thinking>good</thinking><action>tool: t</action>", 100, 50).
+			AddResponse("<thinking>bad3</thinking><action>tool: t</action>", 100, 50).
+			AddResponse("<thinking>good</thinking><answer>done</answer>", 100, 50)
 
 		format := tt.NewMockFormat().
-			AddParseResult(map[string][]string{"action": {"tool: test"}}).
-			AddParseResult(map[string][]string{"answer": {"done"}})
+			AddParseResult(map[string][]string{"thinking": {"bad1"}, "action": {"tool: t"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad2"}, "action": {"tool: t"}}).
+			AddParseResult(map[string][]string{"thinking": {"good"}, "action": {"tool: t"}}).
+			AddParseResult(map[string][]string{"thinking": {"bad3"}, "action": {"tool: t"}}).
+			AddParseResult(map[string][]string{"thinking": {"good"}, "answer": {"done"}})
 
 		toolChain := tt.NewMockToolChain()
 		termination := tt.NewMockTermination()
 
-		agent := NewAgent(model).
-			WithFormat(format).
-			WithToolChain(toolChain).
-			WithTermination(termination)
+		// MockSection: fail, fail, success, fail, success
+		thinkingSection := tt.NewMockSection("thinking").
+			WithParseErrors(
+				gent.ErrInvalidYAML, // iter 1: fail (consecutive=1)
+				gent.ErrInvalidYAML, // iter 2: fail (consecutive=2, at limit)
+				nil,                 // iter 3: success (consecutive resets)
+				gent.ErrInvalidYAML, // iter 4: fail (consecutive=1, after reset)
+				nil,                 // iter 5: success
+			)
 
-		data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
-		execCtx := gent.NewExecutionContext(context.Background(), "test", data)
 		limit := tt.ExactLimit(gent.KeySectionParseErrorConsecutive, 2)
-		execCtx.SetLimits([]gent.Limit{limit})
+		limits := []gent.Limit{limit}
 
-		// Simulate: fail, fail, reset, fail (consecutive should be 1, not 3)
-		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 2) // fail, fail
-		execCtx.Stats().ResetCounter(gent.KeySectionParseErrorConsecutive)   // reset
-		execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 1) // fail
+		execCtx := runWithLimitAndThinking(t, model, format, toolChain, termination,
+			thinkingSection, limits)
 
-		exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
-		exec.Execute(execCtx)
-
-		// Should complete because consecutive is 1, not 3
+		// Should complete successfully because consecutive never exceeded 2
 		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason())
 		assert.Nil(t, execCtx.ExceededLimit())
+		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
-		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+		toolObs := tt.ToolObservation(format, toolChain, "t", "tool executed")
 
-		// Assert events: execution completes successfully
+		// Assert events: fail, fail, success (tool), fail (tool), success (answer)
 		expectedEvents := []gent.Event{
 			tt.BeforeExec(0, 0),
-			// Iteration 1: tool call
+			// Iteration 1: section parse error (consecutive: 1), tool call
 			tt.BeforeIter(0, 1),
 			tt.BeforeModelCall(0, 1, "test-model"),
 			tt.AfterModelCall(0, 1, "test-model", 100, 50),
-			tt.BeforeToolCall(0, 1, "test", nil),
-			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.ParseError(0, 1, gent.ParseErrorTypeSection, "bad1"),
+			tt.BeforeToolCall(0, 1, "t", nil),
+			tt.AfterToolCall(0, 1, "t", nil, "tool executed", nil),
 			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
-			// Iteration 2: terminate
+			// Iteration 2: section parse error (consecutive: 2, at limit but not exceeded)
 			tt.BeforeIter(0, 2),
 			tt.BeforeModelCall(0, 2, "test-model"),
 			tt.AfterModelCall(0, 2, "test-model", 100, 50),
-			tt.AfterIter(0, 2, tt.Terminate("done")),
-			tt.AfterExec(0, 2, gent.TerminationSuccess),
+			tt.ParseError(0, 2, gent.ParseErrorTypeSection, "bad2"),
+			tt.BeforeToolCall(0, 2, "t", nil),
+			tt.AfterToolCall(0, 2, "t", nil, "tool executed", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: section parse success (consecutive resets), tool call
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 3, "t", nil),
+			tt.AfterToolCall(0, 3, "t", nil, "tool executed", nil),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 4: section parse error (consecutive: 1, reset from success), tool call
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ParseError(0, 4, gent.ParseErrorTypeSection, "bad3"),
+			tt.BeforeToolCall(0, 4, "t", nil),
+			tt.AfterToolCall(0, 4, "t", nil, "tool executed", nil),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 5: section parse success, terminate
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.AfterIter(0, 5, tt.Terminate("done")),
+			tt.AfterExec(0, 5, gent.TerminationSuccess),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})

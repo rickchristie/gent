@@ -556,3 +556,68 @@ func (v *MockValidator) Validate(
 	}
 	return &gent.ValidationResult{Accepted: false, Feedback: v.feedback}
 }
+
+// -----------------------------------------------------------------------------
+// MockSection - implements gent.TextSection with proper event publishing
+// -----------------------------------------------------------------------------
+
+// MockSection is a configurable mock that implements gent.TextSection.
+// It publishes ParseError events with ParseErrorTypeSection as required.
+type MockSection struct {
+	name        string
+	guidance    string
+	parseErrors []error
+	callIdx     int
+}
+
+// NewMockSection creates a new MockSection with the given name.
+func NewMockSection(name string) *MockSection {
+	return &MockSection{
+		name:     name,
+		guidance: "Mock section guidance",
+	}
+}
+
+// WithGuidance sets the guidance text for this section.
+func (s *MockSection) WithGuidance(guidance string) *MockSection {
+	s.guidance = guidance
+	return s
+}
+
+// WithParseErrors configures parse errors to return on subsequent ParseSection calls.
+func (s *MockSection) WithParseErrors(errs ...error) *MockSection {
+	s.parseErrors = errs
+	return s
+}
+
+// Name implements gent.TextSection.
+func (s *MockSection) Name() string { return s.name }
+
+// Guidance implements gent.TextSection.
+func (s *MockSection) Guidance() string { return s.guidance }
+
+// ParseSection implements gent.TextSection with proper event publishing.
+func (s *MockSection) ParseSection(
+	execCtx *gent.ExecutionContext,
+	content string,
+) (any, error) {
+	idx := s.callIdx
+	s.callIdx++
+
+	if idx < len(s.parseErrors) && s.parseErrors[idx] != nil {
+		err := s.parseErrors[idx]
+		if execCtx != nil {
+			execCtx.PublishParseError(gent.ParseErrorTypeSection, content, err)
+		}
+		return nil, err
+	}
+
+	// Success resets consecutive counter
+	if execCtx != nil {
+		execCtx.Stats().ResetCounter(gent.KeySectionParseErrorConsecutive)
+	}
+	return content, nil
+}
+
+// Compile-time check that MockSection implements gent.TextSection.
+var _ gent.TextSection = (*MockSection)(nil)
