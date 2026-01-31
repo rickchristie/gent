@@ -74,7 +74,48 @@ func runWithLimitAndThinking(
 // ----------------------------------------------------------------------------
 
 func TestExecutorLimits_Iterations(t *testing.T) {
-	t.Run("stops when iteration limit exceeded", func(t *testing.T) {
+	t.Run("stops when iteration limit exceeded at first iteration", func(t *testing.T) {
+		// Limit of 0 means iteration 1 (value 1 > 0) immediately exceeds
+		model := tt.NewMockModel().
+			AddResponse("<action>tool: test</action>", 100, 50).
+			AddResponse("<answer>done</answer>", 100, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"answer": {"done"}})
+
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
+
+		limit := tt.ExactLimit(gent.KeyIterations, 0)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+		assert.Equal(t, 1, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence - limit exceeded at BeforeIter for iteration 1
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.LimitExceeded(0, 1, limit, 1, gent.KeyIterations),
+			// Agent continues despite cancelled context (mock doesn't check)
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
+	})
+
+	t.Run("stops when iteration limit exceeded at Nth iteration", func(t *testing.T) {
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<action>tool: test</action>", 100, 50).
@@ -96,8 +137,7 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.NotNil(t, execCtx.ExceededLimit())
-		assert.Equal(t, gent.KeyIterations, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 3, execCtx.Iteration()) // Attempted 3rd but stopped
 
 		// Build expected NextPrompt for tool execution
@@ -143,7 +183,48 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestExecutorLimits_InputTokens(t *testing.T) {
-	t.Run("stops when input token limit exceeded", func(t *testing.T) {
+	t.Run("stops when input token limit exceeded at first iteration", func(t *testing.T) {
+		// First model call uses 600 tokens which exceeds limit of 500
+		model := tt.NewMockModel().
+			AddResponse("<action>tool: test</action>", 600, 50).
+			AddResponse("<answer>done</answer>", 100, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"answer": {"done"}})
+
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
+
+		limit := tt.ExactLimit(gent.KeyInputTokens, 500)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+		assert.Equal(t, 1, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence - limit exceeded at AfterModelCall for iteration 1
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 600, 50),
+			tt.LimitExceeded(0, 1, limit, 600, gent.KeyInputTokens),
+			// Agent continues despite cancelled context
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
+	})
+
+	t.Run("stops when input token limit exceeded at Nth iteration", func(t *testing.T) {
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 500, 50).
 			AddResponse("<action>tool: test</action>", 600, 50). // Total: 1100
@@ -163,7 +244,7 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyInputTokens, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
@@ -230,9 +311,7 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		// Verify it was the beta model's tokens that triggered the limit
-		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "call_beta", "child response")
@@ -291,7 +370,7 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyInputTokens, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 3, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
@@ -364,8 +443,7 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 3, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool executions
@@ -433,10 +511,125 @@ func TestExecutorLimits_InputTokens(t *testing.T) {
 		}
 		tt.AssertEventsEqual(t, expectedChild3, child3Events)
 	})
+
+	t.Run("child context tokens propagate to global input token limit", func(t *testing.T) {
+		// Test that child context model calls contribute to the global input token limit.
+		// Parent model uses 200 tokens, child model uses 900 tokens.
+		// Global limit is 1000, so total 1100 exceeds it.
+
+		// Child model called by tool
+		childModel := tt.NewMockModel().WithName("child").
+			AddResponse("child response", 900, 50) // Large enough to trigger limit
+
+		// Parent model
+		parentModel := tt.NewMockModel().WithName("parent").
+			AddResponse("<action>tool: call_child</action>", 200, 50).
+			AddResponse("<answer>done</answer>", 100, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: call_child"}}).
+			AddParseResult(map[string][]string{"answer": {"done"}})
+
+		toolChain := tt.NewMockToolChain().
+			WithToolCtx("call_child",
+				func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
+					childCtx := execCtx.SpawnChild("child-call", nil)
+					resp, err := childModel.GenerateContent(childCtx, "child", "", nil)
+					if err != nil {
+						return "", err
+					}
+					return resp.Choices[0].Content, nil
+				})
+		termination := tt.NewMockTermination()
+
+		// Global input token limit (not prefix) - includes all models
+		limit := tt.ExactLimit(gent.KeyInputTokens, 1000)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, parentModel, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+
+		// Verify global input tokens include both parent and child
+		// Parent: 200, Child: 900 = 1100 total
+		assert.Equal(t, int64(1100), execCtx.Stats().GetCounter(gent.KeyInputTokens))
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "call_child", "child response")
+
+		// Assert parent context events
+		expectedParentEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "parent"),
+			tt.AfterModelCall(0, 1, "parent", 200, 50),
+			tt.BeforeToolCall(0, 1, "call_child", nil),
+			// Child's 900 tokens + parent's 200 = 1100 > 1000 limit
+			tt.LimitExceeded(0, 1, limit, 1100, gent.KeyInputTokens),
+			tt.AfterToolCall(0, 1, "call_child", nil, "child response", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedParentEvents, tt.CollectLifecycleEvents(execCtx))
+
+		// Assert child context events
+		// Note: Child's local stats (900) don't exceed limit (1000)
+		// The aggregated total (1100) only exceeds at parent level
+		// So child does NOT get LimitExceeded
+		require.Len(t, execCtx.Children(), 1)
+		childCtx := execCtx.Children()[0]
+		expectedChildEvents := []gent.Event{
+			tt.BeforeModelCall(1, 0, "child"),
+			tt.AfterModelCall(1, 0, "child", 900, 50),
+		}
+		tt.AssertEventsEqual(t, expectedChildEvents, tt.CollectLifecycleEvents(childCtx))
+	})
 }
 
 func TestExecutorLimits_OutputTokens(t *testing.T) {
-	t.Run("stops when output token limit exceeded", func(t *testing.T) {
+	t.Run("stops when output token limit exceeded at first iteration", func(t *testing.T) {
+		// First model call uses 600 output tokens which exceeds limit of 500
+		model := tt.NewMockModel().
+			AddResponse("<action>tool: test</action>", 100, 600).
+			AddResponse("<answer>done</answer>", 100, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: test"}}).
+			AddParseResult(map[string][]string{"answer": {"done"}})
+
+		toolChain := tt.NewMockToolChain()
+		termination := tt.NewMockTermination()
+
+		limit := tt.ExactLimit(gent.KeyOutputTokens, 500)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+		assert.Equal(t, 1, execCtx.Iteration())
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+		// Assert full event sequence - limit exceeded at AfterModelCall for iteration 1
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 600),
+			tt.LimitExceeded(0, 1, limit, 600, gent.KeyOutputTokens),
+			// Agent continues despite cancelled context
+			tt.BeforeToolCall(0, 1, "test", nil),
+			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
+	})
+
+	t.Run("stops when output token limit exceeded at Nth iteration", func(t *testing.T) {
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 500).
 			AddResponse("<action>tool: test</action>", 100, 600). // Total: 1100
@@ -456,7 +649,7 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyOutputTokens, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
@@ -522,9 +715,7 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		// Verify it was the beta model's tokens that triggered the limit
-		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "call_beta", "child response")
@@ -581,7 +772,7 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyOutputTokens, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 3, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
@@ -654,8 +845,7 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		execCtx := runWithLimit(t, modelAlpha, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Contains(t, execCtx.ExceededLimit().Key, "beta")
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 3, execCtx.Iteration())
 
 		// Build expected NextPrompts for tool executions
@@ -710,6 +900,78 @@ func TestExecutorLimits_OutputTokens(t *testing.T) {
 		}
 		tt.AssertEventsEqual(t, expectedChild3, child3Events)
 	})
+
+	t.Run("child context tokens propagate to global output token limit", func(t *testing.T) {
+		// Test that child context model calls contribute to the global output token limit.
+		// Parent model uses 200 output tokens, child model uses 900 output tokens.
+		// Global limit is 1000, so total 1100 exceeds it.
+
+		// Child model called by tool
+		childModel := tt.NewMockModel().WithName("child").
+			AddResponse("child response", 50, 900) // Large output to trigger limit
+
+		// Parent model
+		parentModel := tt.NewMockModel().WithName("parent").
+			AddResponse("<action>tool: call_child</action>", 50, 200).
+			AddResponse("<answer>done</answer>", 50, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: call_child"}}).
+			AddParseResult(map[string][]string{"answer": {"done"}})
+
+		toolChain := tt.NewMockToolChain().
+			WithToolCtx("call_child",
+				func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
+					childCtx := execCtx.SpawnChild("child-call", nil)
+					resp, err := childModel.GenerateContent(childCtx, "child", "", nil)
+					if err != nil {
+						return "", err
+					}
+					return resp.Choices[0].Content, nil
+				})
+		termination := tt.NewMockTermination()
+
+		// Global output token limit (not prefix) - includes all models
+		limit := tt.ExactLimit(gent.KeyOutputTokens, 1000)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, parentModel, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+
+		// Verify global output tokens include both parent and child
+		// Parent: 200, Child: 900 = 1100 total
+		assert.Equal(t, int64(1100), execCtx.Stats().GetCounter(gent.KeyOutputTokens))
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain, "call_child", "child response")
+
+		// Assert parent context events
+		expectedParentEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "parent"),
+			tt.AfterModelCall(0, 1, "parent", 50, 200),
+			tt.BeforeToolCall(0, 1, "call_child", nil),
+			// Child's 900 output tokens + parent's 200 = 1100 > 1000 limit
+			tt.LimitExceeded(0, 1, limit, 1100, gent.KeyOutputTokens),
+			tt.AfterToolCall(0, 1, "call_child", nil, "child response", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedParentEvents, tt.CollectLifecycleEvents(execCtx))
+
+		// Assert child context events
+		// Child's local stats (900) don't exceed limit (1000)
+		require.Len(t, execCtx.Children(), 1)
+		childCtx := execCtx.Children()[0]
+		expectedChildEvents := []gent.Event{
+			tt.BeforeModelCall(1, 0, "child"),
+			tt.AfterModelCall(1, 0, "child", 50, 900),
+		}
+		tt.AssertEventsEqual(t, expectedChildEvents, tt.CollectLifecycleEvents(childCtx))
+	})
 }
 
 // ----------------------------------------------------------------------------
@@ -739,7 +1001,7 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolCalls, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
@@ -805,8 +1067,7 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Contains(t, execCtx.ExceededLimit().Key, "get_detail")
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration()) // Fails on 5th iteration (2nd get_detail call)
 
 		// Build expected NextPrompts for tool executions
@@ -883,7 +1144,7 @@ func TestExecutorLimits_ToolCalls(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolCalls, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 4, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
@@ -1024,7 +1285,7 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyFormatParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompts for format parse errors
 		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
@@ -1090,7 +1351,7 @@ func TestExecutorLimits_FormatParseErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyFormatParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -1166,7 +1427,7 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolchainParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for toolchain parse errors
 		tcObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
@@ -1227,7 +1488,7 @@ func TestExecutorLimits_ToolchainParseErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolchainParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -1300,7 +1561,7 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyTerminationParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for termination parse error
 		termObs := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "malformed")
@@ -1364,7 +1625,7 @@ func TestExecutorLimits_TerminationParseErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyTerminationParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -1447,8 +1708,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Equal(t, gent.KeySectionParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
@@ -1520,8 +1780,7 @@ func TestExecutorLimits_SectionParseErrorTotal(t *testing.T) {
 			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Equal(t, gent.KeySectionParseErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
@@ -1601,7 +1860,7 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyFormatParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompts for format parse errors
 		parseObs1 := tt.FormatParseErrorObservation(format, gent.ErrNoSectionsFound, "invalid1")
@@ -1663,7 +1922,7 @@ func TestExecutorLimits_FormatParseErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyFormatParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -1738,7 +1997,7 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolchainParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for toolchain parse error
 		errObs := tt.ToolchainErrorObservation(format, gent.ErrInvalidJSON)
@@ -1799,7 +2058,7 @@ func TestExecutorLimits_ToolchainParseErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolchainParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -1872,7 +2131,7 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyTerminationParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompts for termination parse errors
 		termObs1 := tt.TerminationParseErrorObservation(format, gent.ErrInvalidJSON, "bad1")
@@ -1938,7 +2197,7 @@ func TestExecutorLimits_TerminationParseErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyTerminationParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -2020,8 +2279,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Equal(t, gent.KeySectionParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
@@ -2092,8 +2350,7 @@ func TestExecutorLimits_SectionParseErrorConsecutive(t *testing.T) {
 			thinkingSection, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Equal(t, gent.KeySectionParseErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
@@ -2177,7 +2434,7 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolCallsErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool error (empty output)
 		toolErrObs := tt.ToolObservation(format, toolChain, "failing", "")
@@ -2249,7 +2506,7 @@ func TestExecutorLimits_ToolCallsErrorTotal(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolCallsErrorTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -2463,7 +2720,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolCallsErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Build expected NextPrompt for tool error (empty output)
 		toolErrObs := tt.ToolObservation(format, toolChain, "failing", "")
@@ -2535,7 +2792,7 @@ func TestExecutorLimits_ToolCallsErrorConsecutive(t *testing.T) {
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyToolCallsErrorConsecutive, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Build expected NextPrompts
@@ -3265,19 +3522,17 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
 		termination.SetValidator(validator)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyAnswerRejectedTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyAnswerRejectedTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyAnswerRejectedTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Event assertions
 		feedback := []gent.FormattedSection{{Name: "error", Content: "Answer rejected"}}
 		rejectObs := tt.ValidatorFeedbackObservation(format, feedback...)
-		limit := tt.ExactLimit(gent.KeyAnswerRejectedTotal, 2)
 		expectedEvents := []gent.Event{
 			tt.BeforeExec(0, 0),
 			// Iteration 1: answer rejected (count=1)
@@ -3337,21 +3592,19 @@ func TestExecutorLimits_AnswerRejectedTotal(t *testing.T) {
 			WithFeedback(gent.FormattedSection{Name: "error", Content: "Answer rejected"})
 		termination.SetValidator(validator)
 
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyAnswerRejectedTotal, MaxValue: 2},
-		}
+		limit := tt.ExactLimit(gent.KeyAnswerRejectedTotal, 2)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		assert.Equal(t, gent.KeyAnswerRejectedTotal, execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 		assert.Equal(t, 5, execCtx.Iteration())
 
 		// Event assertions
 		feedback := []gent.FormattedSection{{Name: "error", Content: "Answer rejected"}}
 		toolObs := tt.ToolObservation(format, toolChain, "search", "found something")
 		rejectObs := tt.ValidatorFeedbackObservation(format, feedback...)
-		limit := tt.ExactLimit(gent.KeyAnswerRejectedTotal, 2)
 		expectedEvents := []gent.Event{
 			tt.BeforeExec(0, 0),
 			// Iteration 1: tool call
@@ -3458,6 +3711,95 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 	})
 
+	t.Run("prefix limit exceeds at third iteration after successful tool calls", func(t *testing.T) {
+		// Iteration 1-2: tool calls (no answer)
+		// Iteration 3-5: answers rejected by validator (3rd rejection exceeds limit of 2)
+		model := tt.NewMockModel().
+			AddResponse("<action>tool: search</action>", 100, 50).
+			AddResponse("<action>tool: search</action>", 100, 50).
+			AddResponse("<answer>bad answer 1</answer>", 100, 50).
+			AddResponse("<answer>bad answer 2</answer>", 100, 50).
+			AddResponse("<answer>bad answer 3</answer>", 100, 50).
+			AddResponse("<answer>good answer</answer>", 100, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: search"}}).
+			AddParseResult(map[string][]string{"action": {"tool: search"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 1"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 2"}}).
+			AddParseResult(map[string][]string{"answer": {"bad answer 3"}}).
+			AddParseResult(map[string][]string{"answer": {"good answer"}})
+
+		toolChain := tt.NewMockToolChain().
+			WithTool("search", func(args map[string]any) (string, error) {
+				return "found something", nil
+			})
+		termination := tt.NewMockTermination()
+
+		validator := tt.NewMockValidator("schema_validator").
+			WithAcceptances(false, false, false, true).
+			WithFeedback(gent.FormattedSection{Name: "error", Content: "Schema validation failed"})
+		termination.SetValidator(validator)
+
+		limit := tt.PrefixLimit(gent.KeyAnswerRejectedBy, 2)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+		assert.Equal(t, 5, execCtx.Iteration())
+
+		// Event assertions
+		feedback := []gent.FormattedSection{
+			{Name: "error", Content: "Schema validation failed"},
+		}
+		toolObs := tt.ToolObservation(format, toolChain, "search", "found something")
+		rejectObs := tt.ValidatorFeedbackObservation(format, feedback...)
+		matchedKey := gent.KeyAnswerRejectedBy + "schema_validator"
+		expectedEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: tool call
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "test-model"),
+			tt.AfterModelCall(0, 1, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 1, "search", nil),
+			tt.AfterToolCall(0, 1, "search", nil, "found something", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: tool call
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "test-model"),
+			tt.AfterModelCall(0, 2, "test-model", 100, 50),
+			tt.BeforeToolCall(0, 2, "search", nil),
+			tt.AfterToolCall(0, 2, "search", nil, "found something", nil),
+			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 3: answer rejected (count=1)
+			tt.BeforeIter(0, 3),
+			tt.BeforeModelCall(0, 3, "test-model"),
+			tt.AfterModelCall(0, 3, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 3, "schema_validator", "bad answer 1"),
+			tt.ValidatorResult(0, 3, "schema_validator", "bad answer 1", false, feedback),
+			tt.AfterIter(0, 3, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 4: answer rejected (count=2)
+			tt.BeforeIter(0, 4),
+			tt.BeforeModelCall(0, 4, "test-model"),
+			tt.AfterModelCall(0, 4, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 4, "schema_validator", "bad answer 2"),
+			tt.ValidatorResult(0, 4, "schema_validator", "bad answer 2", false, feedback),
+			tt.AfterIter(0, 4, tt.ContinueWithPrompt(rejectObs)),
+			// Iteration 5: answer rejected (count=3) -> limit exceeded
+			tt.BeforeIter(0, 5),
+			tt.BeforeModelCall(0, 5, "test-model"),
+			tt.AfterModelCall(0, 5, "test-model", 100, 50),
+			tt.ValidatorCalled(0, 5, "schema_validator", "bad answer 3"),
+			tt.ValidatorResult(0, 5, "schema_validator", "bad answer 3", false, feedback),
+			tt.LimitExceeded(0, 5, limit, 3, matchedKey),
+			tt.AfterIter(0, 5, tt.ContinueWithPrompt(rejectObs)),
+			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
+	})
+
 	t.Run("child model call validator exceeds limit while main validator does not", func(t *testing.T) {
 		// Scenario:
 		// - Main loop uses "main_validator" - its rejections should NOT trigger the limit
@@ -3507,16 +3849,14 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 		termination.SetValidator(mainValidator)
 
 		// Limit only for child_validator - main_validator rejections don't count
-		limits := []gent.Limit{
-			{Type: gent.LimitExactKey, Key: gent.KeyAnswerRejectedBy + "child_validator", MaxValue: 1},
-		}
+		limit := tt.ExactLimit(gent.KeyAnswerRejectedBy+"child_validator", 1)
+		limits := []gent.Limit{limit}
 
 		execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
 
 		// Should terminate due to child_validator limit exceeded
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
-		require.NotNil(t, execCtx.ExceededLimit())
-		assert.Equal(t, gent.KeyAnswerRejectedBy+"child_validator", execCtx.ExceededLimit().Key)
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
 
 		// Verify stats
 		// main_validator: 3 rejections (iter 1, 2, 4)
@@ -3536,7 +3876,6 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 		mainRejectObs := tt.ValidatorFeedbackObservation(format, mainFeedback...)
 		childToolObs := tt.ToolObservation(format, toolChain,
 			"child_agent", "child agent completed with rejection")
-		limit := tt.ExactLimit(gent.KeyAnswerRejectedBy+"child_validator", 1)
 		matchedKey := gent.KeyAnswerRejectedBy + "child_validator"
 		expectedEvents := []gent.Event{
 			tt.BeforeExec(0, 0),
@@ -3579,5 +3918,198 @@ func TestExecutorLimits_AnswerRejectedByValidator(t *testing.T) {
 			tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
+	})
+}
+
+// ----------------------------------------------------------------------------
+// Global Test: Multiple Limits Race
+// ----------------------------------------------------------------------------
+
+func TestExecutorLimits_MultipleLimitsRace(t *testing.T) {
+	t.Run("first limit by check order is reported when multiple limits exceeded simultaneously",
+		func(t *testing.T) {
+			// Both input and output token limits will be exceeded on the same iteration.
+			// Iteration 1: 500 input, 400 output (both under 800 limit)
+			// Iteration 2: 400 input, 500 output (totals: 900 input > 800, 900 output > 800)
+			// Both limits exceeded simultaneously - first limit (input) should be reported.
+			model := tt.NewMockModel().
+				AddResponse("<action>tool: test</action>", 500, 400).
+				AddResponse("<action>tool: test</action>", 400, 500). // Both totals exceed 800
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{"action": {"tool: test"}}).
+				AddParseResult(map[string][]string{"action": {"tool: test"}}).
+				AddParseResult(map[string][]string{"answer": {"done"}})
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			// Both limits set to 800 - exceeded at iteration 2
+			inputLimit := tt.ExactLimit(gent.KeyInputTokens, 800)
+			outputLimit := tt.ExactLimit(gent.KeyOutputTokens, 800)
+			limits := []gent.Limit{inputLimit, outputLimit}
+
+			execCtx := runWithLimit(t, model, format, toolChain, termination, limits)
+
+			assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+			// First limit in the list should be reported (input tokens)
+			assert.Equal(t, inputLimit, *execCtx.ExceededLimit())
+
+			// Should only have ONE LimitExceededEvent for input tokens
+			limitEvents := 0
+			for _, event := range tt.CollectLifecycleEvents(execCtx) {
+				if _, ok := event.(*gent.LimitExceededEvent); ok {
+					limitEvents++
+				}
+			}
+			assert.Equal(t, 1, limitEvents, "should have exactly one LimitExceededEvent")
+
+			// Build expected NextPrompt for tool execution
+			toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
+
+			// Full event verification
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iteration 1: 500 input, 400 output (both under 800)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "test-model"),
+				tt.AfterModelCall(0, 1, "test-model", 500, 400),
+				tt.BeforeToolCall(0, 1, "test", nil),
+				tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
+				tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+				// Iteration 2: +400 input (total 900 > 800), +500 output (total 900 > 800)
+				// Input limit checked first and exceeded
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "test-model"),
+				tt.AfterModelCall(0, 2, "test-model", 400, 500),
+				tt.LimitExceeded(0, 2, inputLimit, 900, gent.KeyInputTokens),
+				// Agent continues despite cancelled context (mock doesn't check)
+				tt.BeforeToolCall(0, 2, "test", nil),
+				tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
+				tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
+				tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+			}
+			tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
+		})
+}
+
+// ----------------------------------------------------------------------------
+// Global Test: Deep Propagation
+// ----------------------------------------------------------------------------
+
+func TestExecutorLimits_DeepPropagation(t *testing.T) {
+	t.Run("limit exceeded in grandchild propagates to root parent", func(t *testing.T) {
+		// Parent → Child → Grandchild hierarchy
+		// Grandchild model call exceeds the limit set on parent
+		// Verify: limit propagates through all levels to root
+
+		// Grandchild model - exceeds the input token limit
+		grandchildModel := tt.NewMockModel().WithName("grandchild").
+			AddResponse("grandchild response", 600, 50) // Exceeds 500 limit
+
+		// Child model (not used directly, child just calls grandchild tool)
+		childModel := tt.NewMockModel().WithName("child").
+			AddResponse("child response", 100, 50)
+
+		// Parent model
+		parentModel := tt.NewMockModel().WithName("parent").
+			AddResponse("<action>tool: call_child</action>", 100, 50).
+			AddResponse("<answer>done</answer>", 100, 50)
+
+		format := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: call_child"}}).
+			AddParseResult(map[string][]string{"answer": {"done"}})
+
+		// Tool that creates a child context which creates a grandchild context
+		toolChain := tt.NewMockToolChain().
+			WithToolCtx("call_child",
+				func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
+					// Create child context
+					childCtx := execCtx.SpawnChild("child-call", nil)
+
+					// Child calls its model (accumulates some tokens)
+					_, err := childModel.GenerateContent(childCtx, "child", "", nil)
+					if err != nil {
+						return "", err
+					}
+
+					// Child spawns grandchild context
+					grandchildCtx := childCtx.SpawnChild("grandchild-call", nil)
+
+					// Grandchild model call exceeds the limit
+					resp, err := grandchildModel.GenerateContent(grandchildCtx, "grandchild", "", nil)
+					if err != nil {
+						return "", err
+					}
+
+					return "child completed: " + resp.Choices[0].Content, nil
+				})
+		termination := tt.NewMockTermination()
+
+		// Limit on grandchild model's input tokens via prefix
+		limit := tt.PrefixLimit(gent.KeyInputTokensFor+"grandchild", 500)
+		limits := []gent.Limit{limit}
+
+		execCtx := runWithLimit(t, parentModel, format, toolChain, termination, limits)
+
+		// Parent should terminate with limit exceeded
+		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
+		assert.Equal(t, limit, *execCtx.ExceededLimit())
+
+		// Verify child context exists and was affected
+		require.Len(t, execCtx.Children(), 1)
+		childCtx := execCtx.Children()[0]
+		assert.Equal(t, "child-call", childCtx.Name())
+
+		// Verify grandchild context exists and was the source
+		require.Len(t, childCtx.Children(), 1)
+		grandchildCtx := childCtx.Children()[0]
+		assert.Equal(t, "grandchild-call", grandchildCtx.Name())
+
+		// Verify stats propagated through all levels
+		// Grandchild's 600 input tokens should be tracked at gent:input_tokens:grandchild
+		assert.Equal(t,
+			int64(600),
+			execCtx.Stats().GetCounter(gent.KeyInputTokensFor+"grandchild"))
+
+		// Build expected NextPrompt for tool execution
+		toolObs := tt.ToolObservation(format, toolChain,
+			"call_child", "child completed: grandchild response")
+
+		// Assert parent context events
+		matchedKey := gent.KeyInputTokensFor + "grandchild"
+		expectedParentEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "parent"),
+			tt.AfterModelCall(0, 1, "parent", 100, 50),
+			tt.BeforeToolCall(0, 1, "call_child", nil),
+			// Limit exceeded during tool execution (from grandchild)
+			tt.LimitExceeded(0, 1, limit, 600, matchedKey),
+			tt.AfterToolCall(0, 1, "call_child", nil, "child completed: grandchild response", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
+		}
+		tt.AssertEventsEqual(t, expectedParentEvents, tt.CollectLifecycleEvents(execCtx))
+
+		// Assert child context events
+		// Child itself doesn't exceed, but receives propagated LimitExceededEvent from grandchild
+		expectedChildEvents := []gent.Event{
+			tt.BeforeModelCall(1, 0, "child"),
+			tt.AfterModelCall(1, 0, "child", 100, 50),
+			// LimitExceeded propagates up through child context
+			tt.LimitExceeded(1, 0, limit, 600, matchedKey),
+		}
+		tt.AssertEventsEqual(t, expectedChildEvents, tt.CollectLifecycleEvents(childCtx))
+
+		// Assert grandchild context events (this is where the limit is exceeded)
+		expectedGrandchildEvents := []gent.Event{
+			tt.BeforeModelCall(2, 0, "grandchild"),
+			tt.AfterModelCall(2, 0, "grandchild", 600, 50),
+			// LimitExceeded published on the context that triggered it
+			tt.LimitExceeded(2, 0, limit, 600, matchedKey),
+		}
+		tt.AssertEventsEqual(t, expectedGrandchildEvents, tt.CollectLifecycleEvents(grandchildCtx))
 	})
 }
