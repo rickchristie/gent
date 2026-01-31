@@ -90,6 +90,9 @@ func (s *ExecutionStats) IncrCounter(key string, delta int64) {
 // incrCounterInternal increments a counter without protection checks.
 // Used internally for updating stats from events.
 // Each context checks its own limits, then propagates to parent.
+//
+// Note: Protected keys (like gent:iterations) do NOT propagate to parent.
+// This prevents child execution from corrupting parent iteration tracking.
 func (s *ExecutionStats) incrCounterInternal(key string, delta int64) {
 	s.mu.Lock()
 	s.counters[key] += delta
@@ -101,7 +104,8 @@ func (s *ExecutionStats) incrCounterInternal(key string, delta int64) {
 	}
 
 	// Propagate to parent (which will check its own limits)
-	if s.parent != nil {
+	// Protected keys (e.g., iterations) do NOT propagate - they are context-local
+	if s.parent != nil && !isProtectedKey(key) {
 		s.parent.incrCounterInternal(key, delta)
 	}
 }

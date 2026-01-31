@@ -1162,3 +1162,74 @@ func TestLimitExceeded_EventContainsCorrectIterationAndDepth(t *testing.T) {
 	assert.Equal(t, 1, limitEvent.Iteration, "should be child's iteration")
 	assert.Equal(t, 1, limitEvent.Depth, "should be child's depth")
 }
+
+func TestStatsChildPropagation_IterationsDoNotPropagate(t *testing.T) {
+	// Iterations are context-local and should NOT propagate from child to parent.
+	// This prevents child execution from corrupting parent iteration tracking.
+	// Iteration stats are updated via BeforeIterationEvent publishing.
+	parent := NewExecutionContext(context.Background(), "parent", nil)
+	parent.PublishBeforeIteration()
+	parent.PublishBeforeIteration() // parent at iteration 2
+
+	child := parent.SpawnChild("child", nil)
+	child.PublishBeforeIteration() // child at iteration 1
+	child.PublishBeforeIteration() // child at iteration 2
+	child.PublishBeforeIteration() // child at iteration 3
+
+	// Parent iteration should remain at 2, unaffected by child's 3 increments
+	assert.Equal(t, int64(2), parent.Stats().GetIterations(),
+		"parent iterations should not include child iterations")
+	assert.Equal(t, int64(3), child.Stats().GetIterations(),
+		"child iterations should be tracked locally")
+}
+
+func TestStatsChildPropagation_OtherStatsDoPropgate(t *testing.T) {
+	// Non-protected stats SHOULD propagate from child to parent
+	parent := NewExecutionContext(context.Background(), "parent", nil)
+	child := parent.SpawnChild("child", nil)
+
+	// Increment various stats in child
+	child.Stats().IncrCounter(KeyInputTokens, 100)
+	child.Stats().IncrCounter(KeyOutputTokens, 50)
+	child.Stats().IncrCounter(KeyToolCalls, 3)
+
+	// Parent should see all these increments
+	assert.Equal(t, int64(100), parent.Stats().GetCounter(KeyInputTokens),
+		"input tokens should propagate to parent")
+	assert.Equal(t, int64(50), parent.Stats().GetCounter(KeyOutputTokens),
+		"output tokens should propagate to parent")
+	assert.Equal(t, int64(3), parent.Stats().GetCounter(KeyToolCalls),
+		"tool calls should propagate to parent")
+}
+
+func TestStatsChildPropagation_DeepNesting(t *testing.T) {
+	// Verify iteration isolation and stats propagation across multiple levels.
+	// Iteration stats are updated via BeforeIterationEvent publishing.
+	root := NewExecutionContext(context.Background(), "root", nil)
+	root.PublishBeforeIteration() // root at iteration 1
+
+	child := root.SpawnChild("child", nil)
+	child.PublishBeforeIteration() // child at iteration 1
+
+	grandchild := child.SpawnChild("grandchild", nil)
+	grandchild.PublishBeforeIteration()
+	grandchild.PublishBeforeIteration() // grandchild at iteration 2
+
+	// Increment stats in grandchild
+	grandchild.Stats().IncrCounter(KeyInputTokens, 500)
+
+	// Iterations should be isolated at each level
+	assert.Equal(t, int64(1), root.Stats().GetIterations(),
+		"root iterations should be isolated")
+	assert.Equal(t, int64(1), child.Stats().GetIterations(),
+		"child iterations should be isolated")
+	assert.Equal(t, int64(2), grandchild.Stats().GetIterations(),
+		"grandchild iterations should be tracked locally")
+
+	// Other stats should propagate all the way up
+	assert.Equal(t, int64(500), grandchild.Stats().GetCounter(KeyInputTokens))
+	assert.Equal(t, int64(500), child.Stats().GetCounter(KeyInputTokens),
+		"input tokens should propagate to child")
+	assert.Equal(t, int64(500), root.Stats().GetCounter(KeyInputTokens),
+		"input tokens should propagate to root")
+}

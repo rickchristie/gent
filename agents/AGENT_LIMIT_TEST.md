@@ -340,6 +340,35 @@ tt.ExactLimit(key, maxValue)
 tt.PrefixLimit(key, maxValue)
 ```
 
+## Special Behavior: Iterations
+
+The `gent:iterations` stat has unique behavior that differs from other stats:
+
+### No Child-to-Parent Propagation
+
+Unlike other stats, **iterations do NOT propagate from child to parent contexts**. This is intentional:
+
+- When a parent at iteration N spawns a child agent loop, the child starts at iteration 0
+- Child iterations (1, 2, 3...) stay local to the child context
+- Parent iteration count remains at N, unaffected by child iterations
+- This prevents child execution from corrupting parent iteration tracking
+
+### Test Implications
+
+When testing child context propagation with iteration limits:
+- Child iteration limit tests should verify child terminates at correct iteration
+- Parent should NOT see child iteration increments in its stats
+- Other stats (tokens, tool calls) SHOULD propagate normally
+
+```go
+// Example: Parent iteration should not include child iterations
+parentExecCtx := ... // at iteration 2
+childExecCtx := parentExecCtx.SpawnChild(...)
+// Child runs 3 iterations
+assert.Equal(t, int64(3), childExecCtx.Stats().GetIterations())
+assert.Equal(t, int64(2), parentExecCtx.Stats().GetIterations()) // NOT 5
+```
+
 ## Stat Keys Reference
 
 Standard stat keys that require limit tests:

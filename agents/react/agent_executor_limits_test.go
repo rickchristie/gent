@@ -74,6 +74,144 @@ func runWithLimitAndThinking(
 // ----------------------------------------------------------------------------
 
 func TestExecutorLimits_Iterations(t *testing.T) {
+	t.Run("child context iterations do not propagate to parent", func(t *testing.T) {
+		// IMPORTANT: Unlike other stats, iterations do NOT propagate from child to parent.
+		// This test verifies that child iterations stay local and don't affect parent's
+		// iteration count or trigger parent's iteration limit.
+		//
+		// Setup:
+		// - Parent has iteration limit of 2 (allows 2 iterations)
+		// - Parent iteration 1: calls tool that spawns child
+		// - Child runs 3 iterations internally (would exceed parent limit if propagated)
+		// - Parent iteration 2: terminates normally
+		// - Parent should succeed because child iterations don't propagate
+
+		// Child executor that runs 3 iterations
+		childModel := tt.NewMockModel().WithName("child").
+			AddResponse("<action>tool: child_tool</action>", 100, 50).
+			AddResponse("<action>tool: child_tool</action>", 100, 50).
+			AddResponse("<answer>child done</answer>", 100, 50)
+
+		childFormat := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: child_tool"}}).
+			AddParseResult(map[string][]string{"action": {"tool: child_tool"}}).
+			AddParseResult(map[string][]string{"answer": {"child done"}})
+
+		childToolChain := tt.NewMockToolChain()
+		childTermination := tt.NewMockTermination()
+
+		// Parent model
+		parentModel := tt.NewMockModel().WithName("parent").
+			AddResponse("<action>tool: spawn_child</action>", 100, 50).
+			AddResponse("<answer>parent done</answer>", 100, 50)
+
+		parentFormat := tt.NewMockFormat().
+			AddParseResult(map[string][]string{"action": {"tool: spawn_child"}}).
+			AddParseResult(map[string][]string{"answer": {"parent done"}})
+
+		// Tool that spawns child agent loop with its own executor
+		parentToolChain := tt.NewMockToolChain().
+			WithToolCtx("spawn_child",
+				func(execCtx *gent.ExecutionContext, args map[string]any) (string, error) {
+					childData := gent.NewBasicLoopData(&gent.Task{Text: "do child work"})
+					childCtx := execCtx.SpawnChild("child-agent", childData)
+
+					// Create and run child agent
+					childAgent := NewAgent(childModel).
+						WithFormat(childFormat).
+						WithToolChain(childToolChain).
+						WithTermination(childTermination)
+					childExec := executor.New[*gent.BasicLoopData](childAgent, executor.DefaultConfig())
+					childExec.Execute(childCtx)
+
+					return "child completed 3 iterations", nil
+				})
+		parentTermination := tt.NewMockTermination()
+
+		// Parent has iteration limit of 4:
+		// - Parent runs 2 iterations (OK: 2 <= 4)
+		// - Child runs 3 iterations (OK: 3 <= 4)
+		// - If iterations propagated, parent would see 2 + 3 = 5 iterations (EXCEED: 5 > 4)
+		// - Since iterations DON'T propagate, parent sees only 2 (OK)
+		parentLimit := tt.ExactLimit(gent.KeyIterations, 4)
+		limits := []gent.Limit{parentLimit}
+
+		execCtx := runWithLimit(t, parentModel, parentFormat, parentToolChain, parentTermination, limits)
+
+		// Parent should succeed (NOT exceed limit) because child iterations don't propagate
+		assert.Equal(t, gent.TerminationSuccess, execCtx.TerminationReason(),
+			"parent should succeed - child iterations must not propagate")
+		assert.Nil(t, execCtx.ExceededLimit())
+		assert.Equal(t, 2, execCtx.Iteration())
+
+		// Verify parent iterations stayed at 2 (not 2 + 3 = 5)
+		assert.Equal(t, int64(2), execCtx.Stats().GetIterations(),
+			"parent stats should only show parent iterations")
+
+		// Verify child ran 3 iterations
+		require.Len(t, execCtx.Children(), 1)
+		childCtx := execCtx.Children()[0]
+		assert.Equal(t, int64(3), childCtx.Stats().GetIterations(),
+			"child stats should show child iterations")
+
+		// Verify other stats DID propagate (tokens)
+		// Parent: 2 calls × 100 = 200, Child: 3 calls × 100 = 300, Total = 500
+		assert.Equal(t, int64(500), execCtx.Stats().GetCounter(gent.KeyInputTokens),
+			"input tokens should propagate from child to parent")
+
+		// Build expected NextPrompt for parent tool execution
+		toolObs := tt.ToolObservation(parentFormat, parentToolChain,
+			"spawn_child", "child completed 3 iterations")
+
+		// Assert parent event sequence - successful termination
+		expectedParentEvents := []gent.Event{
+			tt.BeforeExec(0, 0),
+			// Iteration 1: spawn child tool
+			tt.BeforeIter(0, 1),
+			tt.BeforeModelCall(0, 1, "parent"),
+			tt.AfterModelCall(0, 1, "parent", 100, 50),
+			tt.BeforeToolCall(0, 1, "spawn_child", nil),
+			tt.AfterToolCall(0, 1, "spawn_child", nil, "child completed 3 iterations", nil),
+			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			// Iteration 2: answer
+			tt.BeforeIter(0, 2),
+			tt.BeforeModelCall(0, 2, "parent"),
+			tt.AfterModelCall(0, 2, "parent", 100, 50),
+			tt.AfterIter(0, 2, tt.Terminate("parent done")),
+			tt.AfterExec(0, 2, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedParentEvents, tt.CollectLifecycleEvents(execCtx))
+
+		// Build expected child tool observation
+		childToolObs := tt.ToolObservation(childFormat, childToolChain, "child_tool", "tool executed")
+
+		// Assert child event sequence
+		expectedChildEvents := []gent.Event{
+			tt.BeforeExec(1, 0),
+			// Child iteration 1: tool call
+			tt.BeforeIter(1, 1),
+			tt.BeforeModelCall(1, 1, "child"),
+			tt.AfterModelCall(1, 1, "child", 100, 50),
+			tt.BeforeToolCall(1, 1, "child_tool", nil),
+			tt.AfterToolCall(1, 1, "child_tool", nil, "tool executed", nil),
+			tt.AfterIter(1, 1, tt.ContinueWithPrompt(childToolObs)),
+			// Child iteration 2: tool call
+			tt.BeforeIter(1, 2),
+			tt.BeforeModelCall(1, 2, "child"),
+			tt.AfterModelCall(1, 2, "child", 100, 50),
+			tt.BeforeToolCall(1, 2, "child_tool", nil),
+			tt.AfterToolCall(1, 2, "child_tool", nil, "tool executed", nil),
+			tt.AfterIter(1, 2, tt.ContinueWithPrompt(childToolObs)),
+			// Child iteration 3: answer
+			tt.BeforeIter(1, 3),
+			tt.BeforeModelCall(1, 3, "child"),
+			tt.AfterModelCall(1, 3, "child", 100, 50),
+			tt.AfterIter(1, 3, tt.Terminate("child done")),
+			tt.AfterExec(1, 3, gent.TerminationSuccess),
+		}
+		tt.AssertEventsEqual(t, expectedChildEvents, tt.CollectLifecycleEvents(childCtx))
+	})
+
 	t.Run("stops when iteration limit exceeded at first iteration", func(t *testing.T) {
 		// Limit of 0 means iteration 1 (value 1 > 0) immediately exceeds
 		model := tt.NewMockModel().
