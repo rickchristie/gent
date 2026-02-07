@@ -66,7 +66,7 @@ func TestBasicLoopData_IterationHistory(t *testing.T) {
 	assert.Empty(t, data.GetIterationHistory(), "expected empty history initially")
 
 	iter := &Iteration{
-		Messages: []MessageContent{
+		Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeAI, Parts: []ContentPart{llms.TextContent{Text: "test"}}},
 		},
 	}
@@ -83,7 +83,7 @@ func TestBasicLoopData_ScratchPad(t *testing.T) {
 	assert.Empty(t, data.GetScratchPad(), "expected empty scratchpad initially")
 
 	iter := &Iteration{
-		Messages: []MessageContent{
+		Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeAI, Parts: []ContentPart{llms.TextContent{Text: "test"}}},
 		},
 	}

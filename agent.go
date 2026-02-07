@@ -217,8 +217,10 @@ func (d *BasicLoopData) SetExecutionContext(ctx *ExecutionContext) {
 var _ LoopData = (*BasicLoopData)(nil)
 
 // Iteration represents a single iteration's message content.
+// Messages must never contain nil elements. All code that constructs or modifies
+// an Iteration must ensure every element in Messages is a valid, non-nil pointer.
 type Iteration struct {
-	Messages []MessageContent
+	Messages []*MessageContent
 }
 
 // MessageContent is wrapper around [llms.MessageContent] used in AgentLoop.

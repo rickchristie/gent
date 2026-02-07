@@ -402,15 +402,15 @@ func TestPublishIterationHistoryChange_SetsCorrectEventName(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 
 	before := []*Iteration{
-		{Messages: []MessageContent{
+		{Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "hello"}}},
 		}},
 	}
 	after := []*Iteration{
-		{Messages: []MessageContent{
+		{Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "hello"}}},
 		}},
-		{Messages: []MessageContent{
+		{Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "world"}}},
 		}},
 	}
@@ -427,12 +427,12 @@ func TestPublishScratchPadChange_SetsCorrectEventName(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 
 	before := []*Iteration{
-		{Messages: []MessageContent{
+		{Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "old"}}},
 		}},
 	}
 	after := []*Iteration{
-		{Messages: []MessageContent{
+		{Messages: []*MessageContent{
 			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "new"}}},
 		}},
 	}

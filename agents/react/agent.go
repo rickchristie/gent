@@ -501,22 +501,20 @@ func (r *Agent) executeToolCalls(
 // doesn't use native tool calling APIs. The observation is a user message containing
 // tool output in text form.
 func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
-	var messages []gent.MessageContent
+	var messages []*gent.MessageContent
 
 	// Assistant message (response)
-	assistantMsg := gent.MessageContent{
+	messages = append(messages, &gent.MessageContent{
 		Role:  llms.ChatMessageTypeAI,
 		Parts: []gent.ContentPart{llms.TextContent{Text: response}},
-	}
-	messages = append(messages, assistantMsg)
+	})
 
 	// Observation message (Human role) - only if there's an observation
 	if observation != "" {
-		observationMsg := gent.MessageContent{
+		messages = append(messages, &gent.MessageContent{
 			Role:  llms.ChatMessageTypeHuman,
 			Parts: []gent.ContentPart{llms.TextContent{Text: observation}},
-		}
-		messages = append(messages, observationMsg)
+		})
 	}
 
 	return &gent.Iteration{

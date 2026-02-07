@@ -358,7 +358,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 
 		// Add scratchpad with one iteration (AI response + observation)
 		iter := &gent.Iteration{
-			Messages: []gent.MessageContent{
+			Messages: []*gent.MessageContent{
 				{
 					Role:  llms.ChatMessageTypeAI,
 					Parts: []gent.ContentPart{llms.TextContent{Text: "thinking..."}},
