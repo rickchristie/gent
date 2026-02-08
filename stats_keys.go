@@ -219,6 +219,56 @@ const (
 //	{Type: LimitExactKey, Key: SGScratchpadLength, MaxValue: 50}
 const SGScratchpadLength StatKey = "gent:scratchpad_length"
 
+// Last-iteration token tracking keys (Gauge).
+//
+// These gauges track token usage for the current/last iteration
+// only. Unlike cumulative counters (SCInputTokens etc.), these
+// gauges reset to 0 at each iteration start via
+// BeforeIterationEvent.
+//
+// As gauges, they never propagate to parent contexts — each
+// context tracks its own per-iteration usage independently.
+//
+// Auto-updated when AfterModelCallEvent is published. Within a
+// single iteration, multiple model calls accumulate (e.g., main
+// agent + tool that calls a model). Reset to 0 on the next
+// BeforeIterationEvent.
+//
+// Example limits:
+//
+//	// No single iteration should use more than 50000 total tokens
+//	{
+//	    Type: LimitExactKey,
+//	    Key: SGTotalTokensLastIteration,
+//	    MaxValue: 50000,
+//	}
+//
+//	// No single iteration should use more than 10000 tokens on
+//	// a specific model
+//	{
+//	    Type: LimitExactKey,
+//	    Key: SGTotalTokensLastIterationFor + "gpt-4",
+//	    MaxValue: 10000,
+//	}
+//
+//	// Prefix limit on per-model last-iteration tokens
+//	{
+//	    Type: LimitKeyPrefix,
+//	    Key: SGTotalTokensLastIterationFor,
+//	    MaxValue: 10000,
+//	}
+const (
+	// Aggregate keys (all models combined)
+	SGInputTokensLastIteration  StatKey = "gent:input_tokens_last_iteration"
+	SGOutputTokensLastIteration StatKey = "gent:output_tokens_last_iteration"
+	SGTotalTokensLastIteration  StatKey = "gent:total_tokens_last_iteration"
+
+	// Per-model keys (append model name as suffix)
+	SGInputTokensLastIterationFor  StatKey = "gent:input_tokens_last_iteration:"  // + model
+	SGOutputTokensLastIterationFor StatKey = "gent:output_tokens_last_iteration:" // + model
+	SGTotalTokensLastIterationFor  StatKey = "gent:total_tokens_last_iteration:"  // + model
+)
+
 // Answer rejection tracking keys (Counter).
 //
 // Updated by Termination implementations when a validator rejects an

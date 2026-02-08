@@ -4268,6 +4268,198 @@ func TestExecutorLimits_DeepPropagation(t *testing.T) {
 	})
 }
 
+// ----------------------------------------------------------------------------
+// Global Test: Gauge Non-Propagation Does Not Trigger Parent Limit
+// ----------------------------------------------------------------------------
+
+func TestExecutorLimits_GaugeNonPropagation(
+	t *testing.T,
+) {
+	t.Run(
+		"parent gauge limit not exceeded when child "+
+			"gauge would push total over limit if "+
+			"propagated",
+		func(t *testing.T) {
+			// Setup:
+			// - Parent has gauge limit on
+			//   SGTotalTokensLastIteration MaxValue 500
+			// - Parent model call: 300+100=400 (<=500 OK)
+			// - Tool spawns child, child model call:
+			//   300+100=400
+			// - If gauges propagated: parent = 400+400 =
+			//   800 > 500 (would EXCEED)
+			// - Since gauges don't propagate: parent
+			//   stays at 400 (<=500 OK)
+			// - Parent should succeed
+
+			childModel := tt.NewMockModel().
+				WithName("child").
+				AddResponse(
+					"<answer>child done</answer>",
+					300, 100,
+				) // child: 400 total
+
+			childFormat := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"answer": {"child done"},
+				})
+
+			childToolChain := tt.NewMockToolChain()
+			childTermination := tt.NewMockTermination()
+
+			parentModel := tt.NewMockModel().
+				WithName("parent").
+				AddResponse(
+					"<action>tool: spawn</action>",
+					300, 100,
+				). // parent: 400 total
+				AddResponse(
+					"<answer>parent done</answer>",
+					50, 20,
+				)
+
+			parentFormat := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: spawn"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"parent done"},
+				})
+
+			parentToolChain := tt.NewMockToolChain().
+				WithToolCtx("spawn",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childData := gent.NewBasicLoopData(
+							&gent.Task{Text: "child"},
+						)
+						childCtx := execCtx.SpawnChild(
+							"child-agent", childData,
+						)
+						childAgent := NewAgent(childModel).
+							WithFormat(childFormat).
+							WithToolChain(childToolChain).
+							WithTermination(childTermination)
+						childExec := executor.New[*gent.BasicLoopData](
+							childAgent,
+							executor.DefaultConfig(),
+						)
+						childExec.Execute(childCtx)
+						return "child completed", nil
+					},
+				)
+			parentTermination := tt.NewMockTermination()
+
+			// Limit: 500. Parent gauge = 400 (OK).
+			// If gauges propagated, parent would see
+			// 400 + 400 = 800 > 500 (EXCEEDED).
+			limit := tt.ExactLimit(
+				gent.SGTotalTokensLastIteration, 500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, parentModel, parentFormat,
+				parentToolChain, parentTermination,
+				limits,
+			)
+
+			// Parent succeeds — gauge did NOT propagate
+			assert.Equal(t,
+				gent.TerminationSuccess,
+				execCtx.TerminationReason())
+			assert.Nil(t, execCtx.ExceededLimit())
+
+			// Parent gauge = only parent's own model
+			// calls. Iter 1: 400, iter 2 resets then
+			// 50+20=70.
+			assert.Equal(t, float64(70),
+				execCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIteration,
+				),
+				"parent gauge should only reflect "+
+					"parent's iter 2 model call (70)")
+
+			// Child gauge = child's own model call
+			require.Len(t, execCtx.Children(), 1)
+			childCtx := execCtx.Children()[0]
+			assert.Equal(t, float64(400),
+				childCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIteration,
+				),
+				"child gauge should be 400")
+
+			// Counter (SCTotalTokens) DID propagate —
+			// verify parent sees total from both
+			// Parent: 400 + 70 = 470 own
+			// Child: 400
+			// Aggregated: 470 + 400 = 870
+			assert.Equal(t, int64(870),
+				execCtx.Stats().GetCounter(
+					gent.SCTotalTokens,
+				),
+				"counter should propagate: "+
+					"parent(470)+child(400)=870")
+
+			// No LimitExceeded events on parent
+			for _, event := range tt.CollectLifecycleEvents(
+				execCtx,
+			) {
+				_, isLimit := event.(*gent.LimitExceededEvent)
+				assert.False(t, isLimit,
+					"no LimitExceededEvent should "+
+						"be on parent")
+			}
+
+			// Verify full parent event sequence
+			toolObs := tt.ToolObservation(
+				parentFormat, parentToolChain,
+				"spawn", "child completed",
+			)
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: parent model + tool spawn
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "parent"),
+				tt.AfterModelCall(
+					0, 1, "parent", 300, 100,
+				),
+				tt.BeforeToolCall(
+					0, 1, "spawn", nil,
+				),
+				tt.AfterToolCall(
+					0, 1, "spawn", nil,
+					"child completed", nil,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: answer
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "parent"),
+				tt.AfterModelCall(
+					0, 2, "parent", 50, 20,
+				),
+				tt.AfterIter(
+					0, 2,
+					tt.Terminate("parent done"),
+				),
+				tt.AfterExec(
+					0, 2,
+					gent.TerminationSuccess,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+}
+
 // ---------------------------------------------------------------------------
 // TotalTokens Limits
 // ---------------------------------------------------------------------------
@@ -5559,6 +5751,585 @@ func TestExecutorLimits_ScratchpadLength(t *testing.T) {
 				t, expectedChildEvents,
 				tt.CollectLifecycleEvents(childCtx),
 			)
+		},
+	)
+}
+
+// --------------------------------------------------------------------
+// Test: Last-iteration total token gauge limit
+// --------------------------------------------------------------------
+
+func TestExecutorLimits_TotalTokensLastIteration(
+	t *testing.T,
+) {
+	t.Run(
+		"stops when last iteration total token limit "+
+			"exceeded at first iteration",
+		func(t *testing.T) {
+			// First model call: 300 input + 400 output = 700
+			// total, limit is 500
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					300, 400,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGTotalTokensLastIteration, 500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason())
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 1, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain,
+				"test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(
+					0, 1, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 1, "test-model", 300, 400,
+				),
+				tt.LimitExceeded(
+					0, 1, limit, 700,
+					gent.SGTotalTokensLastIteration,
+				),
+				tt.BeforeToolCall(
+					0, 1, "test", nil,
+				),
+				tt.AfterToolCall(
+					0, 1, "test", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 1,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"stops when last iteration total token limit "+
+			"exceeded at Nth iteration",
+		func(t *testing.T) {
+			// Iter 1: 200+100=300 total (<=500, OK)
+			// Iter 2: 200+100=300 total (<=500, OK)
+			//         (gauge resets at iter 2 start)
+			// Iter 3: 300+400=700 total (>500, EXCEEDED)
+			//         (gauge resets at iter 3 start)
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					200, 100,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					200, 100,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					300, 400,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGTotalTokensLastIteration, 500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason())
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 3, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain,
+				"test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: 300 total (<=500 OK)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(
+					0, 1, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 1, "test-model", 200, 100,
+				),
+				tt.BeforeToolCall(
+					0, 1, "test", nil,
+				),
+				tt.AfterToolCall(
+					0, 1, "test", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: 300 total (<=500 OK)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(
+					0, 2, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 2, "test-model", 200, 100,
+				),
+				tt.BeforeToolCall(
+					0, 2, "test", nil,
+				),
+				tt.AfterToolCall(
+					0, 2, "test", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 2,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 3: 700 total (>500 EXCEEDED)
+				tt.BeforeIter(0, 3),
+				tt.BeforeModelCall(
+					0, 3, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 3, "test-model", 300, 400,
+				),
+				tt.LimitExceeded(
+					0, 3, limit, 700,
+					gent.SGTotalTokensLastIteration,
+				),
+				tt.BeforeToolCall(
+					0, 3, "test", nil,
+				),
+				tt.AfterToolCall(
+					0, 3, "test", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 3,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 3,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"last iteration gauge does not propagate "+
+			"to parent",
+		func(t *testing.T) {
+			// Child model returns high tokens but parent
+			// has gauge limit. Gauges don't propagate, so
+			// parent should succeed.
+			childModel := tt.NewMockModel().
+				WithName("child").
+				AddResponse(
+					"<answer>child done</answer>",
+					500, 300,
+				)
+
+			childFormat := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"answer": {"child done"},
+				})
+
+			childToolChain := tt.NewMockToolChain()
+			childTermination := tt.NewMockTermination()
+
+			parentModel := tt.NewMockModel().
+				WithName("parent").
+				AddResponse(
+					"<action>tool: spawn</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>parent done</answer>",
+					100, 50,
+				)
+
+			parentFormat := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: spawn"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"parent done"},
+				})
+
+			parentToolChain := tt.NewMockToolChain().
+				WithToolCtx("spawn",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childData := gent.NewBasicLoopData(
+							&gent.Task{Text: "child"},
+						)
+						childCtx := execCtx.SpawnChild(
+							"child-agent", childData,
+						)
+						childAgent := NewAgent(childModel).
+							WithFormat(childFormat).
+							WithToolChain(childToolChain).
+							WithTermination(childTermination)
+						childExec := executor.New[*gent.BasicLoopData](
+							childAgent,
+							executor.DefaultConfig(),
+						)
+						childExec.Execute(childCtx)
+						return "child completed", nil
+					},
+				)
+			parentTermination := tt.NewMockTermination()
+
+			// Limit on parent's per-iteration gauge
+			// set to 200. Parent's own model call uses
+			// 150 (100+50), which is under limit.
+			// Child uses 800 (500+300) but gauges don't
+			// propagate.
+			limit := tt.ExactLimit(
+				gent.SGTotalTokensLastIteration, 200,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, parentModel, parentFormat,
+				parentToolChain, parentTermination,
+				limits,
+			)
+
+			// Parent succeeds because child gauges don't
+			// propagate
+			assert.Equal(t,
+				gent.TerminationSuccess,
+				execCtx.TerminationReason())
+			assert.Nil(t, execCtx.ExceededLimit())
+
+			// Child gauge should reflect child tokens
+			require.Len(t, execCtx.Children(), 1)
+			childCtx := execCtx.Children()[0]
+			assert.Equal(t, float64(800),
+				childCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIteration,
+				),
+				"child gauge should be 800")
+
+			// Verify parent events show success
+			toolObs := tt.ToolObservation(
+				parentFormat, parentToolChain,
+				"spawn", "child completed",
+			)
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: spawn child
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "parent"),
+				tt.AfterModelCall(
+					0, 1, "parent", 100, 50,
+				),
+				tt.BeforeToolCall(
+					0, 1, "spawn", nil,
+				),
+				tt.AfterToolCall(
+					0, 1, "spawn", nil,
+					"child completed", nil,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: answer
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "parent"),
+				tt.AfterModelCall(
+					0, 2, "parent", 100, 50,
+				),
+				tt.AfterIter(
+					0, 2,
+					tt.Terminate("parent done"),
+				),
+				tt.AfterExec(
+					0, 2,
+					gent.TerminationSuccess,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+}
+
+// --------------------------------------------------------------------
+// Test: Last-iteration per-model token gauge limit (prefix)
+// --------------------------------------------------------------------
+
+func TestExecutorLimits_TotalTokensLastIterationForModel(
+	t *testing.T,
+) {
+	t.Run(
+		"stops when model-specific last iteration "+
+			"token limit exceeded",
+		func(t *testing.T) {
+			// The main agent model is "alpha". A tool
+			// calls model "beta" directly on the SAME
+			// execution context (not a child). Limit is
+			// on beta's per-iteration total tokens.
+			//
+			// Alpha call: 600+200=800 (no limit on alpha)
+			// Beta call: 400+300=700 (>500 limit EXCEEDED)
+			modelBeta := tt.NewMockModel().
+				WithName("beta").
+				AddResponse(
+					"beta response", 400, 300,
+				) // 700 total
+
+			modelAlpha := tt.NewMockModel().
+				WithName("alpha").
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					600, 200,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: call_beta"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain().
+				WithToolCtx("call_beta",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						// Call beta on SAME context
+						// (gauge is local to this ctx)
+						resp, err := modelBeta.GenerateContent(
+							execCtx, "beta", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				)
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGTotalTokensLastIterationFor+
+					"beta",
+				500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, modelAlpha, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason())
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 1, execCtx.Iteration())
+
+			// Alpha's per-model gauge should be set
+			assert.Equal(t, float64(800),
+				execCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIterationFor+
+						"alpha",
+				),
+				"alpha gauge should be 800")
+
+			// Beta's per-model gauge triggered the limit
+			assert.Equal(t, float64(700),
+				execCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIterationFor+
+						"beta",
+				),
+				"beta gauge should be 700")
+
+			// Aggregate gauge = 800+700 = 1500
+			assert.Equal(t, float64(1500),
+				execCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIteration,
+				),
+				"aggregate gauge should be 1500")
+		},
+	)
+
+	t.Run(
+		"per-model gauge resets between iterations",
+		func(t *testing.T) {
+			// Tool calls model beta on the same context.
+			// Iter 1: beta 200+200=400 (<=500, OK)
+			// Iter 2: beta 300+300=600 (>500, EXCEEDED)
+			// Proves gauge resets (cumulative = 1000,
+			// per-iteration = 600)
+			modelBeta := tt.NewMockModel().
+				WithName("beta").
+				AddResponse(
+					"response1", 200, 200,
+				). // iter 1: 400
+				AddResponse(
+					"response2", 300, 300,
+				) // iter 2: 600
+
+			modelAlpha := tt.NewMockModel().
+				WithName("alpha").
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: call_beta"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"tool: call_beta"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain().
+				WithToolCtx("call_beta",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						resp, err := modelBeta.GenerateContent(
+							execCtx, "beta", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				)
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGTotalTokensLastIterationFor+
+					"beta",
+				500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, modelAlpha, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason())
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit())
+
+			// Limit triggers at iteration 2:
+			// - Iter 1: beta gauge = 400 (<=500, OK),
+			//   gauge resets at iter 2 start
+			// - Iter 2: beta gauge = 600 (>500, EXCEEDED)
+			// Proves gauge resets — cumulative would be
+			// 1000 at iter 2
+			assert.Equal(t, 2, execCtx.Iteration())
+
+			// Beta's per-model gauge should be 600
+			// (only iter 2's call, after reset)
+			assert.Equal(t, float64(600),
+				execCtx.Stats().GetGauge(
+					gent.SGTotalTokensLastIterationFor+
+						"beta",
+				),
+				"beta gauge should be 600 (iter 2 only)")
 		},
 	)
 }

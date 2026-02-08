@@ -110,6 +110,9 @@ goal is to make it easy to write and experiment with custom agent loops.
 - SGToolCallsErrorConsecutive
 - SGToolCallsErrorConsecutiveFor (+ tool)
 - SGScratchpadLength
+- SGInputTokensLastIteration, SGInputTokensLastIterationFor (+ model)
+- SGOutputTokensLastIteration, SGOutputTokensLastIterationFor (+ model)
+- SGTotalTokensLastIteration, SGTotalTokensLastIterationFor (+ model)
 
 ## Limits
 - LimitExactKey - match specific key

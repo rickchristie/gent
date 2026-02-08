@@ -512,6 +512,19 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 	// Increment BEFORE events (for prevention/limits)
 	case *BeforeIterationEvent:
 		ctx.stats.incrCounterDirect(SCIterations, 1)
+		// Reset per-iteration token gauges
+		ctx.stats.ResetGauge(SGInputTokensLastIteration)
+		ctx.stats.ResetGauge(SGOutputTokensLastIteration)
+		ctx.stats.ResetGauge(SGTotalTokensLastIteration)
+		ctx.stats.resetGaugesByPrefix(
+			SGInputTokensLastIterationFor,
+		)
+		ctx.stats.resetGaugesByPrefix(
+			SGOutputTokensLastIterationFor,
+		)
+		ctx.stats.resetGaugesByPrefix(
+			SGTotalTokensLastIterationFor,
+		)
 
 	case *BeforeToolCallEvent:
 		ctx.stats.incrCounterDirect(SCToolCalls, 1)
@@ -545,6 +558,38 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 			ctx.stats.incrCounterDirect(
 				SCTotalTokensFor+StatKey(e.Model),
 				totalTokens,
+			)
+		}
+
+		// Per-iteration gauge tracking (local-only, reset each
+		// iteration)
+		ctx.stats.incrGaugeInternal(
+			SGInputTokensLastIteration,
+			float64(e.InputTokens),
+		)
+		ctx.stats.incrGaugeInternal(
+			SGOutputTokensLastIteration,
+			float64(e.OutputTokens),
+		)
+		ctx.stats.incrGaugeInternal(
+			SGTotalTokensLastIteration,
+			float64(totalTokens),
+		)
+		if e.Model != "" {
+			ctx.stats.incrGaugeInternal(
+				SGInputTokensLastIterationFor+
+					StatKey(e.Model),
+				float64(e.InputTokens),
+			)
+			ctx.stats.incrGaugeInternal(
+				SGOutputTokensLastIterationFor+
+					StatKey(e.Model),
+				float64(e.OutputTokens),
+			)
+			ctx.stats.incrGaugeInternal(
+				SGTotalTokensLastIterationFor+
+					StatKey(e.Model),
+				float64(totalTokens),
 			)
 		}
 

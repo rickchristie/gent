@@ -253,6 +253,23 @@ func (s *ExecutionStats) ResetGauge(key StatKey) {
 	s.mu.Unlock()
 }
 
+// resetGaugesByPrefix resets all gauges matching the given prefix
+// to 0. Used internally for resetting per-iteration gauges at
+// iteration boundaries.
+func (s *ExecutionStats) resetGaugesByPrefix(
+	prefix StatKey,
+) {
+	prefixStr := string(prefix)
+	s.mu.Lock()
+	for key := range s.gauges {
+		if len(key) >= len(prefixStr) &&
+			key[:len(prefixStr)] == prefixStr {
+			s.gauges[key] = 0
+		}
+	}
+	s.mu.Unlock()
+}
+
 // Counters returns a copy of all counters. This includes both
 // propagated keys (e.g., "gent:input_tokens") and $self:-prefixed
 // local-only keys (e.g., "$self:gent:input_tokens"). Use

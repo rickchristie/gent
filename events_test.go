@@ -1538,6 +1538,310 @@ func TestLimit_ScratchpadLengthGaugeWorksCorrectly(
 		"scratchpad at 3 should exceed MaxValue 2")
 }
 
+// -------------------------------------------------------------------
+// Last-Iteration Token Gauge Tests
+// -------------------------------------------------------------------
+
+func TestGauge_LastIterationTokens_SetOnModelCall(
+	t *testing.T,
+) {
+	ctx := NewExecutionContext(
+		context.Background(), "test", nil,
+	)
+
+	// First model call: 100 input, 50 output
+	ctx.PublishAfterModelCall(
+		"gpt-4", nil,
+		&ContentResponse{
+			Info: &GenerationInfo{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
+		},
+		0, nil,
+	)
+
+	assert.Equal(t, float64(100),
+		ctx.Stats().GetGauge(SGInputTokensLastIteration),
+		"input gauge should be 100")
+	assert.Equal(t, float64(50),
+		ctx.Stats().GetGauge(SGOutputTokensLastIteration),
+		"output gauge should be 50")
+	assert.Equal(t, float64(150),
+		ctx.Stats().GetGauge(SGTotalTokensLastIteration),
+		"total gauge should be 150")
+	assert.Equal(t, float64(100),
+		ctx.Stats().GetGauge(
+			SGInputTokensLastIterationFor+"gpt-4",
+		),
+		"per-model input gauge should be 100")
+	assert.Equal(t, float64(50),
+		ctx.Stats().GetGauge(
+			SGOutputTokensLastIterationFor+"gpt-4",
+		),
+		"per-model output gauge should be 50")
+	assert.Equal(t, float64(150),
+		ctx.Stats().GetGauge(
+			SGTotalTokensLastIterationFor+"gpt-4",
+		),
+		"per-model total gauge should be 150")
+
+	// Second model call (different model): 200 input, 100 output
+	// Gauges should accumulate within the same iteration
+	ctx.PublishAfterModelCall(
+		"claude", nil,
+		&ContentResponse{
+			Info: &GenerationInfo{
+				InputTokens:  200,
+				OutputTokens: 100,
+			},
+		},
+		0, nil,
+	)
+
+	assert.Equal(t, float64(300),
+		ctx.Stats().GetGauge(SGInputTokensLastIteration),
+		"input gauge should accumulate to 300")
+	assert.Equal(t, float64(150),
+		ctx.Stats().GetGauge(SGOutputTokensLastIteration),
+		"output gauge should accumulate to 150")
+	assert.Equal(t, float64(450),
+		ctx.Stats().GetGauge(SGTotalTokensLastIteration),
+		"total gauge should accumulate to 450")
+	// Per-model: gpt-4 unchanged
+	assert.Equal(t, float64(100),
+		ctx.Stats().GetGauge(
+			SGInputTokensLastIterationFor+"gpt-4",
+		),
+		"gpt-4 input gauge should remain 100")
+	// Per-model: claude has its own values
+	assert.Equal(t, float64(200),
+		ctx.Stats().GetGauge(
+			SGInputTokensLastIterationFor+"claude",
+		),
+		"claude input gauge should be 200")
+	assert.Equal(t, float64(100),
+		ctx.Stats().GetGauge(
+			SGOutputTokensLastIterationFor+"claude",
+		),
+		"claude output gauge should be 100")
+	assert.Equal(t, float64(300),
+		ctx.Stats().GetGauge(
+			SGTotalTokensLastIterationFor+"claude",
+		),
+		"claude total gauge should be 300")
+}
+
+func TestGauge_LastIterationTokens_ResetOnNewIteration(
+	t *testing.T,
+) {
+	ctx := NewExecutionContext(
+		context.Background(), "test", nil,
+	)
+
+	// Simulate iteration 1: model call sets gauges
+	ctx.IncrementIteration()
+	ctx.PublishBeforeIteration()
+	ctx.PublishAfterModelCall(
+		"gpt-4", nil,
+		&ContentResponse{
+			Info: &GenerationInfo{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
+		},
+		0, nil,
+	)
+
+	// Verify gauges are set
+	assert.Equal(t, float64(100),
+		ctx.Stats().GetGauge(SGInputTokensLastIteration))
+	assert.Equal(t, float64(50),
+		ctx.Stats().GetGauge(SGOutputTokensLastIteration))
+	assert.Equal(t, float64(150),
+		ctx.Stats().GetGauge(SGTotalTokensLastIteration))
+	assert.Equal(t, float64(100),
+		ctx.Stats().GetGauge(
+			SGInputTokensLastIterationFor+"gpt-4",
+		))
+	assert.Equal(t, float64(50),
+		ctx.Stats().GetGauge(
+			SGOutputTokensLastIterationFor+"gpt-4",
+		))
+	assert.Equal(t, float64(150),
+		ctx.Stats().GetGauge(
+			SGTotalTokensLastIterationFor+"gpt-4",
+		))
+
+	// Simulate iteration 2 start: BeforeIterationEvent resets
+	ctx.IncrementIteration()
+	ctx.PublishBeforeIteration()
+
+	// All gauges should be reset to 0
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(SGInputTokensLastIteration),
+		"input gauge should reset to 0")
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(SGOutputTokensLastIteration),
+		"output gauge should reset to 0")
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(SGTotalTokensLastIteration),
+		"total gauge should reset to 0")
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(
+			SGInputTokensLastIterationFor+"gpt-4",
+		),
+		"per-model input gauge should reset to 0")
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(
+			SGOutputTokensLastIterationFor+"gpt-4",
+		),
+		"per-model output gauge should reset to 0")
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(
+			SGTotalTokensLastIterationFor+"gpt-4",
+		),
+		"per-model total gauge should reset to 0")
+}
+
+func TestGauge_LastIterationTokens_DoesNotPropagateToParent(
+	t *testing.T,
+) {
+	parent := NewExecutionContext(
+		context.Background(), "parent", nil,
+	)
+	child := parent.SpawnChild("child", nil)
+
+	// Child publishes AfterModelCallEvent
+	child.PublishAfterModelCall(
+		"gpt-4", nil,
+		&ContentResponse{
+			Info: &GenerationInfo{
+				InputTokens:  500,
+				OutputTokens: 200,
+			},
+		},
+		0, nil,
+	)
+
+	// Child gauges should be set
+	assert.Equal(t, float64(500),
+		child.Stats().GetGauge(
+			SGInputTokensLastIteration,
+		),
+		"child input gauge should be 500")
+	assert.Equal(t, float64(200),
+		child.Stats().GetGauge(
+			SGOutputTokensLastIteration,
+		),
+		"child output gauge should be 200")
+	assert.Equal(t, float64(700),
+		child.Stats().GetGauge(
+			SGTotalTokensLastIteration,
+		),
+		"child total gauge should be 700")
+
+	// Parent gauges should remain 0 (gauges don't propagate)
+	assert.Equal(t, float64(0),
+		parent.Stats().GetGauge(
+			SGInputTokensLastIteration,
+		),
+		"parent input gauge should remain 0")
+	assert.Equal(t, float64(0),
+		parent.Stats().GetGauge(
+			SGOutputTokensLastIteration,
+		),
+		"parent output gauge should remain 0")
+	assert.Equal(t, float64(0),
+		parent.Stats().GetGauge(
+			SGTotalTokensLastIteration,
+		),
+		"parent total gauge should remain 0")
+}
+
+func TestLimit_LastIterationTokensGaugeWorksCorrectly(
+	t *testing.T,
+) {
+	ctx := NewExecutionContext(
+		context.Background(), "test", nil,
+	)
+	ctx.SetLimits([]Limit{
+		{
+			Type:     LimitExactKey,
+			Key:      SGTotalTokensLastIteration,
+			MaxValue: 500,
+		},
+	})
+
+	// Below limit — should not trigger
+	ctx.PublishAfterModelCall(
+		"gpt-4", nil,
+		&ContentResponse{
+			Info: &GenerationInfo{
+				InputTokens:  200,
+				OutputTokens: 100,
+			},
+		},
+		0, nil,
+	)
+	assert.Nil(t, ctx.ExceededLimit(),
+		"total 300 should not exceed MaxValue 500")
+
+	// Exceeds limit — should trigger
+	ctx.PublishAfterModelCall(
+		"gpt-4", nil,
+		&ContentResponse{
+			Info: &GenerationInfo{
+				InputTokens:  200,
+				OutputTokens: 100,
+			},
+		},
+		0, nil,
+	)
+	assert.NotNil(t, ctx.ExceededLimit(),
+		"total 600 should exceed MaxValue 500")
+	assert.Equal(t, SGTotalTokensLastIteration,
+		ctx.ExceededLimit().Key)
+}
+
+func TestResetGaugesByPrefix(t *testing.T) {
+	stats := NewExecutionStats()
+
+	// Set multiple gauges with same prefix
+	stats.IncrGauge(
+		SGTotalTokensLastIterationFor+"gpt-4", 100,
+	)
+	stats.IncrGauge(
+		SGTotalTokensLastIterationFor+"claude", 200,
+	)
+	// Set a gauge with different prefix (should not be reset)
+	stats.IncrGauge(
+		SGToolCallsErrorConsecutive, 5,
+	)
+
+	// Reset only total tokens last iteration "For" gauges
+	stats.resetGaugesByPrefix(
+		SGTotalTokensLastIterationFor,
+	)
+
+	// Matching gauges should be reset to 0
+	assert.Equal(t, float64(0),
+		stats.GetGauge(
+			SGTotalTokensLastIterationFor+"gpt-4",
+		),
+		"gpt-4 gauge should be reset to 0")
+	assert.Equal(t, float64(0),
+		stats.GetGauge(
+			SGTotalTokensLastIterationFor+"claude",
+		),
+		"claude gauge should be reset to 0")
+
+	// Non-matching gauge should be untouched
+	assert.Equal(t, float64(5),
+		stats.GetGauge(SGToolCallsErrorConsecutive),
+		"unrelated gauge should remain 5")
+}
+
 func TestDefaultLimits_UsesSelfIterations(t *testing.T) {
 	limits := DefaultLimits()
 	found := false
