@@ -93,6 +93,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 - SCIterations (PROTECTED from user IncrCounter)
 - SCInputTokens, SCInputTokensFor (+ model)
 - SCOutputTokens, SCOutputTokensFor (+ model)
+- SCTotalTokens, SCTotalTokensFor (+ model)
 - SCToolCalls, SCToolCallsFor (+ tool)
 - SCToolCallsErrorTotal, SCToolCallsErrorFor (+ tool)
 - SCFormatParseErrorTotal

@@ -290,6 +290,12 @@ func (s *ExecutionStats) GetTotalOutputTokens() int64 {
 	return s.GetCounter(SCOutputTokens)
 }
 
+// GetTotalTokens returns the total tokens (input + output) across
+// all models (aggregated from children).
+func (s *ExecutionStats) GetTotalTokens() int64 {
+	return s.GetCounter(SCTotalTokens)
+}
+
 // GetToolCallCount returns the total number of tool calls
 // (aggregated from children).
 func (s *ExecutionStats) GetToolCallCount() int64 {

@@ -79,7 +79,8 @@ const SCIterations StatKey = "gent:iterations"
 //	    "gpt-4", request, response, duration, nil,
 //	)
 //	// Auto-increments: SCInputTokens, SCInputTokensFor+"gpt-4",
-//	//                  SCOutputTokens, SCOutputTokensFor+"gpt-4"
+//	//                  SCOutputTokens, SCOutputTokensFor+"gpt-4",
+//	//                  SCTotalTokens, SCTotalTokensFor+"gpt-4"
 //
 // Use SCInputTokensFor/SCOutputTokensFor + model name for per-model
 // limits:
@@ -90,6 +91,20 @@ const (
 	SCInputTokensFor StatKey = "gent:input_tokens:" // + model name
 	SCOutputTokens    StatKey = "gent:output_tokens"
 	SCOutputTokensFor StatKey = "gent:output_tokens:" // + model name
+)
+
+// Total token tracking keys (Counter).
+//
+// Sum of input + output tokens. Auto-updated when
+// AfterModelCallEvent is published alongside the individual
+// input/output token counters.
+//
+// Use SCTotalTokensFor + model name for per-model limits:
+//
+//	{Type: LimitExactKey, Key: SCTotalTokensFor + "gpt-4", MaxValue: 20000}
+const (
+	SCTotalTokens    StatKey = "gent:total_tokens"
+	SCTotalTokensFor StatKey = "gent:total_tokens:" // + model name
 )
 
 // Tool call tracking keys (Counter).

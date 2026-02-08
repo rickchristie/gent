@@ -4267,3 +4267,856 @@ func TestExecutorLimits_DeepPropagation(t *testing.T) {
 		tt.AssertEventsEqual(t, expectedGrandchildEvents, tt.CollectLifecycleEvents(grandchildCtx))
 	})
 }
+
+// ---------------------------------------------------------------------------
+// TotalTokens Limits
+// ---------------------------------------------------------------------------
+
+func TestExecutorLimits_TotalTokens(t *testing.T) {
+	t.Run(
+		"stops when total token limit exceeded at first iteration",
+		func(t *testing.T) {
+			// First model call: 300 input + 400 output = 700 total,
+			// exceeds limit of 500.
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					300, 400,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{"action": {"tool: test"}},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(gent.SCTotalTokens, 500)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 1, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain, "test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "test-model"),
+				tt.AfterModelCall(0, 1, "test-model", 300, 400),
+				tt.LimitExceeded(
+					0, 1, limit, 700, gent.SCTotalTokens,
+				),
+				tt.BeforeToolCall(0, 1, "test", nil),
+				tt.AfterToolCall(
+					0, 1, "test", nil, "tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 1, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"stops when total token limit exceeded at Nth iteration",
+		func(t *testing.T) {
+			// Iteration 1: 200+300=500 total (cumulative: 500)
+			// Iteration 2: 300+400=700 total (cumulative: 1200 > 1000)
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					200, 300,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					300, 400,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{"action": {"tool: test"}},
+				).
+				AddParseResult(
+					map[string][]string{"action": {"tool: test"}},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(gent.SCTotalTokens, 1000)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 2, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain, "test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: 200+300=500 (cumulative: 500 <= 1000)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "test-model"),
+				tt.AfterModelCall(0, 1, "test-model", 200, 300),
+				tt.BeforeToolCall(0, 1, "test", nil),
+				tt.AfterToolCall(
+					0, 1, "test", nil, "tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: 300+400=700 (cumulative: 1200 > 1000)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "test-model"),
+				tt.AfterModelCall(0, 2, "test-model", 300, 400),
+				tt.LimitExceeded(
+					0, 2, limit, 1200, gent.SCTotalTokens,
+				),
+				tt.BeforeToolCall(0, 2, "test", nil),
+				tt.AfterToolCall(
+					0, 2, "test", nil, "tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 2, tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 2, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"exceeds limit at third iteration",
+		func(t *testing.T) {
+			// Iter 1: 100+100=200 (cum: 200)
+			// Iter 2: 100+100=200 (cum: 400)
+			// Iter 3: 200+300=500 (cum: 900 > 800 limit)
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					100, 100,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					100, 100,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					200, 300,
+				).
+				AddResponse("<answer>done</answer>", 50, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{"action": {"tool: test"}},
+				).
+				AddParseResult(
+					map[string][]string{"action": {"tool: test"}},
+				).
+				AddParseResult(
+					map[string][]string{"action": {"tool: test"}},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(gent.SCTotalTokens, 800)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 3, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain, "test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: 200 total (cum: 200 <= 800)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "test-model"),
+				tt.AfterModelCall(0, 1, "test-model", 100, 100),
+				tt.BeforeToolCall(0, 1, "test", nil),
+				tt.AfterToolCall(
+					0, 1, "test", nil, "tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: 200 total (cum: 400 <= 800)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "test-model"),
+				tt.AfterModelCall(0, 2, "test-model", 100, 100),
+				tt.BeforeToolCall(0, 2, "test", nil),
+				tt.AfterToolCall(
+					0, 2, "test", nil, "tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 2, tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 3: 500 total (cum: 900 > 800 EXCEEDED)
+				tt.BeforeIter(0, 3),
+				tt.BeforeModelCall(0, 3, "test-model"),
+				tt.AfterModelCall(0, 3, "test-model", 200, 300),
+				tt.LimitExceeded(
+					0, 3, limit, 900, gent.SCTotalTokens,
+				),
+				tt.BeforeToolCall(0, 3, "test", nil),
+				tt.AfterToolCall(
+					0, 3, "test", nil, "tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 3, tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 3, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"child context tokens propagate to global total token limit",
+		func(t *testing.T) {
+			// Parent: 100+100=200. Child: 400+500=900.
+			// Global total: 1100 > 1000 limit.
+			childModel := tt.NewMockModel().WithName("child").
+				AddResponse("child response", 400, 500)
+
+			parentModel := tt.NewMockModel().WithName("parent").
+				AddResponse(
+					"<action>tool: call_child</action>",
+					100, 100,
+				).
+				AddResponse("<answer>done</answer>", 50, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_child"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain().
+				WithToolCtx(
+					"call_child",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childCtx := execCtx.SpawnChild(
+							"child-call", nil,
+						)
+						resp, err := childModel.GenerateContent(
+							childCtx, "child", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				)
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(gent.SCTotalTokens, 1000)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, parentModel, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain,
+				"call_child", "child response",
+			)
+
+			expectedParentEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "parent"),
+				tt.AfterModelCall(0, 1, "parent", 100, 100),
+				tt.BeforeToolCall(0, 1, "call_child", nil),
+				tt.LimitExceeded(
+					0, 1, limit, 1100,
+					gent.SCTotalTokens,
+				),
+				tt.AfterToolCall(
+					0, 1, "call_child", nil,
+					"child response", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 1, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedParentEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+
+			// Child's local total is 900 (400+500) which
+			// doesn't exceed 1000. Only the parent's aggregated
+			// total (1100) exceeds the limit.
+			require.Len(t, execCtx.Children(), 1)
+			childCtx := execCtx.Children()[0]
+			expectedChildEvents := []gent.Event{
+				tt.BeforeModelCall(1, 0, "child"),
+				tt.AfterModelCall(1, 0, "child", 400, 500),
+			}
+			tt.AssertEventsEqual(
+				t, expectedChildEvents,
+				tt.CollectLifecycleEvents(childCtx),
+			)
+		},
+	)
+}
+
+func TestExecutorLimits_TotalTokensForModel(t *testing.T) {
+	t.Run(
+		"stops when model-specific total token limit exceeded",
+		func(t *testing.T) {
+			// Beta: 300+400=700, exceeds 500 limit.
+			// Alpha: 100+50=150, under limit for beta key.
+			modelBeta := tt.NewMockModel().WithName("beta").
+				AddResponse("child response", 300, 400)
+
+			modelAlpha := tt.NewMockModel().WithName("alpha").
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					100, 50,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_beta"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain().
+				WithToolCtx(
+					"call_beta",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childCtx := execCtx.SpawnChild(
+							"beta-call", nil,
+						)
+						resp, err := modelBeta.GenerateContent(
+							childCtx, "beta", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				)
+			termination := tt.NewMockTermination()
+
+			limit := tt.PrefixLimit(
+				gent.SCTotalTokensFor+"beta", 500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, modelAlpha, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain,
+				"call_beta", "child response",
+			)
+
+			expectedParentEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "alpha"),
+				tt.AfterModelCall(0, 1, "alpha", 100, 50),
+				tt.BeforeToolCall(0, 1, "call_beta", nil),
+				tt.LimitExceeded(
+					0, 1, limit, 700,
+					gent.SCTotalTokensFor+"beta",
+				),
+				tt.AfterToolCall(
+					0, 1, "call_beta", nil,
+					"child response", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 1, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedParentEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+
+			require.Len(t, execCtx.Children(), 1)
+			childCtx := execCtx.Children()[0]
+			expectedChildEvents := []gent.Event{
+				tt.BeforeModelCall(1, 0, "beta"),
+				tt.AfterModelCall(1, 0, "beta", 300, 400),
+				tt.LimitExceeded(
+					1, 0, limit, 700,
+					gent.SCTotalTokensFor+"beta",
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedChildEvents,
+				tt.CollectLifecycleEvents(childCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"prefix limit exceeds at third iteration",
+		func(t *testing.T) {
+			// Beta called 3 times via tool:
+			//   Call 1: 100+100=200 (cum: 200)
+			//   Call 2: 100+100=200 (cum: 400)
+			//   Call 3: 200+300=500 (cum: 900 > 800)
+			modelBeta := tt.NewMockModel().WithName("beta").
+				AddResponse("response1", 100, 100).
+				AddResponse("response2", 100, 100).
+				AddResponse("response3", 200, 300)
+
+			modelAlpha := tt.NewMockModel().WithName("alpha").
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: call_beta</action>",
+					100, 50,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_beta"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_beta"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_beta"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain().
+				WithToolCtx(
+					"call_beta",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childCtx := execCtx.SpawnChild(
+							"beta-call", nil,
+						)
+						resp, err := modelBeta.GenerateContent(
+							childCtx, "beta", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				)
+			termination := tt.NewMockTermination()
+
+			limit := tt.PrefixLimit(
+				gent.SCTotalTokensFor+"beta", 800,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, modelAlpha, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 3, execCtx.Iteration())
+
+			toolObs1 := tt.ToolObservation(
+				format, toolChain,
+				"call_beta", "response1",
+			)
+			toolObs2 := tt.ToolObservation(
+				format, toolChain,
+				"call_beta", "response2",
+			)
+			toolObs3 := tt.ToolObservation(
+				format, toolChain,
+				"call_beta", "response3",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: beta 200 total (cum: 200 <= 800)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "alpha"),
+				tt.AfterModelCall(0, 1, "alpha", 100, 50),
+				tt.BeforeToolCall(0, 1, "call_beta", nil),
+				tt.AfterToolCall(
+					0, 1, "call_beta", nil,
+					"response1", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObs1),
+				),
+				// Iter 2: beta 200 total (cum: 400 <= 800)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "alpha"),
+				tt.AfterModelCall(0, 2, "alpha", 100, 50),
+				tt.BeforeToolCall(0, 2, "call_beta", nil),
+				tt.AfterToolCall(
+					0, 2, "call_beta", nil,
+					"response2", nil,
+				),
+				tt.AfterIter(
+					0, 2, tt.ContinueWithPrompt(toolObs2),
+				),
+				// Iter 3: beta 500 total (cum: 900 > 800)
+				tt.BeforeIter(0, 3),
+				tt.BeforeModelCall(0, 3, "alpha"),
+				tt.AfterModelCall(0, 3, "alpha", 100, 50),
+				tt.BeforeToolCall(0, 3, "call_beta", nil),
+				tt.LimitExceeded(
+					0, 3, limit, 900,
+					gent.SCTotalTokensFor+"beta",
+				),
+				tt.AfterToolCall(
+					0, 3, "call_beta", nil,
+					"response3", nil,
+				),
+				tt.AfterIter(
+					0, 3, tt.ContinueWithPrompt(toolObs3),
+				),
+				tt.AfterExec(
+					0, 3, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+
+			require.Len(t, execCtx.Children(), 3)
+
+			// Children 1-2: no limit exceeded
+			for i := 0; i < 2; i++ {
+				childEvents := tt.CollectLifecycleEvents(
+					execCtx.Children()[i],
+				)
+				assert.Len(
+					t, childEvents, 2,
+					"child %d should have 2 events", i,
+				)
+			}
+
+			// Child 3: local 500 <= 800, only parent
+			// aggregated (900) exceeds
+			child3Events := tt.CollectLifecycleEvents(
+				execCtx.Children()[2],
+			)
+			expectedChild3 := []gent.Event{
+				tt.BeforeModelCall(1, 0, "beta"),
+				tt.AfterModelCall(1, 0, "beta", 200, 300),
+			}
+			tt.AssertEventsEqual(
+				t, expectedChild3, child3Events,
+			)
+		},
+	)
+
+	t.Run(
+		"prefix limit only triggers on matching suffix",
+		func(t *testing.T) {
+			// Two models: alpha and beta, both called by tools.
+			// Limit on beta total tokens = 500.
+			// Alpha child uses 800 total (exceeds 500 but not
+			// limited). Beta child uses 600 total (exceeds 500
+			// limit).
+			modelAlpha := tt.NewMockModel().WithName("alpha").
+				AddResponse(
+					"<action>tool: call_a</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: call_b</action>",
+					100, 50,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			childModelA := tt.NewMockModel().WithName("model_a").
+				AddResponse("a response", 400, 400) // 800 total
+
+			childModelB := tt.NewMockModel().WithName("model_b").
+				AddResponse("b response", 300, 300) // 600 total
+
+			format := tt.NewMockFormat().
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_a"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{
+						"action": {"tool: call_b"},
+					},
+				).
+				AddParseResult(
+					map[string][]string{"answer": {"done"}},
+				)
+
+			toolChain := tt.NewMockToolChain().
+				WithToolCtx(
+					"call_a",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childCtx := execCtx.SpawnChild(
+							"a-call", nil,
+						)
+						resp, err := childModelA.GenerateContent(
+							childCtx, "model_a", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				).
+				WithToolCtx(
+					"call_b",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childCtx := execCtx.SpawnChild(
+							"b-call", nil,
+						)
+						resp, err := childModelB.GenerateContent(
+							childCtx, "model_b", "", nil,
+						)
+						if err != nil {
+							return "", err
+						}
+						return resp.Choices[0].Content, nil
+					},
+				)
+			termination := tt.NewMockTermination()
+
+			// Only limit model_b total tokens
+			limit := tt.PrefixLimit(
+				gent.SCTotalTokensFor+"model_b", 500,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, modelAlpha, format, toolChain,
+				termination, limits,
+			)
+
+			assert.Equal(
+				t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 2, execCtx.Iteration())
+
+			toolObsA := tt.ToolObservation(
+				format, toolChain,
+				"call_a", "a response",
+			)
+			toolObsB := tt.ToolObservation(
+				format, toolChain,
+				"call_b", "b response",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: call_a → model_a uses 800 total
+				// (no limit on model_a)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "alpha"),
+				tt.AfterModelCall(0, 1, "alpha", 100, 50),
+				tt.BeforeToolCall(0, 1, "call_a", nil),
+				tt.AfterToolCall(
+					0, 1, "call_a", nil,
+					"a response", nil,
+				),
+				tt.AfterIter(
+					0, 1, tt.ContinueWithPrompt(toolObsA),
+				),
+				// Iter 2: call_b → model_b uses 600 total
+				// (exceeds 500 limit)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "alpha"),
+				tt.AfterModelCall(0, 2, "alpha", 100, 50),
+				tt.BeforeToolCall(0, 2, "call_b", nil),
+				tt.LimitExceeded(
+					0, 2, limit, 600,
+					gent.SCTotalTokensFor+"model_b",
+				),
+				tt.AfterToolCall(
+					0, 2, "call_b", nil,
+					"b response", nil,
+				),
+				tt.AfterIter(
+					0, 2, tt.ContinueWithPrompt(toolObsB),
+				),
+				tt.AfterExec(
+					0, 2, gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+
+			require.Len(t, execCtx.Children(), 2)
+
+			// Child 1 (model_a): no limit exceeded
+			child1Events := tt.CollectLifecycleEvents(
+				execCtx.Children()[0],
+			)
+			expectedChild1 := []gent.Event{
+				tt.BeforeModelCall(1, 0, "model_a"),
+				tt.AfterModelCall(
+					1, 0, "model_a", 400, 400,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedChild1, child1Events,
+			)
+
+			// Child 2 (model_b): limit exceeded
+			child2Events := tt.CollectLifecycleEvents(
+				execCtx.Children()[1],
+			)
+			expectedChild2 := []gent.Event{
+				tt.BeforeModelCall(1, 0, "model_b"),
+				tt.AfterModelCall(
+					1, 0, "model_b", 300, 300,
+				),
+				tt.LimitExceeded(
+					1, 0, limit, 600,
+					gent.SCTotalTokensFor+"model_b",
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedChild2, child2Events,
+			)
+		},
+	)
+}

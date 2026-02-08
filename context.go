@@ -523,11 +523,15 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 
 	// Increment AFTER events (for recording)
 	case *AfterModelCallEvent:
+		totalTokens := int64(e.InputTokens) + int64(e.OutputTokens)
 		ctx.stats.incrCounterDirect(
 			SCInputTokens, int64(e.InputTokens),
 		)
 		ctx.stats.incrCounterDirect(
 			SCOutputTokens, int64(e.OutputTokens),
+		)
+		ctx.stats.incrCounterDirect(
+			SCTotalTokens, totalTokens,
 		)
 		if e.Model != "" {
 			ctx.stats.incrCounterDirect(
@@ -537,6 +541,10 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 			ctx.stats.incrCounterDirect(
 				SCOutputTokensFor+StatKey(e.Model),
 				int64(e.OutputTokens),
+			)
+			ctx.stats.incrCounterDirect(
+				SCTotalTokensFor+StatKey(e.Model),
+				totalTokens,
 			)
 		}
 
