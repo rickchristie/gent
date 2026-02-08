@@ -1044,24 +1044,20 @@ import (
 // # Example
 //
 //     strategy := compaction.NewSummarization(model).
-//         WithKeepRecent(5).
-//         WithPrompt(myCustomPrompt)
+//         WithKeepRecent(5)
 type SummarizationStrategy struct {
     model      gent.Model
-    modelName  string
     keepRecent int
     prompt     string
 }
 
 // NewSummarization creates a SummarizationStrategy with the
-// given model. The modelName is used for stats tracking.
+// given model.
 func NewSummarization(
     model gent.Model,
-    modelName string,
 ) *SummarizationStrategy {
     return &SummarizationStrategy{
         model:      model,
-        modelName:  modelName,
         keepRecent: 0,
         prompt:     DefaultSummarizationPrompt,
     }
@@ -1174,11 +1170,23 @@ func (s *SummarizationStrategy) Compact(
     )
 
     // Call model for summarization
+    messages := []llms.MessageContent{
+        {
+            Role: llms.ChatMessageTypeHuman,
+            Parts: []llms.ContentPart{
+                llms.TextContent{Text: fullPrompt},
+            },
+        },
+    }
+    streamId := fmt.Sprintf(
+        "compaction-summarization-%d",
+        execCtx.Iteration(),
+    )
     response, err := s.model.GenerateContent(
         execCtx,
-        s.modelName,
-        fullPrompt,
-        nil, // no chat messages, prompt is the system message
+        streamId,
+        "compaction",
+        messages,
     )
     if err != nil {
         return fmt.Errorf("summarization model call: %w", err)
