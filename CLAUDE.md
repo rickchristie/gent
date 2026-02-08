@@ -109,6 +109,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 - SGTerminationParseErrorConsecutive
 - SGToolCallsErrorConsecutive
 - SGToolCallsErrorConsecutiveFor (+ tool)
+- SGScratchpadLength
 
 ## Limits
 - LimitExactKey - match specific key

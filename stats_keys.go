@@ -208,6 +208,17 @@ const (
 	SGSectionParseErrorConsecutive StatKey = "gent:section_parse_error_consecutive"
 )
 
+// Scratchpad length tracking key (Gauge).
+//
+// Auto-updated when BasicLoopData.SetScratchPad is called.
+// Reflects the current number of iterations in the scratchpad.
+// Use for limits to prevent unbounded scratchpad growth.
+//
+// Example limit:
+//
+//	{Type: LimitExactKey, Key: SGScratchpadLength, MaxValue: 50}
+const SGScratchpadLength StatKey = "gent:scratchpad_length"
+
 // Answer rejection tracking keys (Counter).
 //
 // Updated by Termination implementations when a validator rejects an

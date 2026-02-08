@@ -199,11 +199,15 @@ func (d *BasicLoopData) GetScratchPad() []*Iteration {
 }
 
 // SetScratchPad sets the iterations to be used in next iteration.
-// Publishes a CommonDiffEvent if ExecutionContext is set.
+// Sets the SGScratchpadLength gauge and publishes a CommonDiffEvent
+// if ExecutionContext is set.
 func (d *BasicLoopData) SetScratchPad(iterations []*Iteration) {
 	before := d.scratchpad
 	d.scratchpad = iterations
 	if d.execCtx != nil {
+		d.execCtx.Stats().SetGauge(
+			SGScratchpadLength, float64(len(iterations)),
+		)
 		d.execCtx.PublishScratchPadChange(before, iterations)
 	}
 }

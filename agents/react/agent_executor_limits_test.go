@@ -5120,3 +5120,445 @@ func TestExecutorLimits_TotalTokensForModel(t *testing.T) {
 		},
 	)
 }
+
+// ---------------------------------------------------------------
+// Test: Scratchpad length limit
+// ---------------------------------------------------------------
+
+func TestExecutorLimits_ScratchpadLength(t *testing.T) {
+	t.Run(
+		"stops when scratchpad length limit exceeded "+
+			"at first iteration",
+		func(t *testing.T) {
+			// Limit of 0 means scratchpad growing to 1
+			// (value 1 > 0) immediately exceeds.
+			// Iteration 1: tool call → scratchpad 1 → exceeds
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					100, 50,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGScratchpadLength, 0,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 1, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain, "test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: tool → scratchpad 1 > limit 0
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "test-model"),
+				tt.AfterModelCall(
+					0, 1, "test-model", 100, 50,
+				),
+				tt.BeforeToolCall(0, 1, "test", nil),
+				tt.AfterToolCall(
+					0, 1, "test", nil,
+					"tool executed", nil,
+				),
+				tt.LimitExceeded(
+					0, 1, limit, 1,
+					gent.SGScratchpadLength,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 1,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"stops when scratchpad length limit exceeded "+
+			"at Nth iteration",
+		func(t *testing.T) {
+			// Limit of 2: scratchpad grows 1, 2 (OK),
+			// then 3 > 2 at iteration 3.
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>tool: test</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: test</action>",
+					100, 50,
+				).
+				AddResponse("<answer>done</answer>", 100, 50)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"tool: test"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain()
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGScratchpadLength, 2,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t, limit, *execCtx.ExceededLimit())
+			assert.Equal(t, 3, execCtx.Iteration())
+
+			toolObs := tt.ToolObservation(
+				format, toolChain, "test", "tool executed",
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: scratchpad 1 <= 2 (OK)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "test-model"),
+				tt.AfterModelCall(
+					0, 1, "test-model", 100, 50,
+				),
+				tt.BeforeToolCall(0, 1, "test", nil),
+				tt.AfterToolCall(
+					0, 1, "test", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: scratchpad 2 <= 2 (OK)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "test-model"),
+				tt.AfterModelCall(
+					0, 2, "test-model", 100, 50,
+				),
+				tt.BeforeToolCall(0, 2, "test", nil),
+				tt.AfterToolCall(
+					0, 2, "test", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					0, 2,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 3: scratchpad 3 > 2 (EXCEEDED)
+				tt.BeforeIter(0, 3),
+				tt.BeforeModelCall(0, 3, "test-model"),
+				tt.AfterModelCall(
+					0, 3, "test-model", 100, 50,
+				),
+				tt.BeforeToolCall(0, 3, "test", nil),
+				tt.AfterToolCall(
+					0, 3, "test", nil,
+					"tool executed", nil,
+				),
+				tt.LimitExceeded(
+					0, 3, limit, 3,
+					gent.SGScratchpadLength,
+				),
+				tt.AfterIter(
+					0, 3,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				tt.AfterExec(
+					0, 3,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"scratchpad gauge does not propagate to parent",
+		func(t *testing.T) {
+			// Child runs 3 iterations (tool, tool, answer),
+			// growing its scratchpad to 2. Parent's gauge
+			// should remain 0 (gauges don't propagate).
+			// Parent runs 2 iterations (spawn_child, answer).
+
+			// Child: 2 tool calls + 1 answer = 3 iterations
+			childModel := tt.NewMockModel().
+				WithName("child").
+				AddResponse(
+					"<action>tool: child_tool</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>tool: child_tool</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>child done</answer>",
+					100, 50,
+				)
+
+			childFormat := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: child_tool"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"tool: child_tool"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"child done"},
+				})
+
+			childToolChain := tt.NewMockToolChain()
+			childTermination := tt.NewMockTermination()
+
+			// Parent: spawn_child tool + answer
+			parentModel := tt.NewMockModel().
+				WithName("parent").
+				AddResponse(
+					"<action>tool: spawn_child</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>parent done</answer>",
+					100, 50,
+				)
+
+			parentFormat := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"tool: spawn_child"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"parent done"},
+				})
+
+			parentToolChain := tt.NewMockToolChain().
+				WithToolCtx("spawn_child",
+					func(
+						execCtx *gent.ExecutionContext,
+						args map[string]any,
+					) (string, error) {
+						childData := gent.NewBasicLoopData(
+							&gent.Task{Text: "child work"},
+						)
+						childCtx := execCtx.SpawnChild(
+							"child-agent", childData,
+						)
+
+						childAgent := NewAgent(childModel).
+							WithFormat(childFormat).
+							WithToolChain(childToolChain).
+							WithTermination(childTermination)
+						childExec := executor.New[*gent.BasicLoopData](
+							childAgent,
+							executor.DefaultConfig(),
+						)
+						childExec.Execute(childCtx)
+
+						return "child completed", nil
+					},
+				)
+			parentTermination := tt.NewMockTermination()
+
+			limits := []gent.Limit{}
+
+			execCtx := runWithLimit(
+				t, parentModel, parentFormat,
+				parentToolChain, parentTermination,
+				limits,
+			)
+
+			// Parent succeeds
+			assert.Equal(t,
+				gent.TerminationSuccess,
+				execCtx.TerminationReason(),
+			)
+			assert.Nil(t, execCtx.ExceededLimit())
+			assert.Equal(t, 2, execCtx.Iteration())
+
+			// Parent scratchpad gauge = 1 (1 tool iteration)
+			assert.Equal(t, float64(1),
+				execCtx.Stats().GetGauge(
+					gent.SGScratchpadLength,
+				),
+				"parent scratchpad gauge should be 1",
+			)
+
+			// Child scratchpad gauge = 2 (2 tool iterations)
+			require.Len(t, execCtx.Children(), 1)
+			childCtx := execCtx.Children()[0]
+			assert.Equal(t, float64(2),
+				childCtx.Stats().GetGauge(
+					gent.SGScratchpadLength,
+				),
+				"child scratchpad gauge should be 2",
+			)
+
+			// Verify parent gauge was not affected by child
+			assert.Equal(t, float64(1),
+				execCtx.Stats().GetGauge(
+					gent.SGScratchpadLength,
+				),
+				"parent gauge should not include child",
+			)
+
+			// Verify parent events
+			toolObs := tt.ToolObservation(
+				parentFormat, parentToolChain,
+				"spawn_child", "child completed",
+			)
+
+			expectedParentEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iter 1: spawn child
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(0, 1, "parent"),
+				tt.AfterModelCall(
+					0, 1, "parent", 100, 50,
+				),
+				tt.BeforeToolCall(
+					0, 1, "spawn_child", nil,
+				),
+				tt.AfterToolCall(
+					0, 1, "spawn_child", nil,
+					"child completed", nil,
+				),
+				tt.AfterIter(
+					0, 1,
+					tt.ContinueWithPrompt(toolObs),
+				),
+				// Iter 2: answer
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(0, 2, "parent"),
+				tt.AfterModelCall(
+					0, 2, "parent", 100, 50,
+				),
+				tt.AfterIter(
+					0, 2,
+					tt.Terminate("parent done"),
+				),
+				tt.AfterExec(
+					0, 2, gent.TerminationSuccess,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedParentEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+
+			// Verify child events
+			childToolObs := tt.ToolObservation(
+				childFormat, childToolChain,
+				"child_tool", "tool executed",
+			)
+
+			expectedChildEvents := []gent.Event{
+				tt.BeforeExec(1, 0),
+				// Child iter 1: tool call
+				tt.BeforeIter(1, 1),
+				tt.BeforeModelCall(1, 1, "child"),
+				tt.AfterModelCall(
+					1, 1, "child", 100, 50,
+				),
+				tt.BeforeToolCall(
+					1, 1, "child_tool", nil,
+				),
+				tt.AfterToolCall(
+					1, 1, "child_tool", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					1, 1,
+					tt.ContinueWithPrompt(childToolObs),
+				),
+				// Child iter 2: tool call
+				tt.BeforeIter(1, 2),
+				tt.BeforeModelCall(1, 2, "child"),
+				tt.AfterModelCall(
+					1, 2, "child", 100, 50,
+				),
+				tt.BeforeToolCall(
+					1, 2, "child_tool", nil,
+				),
+				tt.AfterToolCall(
+					1, 2, "child_tool", nil,
+					"tool executed", nil,
+				),
+				tt.AfterIter(
+					1, 2,
+					tt.ContinueWithPrompt(childToolObs),
+				),
+				// Child iter 3: answer
+				tt.BeforeIter(1, 3),
+				tt.BeforeModelCall(1, 3, "child"),
+				tt.AfterModelCall(
+					1, 3, "child", 100, 50,
+				),
+				tt.AfterIter(
+					1, 3,
+					tt.Terminate("child done"),
+				),
+				tt.AfterExec(
+					1, 3, gent.TerminationSuccess,
+				),
+			}
+			tt.AssertEventsEqual(
+				t, expectedChildEvents,
+				tt.CollectLifecycleEvents(childCtx),
+			)
+		},
+	)
+}

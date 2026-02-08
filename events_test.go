@@ -1432,6 +1432,112 @@ func TestLimit_GaugeKeyWorksCorrectly(t *testing.T) {
 		"gauge at 4 should exceed MaxValue 3")
 }
 
+// -------------------------------------------------------------------
+// Scratchpad Length Gauge Tests
+// -------------------------------------------------------------------
+
+func TestGauge_ScratchpadLength_SetOnScratchPadChange(
+	t *testing.T,
+) {
+	ctx := NewExecutionContext(
+		context.Background(), "test", nil,
+	)
+	data := NewBasicLoopData(&Task{Text: "test"})
+	data.SetExecutionContext(ctx)
+
+	// Empty scratchpad → gauge 0
+	data.SetScratchPad([]*Iteration{})
+	assert.Equal(t, float64(0),
+		ctx.Stats().GetGauge(SGScratchpadLength),
+		"empty scratchpad should set gauge to 0")
+
+	// 1 iteration → gauge 1
+	data.SetScratchPad([]*Iteration{
+		{Messages: []*MessageContent{}},
+	})
+	assert.Equal(t, float64(1),
+		ctx.Stats().GetGauge(SGScratchpadLength),
+		"1-element scratchpad should set gauge to 1")
+
+	// 3 iterations → gauge 3
+	data.SetScratchPad([]*Iteration{
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+	})
+	assert.Equal(t, float64(3),
+		ctx.Stats().GetGauge(SGScratchpadLength),
+		"3-element scratchpad should set gauge to 3")
+
+	// Compaction back to 1 → gauge 1
+	data.SetScratchPad([]*Iteration{
+		{Messages: []*MessageContent{}},
+	})
+	assert.Equal(t, float64(1),
+		ctx.Stats().GetGauge(SGScratchpadLength),
+		"compacted scratchpad should set gauge to 1")
+}
+
+func TestGauge_ScratchpadLength_DoesNotPropagateToParent(
+	t *testing.T,
+) {
+	parent := NewExecutionContext(
+		context.Background(), "parent", nil,
+	)
+	child := parent.SpawnChild("child", nil)
+
+	childData := NewBasicLoopData(&Task{Text: "test"})
+	childData.SetExecutionContext(child)
+
+	childData.SetScratchPad([]*Iteration{
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+	})
+
+	assert.Equal(t, float64(3),
+		child.Stats().GetGauge(SGScratchpadLength),
+		"child gauge should be 3")
+	assert.Equal(t, float64(0),
+		parent.Stats().GetGauge(SGScratchpadLength),
+		"parent gauge should remain 0")
+}
+
+func TestLimit_ScratchpadLengthGaugeWorksCorrectly(
+	t *testing.T,
+) {
+	ctx := NewExecutionContext(
+		context.Background(), "test", nil,
+	)
+	ctx.SetLimits([]Limit{
+		{
+			Type:     LimitExactKey,
+			Key:      SGScratchpadLength,
+			MaxValue: 2,
+		},
+	})
+
+	data := NewBasicLoopData(&Task{Text: "test"})
+	data.SetExecutionContext(ctx)
+
+	// At limit (2) — should not trigger
+	data.SetScratchPad([]*Iteration{
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+	})
+	assert.Nil(t, ctx.ExceededLimit(),
+		"scratchpad at 2 should not exceed MaxValue 2")
+
+	// Exceeds limit (3 > 2) — should trigger
+	data.SetScratchPad([]*Iteration{
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+		{Messages: []*MessageContent{}},
+	})
+	assert.NotNil(t, ctx.ExceededLimit(),
+		"scratchpad at 3 should exceed MaxValue 2")
+}
+
 func TestDefaultLimits_UsesSelfIterations(t *testing.T) {
 	limits := DefaultLimits()
 	found := false
