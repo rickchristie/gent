@@ -143,7 +143,6 @@ const (
 const (
 	// Counters
 	SCFormatParseErrorTotal StatKey = "gent:format_parse_error_total"
-	SCFormatParseErrorAt    StatKey = "gent:format_parse_error:" // + iteration
 
 	// Gauges
 	SGFormatParseErrorConsecutive StatKey = "gent:format_parse_error_consecutive"
@@ -159,7 +158,6 @@ const (
 const (
 	// Counters
 	SCToolchainParseErrorTotal StatKey = "gent:toolchain_parse_error_total"
-	SCToolchainParseErrorAt    StatKey = "gent:toolchain_parse_error:" // + iteration
 
 	// Gauges
 	SGToolchainParseErrorConsecutive StatKey = "gent:toolchain_parse_error_consecutive"
@@ -175,7 +173,6 @@ const (
 const (
 	// Counters
 	SCTerminationParseErrorTotal StatKey = "gent:termination_parse_error_total"
-	SCTerminationParseErrorAt    StatKey = "gent:termination_parse_error:" // + iteration
 
 	// Gauges
 	SGTerminationParseErrorConsecutive StatKey = "gent:termination_parse_error_consecutive"
@@ -191,7 +188,6 @@ const (
 const (
 	// Counters
 	SCSectionParseErrorTotal StatKey = "gent:section_parse_error_total"
-	SCSectionParseErrorAt    StatKey = "gent:section_parse_error:" // + iteration
 
 	// Gauges
 	SGSectionParseErrorConsecutive StatKey = "gent:section_parse_error_consecutive"

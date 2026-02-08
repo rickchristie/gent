@@ -6,6 +6,21 @@ import "sync"
 // metrics. All standard gent metrics use keys prefixed with "gent:"
 // to avoid collisions with user-defined keys.
 //
+// # Use Cases
+//
+// Stats serve three purposes:
+//
+//  1. Termination limits: Checked on every update to stop runaway
+//     agent loops (e.g., max iterations, max tokens, consecutive
+//     errors). See [Limit] and [DefaultLimits].
+//
+//  2. Compaction decisions: Read during scratchpad compaction to
+//     inform what to keep or discard (e.g., token counts, iteration
+//     counts).
+//
+//  3. Event-driven actions: Read by event subscribers for milestones
+//     like saving state, logging, or triggering alerts.
+//
 // # Counters vs Gauges
 //
 // Counters are monotonically increasing (only go up). They always
@@ -90,19 +105,6 @@ func newExecutionStatsWithContextAndParent(
 		parent:   parent,
 		execCtx:  ctx,
 		rootCtx:  rootCtx,
-	}
-}
-
-// newExecutionStatsWithParent creates a new ExecutionStats with a
-// parent reference for hierarchical aggregation (without context
-// association).
-func newExecutionStatsWithParent(
-	parent *ExecutionStats,
-) *ExecutionStats {
-	return &ExecutionStats{
-		counters: make(map[string]int64),
-		gauges:   make(map[string]float64),
-		parent:   parent,
 	}
 }
 
@@ -298,12 +300,6 @@ func (s *ExecutionStats) GetToolCallCount() int64 {
 // errors (aggregated from children).
 func (s *ExecutionStats) GetFormatParseErrorTotal() int64 {
 	return s.GetCounter(SCFormatParseErrorTotal)
-}
-
-// GetToolchainParseErrorTotal returns the total number of toolchain
-// parse errors (aggregated from children).
-func (s *ExecutionStats) GetToolchainParseErrorTotal() int64 {
-	return s.GetCounter(SCToolchainParseErrorTotal)
 }
 
 // GetIterations returns the current iteration count (aggregated

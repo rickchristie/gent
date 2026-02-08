@@ -95,10 +95,10 @@ goal is to make it easy to write and experiment with custom agent loops.
 - SCOutputTokens, SCOutputTokensFor (+ model)
 - SCToolCalls, SCToolCallsFor (+ tool)
 - SCToolCallsErrorTotal, SCToolCallsErrorFor (+ tool)
-- SCFormatParseErrorTotal, SCFormatParseErrorAt (+ iter)
-- SCToolchainParseErrorTotal, SCToolchainParseErrorAt (+ iter)
-- SCTerminationParseErrorTotal, SCTerminationParseErrorAt (+ iter)
-- SCSectionParseErrorTotal, SCSectionParseErrorAt (+ iter)
+- SCFormatParseErrorTotal
+- SCToolchainParseErrorTotal
+- SCTerminationParseErrorTotal
+- SCSectionParseErrorTotal
 - SCAnswerRejectedTotal, SCAnswerRejectedBy (+ validator)
 
 ### Gauges (SG*, local-only, never propagated)

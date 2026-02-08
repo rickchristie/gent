@@ -1736,7 +1736,6 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			shouldError          bool
 			toolchainErrorTotal  int64
 			toolchainErrorConsec float64
-			toolchainErrorAtIter int64
 		}
 	}{
 		{
@@ -1746,12 +1745,10 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError          bool
 				toolchainErrorTotal  int64
 				toolchainErrorConsec float64
-				toolchainErrorAtIter int64
-			}{
+				}{
 				shouldError:          true,
 				toolchainErrorTotal:  1,
 				toolchainErrorConsec: 1,
-				toolchainErrorAtIter: 1,
 			},
 		},
 		{
@@ -1761,12 +1758,10 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError          bool
 				toolchainErrorTotal  int64
 				toolchainErrorConsec float64
-				toolchainErrorAtIter int64
-			}{
+				}{
 				shouldError:          false,
 				toolchainErrorTotal:  0,
 				toolchainErrorConsec: 0,
-				toolchainErrorAtIter: 0,
 			},
 		},
 	}
@@ -1803,9 +1798,6 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			assert.Equal(t, tt.expected.toolchainErrorConsec,
 				stats.GetGauge(gent.SGToolchainParseErrorConsecutive),
 				"toolchain error consecutive mismatch")
-			assert.Equal(t, tt.expected.toolchainErrorAtIter,
-				stats.GetCounter(gent.SCToolchainParseErrorAt+"1"),
-				"toolchain error at iteration mismatch")
 		})
 	}
 }

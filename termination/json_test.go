@@ -575,7 +575,6 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			shouldError            bool
 			terminationErrorTotal  int64
 			terminationErrorConsec float64
-			terminationErrorAtIter int64
 		}
 	}{
 		{
@@ -585,12 +584,10 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError            bool
 				terminationErrorTotal  int64
 				terminationErrorConsec float64
-				terminationErrorAtIter int64
-			}{
+				}{
 				shouldError:            true,
 				terminationErrorTotal:  1,
 				terminationErrorConsec: 1,
-				terminationErrorAtIter: 1,
 			},
 		},
 		{
@@ -600,12 +597,10 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError            bool
 				terminationErrorTotal  int64
 				terminationErrorConsec float64
-				terminationErrorAtIter int64
-			}{
+				}{
 				shouldError:            false,
 				terminationErrorTotal:  0,
 				terminationErrorConsec: 0,
-				terminationErrorAtIter: 0,
 			},
 		},
 	}
@@ -643,11 +638,6 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 					gent.SGTerminationParseErrorConsecutive,
 				),
 				"termination error consecutive mismatch")
-			assert.Equal(t, tt.expected.terminationErrorAtIter,
-				stats.GetCounter(
-					gent.SCTerminationParseErrorAt+"1",
-				),
-				"termination error at iteration mismatch")
 		})
 	}
 }

@@ -346,7 +346,6 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 			shouldError       bool
 			formatErrorTotal  int64
 			formatErrorConsec float64
-			formatErrorAtIter int64
 		}
 	}{
 		{
@@ -356,12 +355,10 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 				shouldError       bool
 				formatErrorTotal  int64
 				formatErrorConsec float64
-				formatErrorAtIter int64
-			}{
+				}{
 				shouldError:       true,
 				formatErrorTotal:  1,
 				formatErrorConsec: 1,
-				formatErrorAtIter: 1,
 			},
 		},
 		{
@@ -371,12 +368,10 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 				shouldError       bool
 				formatErrorTotal  int64
 				formatErrorConsec float64
-				formatErrorAtIter int64
-			}{
+				}{
 				shouldError:       false,
 				formatErrorTotal:  0,
 				formatErrorConsec: 0,
-				formatErrorAtIter: 0,
 			},
 		},
 	}
@@ -416,9 +411,6 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 			assert.Equal(t, tt.expected.formatErrorConsec,
 				stats.GetGauge(gent.SGFormatParseErrorConsecutive),
 				"format error consecutive mismatch")
-			assert.Equal(t, tt.expected.formatErrorAtIter,
-				stats.GetCounter(gent.SCFormatParseErrorAt+"1"),
-				"format error at iteration mismatch")
 		})
 	}
 }

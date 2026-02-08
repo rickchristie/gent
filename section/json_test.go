@@ -458,7 +458,6 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			hasErr                bool
 			totalErrors           int64
 			consecutiveErrors     float64
-			iterationErrorCounter int64
 		}
 	}{
 		{
@@ -474,12 +473,10 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				hasErr                bool
 				totalErrors           int64
 				consecutiveErrors     float64
-				iterationErrorCounter int64
-			}{
+				}{
 				hasErr:                true,
 				totalErrors:           1,
 				consecutiveErrors:     1,
-				iterationErrorCounter: 1,
 			},
 		},
 		{
@@ -495,12 +492,10 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				hasErr                bool
 				totalErrors           int64
 				consecutiveErrors     float64
-				iterationErrorCounter int64
-			}{
+				}{
 				hasErr:                false,
 				totalErrors:           0,
 				consecutiveErrors:     0,
-				iterationErrorCounter: 0,
 			},
 		},
 	}
@@ -533,8 +528,6 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				stats.GetCounter(gent.SCSectionParseErrorTotal))
 			assert.Equal(t, tt.expected.consecutiveErrors,
 				stats.GetGauge(gent.SGSectionParseErrorConsecutive))
-			assert.Equal(t, tt.expected.iterationErrorCounter,
-				stats.GetCounter(gent.SCSectionParseErrorAt+"1"))
 		})
 	}
 }

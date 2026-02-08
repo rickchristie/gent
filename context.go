@@ -419,7 +419,7 @@ func (ctx *ExecutionContext) publish(event Event) {
 		publisher = ctx.eventPublisher
 	})
 
-	// Update stats based on event type (outside lock because incrCounterInternal calls checkLimits)
+	// Update stats based on event type (outside lock because incrCounterDirect calls checkLimits)
 	ctx.updateStatsForEvent(event)
 
 	// Dispatch to subscribers
@@ -561,14 +561,10 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 		}
 
 	case *ParseErrorEvent:
-		iter := fmt.Sprintf("%d", ctx.iteration)
 		switch e.ErrorType {
 		case ParseErrorTypeFormat:
 			ctx.stats.incrCounterDirect(
 				SCFormatParseErrorTotal, 1,
-			)
-			ctx.stats.incrCounterDirect(
-				SCFormatParseErrorAt+StatKey(iter), 1,
 			)
 			ctx.stats.incrGaugeInternal(
 				SGFormatParseErrorConsecutive, 1,
@@ -577,9 +573,6 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 			ctx.stats.incrCounterDirect(
 				SCToolchainParseErrorTotal, 1,
 			)
-			ctx.stats.incrCounterDirect(
-				SCToolchainParseErrorAt+StatKey(iter), 1,
-			)
 			ctx.stats.incrGaugeInternal(
 				SGToolchainParseErrorConsecutive, 1,
 			)
@@ -587,18 +580,12 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 			ctx.stats.incrCounterDirect(
 				SCTerminationParseErrorTotal, 1,
 			)
-			ctx.stats.incrCounterDirect(
-				SCTerminationParseErrorAt+StatKey(iter), 1,
-			)
 			ctx.stats.incrGaugeInternal(
 				SGTerminationParseErrorConsecutive, 1,
 			)
 		case ParseErrorTypeSection:
 			ctx.stats.incrCounterDirect(
 				SCSectionParseErrorTotal, 1,
-			)
-			ctx.stats.incrCounterDirect(
-				SCSectionParseErrorAt+StatKey(iter), 1,
 			)
 			ctx.stats.incrGaugeInternal(
 				SGSectionParseErrorConsecutive, 1,
