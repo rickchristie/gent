@@ -182,7 +182,7 @@ func (tc *MockToolChain) ParseSection(
 	}
 	// Success resets consecutive counter
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyToolchainParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGToolchainParseErrorConsecutive)
 	}
 	return content, nil
 }
@@ -207,7 +207,7 @@ func (tc *MockToolChain) Execute(
 
 	// Success resets consecutive counter
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyToolchainParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGToolchainParseErrorConsecutive)
 	}
 
 	// Parse tool name from content (simple mock: "tool: <name>")
@@ -246,8 +246,13 @@ func (tc *MockToolChain) Execute(
 
 		// Reset consecutive error counters on success
 		if toolErr == nil {
-			execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutive)
-			execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutiveFor + toolName)
+			execCtx.Stats().ResetGauge(
+				gent.SGToolCallsErrorConsecutive,
+			)
+			execCtx.Stats().ResetGauge(
+				gent.SGToolCallsErrorConsecutiveFor +
+					gent.StatKey(toolName),
+			)
 		}
 	}
 
@@ -326,7 +331,9 @@ func (t *MockTermination) ParseSection(
 
 	// Success resets consecutive counter
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyTerminationParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(
+			gent.SGTerminationParseErrorConsecutive,
+		)
 	}
 	return content, nil
 }
@@ -443,14 +450,14 @@ func (f *MockFormat) Parse(
 
 		// Success resets consecutive counter
 		if execCtx != nil {
-			execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+			execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
 		}
 		return call.Result, nil
 	}
 
 	// Default: terminate
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
 	}
 	return map[string][]string{"answer": {"done"}}, nil
 }
@@ -614,7 +621,9 @@ func (s *MockSection) ParseSection(
 
 	// Success resets consecutive counter
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeySectionParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(
+			gent.SGSectionParseErrorConsecutive,
+		)
 	}
 	return content, nil
 }

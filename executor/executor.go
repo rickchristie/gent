@@ -153,7 +153,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 		}
 
 		// Start iteration: increment counter and publish BeforeIterationEvent
-		// (BeforeIterationEvent updates KeyIterations stat)
+		// (BeforeIterationEvent updates SCIterations stat)
 		execCtx.IncrementIteration()
 		iterStart := time.Now()
 		execCtx.PublishBeforeIteration()

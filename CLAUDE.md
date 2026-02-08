@@ -42,15 +42,15 @@ goal is to make it easy to write and experiment with custom agent loops.
 - AvailableToolsPrompt(): generates tool catalog with schemas for system prompt
 - Guidance(): instructions on tool call syntax (inherited from TextSection)
 - SIDE EFFECT: BeforeToolCallEvent auto-increments tool_calls, tool_calls:<name>
-- SIDE EFFECT: AfterToolCallEvent with error increments error counters
-- SIDE EFFECT: Success resets consecutive error counters
+- SIDE EFFECT: AfterToolCallEvent with error increments error counters/gauges
+- SIDE EFFECT: Success resets consecutive error gauges
 
 ### Termination + Validator
 - Interface: `termination.go`
 - Implementations: `termination/text.go`, `termination/json.go`
 - Parses answer section, runs optional AnswerValidator
 - Returns: Continue (no answer), AnswerRejected (with feedback), AnswerAccepted
-- SIDE EFFECT: ValidatorResultEvent with rejection increments answer_rejected counters
+- SIDE EFFECT: ValidatorResultEvent with rejection increments answer_rejected counter
 
 ### TextFormat + TextSection
 - Interfaces: `format.go` (TextFormat), `section/` (TextSection)
@@ -58,11 +58,16 @@ goal is to make it easy to write and experiment with custom agent loops.
 - TextFormat: envelope parsing (<tags> or # headers), section extraction
 - TextSection: content parsing within a section (text passthrough, JSON, YAML)
 - DescribeStructure(): generates output format instructions for system prompt
-- SIDE EFFECT: ParseErrorEvent increments parse error counters by type
+- SIDE EFFECT: ParseErrorEvent increments parse error counters/gauges by type
 
 ### Stats + Limits
-- Defined in: `stats.go`, `limit.go`
-- Stats: counters/gauges with hierarchical propagation (child → parent)
+- Defined in: `stats.go`, `stats_keys.go`, `limit.go`
+- `StatKey` type with `Self()` and `IsSelf()` methods
+- SC prefix = Counter (monotonic, always propagated, has $self: counterpart)
+- SG prefix = Gauge (can go up/down, never propagated, local-only)
+- $self:-prefixed keys track per-context only (no children)
+- Counters: IncrCounter only (no Set/Reset, panics on negative)
+- Gauges: IncrGauge, SetGauge, ResetGauge (used for consecutive errors)
 - Limits: checked on EVERY stats update, cancels context when exceeded
 - SIDE EFFECT: LimitExceededEvent published, then context.CancelCause() called
 
@@ -84,17 +89,31 @@ goal is to make it easy to write and experiment with custom agent loops.
 5. On accepted answer: TerminationSuccess with result
 
 ## Stats Keys (gent: prefix)
-- iterations (PROTECTED), input_tokens, output_tokens
-- input_tokens:<model>, output_tokens:<model>
-- tool_calls, tool_calls:<tool>
-- tool_calls_error_total, tool_calls_error_consecutive
-- format_parse_error_consecutive, toolchain_parse_error_consecutive
-- termination_parse_error_consecutive, section_parse_error_consecutive
-- answer_rejected_total, answer_rejected_by:<validator>
+### Counters (SC*, propagated, $self: counterpart)
+- SCIterations (PROTECTED from user IncrCounter)
+- SCInputTokens, SCInputTokensFor (+ model)
+- SCOutputTokens, SCOutputTokensFor (+ model)
+- SCToolCalls, SCToolCallsFor (+ tool)
+- SCToolCallsErrorTotal, SCToolCallsErrorFor (+ tool)
+- SCFormatParseErrorTotal, SCFormatParseErrorAt (+ iter)
+- SCToolchainParseErrorTotal, SCToolchainParseErrorAt (+ iter)
+- SCTerminationParseErrorTotal, SCTerminationParseErrorAt (+ iter)
+- SCSectionParseErrorTotal, SCSectionParseErrorAt (+ iter)
+- SCAnswerRejectedTotal, SCAnswerRejectedBy (+ validator)
+
+### Gauges (SG*, local-only, never propagated)
+- SGFormatParseErrorConsecutive
+- SGToolchainParseErrorConsecutive
+- SGSectionParseErrorConsecutive
+- SGTerminationParseErrorConsecutive
+- SGToolCallsErrorConsecutive
+- SGToolCallsErrorConsecutiveFor (+ tool)
 
 ## Limits
 - LimitExactKey - match specific key
-- LimitKeyPrefix - match any key with prefix (e.g., "gent:tool_calls:")
+- LimitKeyPrefix - match any key with prefix
+- Use Key.Self() for per-context limits (excludes children)
+- DefaultLimits uses SCIterations.Self() for per-context iteration limit
 - Executor has default limits
 </codebase_architecture>
 

@@ -210,7 +210,7 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-reschedule", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 15},
 	})
 
 	// Create event registry
@@ -562,7 +562,7 @@ SkyWings is an international airline. Reply with customer's language.
 	// Create ExecutionContext with iteration limit
 	execCtx := gent.NewExecutionContext(ctx, "airline-chat", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 15},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 15},
 	})
 
 	// Create event registry

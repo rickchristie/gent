@@ -1834,20 +1834,20 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 		name     string
 		input    string
 		expected struct {
-			shouldError              bool
-			toolchainErrorTotal      int64
-			toolchainErrorConsec     int64
-			toolchainErrorAtIter     int64
+			shouldError          bool
+			toolchainErrorTotal  int64
+			toolchainErrorConsec float64
+			toolchainErrorAtIter int64
 		}
 	}{
 		{
 			name:  "parse error publishes ParseErrorEvent",
 			input: "invalid: yaml: [",
 			expected: struct {
-				shouldError              bool
-				toolchainErrorTotal      int64
-				toolchainErrorConsec     int64
-				toolchainErrorAtIter     int64
+				shouldError          bool
+				toolchainErrorTotal  int64
+				toolchainErrorConsec float64
+				toolchainErrorAtIter int64
 			}{
 				shouldError:          true,
 				toolchainErrorTotal:  1,
@@ -1856,13 +1856,13 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "successful parse resets consecutive counter",
+			name:  "successful parse resets consecutive gauge",
 			input: "tool: test\nargs:\n  query: hello",
 			expected: struct {
-				shouldError              bool
-				toolchainErrorTotal      int64
-				toolchainErrorConsec     int64
-				toolchainErrorAtIter     int64
+				shouldError          bool
+				toolchainErrorTotal  int64
+				toolchainErrorConsec float64
+				toolchainErrorAtIter int64
 			}{
 				shouldError:          false,
 				toolchainErrorTotal:  0,
@@ -1877,12 +1877,16 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 			tc := NewYAML()
 
 			// Create execution context with iteration 1
-			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", nil,
+			)
 			execCtx.IncrementIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {
-				execCtx.Stats().IncrCounter(gent.KeyToolchainParseErrorConsecutive, 1)
+				execCtx.Stats().IncrGauge(
+					gent.SGToolchainParseErrorConsecutive, 1,
+				)
 			}
 
 			_, err := tc.ParseSection(execCtx, tt.input)
@@ -1895,13 +1899,13 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 
 			stats := execCtx.Stats()
 			assert.Equal(t, tt.expected.toolchainErrorTotal,
-				stats.GetCounter(gent.KeyToolchainParseErrorTotal),
+				stats.GetCounter(gent.SCToolchainParseErrorTotal),
 				"toolchain error total mismatch")
 			assert.Equal(t, tt.expected.toolchainErrorConsec,
-				stats.GetCounter(gent.KeyToolchainParseErrorConsecutive),
+				stats.GetGauge(gent.SGToolchainParseErrorConsecutive),
 				"toolchain error consecutive mismatch")
 			assert.Equal(t, tt.expected.toolchainErrorAtIter,
-				stats.GetCounter(gent.KeyToolchainParseErrorAt+"1"),
+				stats.GetCounter(gent.SCToolchainParseErrorAt+"1"),
 				"toolchain error at iteration mismatch")
 		})
 	}
@@ -2010,18 +2014,21 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 		require.NoError(t, err)
 
 		stats := execCtx.Stats()
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
-			"error total mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorFor+"failing_tool"),
-			"error for tool mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
-			"error consecutive mismatch")
 		assert.Equal(t, int64(1),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"failing_tool"),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
+			"error total mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorFor+"failing_tool"),
+			"error for tool mismatch")
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
+			"error consecutive mismatch")
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"failing_tool"),
 			"error consecutive for tool mismatch")
 	})
 
-	t.Run("successful tool after failure resets consecutive counters", func(t *testing.T) {
+	t.Run("successful tool after failure resets consecutive gauges", func(t *testing.T) {
 		tc := NewYAML()
 		callCount := 0
 		tool := gent.NewToolFunc(
@@ -2046,26 +2053,32 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 		require.NoError(t, err)
 
 		stats := execCtx.Stats()
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
-			"after first call: error total mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
-			"after first call: error consecutive mismatch")
 		assert.Equal(t, int64(1),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"test_tool"),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
+			"after first call: error total mismatch")
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
+			"after first call: error consecutive mismatch")
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"test_tool"),
 			"after first call: error consecutive for tool mismatch")
 
 		// Second iteration: tool succeeds
 		execCtx.IncrementIteration()
-		_, err = tc.Execute(execCtx, "tool: test_tool\nargs: {}", yamlTestFormat())
+		_, err = tc.Execute(
+			execCtx, "tool: test_tool\nargs: {}", yamlTestFormat(),
+		)
 		require.NoError(t, err)
 
 		// Total should remain 1, but consecutive should be reset to 0
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"after second call: error total should not change")
-		assert.Equal(t, int64(0), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+		assert.Equal(t, float64(0),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 			"after second call: error consecutive should be reset")
-		assert.Equal(t, int64(0),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"test_tool"),
+		assert.Equal(t, float64(0),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"test_tool"),
 			"after second call: error consecutive for tool should be reset")
 	})
 
@@ -2090,9 +2103,11 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 			require.NoError(t, err)
 
 			stats := execCtx.Stats()
-			assert.Equal(t, int64(i), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+			assert.Equal(t, int64(i),
+				stats.GetCounter(gent.SCToolCallsErrorTotal),
 				"after iteration %d: error total mismatch", i)
-			assert.Equal(t, int64(i), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+			assert.Equal(t, float64(i),
+				stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 				"after iteration %d: error consecutive mismatch", i)
 		}
 	})
@@ -2110,11 +2125,14 @@ func TestYAML_Execute_TracesToolCallErrors_UnknownTool(t *testing.T) {
 		require.NoError(t, err) // Execute returns nil, errors are in Raw.Errors
 
 		stats := execCtx.Stats()
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"error total mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorFor+"nonexistent"),
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorFor+"nonexistent"),
 			"error for tool mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 			"error consecutive mismatch")
 	})
 }
@@ -2145,11 +2163,14 @@ func TestYAML_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 		require.NoError(t, err)
 
 		stats := execCtx.Stats()
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"error total mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorFor+"validated_tool"),
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorFor+"validated_tool"),
 			"error for tool mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 			"error consecutive mismatch")
 	})
 }
@@ -2185,19 +2206,23 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		require.NoError(t, err)
 
 		stats := execCtx.Stats()
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorTotal),
-			"error total mismatch")
-		assert.Equal(t, int64(0), stats.GetCounter(gent.KeyToolCallsErrorFor+"success_tool"),
-			"error for success_tool mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorFor+"failing_tool"),
-			"error for failing_tool mismatch")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
-			"error consecutive mismatch")
-		assert.Equal(t, int64(0),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"success_tool"),
-			"error consecutive for success_tool mismatch")
 		assert.Equal(t, int64(1),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"failing_tool"),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
+			"error total mismatch")
+		assert.Equal(t, int64(0),
+			stats.GetCounter(gent.SCToolCallsErrorFor+"success_tool"),
+			"error for success_tool mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsErrorFor+"failing_tool"),
+			"error for failing_tool mismatch")
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
+			"error consecutive mismatch")
+		assert.Equal(t, float64(0),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"success_tool"),
+			"error consecutive for success_tool mismatch")
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"failing_tool"),
 			"error consecutive for failing_tool mismatch")
 	})
 
@@ -2240,15 +2265,17 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		require.NoError(t, err)
 
 		stats := execCtx.Stats()
-		assert.Equal(t, int64(2), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+		assert.Equal(t, int64(2),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"iteration 1: total errors")
-		assert.Equal(t, int64(2), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+		assert.Equal(t, float64(2),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 			"iteration 1: consecutive errors")
-		assert.Equal(t, int64(1),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool1"),
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"tool1"),
 			"iteration 1: tool1 consecutive")
-		assert.Equal(t, int64(1),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool2"),
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"tool2"),
 			"iteration 1: tool2 consecutive")
 
 		// Second iteration: tool1 succeeds, tool2 still fails
@@ -2257,18 +2284,20 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		require.NoError(t, err)
 
 		// Total increments by 1 (only tool2 fails)
-		// Global consecutive resets then increments to 1 (tool1 success resets, tool2 increments)
+		// Global consecutive resets then increments to 1
 		// tool1 consecutive should be reset
 		// tool2 consecutive should be 2
-		assert.Equal(t, int64(3), stats.GetCounter(gent.KeyToolCallsErrorTotal),
+		assert.Equal(t, int64(3),
+			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"iteration 2: total errors")
-		assert.Equal(t, int64(1), stats.GetCounter(gent.KeyToolCallsErrorConsecutive),
+		assert.Equal(t, float64(1),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 			"iteration 2: consecutive errors (reset by tool1 success, then +1 by tool2)")
-		assert.Equal(t, int64(0),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool1"),
+		assert.Equal(t, float64(0),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"tool1"),
 			"iteration 2: tool1 consecutive reset")
-		assert.Equal(t, int64(2),
-			stats.GetCounter(gent.KeyToolCallsErrorConsecutiveFor+"tool2"),
+		assert.Equal(t, float64(2),
+			stats.GetGauge(gent.SGToolCallsErrorConsecutiveFor+"tool2"),
 			"iteration 2: tool2 consecutive accumulated")
 	})
 }

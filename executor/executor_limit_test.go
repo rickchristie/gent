@@ -201,7 +201,7 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 				terminate: gent.TerminationLimitExceeded,
 				exceededLimit: gent.Limit{
 					Type:     gent.LimitExactKey,
-					Key:      gent.KeyIterations,
+					Key:      gent.SCIterations,
 					MaxValue: 5,
 				},
 				events: []gent.Event{
@@ -218,8 +218,8 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 					tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 6),
 					tt.LimitExceeded(0, 6,
-						tt.ExactLimit(gent.KeyIterations, 5),
-						6, gent.KeyIterations),
+						tt.ExactLimit(gent.SCIterations, 5),
+						6, gent.SCIterations),
 					tt.AfterIter(0, 6, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 6, gent.TerminationLimitExceeded),
 				},
@@ -233,7 +233,7 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 				terminate: gent.TerminationLimitExceeded,
 				exceededLimit: gent.Limit{
 					Type:     gent.LimitExactKey,
-					Key:      gent.KeyIterations,
+					Key:      gent.SCIterations,
 					MaxValue: 1,
 				},
 				events: []gent.Event{
@@ -242,8 +242,8 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 2),
 					tt.LimitExceeded(0, 2,
-						tt.ExactLimit(gent.KeyIterations, 1),
-						2, gent.KeyIterations),
+						tt.ExactLimit(gent.SCIterations, 1),
+						2, gent.SCIterations),
 					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
 				},
@@ -257,7 +257,7 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 				terminate: gent.TerminationLimitExceeded,
 				exceededLimit: gent.Limit{
 					Type:     gent.LimitExactKey,
-					Key:      gent.KeyIterations,
+					Key:      gent.SCIterations,
 					MaxValue: 10,
 				},
 				events: []gent.Event{
@@ -284,8 +284,8 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 					tt.AfterIter(0, 10, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 11),
 					tt.LimitExceeded(0, 11,
-						tt.ExactLimit(gent.KeyIterations, 10),
-						11, gent.KeyIterations),
+						tt.ExactLimit(gent.SCIterations, 10),
+						11, gent.SCIterations),
 					tt.AfterIter(0, 11, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 11, gent.TerminationLimitExceeded),
 				},
@@ -302,7 +302,7 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: tc.input.maxIterations},
+				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: tc.input.maxIterations},
 			})
 
 			exec.Execute(execCtx)
@@ -392,7 +392,7 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: tc.input.maxIterations},
+				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: tc.input.maxIterations},
 			})
 
 			exec.Execute(execCtx)
@@ -444,7 +444,7 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 				calls:     3,
 				iteration: 3,
 				exceededLimit: gent.Limit{
-					Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 2500},
+					Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 2500},
 				reason: gent.TerminationLimitExceeded,
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
@@ -460,7 +460,7 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 					tt.BeforeModelCall(0, 3, "test-model"),
 					tt.AfterModelCall(0, 3, "test-model", 1000, 100),
 					tt.LimitExceeded(0, 3,
-						tt.ExactLimit(gent.KeyInputTokens, 2500), 3000, gent.KeyInputTokens),
+						tt.ExactLimit(gent.SCInputTokens, 2500), 3000, gent.SCInputTokens),
 					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 				},
@@ -474,7 +474,7 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 				calls:     3,
 				iteration: 3,
 				exceededLimit: gent.Limit{
-					Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 1200},
+					Type: gent.LimitExactKey, Key: gent.SCOutputTokens, MaxValue: 1200},
 				reason: gent.TerminationLimitExceeded,
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
@@ -490,7 +490,7 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 					tt.BeforeModelCall(0, 3, "test-model"),
 					tt.AfterModelCall(0, 3, "test-model", 100, 500),
 					tt.LimitExceeded(0, 3,
-						tt.ExactLimit(gent.KeyOutputTokens, 1200), 1500, gent.KeyOutputTokens),
+						tt.ExactLimit(gent.SCOutputTokens, 1200), 1500, gent.SCOutputTokens),
 					tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 				},
@@ -503,7 +503,7 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 			expected: expected{
 				calls:         2,
 				iteration:     2,
-				exceededLimit: tt.ExactLimit(gent.KeyInputTokens, 1500),
+				exceededLimit: tt.ExactLimit(gent.SCInputTokens, 1500),
 				reason:        gent.TerminationLimitExceeded,
 				events: []gent.Event{
 					tt.BeforeExec(0, 0),
@@ -515,7 +515,7 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 					tt.BeforeModelCall(0, 2, "test-model"),
 					tt.AfterModelCall(0, 2, "test-model", 1000, 1000),
 					tt.LimitExceeded(0, 2,
-						tt.ExactLimit(gent.KeyInputTokens, 1500), 2000, gent.KeyInputTokens),
+						tt.ExactLimit(gent.SCInputTokens, 1500), 2000, gent.SCInputTokens),
 					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 					tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
 				},
@@ -535,9 +535,9 @@ func TestLimits_TokenLimit_Exceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: tc.limits.maxInput},
-				{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: tc.limits.maxOutput},
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+				{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: tc.limits.maxInput},
+				{Type: gent.LimitExactKey, Key: gent.SCOutputTokens, MaxValue: tc.limits.maxOutput},
+				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 			})
 
 			exec.Execute(execCtx)
@@ -587,8 +587,8 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
 		// Limit any single model to 2500 tokens
-		{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 2500},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitKeyPrefix, Key: gent.SCInputTokensFor, MaxValue: 2500},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -598,12 +598,12 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.NotNil(t, result.ExceededLimit)
-	assert.Equal(t, gent.KeyInputTokensFor, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokensFor, result.ExceededLimit.Key)
 
 	// model-a gets 1000 tokens on iterations 1, 3, 5 -> 3000 tokens > 2500
 	// So should terminate after iteration 5
 	stats := execCtx.Stats()
-	assert.Equal(t, int64(3000), stats.GetCounter(gent.KeyInputTokensFor+"model-a"))
+	assert.Equal(t, int64(3000), stats.GetCounter(gent.SCInputTokensFor+"model-a"))
 
 	// Verify iteration count
 	// Iterations: 1(a:1000), 2(b:500), 3(a:2000), 4(b:1000), 5(a:3000 > 2500, limit!)
@@ -632,7 +632,7 @@ func TestLimits_PrefixLimit_Exceeded(t *testing.T) {
 		tt.BeforeModelCall(0, 5, "model-a"),
 		tt.AfterModelCall(0, 5, "model-a", 1000, 0),
 		tt.LimitExceeded(0, 5,
-			tt.PrefixLimit(gent.KeyInputTokensFor, 2500), 3000, gent.KeyInputTokensFor+"model-a"),
+			tt.PrefixLimit(gent.SCInputTokensFor, 2500), 3000, gent.SCInputTokensFor+"model-a"),
 		tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 	}
@@ -674,8 +674,8 @@ func TestLimits_ParallelChildren_AggregateToParent(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 10000},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 10000},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -760,8 +760,8 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 		// Iter 1: 1000 tokens (< 1500, OK)
 		// Iter 2: During execution, when cumulative tokens exceed 1500, context cancelled immediately
 		// Iter 3: ctx.Err() detected at top of loop → terminate
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1500},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 1500},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -771,7 +771,7 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	assert.NotNil(t, result.ExceededLimit)
-	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokens, result.ExceededLimit.Key)
 
 	// Verify iteration counts
 	// Iter 1, 2 call Next(); limit exceeded during iter 2, detected at iter 3 start
@@ -795,10 +795,10 @@ func TestLimits_ParallelChildren_LimitExceededOnNextIteration(t *testing.T) {
 	for _, e := range parentEvents {
 		if limitEvent, ok := e.(*gent.LimitExceededEvent); ok {
 			assert.Equal(t, 2, limitEvent.Iteration)
-			assert.Equal(t, gent.KeyInputTokens, limitEvent.Limit.Key)
+			assert.Equal(t, gent.SCInputTokens, limitEvent.Limit.Key)
 			assert.Equal(t, 1500.0, limitEvent.Limit.MaxValue)
 			assert.Greater(t, limitEvent.CurrentValue, 1500.0)
-			assert.Equal(t, gent.KeyInputTokens, limitEvent.MatchedKey)
+			assert.Equal(t, gent.SCInputTokens, limitEvent.MatchedKey)
 		}
 		if afterExec, ok := e.(*gent.AfterExecutionEvent); ok {
 			assert.Equal(t, gent.TerminationLimitExceeded, afterExec.TerminationReason)
@@ -856,8 +856,8 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 		// Iter 2: 1000 tokens (< 1200, OK)
 		// Iter 3: 1500 tokens (> 1200, limit detected during AfterModelCall)
 		// Iter 4: ctx.Err() detected at top of loop → terminate
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1200},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 1200},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -866,7 +866,7 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokens, result.ExceededLimit.Key)
 
 	// Iter 1: 500, Iter 2: 1000, Iter 3: 1500 > 1200 (detected during iter 3)
 	// Iter 4 never starts since ctx.Err() is detected at top of loop
@@ -884,7 +884,7 @@ func TestLimits_SerialChildren_CumulativeLimit(t *testing.T) {
 		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.LimitExceeded(0, 3,
-			tt.ExactLimit(gent.KeyInputTokens, 1200), 1500, gent.KeyInputTokens),
+			tt.ExactLimit(gent.SCInputTokens, 1200), 1500, gent.SCInputTokens),
 		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
@@ -946,8 +946,8 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 		// Iter 3: 900 (< 1000, OK)
 		// Iter 4: During execution, when cumulative > 1000, limit detected immediately
 		// Iter 5: ctx.Err() detected at top of loop → terminate
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 1000},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -956,7 +956,7 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokens, result.ExceededLimit.Key)
 
 	// Iter 1: 300, Iter 2: 600, Iter 3: 900, Iter 4: >1000 (detected during iter 4)
 	// Iter 5 never starts since ctx.Err() is detected at top of loop
@@ -978,10 +978,10 @@ func TestLimits_MixedTopology_NestedParallelAndSerial(t *testing.T) {
 	for _, e := range parentEvents {
 		if limitEvent, ok := e.(*gent.LimitExceededEvent); ok {
 			assert.Equal(t, 4, limitEvent.Iteration)
-			assert.Equal(t, gent.KeyInputTokens, limitEvent.Limit.Key)
+			assert.Equal(t, gent.SCInputTokens, limitEvent.Limit.Key)
 			assert.Equal(t, 1000.0, limitEvent.Limit.MaxValue)
 			assert.Greater(t, limitEvent.CurrentValue, 1000.0)
-			assert.Equal(t, gent.KeyInputTokens, limitEvent.MatchedKey)
+			assert.Equal(t, gent.SCInputTokens, limitEvent.MatchedKey)
 		}
 		if afterExec, ok := e.(*gent.AfterExecutionEvent); ok {
 			assert.Equal(t, gent.TerminationLimitExceeded, afterExec.TerminationReason)
@@ -1052,8 +1052,8 @@ func TestLimits_EdgeCase_ZeroMaxValue(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 0},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 0},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1062,7 +1062,7 @@ func TestLimits_EdgeCase_ZeroMaxValue(t *testing.T) {
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokens, result.ExceededLimit.Key)
 
 	// Limit triggered on first iteration during AfterModelCall
 	assert.Equal(t, 1, loop.GetCalls())
@@ -1075,7 +1075,7 @@ func TestLimits_EdgeCase_ZeroMaxValue(t *testing.T) {
 		tt.BeforeModelCall(0, 1, "test-model"),
 		tt.AfterModelCall(0, 1, "test-model", 100, 0),
 		tt.LimitExceeded(0, 1,
-			tt.ExactLimit(gent.KeyInputTokens, 0), 100, gent.KeyInputTokens),
+			tt.ExactLimit(gent.SCInputTokens, 0), 100, gent.SCInputTokens),
 		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
 	}
@@ -1092,8 +1092,8 @@ func TestLimits_EdgeCase_ExactlyAtLimit(t *testing.T) {
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
 		// 2 iterations * 500 = 1000, limit at 1000 should NOT trigger
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 1000},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1135,9 +1135,9 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 500},  // Would exceed
-		{Type: gent.LimitExactKey, Key: gent.KeyOutputTokens, MaxValue: 500}, // Would exceed
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 500},  // Would exceed
+		{Type: gent.LimitExactKey, Key: gent.SCOutputTokens, MaxValue: 500}, // Would exceed
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1146,7 +1146,7 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 	// First limit in the list should be the one reported
-	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokens, result.ExceededLimit.Key)
 
 	// Verify iteration count
 	// Both input (1000) and output (1000) tokens exceed their limits (500) on first iteration
@@ -1160,7 +1160,7 @@ func TestLimits_EdgeCase_MultipleMatchingLimits(t *testing.T) {
 		tt.BeforeModelCall(0, 1, "test-model"),
 		tt.AfterModelCall(0, 1, "test-model", 1000, 1000),
 		tt.LimitExceeded(0, 1,
-			tt.ExactLimit(gent.KeyInputTokens, 500), 1000, gent.KeyInputTokens),
+			tt.ExactLimit(gent.SCInputTokens, 500), 1000, gent.SCInputTokens),
 		tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
 	}
@@ -1177,7 +1177,7 @@ func TestLimits_EdgeCase_ContextAlreadyCancelled(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1216,8 +1216,8 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 3},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SGFormatParseErrorConsecutive, MaxValue: 3},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1225,7 +1225,7 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyFormatParseErrorConsecutive, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SGFormatParseErrorConsecutive, result.ExceededLimit.Key)
 	assert.Equal(t, 4, errorCount) // 4 errors exceed the limit of 3
 
 	// Verify events
@@ -1243,8 +1243,8 @@ func TestLimits_ConsecutiveFormatParseErrors_Exceeded(t *testing.T) {
 		tt.BeforeIter(0, 4),
 		tt.ParseError(0, 4, gent.ParseErrorTypeFormat, "invalid content"),
 		tt.LimitExceeded(0, 4,
-			tt.ExactLimit(gent.KeyFormatParseErrorConsecutive, 3), 4,
-			gent.KeyFormatParseErrorConsecutive),
+			tt.ExactLimit(gent.SGFormatParseErrorConsecutive, 3), 4,
+			gent.SGFormatParseErrorConsecutive),
 		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
 	}
@@ -1267,8 +1267,8 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyToolchainParseErrorConsecutive, MaxValue: 2},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SGToolchainParseErrorConsecutive, MaxValue: 2},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1276,7 +1276,7 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 	result := execCtx.Result()
 	assert.NotNil(t, result)
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyToolchainParseErrorConsecutive, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SGToolchainParseErrorConsecutive, result.ExceededLimit.Key)
 	assert.Equal(t, 3, errorCount) // 3 errors exceed the limit of 2
 
 	// Verify events
@@ -1291,8 +1291,8 @@ func TestLimits_ConsecutiveToolchainParseErrors_Exceeded(t *testing.T) {
 		tt.BeforeIter(0, 3),
 		tt.ParseError(0, 3, gent.ParseErrorTypeToolchain, "invalid yaml"),
 		tt.LimitExceeded(0, 3,
-			tt.ExactLimit(gent.KeyToolchainParseErrorConsecutive, 2), 3,
-			gent.KeyToolchainParseErrorConsecutive),
+			tt.ExactLimit(gent.SGToolchainParseErrorConsecutive, 2), 3,
+			gent.SGToolchainParseErrorConsecutive),
 		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
@@ -1310,7 +1310,7 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 				execCtx.PublishParseError(gent.ParseErrorTypeFormat, "invalid", nil)
 			} else {
 				// Even iterations: success (reset consecutive counter)
-				execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+				execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
 			}
 
 			if callCount >= 10 {
@@ -1325,8 +1325,8 @@ func TestLimits_ConsecutiveErrors_ResetOnSuccess(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyFormatParseErrorConsecutive, MaxValue: 3},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SGFormatParseErrorConsecutive, MaxValue: 3},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1390,7 +1390,7 @@ func TestLimits_DefaultLimits_Applied(t *testing.T) {
 	// Should contain iteration limit
 	found := false
 	for _, limit := range limits {
-		if limit.Key == gent.KeyIterations {
+		if limit.Key == gent.SCIterations.Self() {
 			found = true
 			assert.Equal(t, float64(100), limit.MaxValue)
 			break
@@ -1405,13 +1405,13 @@ func TestLimits_DefaultLimits_CanBeOverridden(t *testing.T) {
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 
 	customLimits := []gent.Limit{
-		{Type: gent.LimitExactKey, Key: "custom:limit", MaxValue: 42},
+		{Type: gent.LimitExactKey, Key: gent.StatKey("custom:limit"), MaxValue: 42},
 	}
 	execCtx.SetLimits(customLimits)
 
 	limits := execCtx.Limits()
 	assert.Len(t, limits, 1)
-	assert.Equal(t, "custom:limit", limits[0].Key)
+	assert.Equal(t, gent.StatKey("custom:limit"), limits[0].Key)
 	assert.Equal(t, float64(42), limits[0].MaxValue)
 }
 
@@ -1421,7 +1421,7 @@ func TestLimits_DefaultLimits_CanBeOverridden(t *testing.T) {
 
 func TestLimits_GaugeLimit_Exceeded(t *testing.T) {
 	type input struct {
-		gaugeKey       string
+		gaugeKey       gent.StatKey
 		gaugeIncrement float64
 	}
 
@@ -1431,7 +1431,7 @@ func TestLimits_GaugeLimit_Exceeded(t *testing.T) {
 
 	type expected struct {
 		terminationReason gent.TerminationReason
-		exceededKey       string
+		exceededKey       gent.StatKey
 		callCount         int
 		finalGaugeValue   float64
 	}
@@ -1491,7 +1491,7 @@ func TestLimits_GaugeLimit_Exceeded(t *testing.T) {
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
 				{Type: gent.LimitExactKey, Key: tc.input.gaugeKey, MaxValue: tc.mocks.maxValue},
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 			})
 
 			exec.Execute(execCtx)
@@ -1511,7 +1511,7 @@ func TestLimits_GaugeLimit_Exceeded(t *testing.T) {
 
 func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
 	type input struct {
-		gaugePrefix string
+		gaugePrefix gent.StatKey
 	}
 
 	type mocks struct {
@@ -1520,7 +1520,7 @@ func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
 
 	type expected struct {
 		terminationReason gent.TerminationReason
-		exceededKeyPrefix string
+		exceededKeyPrefix gent.StatKey
 		expensiveValue    float64
 		cheapValue        float64
 	}
@@ -1570,7 +1570,7 @@ func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
 				{Type: gent.LimitKeyPrefix, Key: tc.input.gaugePrefix, MaxValue: tc.mocks.maxValue},
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 			})
 
 			exec.Execute(execCtx)
@@ -1592,7 +1592,7 @@ func TestLimits_GaugePrefixLimit_Exceeded(t *testing.T) {
 
 func TestLimits_GaugeExactKey_NotExceededUntilOverThreshold(t *testing.T) {
 	type input struct {
-		gaugeKey       string
+		gaugeKey       gent.StatKey
 		gaugeIncrement float64
 		terminateAt    int
 	}
@@ -1649,7 +1649,7 @@ func TestLimits_GaugeExactKey_NotExceededUntilOverThreshold(t *testing.T) {
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
 				{Type: gent.LimitExactKey, Key: tc.input.gaugeKey, MaxValue: tc.mocks.maxValue},
-				{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 			})
 
 			exec.Execute(execCtx)
@@ -1701,8 +1701,8 @@ func TestLimits_StatsAggregation_VerifyAccuracy(t *testing.T) {
 	assert.Equal(t, int64(150), stats.GetTotalOutputTokens()) // 50 + 100
 
 	// Per-model stats
-	assert.Equal(t, int64(100), stats.GetCounter(gent.KeyInputTokensFor+"parent-model"))
-	assert.Equal(t, int64(200), stats.GetCounter(gent.KeyInputTokensFor+"child-model"))
+	assert.Equal(t, int64(100), stats.GetCounter(gent.SCInputTokensFor+"parent-model"))
+	assert.Equal(t, int64(200), stats.GetCounter(gent.SCInputTokensFor+"child-model"))
 
 	// Verify iteration count
 	assert.Equal(t, 1, execCtx.Iteration())
@@ -1753,7 +1753,7 @@ func TestLimits_LimitExceededEvent_PublishedOnIterationLimit(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 3},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 3},
 	})
 
 	exec.Execute(execCtx)
@@ -1772,7 +1772,7 @@ func TestLimits_LimitExceededEvent_PublishedOnIterationLimit(t *testing.T) {
 		tt.BeforeIter(0, 3),
 		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 4),
-		tt.LimitExceeded(0, 4, tt.ExactLimit(gent.KeyIterations, 3), 4, gent.KeyIterations),
+		tt.LimitExceeded(0, 4, tt.ExactLimit(gent.SCIterations, 3), 4, gent.SCIterations),
 		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
 	}
@@ -1790,8 +1790,8 @@ func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 1000},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 1000},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1799,7 +1799,7 @@ func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
 	// Verify termination
 	result := execCtx.Result()
 	assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
-	assert.Equal(t, gent.KeyInputTokens, result.ExceededLimit.Key)
+	assert.Equal(t, gent.SCInputTokens, result.ExceededLimit.Key)
 
 	// Verify events
 	expectedEvents := []gent.Event{
@@ -1816,7 +1816,7 @@ func TestLimits_LimitExceededEvent_PublishedOnTokenLimit(t *testing.T) {
 		tt.BeforeModelCall(0, 3, "test-model"),
 		tt.AfterModelCall(0, 3, "test-model", 500, 100),
 		tt.LimitExceeded(0, 3,
-			tt.ExactLimit(gent.KeyInputTokens, 1000), 1500, gent.KeyInputTokens),
+			tt.ExactLimit(gent.SCInputTokens, 1000), 1500, gent.SCInputTokens),
 		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
@@ -1846,8 +1846,8 @@ func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) 
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitKeyPrefix, Key: gent.KeyInputTokensFor, MaxValue: 2500},
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 100},
+		{Type: gent.LimitKeyPrefix, Key: gent.SCInputTokensFor, MaxValue: 2500},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 100},
 	})
 
 	exec.Execute(execCtx)
@@ -1877,8 +1877,8 @@ func TestLimits_LimitExceededEvent_PrefixLimit_ContainsMatchedKey(t *testing.T) 
 		tt.BeforeModelCall(0, 5, "expensive-model"),
 		tt.AfterModelCall(0, 5, "expensive-model", 1000, 0),
 		tt.LimitExceeded(0, 5,
-			tt.PrefixLimit(gent.KeyInputTokensFor, 2500), 3000,
-			gent.KeyInputTokensFor+"expensive-model"),
+			tt.PrefixLimit(gent.SCInputTokensFor, 2500), 3000,
+			gent.SCInputTokensFor+"expensive-model"),
 		tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
 		tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 	}
@@ -1893,7 +1893,7 @@ func TestLimits_LimitExceededEvent_NotPublishedOnSuccess(t *testing.T) {
 	data := newMockLoopData()
 	execCtx := gent.NewExecutionContext(ctx, "test", data)
 	execCtx.SetLimits([]gent.Limit{
-		{Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 10},
+		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 10},
 	})
 
 	exec.Execute(execCtx)

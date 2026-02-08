@@ -198,16 +198,16 @@ func TestPublishLimitExceeded_SetsCorrectEventName(t *testing.T) {
 	execCtx.IncrementIteration()
 	limit := Limit{
 		Type:     LimitExactKey,
-		Key:      KeyIterations,
+		Key:      SCIterations,
 		MaxValue: 5,
 	}
 
-	event := execCtx.PublishLimitExceeded(limit, 6.0, KeyIterations)
+	event := execCtx.PublishLimitExceeded(limit, 6.0, SCIterations)
 
 	assert.Equal(t, EventNameLimitExceeded, event.EventName)
 	assert.Equal(t, limit, event.Limit)
 	assert.Equal(t, 6.0, event.CurrentValue)
-	assert.Equal(t, KeyIterations, event.MatchedKey)
+	assert.Equal(t, SCIterations, event.MatchedKey)
 	assert.Equal(t, 1, event.Iteration)
 	assert.NotZero(t, event.Timestamp)
 }
@@ -216,16 +216,16 @@ func TestPublishLimitExceeded_PrefixLimitMatchedKey(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 	limit := Limit{
 		Type:     LimitKeyPrefix,
-		Key:      KeyInputTokensFor,
+		Key:      SCInputTokensFor,
 		MaxValue: 1000,
 	}
 
-	event := execCtx.PublishLimitExceeded(limit, 1500.0, KeyInputTokensFor+"gpt-4")
+	event := execCtx.PublishLimitExceeded(limit, 1500.0, SCInputTokensFor+"gpt-4")
 
 	assert.Equal(t, EventNameLimitExceeded, event.EventName)
-	assert.Equal(t, KeyInputTokensFor, event.Limit.Key)
+	assert.Equal(t, SCInputTokensFor, event.Limit.Key)
 	assert.Equal(t, 1500.0, event.CurrentValue)
-	assert.Equal(t, KeyInputTokensFor+"gpt-4", event.MatchedKey)
+	assert.Equal(t, SCInputTokensFor+"gpt-4", event.MatchedKey)
 }
 
 // -----------------------------------------------------------------------------
@@ -850,7 +850,7 @@ func TestPublish_ConcurrentWithDifferentEventTypes(t *testing.T) {
 
 func TestLimitExceeded_PublishedWhenCounterExceedsLimit(t *testing.T) {
 	type input struct {
-		limitKey   string
+		limitKey   StatKey
 		limitMax   float64
 		counterVal int64
 	}
@@ -858,7 +858,7 @@ func TestLimitExceeded_PublishedWhenCounterExceedsLimit(t *testing.T) {
 	type expected struct {
 		eventPublished bool
 		currentValue   float64
-		matchedKey     string
+		matchedKey     StatKey
 	}
 
 	tests := []struct {
@@ -869,20 +869,20 @@ func TestLimitExceeded_PublishedWhenCounterExceedsLimit(t *testing.T) {
 		{
 			name: "event published when counter exceeds limit",
 			input: input{
-				limitKey:   "test:counter",
+				limitKey:   StatKey("test:counter"),
 				limitMax:   5,
 				counterVal: 6,
 			},
 			expected: expected{
 				eventPublished: true,
 				currentValue:   6.0,
-				matchedKey:     "test:counter",
+				matchedKey:     StatKey("test:counter"),
 			},
 		},
 		{
 			name: "no event when counter equals limit (not exceeded)",
 			input: input{
-				limitKey:   "test:counter",
+				limitKey:   StatKey("test:counter"),
 				limitMax:   5,
 				counterVal: 5,
 			},
@@ -893,7 +893,7 @@ func TestLimitExceeded_PublishedWhenCounterExceedsLimit(t *testing.T) {
 		{
 			name: "no event when counter below limit",
 			input: input{
-				limitKey:   "test:counter",
+				limitKey:   StatKey("test:counter"),
 				limitMax:   5,
 				counterVal: 3,
 			},
@@ -937,7 +937,7 @@ func TestLimitExceeded_PublishedWhenCounterExceedsLimit(t *testing.T) {
 
 func TestLimitExceeded_PublishedWhenGaugeExceedsLimit(t *testing.T) {
 	type input struct {
-		limitKey string
+		limitKey StatKey
 		limitMax float64
 		gaugeVal float64
 	}
@@ -945,7 +945,7 @@ func TestLimitExceeded_PublishedWhenGaugeExceedsLimit(t *testing.T) {
 	type expected struct {
 		eventPublished bool
 		currentValue   float64
-		matchedKey     string
+		matchedKey     StatKey
 	}
 
 	tests := []struct {
@@ -956,20 +956,20 @@ func TestLimitExceeded_PublishedWhenGaugeExceedsLimit(t *testing.T) {
 		{
 			name: "event published when gauge exceeds limit",
 			input: input{
-				limitKey: "test:gauge",
+				limitKey: StatKey("test:gauge"),
 				limitMax: 1.0,
 				gaugeVal: 1.5,
 			},
 			expected: expected{
 				eventPublished: true,
 				currentValue:   1.5,
-				matchedKey:     "test:gauge",
+				matchedKey:     StatKey("test:gauge"),
 			},
 		},
 		{
 			name: "no event when gauge equals limit (not exceeded)",
 			input: input{
-				limitKey: "test:gauge",
+				limitKey: StatKey("test:gauge"),
 				limitMax: 1.0,
 				gaugeVal: 1.0,
 			},
@@ -1011,14 +1011,14 @@ func TestLimitExceeded_PublishedWhenGaugeExceedsLimit(t *testing.T) {
 
 func TestLimitExceeded_PrefixLimit_MatchedKeyIsSpecificKey(t *testing.T) {
 	type input struct {
-		limitPrefix string
+		limitPrefix StatKey
 		limitMax    float64
-		keys        map[string]int64 // key -> counter value
+		keys        map[StatKey]int64 // key -> counter value
 	}
 
 	type expected struct {
 		eventPublished bool
-		matchedKey     string
+		matchedKey     StatKey
 		currentValue   float64
 	}
 
@@ -1030,27 +1030,27 @@ func TestLimitExceeded_PrefixLimit_MatchedKeyIsSpecificKey(t *testing.T) {
 		{
 			name: "prefix limit reports specific key that exceeded",
 			input: input{
-				limitPrefix: KeyInputTokensFor,
+				limitPrefix: SCInputTokensFor,
 				limitMax:    1000,
-				keys: map[string]int64{
-					KeyInputTokensFor + "gpt-3.5": 500,
-					KeyInputTokensFor + "gpt-4":   1500, // This one exceeds
+				keys: map[StatKey]int64{
+					SCInputTokensFor + "gpt-3.5": 500,
+					SCInputTokensFor + "gpt-4":   1500,
 				},
 			},
 			expected: expected{
 				eventPublished: true,
-				matchedKey:     KeyInputTokensFor + "gpt-4",
+				matchedKey:     SCInputTokensFor + "gpt-4",
 				currentValue:   1500.0,
 			},
 		},
 		{
 			name: "no event when all keys under limit",
 			input: input{
-				limitPrefix: KeyInputTokensFor,
+				limitPrefix: SCInputTokensFor,
 				limitMax:    2000,
-				keys: map[string]int64{
-					KeyInputTokensFor + "gpt-3.5": 500,
-					KeyInputTokensFor + "gpt-4":   1500,
+				keys: map[StatKey]int64{
+					SCInputTokensFor + "gpt-3.5": 500,
+					SCInputTokensFor + "gpt-4":   1500,
 				},
 			},
 			expected: expected{
@@ -1095,13 +1095,13 @@ func TestLimitExceeded_PrefixLimit_MatchedKeyIsSpecificKey(t *testing.T) {
 func TestLimitExceeded_OnlyPublishedOnce(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 	execCtx.SetLimits([]Limit{
-		{Type: LimitExactKey, Key: "test:counter", MaxValue: 2},
+		{Type: LimitExactKey, Key: StatKey("test:counter"), MaxValue: 2},
 	})
 
 	// Exceed limit multiple times
-	execCtx.Stats().IncrCounter("test:counter", 3) // Exceeds
-	execCtx.Stats().IncrCounter("test:counter", 1) // Would exceed again
-	execCtx.Stats().IncrCounter("test:counter", 1) // Would exceed again
+	execCtx.Stats().IncrCounter(StatKey("test:counter"), 3) // Exceeds
+	execCtx.Stats().IncrCounter(StatKey("test:counter"), 1) // Would exceed again
+	execCtx.Stats().IncrCounter(StatKey("test:counter"), 1) // Would exceed again
 
 	// Count LimitExceededEvent occurrences
 	var count int
@@ -1117,11 +1117,11 @@ func TestLimitExceeded_OnlyPublishedOnce(t *testing.T) {
 func TestLimitExceeded_EventContainsCorrectTimestamp(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 	execCtx.SetLimits([]Limit{
-		{Type: LimitExactKey, Key: "test:counter", MaxValue: 0},
+		{Type: LimitExactKey, Key: StatKey("test:counter"), MaxValue: 0},
 	})
 
 	before := time.Now()
-	execCtx.Stats().IncrCounter("test:counter", 1)
+	execCtx.Stats().IncrCounter(StatKey("test:counter"), 1)
 	after := time.Now()
 
 	var limitEvent *LimitExceededEvent
@@ -1145,10 +1145,10 @@ func TestLimitExceeded_EventContainsCorrectIterationAndDepth(t *testing.T) {
 	child := execCtx.SpawnChild("child", nil)
 	child.IncrementIteration() // child iteration = 1
 	child.SetLimits([]Limit{
-		{Type: LimitExactKey, Key: "test:counter", MaxValue: 0},
+		{Type: LimitExactKey, Key: StatKey("test:counter"), MaxValue: 0},
 	})
 
-	child.Stats().IncrCounter("test:counter", 1)
+	child.Stats().IncrCounter(StatKey("test:counter"), 1)
 
 	var limitEvent *LimitExceededEvent
 	for _, event := range child.Events() {
@@ -1163,11 +1163,12 @@ func TestLimitExceeded_EventContainsCorrectIterationAndDepth(t *testing.T) {
 	assert.Equal(t, 1, limitEvent.Depth, "should be child's depth")
 }
 
-func TestStatsChildPropagation_IterationsDoNotPropagate(t *testing.T) {
-	// Iterations are context-local and should NOT propagate from child to parent.
-	// This prevents child execution from corrupting parent iteration tracking.
-	// Iteration stats are updated via BeforeIterationEvent publishing.
-	parent := NewExecutionContext(context.Background(), "parent", nil)
+func TestStatsChildPropagation_IterationsPropagate(t *testing.T) {
+	// Iterations propagate like all other counters.
+	// Use $self: key for per-context iteration tracking.
+	parent := NewExecutionContext(
+		context.Background(), "parent", nil,
+	)
 	parent.PublishBeforeIteration()
 	parent.PublishBeforeIteration() // parent at iteration 2
 
@@ -1176,11 +1177,20 @@ func TestStatsChildPropagation_IterationsDoNotPropagate(t *testing.T) {
 	child.PublishBeforeIteration() // child at iteration 2
 	child.PublishBeforeIteration() // child at iteration 3
 
-	// Parent iteration should remain at 2, unaffected by child's 3 increments
-	assert.Equal(t, int64(2), parent.Stats().GetIterations(),
-		"parent iterations should not include child iterations")
+	// Aggregated: parent sees own (2) + child (3) = 5
+	assert.Equal(t, int64(5), parent.Stats().GetIterations(),
+		"parent iterations should include child iterations")
+	// Self: parent's own iterations only
+	assert.Equal(t, int64(2),
+		parent.Stats().GetCounter(SCIterations.Self()),
+		"parent $self iterations should be 2")
+	// Child aggregated = 3 (no children of its own)
 	assert.Equal(t, int64(3), child.Stats().GetIterations(),
-		"child iterations should be tracked locally")
+		"child iterations should be 3")
+	// Child self = 3
+	assert.Equal(t, int64(3),
+		child.Stats().GetCounter(SCIterations.Self()),
+		"child $self iterations should be 3")
 }
 
 func TestStatsChildPropagation_OtherStatsDoPropgate(t *testing.T) {
@@ -1189,23 +1199,25 @@ func TestStatsChildPropagation_OtherStatsDoPropgate(t *testing.T) {
 	child := parent.SpawnChild("child", nil)
 
 	// Increment various stats in child
-	child.Stats().IncrCounter(KeyInputTokens, 100)
-	child.Stats().IncrCounter(KeyOutputTokens, 50)
-	child.Stats().IncrCounter(KeyToolCalls, 3)
+	child.Stats().IncrCounter(SCInputTokens, 100)
+	child.Stats().IncrCounter(SCOutputTokens, 50)
+	child.Stats().IncrCounter(SCToolCalls, 3)
 
 	// Parent should see all these increments
-	assert.Equal(t, int64(100), parent.Stats().GetCounter(KeyInputTokens),
+	assert.Equal(t, int64(100), parent.Stats().GetCounter(SCInputTokens),
 		"input tokens should propagate to parent")
-	assert.Equal(t, int64(50), parent.Stats().GetCounter(KeyOutputTokens),
+	assert.Equal(t, int64(50), parent.Stats().GetCounter(SCOutputTokens),
 		"output tokens should propagate to parent")
-	assert.Equal(t, int64(3), parent.Stats().GetCounter(KeyToolCalls),
+	assert.Equal(t, int64(3), parent.Stats().GetCounter(SCToolCalls),
 		"tool calls should propagate to parent")
 }
 
 func TestStatsChildPropagation_DeepNesting(t *testing.T) {
-	// Verify iteration isolation and stats propagation across multiple levels.
-	// Iteration stats are updated via BeforeIterationEvent publishing.
-	root := NewExecutionContext(context.Background(), "root", nil)
+	// Verify iteration propagation and $self: tracking across
+	// multiple levels.
+	root := NewExecutionContext(
+		context.Background(), "root", nil,
+	)
 	root.PublishBeforeIteration() // root at iteration 1
 
 	child := root.SpawnChild("child", nil)
@@ -1216,20 +1228,219 @@ func TestStatsChildPropagation_DeepNesting(t *testing.T) {
 	grandchild.PublishBeforeIteration() // grandchild at iteration 2
 
 	// Increment stats in grandchild
-	grandchild.Stats().IncrCounter(KeyInputTokens, 500)
+	grandchild.Stats().IncrCounter(SCInputTokens, 500)
 
-	// Iterations should be isolated at each level
-	assert.Equal(t, int64(1), root.Stats().GetIterations(),
-		"root iterations should be isolated")
-	assert.Equal(t, int64(1), child.Stats().GetIterations(),
-		"child iterations should be isolated")
-	assert.Equal(t, int64(2), grandchild.Stats().GetIterations(),
-		"grandchild iterations should be tracked locally")
+	// Aggregated iterations: root(1) + child(1) + grandchild(2) = 4
+	assert.Equal(t, int64(4), root.Stats().GetIterations(),
+		"root aggregated iterations should be 4")
+	// child(1) + grandchild(2) = 3
+	assert.Equal(t, int64(3), child.Stats().GetIterations(),
+		"child aggregated iterations should be 3")
+	assert.Equal(t, int64(2),
+		grandchild.Stats().GetIterations(),
+		"grandchild aggregated iterations should be 2")
+
+	// $self: iterations should be local only
+	assert.Equal(t, int64(1),
+		root.Stats().GetCounter(SCIterations.Self()),
+		"root $self iterations should be 1")
+	assert.Equal(t, int64(1),
+		child.Stats().GetCounter(SCIterations.Self()),
+		"child $self iterations should be 1")
+	assert.Equal(t, int64(2),
+		grandchild.Stats().GetCounter(SCIterations.Self()),
+		"grandchild $self iterations should be 2")
 
 	// Other stats should propagate all the way up
-	assert.Equal(t, int64(500), grandchild.Stats().GetCounter(KeyInputTokens))
-	assert.Equal(t, int64(500), child.Stats().GetCounter(KeyInputTokens),
+	assert.Equal(t, int64(500),
+		grandchild.Stats().GetCounter(SCInputTokens))
+	assert.Equal(t, int64(500),
+		child.Stats().GetCounter(SCInputTokens),
 		"input tokens should propagate to child")
-	assert.Equal(t, int64(500), root.Stats().GetCounter(KeyInputTokens),
+	assert.Equal(t, int64(500),
+		root.Stats().GetCounter(SCInputTokens),
 		"input tokens should propagate to root")
+}
+
+// -------------------------------------------------------------------
+// StatKey Tests
+// -------------------------------------------------------------------
+
+func TestStatKey_Self_ReturnsLocalVariant(t *testing.T) {
+	key := StatKey("gent:input_tokens")
+	self := key.Self()
+	assert.Equal(t, StatKey("$self:gent:input_tokens"), self)
+}
+
+func TestStatKey_Self_IsIdempotent(t *testing.T) {
+	key := StatKey("gent:input_tokens")
+	once := key.Self()
+	twice := once.Self()
+	assert.Equal(t, once, twice,
+		"Self() should be idempotent")
+}
+
+func TestStatKey_IsSelf(t *testing.T) {
+	assert.True(t,
+		StatKey("$self:gent:input_tokens").IsSelf())
+	assert.False(t,
+		StatKey("gent:input_tokens").IsSelf())
+}
+
+// -------------------------------------------------------------------
+// Counter Semantics Tests
+// -------------------------------------------------------------------
+
+func TestIncrCounter_NegativeDeltaPanics(t *testing.T) {
+	stats := NewExecutionStats()
+	assert.Panics(t, func() {
+		stats.IncrCounter(StatKey("test:counter"), -1)
+	}, "negative delta should panic")
+}
+
+func TestIncrCounter_SelfPrefixPanics(t *testing.T) {
+	stats := NewExecutionStats()
+	assert.Panics(t, func() {
+		stats.IncrCounter(
+			StatKey("$self:test:counter"), 1,
+		)
+	}, "$self: prefix should panic")
+}
+
+func TestIncrCounter_ProtectedKeyIgnored(t *testing.T) {
+	stats := NewExecutionStats()
+	stats.IncrCounter(SCIterations, 1)
+	assert.Equal(t, int64(0),
+		stats.GetCounter(SCIterations),
+		"protected key should be silently ignored")
+}
+
+// -------------------------------------------------------------------
+// $self: Tracking Tests
+// -------------------------------------------------------------------
+
+func TestSelfKey_TrackedOnDirectIncrement(t *testing.T) {
+	stats := NewExecutionStats()
+	stats.IncrCounter(SCInputTokens, 100)
+	assert.Equal(t, int64(100),
+		stats.GetCounter(SCInputTokens),
+		"base key should be 100")
+	assert.Equal(t, int64(100),
+		stats.GetCounter(SCInputTokens.Self()),
+		"$self: key should also be 100")
+}
+
+func TestSelfKey_NotWrittenOnPropagation(t *testing.T) {
+	parent := NewExecutionContext(
+		context.Background(), "parent", nil,
+	)
+	child := parent.SpawnChild("child", nil)
+
+	child.Stats().IncrCounter(SCInputTokens, 100)
+
+	// Parent's aggregated key should have the value
+	assert.Equal(t, int64(100),
+		parent.Stats().GetCounter(SCInputTokens),
+		"parent aggregated should be 100")
+	// Parent's $self: key should NOT have the value
+	assert.Equal(t, int64(0),
+		parent.Stats().GetCounter(SCInputTokens.Self()),
+		"parent $self should be 0 (not directly incremented)")
+}
+
+// -------------------------------------------------------------------
+// Gauge Non-Propagation Tests
+// -------------------------------------------------------------------
+
+func TestGauge_DoesNotPropagateToParent(t *testing.T) {
+	parent := NewExecutionContext(
+		context.Background(), "parent", nil,
+	)
+	child := parent.SpawnChild("child", nil)
+
+	child.Stats().IncrGauge(
+		SGFormatParseErrorConsecutive, 3,
+	)
+
+	assert.Equal(t, float64(3),
+		child.Stats().GetGauge(
+			SGFormatParseErrorConsecutive,
+		),
+		"child gauge should be 3")
+	assert.Equal(t, float64(0),
+		parent.Stats().GetGauge(
+			SGFormatParseErrorConsecutive,
+		),
+		"parent gauge should remain 0")
+}
+
+// -------------------------------------------------------------------
+// Limit on $self: Key Tests
+// -------------------------------------------------------------------
+
+func TestLimit_SelfKeyWorksCorrectly(t *testing.T) {
+	parent := NewExecutionContext(
+		context.Background(), "parent", nil,
+	)
+	parent.SetLimits([]Limit{
+		{
+			Type:     LimitExactKey,
+			Key:      SCInputTokens.Self(),
+			MaxValue: 50,
+		},
+	})
+	child := parent.SpawnChild("child", nil)
+
+	// Child increments 100 tokens — should NOT trigger
+	// parent's $self: limit
+	child.Stats().IncrCounter(SCInputTokens, 100)
+
+	// Parent's aggregated has 100 but $self: has 0
+	assert.Equal(t, int64(100),
+		parent.Stats().GetCounter(SCInputTokens))
+	assert.Equal(t, int64(0),
+		parent.Stats().GetCounter(SCInputTokens.Self()))
+	assert.Nil(t, parent.ExceededLimit(),
+		"$self: limit should not fire from child propagation")
+
+	// Now parent directly increments 60 — should trigger
+	parent.Stats().IncrCounter(SCInputTokens, 60)
+	assert.NotNil(t, parent.ExceededLimit(),
+		"$self: limit should fire from direct increment")
+}
+
+func TestLimit_GaugeKeyWorksCorrectly(t *testing.T) {
+	ctx := NewExecutionContext(
+		context.Background(), "test", nil,
+	)
+	ctx.SetLimits([]Limit{
+		{
+			Type:     LimitExactKey,
+			Key:      SGFormatParseErrorConsecutive,
+			MaxValue: 3,
+		},
+	})
+
+	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
+	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
+	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
+	assert.Nil(t, ctx.ExceededLimit(),
+		"gauge at 3 should not exceed MaxValue 3")
+
+	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
+	assert.NotNil(t, ctx.ExceededLimit(),
+		"gauge at 4 should exceed MaxValue 3")
+}
+
+func TestDefaultLimits_UsesSelfIterations(t *testing.T) {
+	limits := DefaultLimits()
+	found := false
+	for _, l := range limits {
+		if l.Key == SCIterations.Self() {
+			found = true
+			assert.Equal(t, float64(100), l.MaxValue)
+		}
+	}
+	assert.True(t, found,
+		"DefaultLimits should have SCIterations.Self()")
 }

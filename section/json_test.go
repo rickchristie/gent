@@ -451,29 +451,29 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 	tests := []struct {
 		name  string
 		input struct {
-			content       string
-			presetCounter bool
+			content     string
+			presetGauge bool
 		}
 		expected struct {
 			hasErr                bool
 			totalErrors           int64
-			consecutiveErrors     int64
+			consecutiveErrors     float64
 			iterationErrorCounter int64
 		}
 	}{
 		{
 			name: "traces error on invalid JSON",
 			input: struct {
-				content       string
-				presetCounter bool
+				content     string
+				presetGauge bool
 			}{
-				content:       `{"invalid": }`,
-				presetCounter: false,
+				content:     `{"invalid": }`,
+				presetGauge: false,
 			},
 			expected: struct {
 				hasErr                bool
 				totalErrors           int64
-				consecutiveErrors     int64
+				consecutiveErrors     float64
 				iterationErrorCounter int64
 			}{
 				hasErr:                true,
@@ -483,18 +483,18 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "resets consecutive counter on success",
+			name: "resets consecutive gauge on success",
 			input: struct {
-				content       string
-				presetCounter bool
+				content     string
+				presetGauge bool
 			}{
-				content:       `{"name": "test", "value": 42}`,
-				presetCounter: true,
+				content:     `{"name": "test", "value": 42}`,
+				presetGauge: true,
 			},
 			expected: struct {
 				hasErr                bool
 				totalErrors           int64
-				consecutiveErrors     int64
+				consecutiveErrors     float64
 				iterationErrorCounter int64
 			}{
 				hasErr:                false,
@@ -509,11 +509,15 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", nil,
+			)
 			execCtx.IncrementIteration()
 
-			if tt.input.presetCounter {
-				execCtx.Stats().IncrCounter(gent.KeySectionParseErrorConsecutive, 1)
+			if tt.input.presetGauge {
+				execCtx.Stats().IncrGauge(
+					gent.SGSectionParseErrorConsecutive, 1,
+				)
 			}
 
 			_, err := section.ParseSection(execCtx, tt.input.content)
@@ -526,11 +530,11 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 
 			stats := execCtx.Stats()
 			assert.Equal(t, tt.expected.totalErrors,
-				stats.GetCounter(gent.KeySectionParseErrorTotal))
+				stats.GetCounter(gent.SCSectionParseErrorTotal))
 			assert.Equal(t, tt.expected.consecutiveErrors,
-				stats.GetCounter(gent.KeySectionParseErrorConsecutive))
+				stats.GetGauge(gent.SGSectionParseErrorConsecutive))
 			assert.Equal(t, tt.expected.iterationErrorCounter,
-				stats.GetCounter(gent.KeySectionParseErrorAt+"1"))
+				stats.GetCounter(gent.SCSectionParseErrorAt+"1"))
 		})
 	}
 }

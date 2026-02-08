@@ -55,7 +55,7 @@ import (
 //
 // When YAML parsing fails, a [gent.ParseErrorEvent] is published and the error
 // is returned. The framework tracks consecutive parse errors via
-// [gent.KeySectionParseErrorConsecutive] for limit enforcement.
+// [gent.SGSectionParseErrorConsecutive] for limit enforcement.
 type YAML[T any] struct {
 	sectionName string
 	guidance    string
@@ -140,9 +140,9 @@ func (y *YAML[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 		return nil, parseErr
 	}
 
-	// Successful parse - reset consecutive error counter
+	// Successful parse - reset consecutive error gauge
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeySectionParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGSectionParseErrorConsecutive)
 	}
 
 	return result, nil

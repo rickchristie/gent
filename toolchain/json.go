@@ -137,9 +137,9 @@ func (c *JSON) ParseSection(execCtx *gent.ExecutionContext, content string) (any
 		return nil, err
 	}
 
-	// Successful parse - reset consecutive error counter
+	// Successful parse - reset consecutive error gauge
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyToolchainParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGToolchainParseErrorConsecutive)
 	}
 
 	return result, nil
@@ -314,10 +314,10 @@ func (c *JSON) Execute(
 				Content: fmt.Sprintf("Error: %v", err),
 			})
 		} else {
-			// Successful tool call - reset consecutive error counters
+			// Successful tool call - reset consecutive error gauges
 			if execCtx != nil {
-				execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutive)
-				execCtx.Stats().ResetCounter(gent.KeyToolCallsErrorConsecutiveFor + call.Name)
+				execCtx.Stats().ResetGauge(gent.SGToolCallsErrorConsecutive)
+				execCtx.Stats().ResetGauge(gent.SGToolCallsErrorConsecutiveFor + gent.StatKey(call.Name))
 			}
 
 			// Store raw result

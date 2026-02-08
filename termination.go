@@ -10,7 +10,7 @@ const (
 
 	// TerminationAnswerRejected indicates an answer was found but rejected by a validator.
 	// The feedback content should be added to the scratchpad for the LLM to reconsider.
-	// Stats updated: [KeyAnswerRejectedTotal], [KeyAnswerRejectedBy].
+	// Stats updated: [SCAnswerRejectedTotal], [SCAnswerRejectedBy].
 	TerminationAnswerRejected
 
 	// TerminationAnswerAccepted indicates an answer was found and accepted.

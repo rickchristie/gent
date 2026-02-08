@@ -43,9 +43,9 @@ package gent
 //	        }
 //	        return nil, err
 //	    }
-//	    // Reset consecutive error counter on success
+//	    // Reset consecutive error gauge on success
 //	    if execCtx != nil {
-//	        execCtx.Stats().ResetCounter(KeySectionParseErrorConsecutive)
+//	        execCtx.Stats().ResetGauge(SGSectionParseErrorConsecutive)
 //	    }
 //	    return parsed, nil
 //	}
@@ -59,12 +59,12 @@ package gent
 //   - Stats are auto-updated when ParseErrorEvent is published
 //
 // Supported ErrorTypes and their corresponding keys:
-//   - "section": [KeySectionParseErrorConsecutive] (for generic sections)
-//   - "toolchain": [KeyToolchainParseErrorConsecutive] (for ToolChain)
-//   - "termination": [KeyTerminationParseErrorConsecutive] (for Termination)
+//   - "section": [SGSectionParseErrorConsecutive] (for generic sections)
+//   - "toolchain": [SGToolchainParseErrorConsecutive] (for ToolChain)
+//   - "termination": [SGTerminationParseErrorConsecutive] (for Termination)
 //
 // On successful parse:
-//   - Call execCtx.Stats().ResetCounter() for the appropriate consecutive error key
+//   - Call execCtx.Stats().ResetGauge() for the appropriate consecutive error key
 //
 // Sections that never fail parsing (e.g., simple text passthrough) may skip tracing.
 //

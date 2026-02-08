@@ -76,7 +76,7 @@ type FormattedSection struct {
 //   - Stats are auto-updated when the event is published
 //
 // On successful parse:
-//   - Call execCtx.Stats().ResetCounter(KeyFormatParseErrorConsecutive)
+//   - Call execCtx.Stats().ResetGauge(SGFormatParseErrorConsecutive)
 //
 // Example implementation:
 //
@@ -89,7 +89,7 @@ type FormattedSection struct {
 //	        return nil, err
 //	    }
 //	    if execCtx != nil {
-//	        execCtx.Stats().ResetCounter(KeyFormatParseErrorConsecutive)
+//	        execCtx.Stats().ResetGauge(SGFormatParseErrorConsecutive)
 //	    }
 //	    return result, nil
 //	}

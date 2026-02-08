@@ -236,11 +236,12 @@ func (ctx *ExecutionContext) Result() *ExecutionResult {
 // Limit Checking (internal)
 // -----------------------------------------------------------------------------
 
-// limitExceededInfo contains information about a limit that was exceeded.
+// limitExceededInfo contains information about a limit that was
+// exceeded.
 type limitExceededInfo struct {
 	limit        *Limit
 	currentValue float64
-	matchedKey   string
+	matchedKey   StatKey
 }
 
 // checkLimits checks if any limits are exceeded on this context.
@@ -304,7 +305,9 @@ func (ctx *ExecutionContext) checkLimitLocked(limit *Limit) *limitExceededInfo {
 
 // checkExactKeyLimit checks if an exact key limit is exceeded.
 // Returns info about the exceeded limit, or nil if not exceeded.
-func (ctx *ExecutionContext) checkExactKeyLimit(limit *Limit) *limitExceededInfo {
+func (ctx *ExecutionContext) checkExactKeyLimit(
+	limit *Limit,
+) *limitExceededInfo {
 	// Check counters first
 	if val := ctx.stats.GetCounter(limit.Key); val > 0 {
 		if float64(val) > limit.MaxValue {
@@ -328,29 +331,33 @@ func (ctx *ExecutionContext) checkExactKeyLimit(limit *Limit) *limitExceededInfo
 	return nil
 }
 
-// checkPrefixLimit checks if any key with the given prefix exceeds the limit.
+// checkPrefixLimit checks if any key with the given prefix exceeds
+// the limit.
 // Returns info about the exceeded limit, or nil if not exceeded.
-func (ctx *ExecutionContext) checkPrefixLimit(limit *Limit) *limitExceededInfo {
+func (ctx *ExecutionContext) checkPrefixLimit(
+	limit *Limit,
+) *limitExceededInfo {
+	prefix := string(limit.Key)
 	// Check all counters with matching prefix
 	for key, val := range ctx.stats.Counters() {
-		if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
 			if float64(val) > limit.MaxValue {
 				return &limitExceededInfo{
 					limit:        limit,
 					currentValue: float64(val),
-					matchedKey:   key,
+					matchedKey:   StatKey(key),
 				}
 			}
 		}
 	}
 	// Check all gauges with matching prefix
 	for key, val := range ctx.stats.Gauges() {
-		if len(key) >= len(limit.Key) && key[:len(limit.Key)] == limit.Key {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
 			if val > limit.MaxValue {
 				return &limitExceededInfo{
 					limit:        limit,
 					currentValue: val,
-					matchedKey:   key,
+					matchedKey:   StatKey(key),
 				}
 			}
 		}
@@ -504,59 +511,110 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 	switch e := event.(type) {
 	// Increment BEFORE events (for prevention/limits)
 	case *BeforeIterationEvent:
-		ctx.stats.incrCounterInternal(KeyIterations, 1)
+		ctx.stats.incrCounterDirect(SCIterations, 1)
 
 	case *BeforeToolCallEvent:
-		ctx.stats.incrCounterInternal(KeyToolCalls, 1)
+		ctx.stats.incrCounterDirect(SCToolCalls, 1)
 		if e.ToolName != "" {
-			ctx.stats.incrCounterInternal(KeyToolCallsFor+e.ToolName, 1)
+			ctx.stats.incrCounterDirect(
+				SCToolCallsFor+StatKey(e.ToolName), 1,
+			)
 		}
 
 	// Increment AFTER events (for recording)
 	case *AfterModelCallEvent:
-		ctx.stats.incrCounterInternal(KeyInputTokens, int64(e.InputTokens))
-		ctx.stats.incrCounterInternal(KeyOutputTokens, int64(e.OutputTokens))
+		ctx.stats.incrCounterDirect(
+			SCInputTokens, int64(e.InputTokens),
+		)
+		ctx.stats.incrCounterDirect(
+			SCOutputTokens, int64(e.OutputTokens),
+		)
 		if e.Model != "" {
-			ctx.stats.incrCounterInternal(KeyInputTokensFor+e.Model, int64(e.InputTokens))
-			ctx.stats.incrCounterInternal(KeyOutputTokensFor+e.Model, int64(e.OutputTokens))
+			ctx.stats.incrCounterDirect(
+				SCInputTokensFor+StatKey(e.Model),
+				int64(e.InputTokens),
+			)
+			ctx.stats.incrCounterDirect(
+				SCOutputTokensFor+StatKey(e.Model),
+				int64(e.OutputTokens),
+			)
 		}
 
 	case *AfterToolCallEvent:
 		if e.Error != nil {
-			ctx.stats.incrCounterInternal(KeyToolCallsErrorTotal, 1)
-			ctx.stats.incrCounterInternal(KeyToolCallsErrorConsecutive, 1)
+			ctx.stats.incrCounterDirect(
+				SCToolCallsErrorTotal, 1,
+			)
+			ctx.stats.incrGaugeInternal(
+				SGToolCallsErrorConsecutive, 1,
+			)
 			if e.ToolName != "" {
-				ctx.stats.incrCounterInternal(KeyToolCallsErrorFor+e.ToolName, 1)
-				ctx.stats.incrCounterInternal(KeyToolCallsErrorConsecutiveFor+e.ToolName, 1)
+				ctx.stats.incrCounterDirect(
+					SCToolCallsErrorFor+StatKey(e.ToolName),
+					1,
+				)
+				ctx.stats.incrGaugeInternal(
+					SGToolCallsErrorConsecutiveFor+StatKey(e.ToolName),
+					1,
+				)
 			}
 		}
 
 	case *ParseErrorEvent:
-		iteration := fmt.Sprintf("%d", ctx.iteration)
+		iter := fmt.Sprintf("%d", ctx.iteration)
 		switch e.ErrorType {
 		case ParseErrorTypeFormat:
-			ctx.stats.incrCounterInternal(KeyFormatParseErrorTotal, 1)
-			ctx.stats.incrCounterInternal(KeyFormatParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterInternal(KeyFormatParseErrorConsecutive, 1)
+			ctx.stats.incrCounterDirect(
+				SCFormatParseErrorTotal, 1,
+			)
+			ctx.stats.incrCounterDirect(
+				SCFormatParseErrorAt+StatKey(iter), 1,
+			)
+			ctx.stats.incrGaugeInternal(
+				SGFormatParseErrorConsecutive, 1,
+			)
 		case ParseErrorTypeToolchain:
-			ctx.stats.incrCounterInternal(KeyToolchainParseErrorTotal, 1)
-			ctx.stats.incrCounterInternal(KeyToolchainParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterInternal(KeyToolchainParseErrorConsecutive, 1)
+			ctx.stats.incrCounterDirect(
+				SCToolchainParseErrorTotal, 1,
+			)
+			ctx.stats.incrCounterDirect(
+				SCToolchainParseErrorAt+StatKey(iter), 1,
+			)
+			ctx.stats.incrGaugeInternal(
+				SGToolchainParseErrorConsecutive, 1,
+			)
 		case ParseErrorTypeTermination:
-			ctx.stats.incrCounterInternal(KeyTerminationParseErrorTotal, 1)
-			ctx.stats.incrCounterInternal(KeyTerminationParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterInternal(KeyTerminationParseErrorConsecutive, 1)
+			ctx.stats.incrCounterDirect(
+				SCTerminationParseErrorTotal, 1,
+			)
+			ctx.stats.incrCounterDirect(
+				SCTerminationParseErrorAt+StatKey(iter), 1,
+			)
+			ctx.stats.incrGaugeInternal(
+				SGTerminationParseErrorConsecutive, 1,
+			)
 		case ParseErrorTypeSection:
-			ctx.stats.incrCounterInternal(KeySectionParseErrorTotal, 1)
-			ctx.stats.incrCounterInternal(KeySectionParseErrorAt+iteration, 1)
-			ctx.stats.incrCounterInternal(KeySectionParseErrorConsecutive, 1)
+			ctx.stats.incrCounterDirect(
+				SCSectionParseErrorTotal, 1,
+			)
+			ctx.stats.incrCounterDirect(
+				SCSectionParseErrorAt+StatKey(iter), 1,
+			)
+			ctx.stats.incrGaugeInternal(
+				SGSectionParseErrorConsecutive, 1,
+			)
 		}
 
 	case *ValidatorResultEvent:
 		if !e.Accepted {
-			ctx.stats.incrCounterInternal(KeyAnswerRejectedTotal, 1)
+			ctx.stats.incrCounterDirect(
+				SCAnswerRejectedTotal, 1,
+			)
 			if e.ValidatorName != "" {
-				ctx.stats.incrCounterInternal(KeyAnswerRejectedBy+e.ValidatorName, 1)
+				ctx.stats.incrCounterDirect(
+					SCAnswerRejectedBy+StatKey(e.ValidatorName),
+					1,
+				)
 			}
 		}
 	}
@@ -760,14 +818,17 @@ func (ctx *ExecutionContext) PublishError(err error) *ErrorEvent {
 }
 
 // PublishLimitExceeded publishes a LimitExceededEvent.
-// This is called automatically when a limit is exceeded during checkLimits().
+// This is called automatically when a limit is exceeded during
+// checkLimits().
 func (ctx *ExecutionContext) PublishLimitExceeded(
 	limit Limit,
 	currentValue float64,
-	matchedKey string,
+	matchedKey StatKey,
 ) *LimitExceededEvent {
 	event := &LimitExceededEvent{
-		BaseEvent:    BaseEvent{EventName: EventNameLimitExceeded},
+		BaseEvent: BaseEvent{
+			EventName: EventNameLimitExceeded,
+		},
 		Limit:        limit,
 		CurrentValue: currentValue,
 		MatchedKey:   matchedKey,

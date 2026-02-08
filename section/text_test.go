@@ -262,8 +262,10 @@ func TestText_ParseSection_WithExecutionContext(t *testing.T) {
 
 			// Text section should never trace errors (it never fails)
 			stats := execCtx.Stats()
-			assert.Equal(t, int64(0), stats.GetCounter(gent.KeySectionParseErrorTotal))
-			assert.Equal(t, int64(0), stats.GetCounter(gent.KeySectionParseErrorConsecutive))
+			assert.Equal(t, int64(0),
+				stats.GetCounter(gent.SCSectionParseErrorTotal))
+			assert.Equal(t, float64(0),
+				stats.GetGauge(gent.SGSectionParseErrorConsecutive))
 		})
 	}
 }

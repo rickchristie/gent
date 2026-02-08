@@ -78,8 +78,8 @@ func (r *ToolChainResult) AsContentParts() []ContentPart {
 //
 //	execCtx.PublishAfterToolCall(toolName, input, output, time.Since(startTime), err)
 //
-// This enables automatic stat updates: [KeyToolCalls], [KeyToolCallsFor],
-// [KeyToolCallsErrorTotal], [KeyToolCallsErrorConsecutive], etc.
+// This enables automatic stat updates: [SCToolCalls], [SCToolCallsFor],
+// [SCToolCallsErrorTotal], [SGToolCallsErrorConsecutive], etc.
 //
 // # Parse Error Handling
 //
@@ -89,9 +89,9 @@ func (r *ToolChainResult) AsContentParts() []ContentPart {
 //	    execCtx.PublishParseError("toolchain", content, parseErr)
 //	}
 //
-// On successful parse, reset the consecutive error counter:
+// On successful parse, reset the consecutive error gauge:
 //
-//	execCtx.Stats().ResetCounter(KeyToolchainParseErrorConsecutive)
+//	execCtx.Stats().ResetGauge(SGToolchainParseErrorConsecutive)
 //
 // # Available Implementations
 //

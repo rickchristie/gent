@@ -224,7 +224,7 @@ func (m *mockFormat) Parse(
 	}
 	// Reset consecutive counter on success
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
 	}
 	return m.parseResult, nil
 }
@@ -597,8 +597,8 @@ func TestAgent_Next_ParseError_TracesError(t *testing.T) {
 
 	// Verify parse error was traced (stats updated)
 	stats := execCtx.Stats()
-	assert.Equal(t, int64(1), stats.GetCounter(gent.KeyFormatParseErrorTotal))
-	assert.Equal(t, int64(1), stats.GetCounter(gent.KeyFormatParseErrorConsecutive))
+	assert.Equal(t, int64(1), stats.GetCounter(gent.SCFormatParseErrorTotal))
+	assert.Equal(t, float64(1), stats.GetGauge(gent.SGFormatParseErrorConsecutive))
 }
 
 func TestAgent_Next_ParseErrorFeedback(t *testing.T) {

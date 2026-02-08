@@ -156,9 +156,9 @@ func (t *JSON[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 		return nil, parseErr
 	}
 
-	// Successful parse - reset consecutive error counter
+	// Successful parse - reset consecutive error gauge
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyTerminationParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGTerminationParseErrorConsecutive)
 	}
 
 	return result, nil

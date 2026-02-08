@@ -102,7 +102,7 @@ func Terminate(text string) *gent.AgentLoopResult {
 // -----------------------------------------------------------------------------
 
 // Limit creates a Limit with all fields set.
-func Limit(limitType gent.LimitType, key string, maxValue float64) gent.Limit {
+func Limit(limitType gent.LimitType, key gent.StatKey, maxValue float64) gent.Limit {
 	return gent.Limit{
 		Type:     limitType,
 		Key:      key,
@@ -111,7 +111,7 @@ func Limit(limitType gent.LimitType, key string, maxValue float64) gent.Limit {
 }
 
 // ExactLimit creates a Limit with LimitExactKey type.
-func ExactLimit(key string, maxValue float64) gent.Limit {
+func ExactLimit(key gent.StatKey, maxValue float64) gent.Limit {
 	return gent.Limit{
 		Type:     gent.LimitExactKey,
 		Key:      key,
@@ -120,7 +120,7 @@ func ExactLimit(key string, maxValue float64) gent.Limit {
 }
 
 // PrefixLimit creates a Limit with LimitKeyPrefix type.
-func PrefixLimit(key string, maxValue float64) gent.Limit {
+func PrefixLimit(key gent.StatKey, maxValue float64) gent.Limit {
 	return gent.Limit{
 		Type:     gent.LimitKeyPrefix,
 		Key:      key,
@@ -253,7 +253,7 @@ func LimitExceeded(
 	depth, iteration int,
 	limit gent.Limit,
 	currentValue float64,
-	matchedKey string,
+	matchedKey gent.StatKey,
 ) *gent.LimitExceededEvent {
 	return &gent.LimitExceededEvent{
 		BaseEvent: gent.BaseEvent{

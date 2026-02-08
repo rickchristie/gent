@@ -540,8 +540,12 @@ func TestJSON_SetValidator(t *testing.T) {
 		assert.Len(t, result.Content, 1)
 
 		// Verify stats were incremented
-		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedTotal))
-		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"schema_validator"))
+		assert.Equal(t, int64(1),
+			execCtx.Stats().GetCounter(gent.SCAnswerRejectedTotal))
+		assert.Equal(t, int64(1),
+			execCtx.Stats().GetCounter(
+				gent.SCAnswerRejectedBy+"schema_validator",
+			))
 	})
 
 	t.Run("no validator means answer accepted", func(t *testing.T) {
@@ -568,20 +572,20 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 		name     string
 		input    string
 		expected struct {
-			shouldError                 bool
-			terminationErrorTotal       int64
-			terminationErrorConsec      int64
-			terminationErrorAtIter      int64
+			shouldError            bool
+			terminationErrorTotal  int64
+			terminationErrorConsec float64
+			terminationErrorAtIter int64
 		}
 	}{
 		{
 			name:  "parse error publishes ParseErrorEvent",
 			input: "{invalid json",
 			expected: struct {
-				shouldError                 bool
-				terminationErrorTotal       int64
-				terminationErrorConsec      int64
-				terminationErrorAtIter      int64
+				shouldError            bool
+				terminationErrorTotal  int64
+				terminationErrorConsec float64
+				terminationErrorAtIter int64
 			}{
 				shouldError:            true,
 				terminationErrorTotal:  1,
@@ -590,13 +594,13 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "successful parse resets consecutive counter",
+			name:  "successful parse resets consecutive gauge",
 			input: `{"name": "test", "value": 42}`,
 			expected: struct {
-				shouldError                 bool
-				terminationErrorTotal       int64
-				terminationErrorConsec      int64
-				terminationErrorAtIter      int64
+				shouldError            bool
+				terminationErrorTotal  int64
+				terminationErrorConsec float64
+				terminationErrorAtIter int64
 			}{
 				shouldError:            false,
 				terminationErrorTotal:  0,
@@ -616,7 +620,9 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {
-				execCtx.Stats().IncrCounter(gent.KeyTerminationParseErrorConsecutive, 1)
+				execCtx.Stats().IncrGauge(
+					gent.SGTerminationParseErrorConsecutive, 1,
+				)
 			}
 
 			_, err := term.ParseSection(execCtx, tt.input)
@@ -629,13 +635,18 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 
 			stats := execCtx.Stats()
 			assert.Equal(t, tt.expected.terminationErrorTotal,
-				stats.GetCounter(gent.KeyTerminationParseErrorTotal),
+				stats.GetCounter(gent.SCTerminationParseErrorTotal),
 				"termination error total mismatch")
-			assert.Equal(t, tt.expected.terminationErrorConsec,
-				stats.GetCounter(gent.KeyTerminationParseErrorConsecutive),
+			assert.Equal(t,
+				tt.expected.terminationErrorConsec,
+				stats.GetGauge(
+					gent.SGTerminationParseErrorConsecutive,
+				),
 				"termination error consecutive mismatch")
 			assert.Equal(t, tt.expected.terminationErrorAtIter,
-				stats.GetCounter(gent.KeyTerminationParseErrorAt+"1"),
+				stats.GetCounter(
+					gent.SCTerminationParseErrorAt+"1",
+				),
 				"termination error at iteration mismatch")
 		})
 	}

@@ -52,8 +52,8 @@
 //	term.SetValidator(&OrderValidator{})
 //
 // When a validator rejects an answer, the agent receives feedback and can retry.
-// The framework tracks rejection counts via [gent.KeyAnswerRejectedTotal] and
-// [gent.KeyAnswerRejectedBy] stats, allowing limits to be set on retries.
+// The framework tracks rejection counts via [gent.SCAnswerRejectedTotal] and
+// [gent.SCAnswerRejectedBy] stats, allowing limits to be set on retries.
 //
 // # Example Usage
 //

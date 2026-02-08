@@ -334,8 +334,9 @@ type LimitExceededEvent struct {
 
 	// MatchedKey is the actual key that exceeded the limit.
 	// For exact key limits, this equals Limit.Key.
-	// For prefix limits, this is the specific key that matched and exceeded.
-	MatchedKey string
+	// For prefix limits, this is the specific key that matched
+	// and exceeded.
+	MatchedKey StatKey
 }
 
 // -----------------------------------------------------------------------------

@@ -248,8 +248,12 @@ func TestText_SetValidator(t *testing.T) {
 		assert.Len(t, result.Content, 1)
 
 		// Verify stats were incremented
-		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedTotal))
-		assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.KeyAnswerRejectedBy+"test_validator"))
+		assert.Equal(t, int64(1),
+			execCtx.Stats().GetCounter(gent.SCAnswerRejectedTotal))
+		assert.Equal(t, int64(1),
+			execCtx.Stats().GetCounter(
+				gent.SCAnswerRejectedBy+"test_validator",
+			))
 	})
 
 	t.Run("no validator means answer accepted", func(t *testing.T) {

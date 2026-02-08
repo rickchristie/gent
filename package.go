@@ -58,8 +58,8 @@
 //
 //	    // 6. Configure limits (optional - defaults are applied automatically)
 //	    limits := []gent.Limit{
-//	        {Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 20},
-//	        {Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 50000},
+//	        {Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 20},
+//	        {Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 50000},
 //	    }
 //
 //	    // 7. Create execution context with task
@@ -121,7 +121,7 @@
 //	term.SetValidator(&MyValidator{})
 //
 // When rejected, the feedback is shown to the LLM and it continues iterating.
-// Stats are tracked: [KeyAnswerRejectedTotal], [KeyAnswerRejectedBy].
+// Stats are tracked: [SCAnswerRejectedTotal], [SCAnswerRejectedBy].
 //
 // See [Termination], [AnswerValidator], and the termination package for details.
 //
@@ -242,13 +242,13 @@
 //
 //	limits := []gent.Limit{
 //	    // Stop after 50 iterations
-//	    {Type: gent.LimitExactKey, Key: gent.KeyIterations, MaxValue: 50},
+//	    {Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 50},
 //	    // Stop after 100k total input tokens (across all models)
-//	    {Type: gent.LimitExactKey, Key: gent.KeyInputTokens, MaxValue: 100000},
+//	    {Type: gent.LimitExactKey, Key: gent.SCInputTokens, MaxValue: 100000},
 //	    // Stop after 10k tokens for specific model
-//	    {Type: gent.LimitExactKey, Key: gent.KeyInputTokensFor + "gpt-4", MaxValue: 10000},
+//	    {Type: gent.LimitExactKey, Key: gent.SCInputTokensFor + "gpt-4", MaxValue: 10000},
 //	    // Stop any tool from being called more than 20 times
-//	    {Type: gent.LimitKeyPrefix, Key: gent.KeyToolCallsFor, MaxValue: 20},
+//	    {Type: gent.LimitKeyPrefix, Key: gent.SCToolCallsFor, MaxValue: 20},
 //	}
 //	execCtx.SetLimits(limits)
 //

@@ -165,9 +165,9 @@ func (f *Markdown) Parse(
 		return nil, err
 	}
 
-	// Successful parse - reset consecutive error counter
+	// Successful parse - reset consecutive error gauge
 	if execCtx != nil {
-		execCtx.Stats().ResetCounter(gent.KeyFormatParseErrorConsecutive)
+		execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
 	}
 
 	return result, nil

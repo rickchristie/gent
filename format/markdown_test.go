@@ -343,20 +343,20 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 		name     string
 		input    string
 		expected struct {
-			shouldError           bool
-			formatErrorTotal      int64
-			formatErrorConsec     int64
-			formatErrorAtIter     int64
+			shouldError       bool
+			formatErrorTotal  int64
+			formatErrorConsec float64
+			formatErrorAtIter int64
 		}
 	}{
 		{
 			name:  "parse error publishes ParseErrorEvent",
 			input: "no markdown headers here",
 			expected: struct {
-				shouldError           bool
-				formatErrorTotal      int64
-				formatErrorConsec     int64
-				formatErrorAtIter     int64
+				shouldError       bool
+				formatErrorTotal  int64
+				formatErrorConsec float64
+				formatErrorAtIter int64
 			}{
 				shouldError:       true,
 				formatErrorTotal:  1,
@@ -365,13 +365,13 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "successful parse resets consecutive counter",
+			name:  "successful parse resets consecutive gauge",
 			input: "# Answer\nhello world",
 			expected: struct {
-				shouldError           bool
-				formatErrorTotal      int64
-				formatErrorConsec     int64
-				formatErrorAtIter     int64
+				shouldError       bool
+				formatErrorTotal  int64
+				formatErrorConsec float64
+				formatErrorAtIter int64
 			}{
 				shouldError:       false,
 				formatErrorTotal:  0,
@@ -384,15 +384,21 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			format := NewMarkdown()
-			format.RegisterSection(&mockSection{name: "Answer", guidance: "Answer here"})
+			format.RegisterSection(
+				&mockSection{name: "Answer", guidance: "Answer here"},
+			)
 
 			// Create execution context with iteration 1
-			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", nil,
+			)
 			execCtx.IncrementIteration()
 
 			// If we expect success, first set consecutive to 1 to verify reset
 			if !tt.expected.shouldError {
-				execCtx.Stats().IncrCounter(gent.KeyFormatParseErrorConsecutive, 1)
+				execCtx.Stats().IncrGauge(
+					gent.SGFormatParseErrorConsecutive, 1,
+				)
 			}
 
 			_, err := format.Parse(execCtx, tt.input)
@@ -405,13 +411,13 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 
 			stats := execCtx.Stats()
 			assert.Equal(t, tt.expected.formatErrorTotal,
-				stats.GetCounter(gent.KeyFormatParseErrorTotal),
+				stats.GetCounter(gent.SCFormatParseErrorTotal),
 				"format error total mismatch")
 			assert.Equal(t, tt.expected.formatErrorConsec,
-				stats.GetCounter(gent.KeyFormatParseErrorConsecutive),
+				stats.GetGauge(gent.SGFormatParseErrorConsecutive),
 				"format error consecutive mismatch")
 			assert.Equal(t, tt.expected.formatErrorAtIter,
-				stats.GetCounter(gent.KeyFormatParseErrorAt+"1"),
+				stats.GetCounter(gent.SCFormatParseErrorAt+"1"),
 				"format error at iteration mismatch")
 		})
 	}
