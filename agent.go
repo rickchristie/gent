@@ -299,6 +299,10 @@ type Iteration struct {
 	// iteration. The framework defines standard keys (IMK*
 	// constants); users can add custom keys.
 	//
+	// This field is exported for JSON marshalling. Use
+	// SetMetadata/GetMetadata helper methods for access
+	// instead of writing to the map directly.
+	//
 	// This field is nil by default and lazily initialized on
 	// first write. Always use SetMetadata/GetMetadata helper
 	// methods instead of accessing the map directly to avoid
