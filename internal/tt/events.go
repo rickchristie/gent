@@ -323,6 +323,22 @@ func ValidatorResult(
 	}
 }
 
+// Compaction creates a CompactionEvent with all fields set.
+func Compaction(
+	depth, iteration int,
+	lengthBefore, lengthAfter int,
+) *gent.CompactionEvent {
+	return &gent.CompactionEvent{
+		BaseEvent: gent.BaseEvent{
+			EventName: gent.EventNameCompaction,
+			Iteration: iteration,
+			Depth:     depth,
+		},
+		ScratchpadLengthBefore: lengthBefore,
+		ScratchpadLengthAfter:  lengthAfter,
+	}
+}
+
 // Error creates an ErrorEvent with all fields set.
 func Error(depth, iteration int, err error) *gent.ErrorEvent {
 	return &gent.ErrorEvent{

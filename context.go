@@ -123,6 +123,10 @@ type ExecutionContext struct {
 
 	// Streaming support
 	streamHub *streamHub
+
+	// Compaction configuration (optional)
+	compactionTrigger  CompactionTrigger
+	compactionStrategy CompactionStrategy
 }
 
 // NewExecutionContext creates a new root ExecutionContext with the given name and data.
@@ -215,6 +219,45 @@ func (ctx *ExecutionContext) Limits() []Limit {
 	result := make([]Limit, len(ctx.limits))
 	copy(result, ctx.limits)
 	return result
+}
+
+// SetCompaction configures scratchpad compaction for this
+// execution. The trigger decides when to compact, the
+// strategy decides how.
+//
+// Must be called before execution starts. Both trigger and
+// strategy must be non-nil.
+//
+// When compaction is configured, the executor checks the
+// trigger at the start of each loop iteration (after the
+// first). If the trigger fires, the strategy's Compact
+// method is called.
+//
+// If Compact returns an error, execution terminates with
+// TerminationCompactionFailed.
+func (ctx *ExecutionContext) SetCompaction(
+	trigger CompactionTrigger,
+	strategy CompactionStrategy,
+) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.compactionTrigger = trigger
+	ctx.compactionStrategy = strategy
+}
+
+// CompactionTrigger returns the configured trigger, or nil.
+func (ctx *ExecutionContext) CompactionTrigger() CompactionTrigger {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.compactionTrigger
+}
+
+// CompactionStrategy returns the configured strategy,
+// or nil.
+func (ctx *ExecutionContext) CompactionStrategy() CompactionStrategy {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.compactionStrategy
 }
 
 // ExceededLimit returns the limit that was exceeded, or nil if no limit was exceeded.
@@ -502,6 +545,10 @@ func (ctx *ExecutionContext) populateBaseEvent(event Event) {
 		e.Timestamp = time.Now()
 		e.Iteration = ctx.iteration
 		e.Depth = ctx.depth
+	case *CompactionEvent:
+		e.Timestamp = time.Now()
+		e.Iteration = ctx.iteration
+		e.Depth = ctx.depth
 	}
 }
 
@@ -657,6 +704,9 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 				)
 			}
 		}
+
+	case *CompactionEvent:
+		ctx.stats.incrCounterDirect(SCCompactions, 1)
 	}
 }
 
@@ -872,6 +922,25 @@ func (ctx *ExecutionContext) PublishLimitExceeded(
 		Limit:        limit,
 		CurrentValue: currentValue,
 		MatchedKey:   matchedKey,
+	}
+	ctx.publish(event)
+	return event
+}
+
+// PublishCompaction publishes a CompactionEvent.
+// Stats updated: SCCompactions counter is incremented.
+func (ctx *ExecutionContext) PublishCompaction(
+	lengthBefore int,
+	lengthAfter int,
+	duration time.Duration,
+) *CompactionEvent {
+	event := &CompactionEvent{
+		BaseEvent: BaseEvent{
+			EventName: EventNameCompaction,
+		},
+		ScratchpadLengthBefore: lengthBefore,
+		ScratchpadLengthAfter:  lengthAfter,
+		Duration:               duration,
 	}
 	ctx.publish(event)
 	return event

@@ -21,9 +21,15 @@ const (
 	// TerminationContextCanceled means the context was canceled.
 	TerminationContextCanceled TerminationReason = "context_canceled"
 
-	// TerminationLimitExceeded means a configured limit was exceeded.
-	// Inspect ExecutionResult.ExceededLimit for details about which limit was hit.
+	// TerminationLimitExceeded means a configured limit was
+	// exceeded. Inspect ExecutionResult.ExceededLimit for
+	// details about which limit was hit.
 	TerminationLimitExceeded TerminationReason = "limit_exceeded"
+
+	// TerminationCompactionFailed means a CompactionStrategy
+	// returned an error. Inspect ExecutionResult.Error for
+	// details.
+	TerminationCompactionFailed TerminationReason = "compaction_failed"
 )
 
 // -----------------------------------------------------------------------------
@@ -337,6 +343,27 @@ type LimitExceededEvent struct {
 	// For prefix limits, this is the specific key that matched
 	// and exceeded.
 	MatchedKey StatKey
+}
+
+// -----------------------------------------------------------------------------
+// Compaction Event
+// -----------------------------------------------------------------------------
+
+// CompactionEvent is published after a successful compaction.
+// Stats updated: SCCompactions counter is incremented.
+type CompactionEvent struct {
+	BaseEvent
+
+	// ScratchpadLengthBefore is the number of iterations
+	// before compaction.
+	ScratchpadLengthBefore int
+
+	// ScratchpadLengthAfter is the number of iterations after
+	// compaction.
+	ScratchpadLengthAfter int
+
+	// Duration is how long the compaction took.
+	Duration time.Duration
 }
 
 // -----------------------------------------------------------------------------

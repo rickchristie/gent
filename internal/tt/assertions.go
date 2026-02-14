@@ -28,7 +28,8 @@ func IsLifecycleEvent(event gent.Event) bool {
 		*gent.ParseErrorEvent,
 		*gent.ValidatorCalledEvent,
 		*gent.ValidatorResultEvent,
-		*gent.ErrorEvent:
+		*gent.ErrorEvent,
+		*gent.CompactionEvent:
 		return true
 	default:
 		return false
@@ -89,6 +90,8 @@ func CountEventTypes(events []gent.Event) map[string]int {
 			counts["ValidatorResultEvent"]++
 		case *gent.ErrorEvent:
 			counts["ErrorEvent"]++
+		case *gent.CompactionEvent:
+			counts["CompactionEvent"]++
 		}
 	}
 	return counts
@@ -233,6 +236,28 @@ func assertEventEqual(
 		assertBaseEvent(t, index, exp.BaseEvent, act.BaseEvent, prevTimestamp)
 		assert.Equal(t, exp.Error, act.Error, msgFmt("Error"), index)
 
+	case *gent.CompactionEvent:
+		act := actual.(*gent.CompactionEvent)
+		assertBaseEvent(
+			t, index,
+			exp.BaseEvent, act.BaseEvent,
+			prevTimestamp,
+		)
+		assert.Equal(t,
+			exp.ScratchpadLengthBefore,
+			act.ScratchpadLengthBefore,
+			msgFmt("ScratchpadLengthBefore"), index,
+		)
+		assert.Equal(t,
+			exp.ScratchpadLengthAfter,
+			act.ScratchpadLengthAfter,
+			msgFmt("ScratchpadLengthAfter"), index,
+		)
+		assert.GreaterOrEqual(t,
+			act.Duration, time.Duration(0),
+			msgFmt("Duration"), index,
+		)
+
 	default:
 		t.Errorf("event[%d]: unknown event type %T", index, expected)
 	}
@@ -297,6 +322,8 @@ func eventTypeName(event gent.Event) string {
 		return "ValidatorResultEvent"
 	case *gent.ErrorEvent:
 		return "ErrorEvent"
+	case *gent.CompactionEvent:
+		return "CompactionEvent"
 	default:
 		return "UnknownEvent"
 	}

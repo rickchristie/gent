@@ -41,6 +41,9 @@ const (
 	// Limits
 	EventNameLimitExceeded = "gent:limit_exceeded"
 
+	// Compaction
+	EventNameCompaction = "gent:compaction"
+
 	// Child context lifecycle (published as CommonEvent)
 	EventNameChildSpawn    = "gent:child:spawn"
 	EventNameChildComplete = "gent:child:complete"

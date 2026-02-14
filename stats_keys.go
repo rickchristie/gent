@@ -296,6 +296,15 @@ const (
 	SCAnswerRejectedBy    StatKey = "gent:answer_rejected_by:" // + validator name
 )
 
+// Compaction tracking key (Counter).
+//
+// Auto-updated when CompactionEvent is published. Tracks the
+// total number of successful compactions performed.
+//
+// Propagates to parent: the parent's SCCompactions reflects
+// total compactions across the entire agent tree.
+const SCCompactions StatKey = "gent:compactions"
+
 // protectedKeys contains keys that cannot be modified by user code
 // via IncrCounter. Protected keys can still be incremented internally
 // by the framework (e.g., the executor increments SCIterations).

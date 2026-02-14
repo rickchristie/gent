@@ -630,3 +630,117 @@ func (s *MockSection) ParseSection(
 
 // Compile-time check that MockSection implements gent.TextSection.
 var _ gent.TextSection = (*MockSection)(nil)
+
+// ----------------------------------------------------------
+// MockCompactionTrigger
+// ----------------------------------------------------------
+
+// MockCompactionTrigger is a configurable mock that implements
+// gent.CompactionTrigger.
+type MockCompactionTrigger struct {
+	shouldCompact []bool
+	callIdx       int
+	notifiedCount int
+}
+
+// NewMockCompactionTrigger creates a new MockCompactionTrigger.
+func NewMockCompactionTrigger() *MockCompactionTrigger {
+	return &MockCompactionTrigger{}
+}
+
+// WithShouldCompact sets the sequence of ShouldCompact
+// return values. Panics if exhausted.
+func (t *MockCompactionTrigger) WithShouldCompact(
+	values ...bool,
+) *MockCompactionTrigger {
+	t.shouldCompact = values
+	return t
+}
+
+// ShouldCompact implements gent.CompactionTrigger.
+func (t *MockCompactionTrigger) ShouldCompact(
+	_ *gent.ExecutionContext,
+) bool {
+	if t.callIdx >= len(t.shouldCompact) {
+		panic(
+			"MockCompactionTrigger: exhausted " +
+				"ShouldCompact sequence",
+		)
+	}
+	result := t.shouldCompact[t.callIdx]
+	t.callIdx++
+	return result
+}
+
+// NotifyCompacted implements gent.CompactionTrigger.
+func (t *MockCompactionTrigger) NotifyCompacted(
+	_ *gent.ExecutionContext,
+) {
+	t.notifiedCount++
+}
+
+// NotifiedCount returns how many times NotifyCompacted was
+// called.
+func (t *MockCompactionTrigger) NotifiedCount() int {
+	return t.notifiedCount
+}
+
+// Compile-time check.
+var _ gent.CompactionTrigger = (*MockCompactionTrigger)(nil)
+
+// ----------------------------------------------------------
+// MockCompactionStrategy
+// ----------------------------------------------------------
+
+// MockCompactionStrategy is a configurable mock that
+// implements gent.CompactionStrategy.
+type MockCompactionStrategy struct {
+	compactFunc func(execCtx *gent.ExecutionContext) error
+	callCount   int
+}
+
+// NewMockCompactionStrategy creates a new
+// MockCompactionStrategy.
+func NewMockCompactionStrategy() *MockCompactionStrategy {
+	return &MockCompactionStrategy{}
+}
+
+// WithCompactFunc sets the Compact implementation.
+func (s *MockCompactionStrategy) WithCompactFunc(
+	fn func(execCtx *gent.ExecutionContext) error,
+) *MockCompactionStrategy {
+	s.compactFunc = fn
+	return s
+}
+
+// WithError creates a strategy that always returns the
+// given error.
+func (s *MockCompactionStrategy) WithError(
+	err error,
+) *MockCompactionStrategy {
+	s.compactFunc = func(
+		_ *gent.ExecutionContext,
+	) error {
+		return err
+	}
+	return s
+}
+
+// Compact implements gent.CompactionStrategy.
+func (s *MockCompactionStrategy) Compact(
+	execCtx *gent.ExecutionContext,
+) error {
+	s.callCount++
+	if s.compactFunc != nil {
+		return s.compactFunc(execCtx)
+	}
+	return nil
+}
+
+// CallCount returns how many times Compact was called.
+func (s *MockCompactionStrategy) CallCount() int {
+	return s.callCount
+}
+
+// Compile-time check.
+var _ gent.CompactionStrategy = (*MockCompactionStrategy)(nil)

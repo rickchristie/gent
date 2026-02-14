@@ -152,8 +152,25 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 			return
 		}
 
-		// Start iteration: increment counter and publish BeforeIterationEvent
-		// (BeforeIterationEvent updates SCIterations stat)
+		// Compaction check (skip first iteration — nothing to
+		// compact)
+		if execCtx.Iteration() > 0 {
+			if err := e.compactIfNeeded(execCtx); err != nil {
+				execCtx.SetTermination(
+					gent.TerminationCompactionFailed,
+					nil,
+					fmt.Errorf(
+						"compaction (iteration %d): %w",
+						execCtx.Iteration(), err,
+					),
+				)
+				return
+			}
+		}
+
+		// Start iteration: increment counter and publish
+		// BeforeIterationEvent (BeforeIterationEvent updates
+		// SCIterations stat)
 		execCtx.IncrementIteration()
 		iterStart := time.Now()
 		execCtx.PublishBeforeIteration()
@@ -199,4 +216,36 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 		// Continue - the AgentLoop is responsible for updating data with NextPrompt
 		// The exact mechanism depends on the LoopData implementation
 	}
+}
+
+// compactIfNeeded checks the compaction trigger and runs the
+// strategy if triggered.
+func (e *Executor[Data]) compactIfNeeded(
+	execCtx *gent.ExecutionContext,
+) error {
+	trigger := execCtx.CompactionTrigger()
+	strategy := execCtx.CompactionStrategy()
+	if trigger == nil || strategy == nil {
+		return nil
+	}
+
+	if !trigger.ShouldCompact(execCtx) {
+		return nil
+	}
+
+	lengthBefore := len(execCtx.Data().GetScratchPad())
+	compactStart := time.Now()
+
+	if err := strategy.Compact(execCtx); err != nil {
+		return err
+	}
+
+	lengthAfter := len(execCtx.Data().GetScratchPad())
+	duration := time.Since(compactStart)
+	execCtx.PublishCompaction(
+		lengthBefore, lengthAfter, duration,
+	)
+	trigger.NotifyCompacted(execCtx)
+
+	return nil
 }

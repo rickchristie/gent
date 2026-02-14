@@ -79,8 +79,8 @@ Standard metadata key:
 //
 //     score, ok := gent.GetImportanceScore(iter)
 //
-// The exact threshold for "pinned" is strategy-specific. The
-// standard strategies treat any score > 0 as pinned.
+// The standard strategies treat any score >= ImportanceScorePinned
+// (10.0) as pinned.
 const IMKImportanceScore IterationMetadataKey = "gent:importance_score"
 ```
 
@@ -882,7 +882,7 @@ import "github.com/rickchristie/gent"
 
 // SlidingWindowStrategy keeps the last N iterations in the
 // scratchpad, discarding older ones. Pinned iterations (those
-// with a positive importance score) are always preserved
+// with importance score >= ImportanceScorePinned) are always preserved
 // regardless of the window size — they are "bonus slots" that
 // do not count toward the window.
 //
@@ -951,11 +951,11 @@ func (s *SlidingWindowStrategy) Compact(
     return nil
 }
 
-// isPinned returns true if the iteration has a positive
-// importance score.
+// isPinned returns true if the iteration has an importance
+// score >= ImportanceScorePinned (10.0).
 func isPinned(iter *gent.Iteration) bool {
     score, ok := gent.GetImportanceScore(iter)
-    return ok && score > 0
+    return ok && score >= gent.ImportanceScorePinned
 }
 ```
 
@@ -990,7 +990,7 @@ Test cases:
 5. **Pinned iterations preserve relative order** — a pinned
    iteration at index 2 stays between the right neighbors
 6. **Window size 1** — only most recent unpinned kept
-7. **Importance score exactly 0** — NOT pinned (only > 0 is pinned)
+7. **Importance score below threshold** — NOT pinned (only >= 10.0 is pinned)
 8. **Negative importance score** — NOT pinned
 9. **No metadata (nil)** — NOT pinned
 10. **Panics on windowSize < 1**
@@ -1024,7 +1024,7 @@ import (
 //   - KeepRecent = 0: pure progressive (summarize everything)
 //   - KeepRecent > 0: hybrid (keep last N, summarize the rest)
 //
-// Pinned iterations (importance score > 0) are always preserved
+// Pinned iterations (importance score >= 10.0) are always preserved
 // untouched, regardless of their position.
 //
 // # Multi-Modal Handling

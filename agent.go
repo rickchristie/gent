@@ -220,11 +220,136 @@ func (d *BasicLoopData) SetExecutionContext(ctx *ExecutionContext) {
 // Compile-time check that BasicLoopData implements LoopData.
 var _ LoopData = (*BasicLoopData)(nil)
 
+// IterationOrigin indicates how an Iteration was created.
+// Used for debugging and observability — helps trace whether
+// an iteration is original, was synthesized by compaction, or
+// was modified in place.
+type IterationOrigin string
+
+const (
+	// IterationOriginal is the zero value. The iteration was
+	// created normally by the AgentLoop during execution.
+	IterationOriginal IterationOrigin = ""
+
+	// IterationCompactedSynthetic means this iteration was
+	// created by a CompactionStrategy to summarize multiple
+	// iterations.
+	IterationCompactedSynthetic IterationOrigin = "compacted_synthetic"
+
+	// IterationCompactedModified means this is an original
+	// iteration that was modified in place by a
+	// CompactionStrategy.
+	IterationCompactedModified IterationOrigin = "compacted_modified"
+
+	// IterationRetrievedHistory means this iteration was pulled
+	// back from evicted history (e.g., via a
+	// retrieval-augmented strategy).
+	IterationRetrievedHistory IterationOrigin = "retrieved_history"
+)
+
+// IterationMetadataKey is a typed key for Iteration metadata.
+// The framework defines standard keys (IMK* constants). Users
+// can define their own keys with a custom prefix.
+type IterationMetadataKey string
+
+// IMKImportanceScore is a float64 value in [-10, 10] that
+// indicates how important this iteration is.
+//
+// Positive values = more important (prefer to keep).
+// Negative values = less important (prefer to discard).
+// Zero or absent = neutral (default treatment).
+//
+// The standard strategies treat any score >=
+// [ImportanceScorePinned] (10.0) as "pinned" and preserve
+// those iterations through compaction.
+//
+// Usage:
+//
+//	// Pin this iteration (will survive compaction):
+//	iter.SetMetadata(
+//	    gent.IMKImportanceScore,
+//	    gent.ImportanceScorePinned,
+//	)
+//
+//	score, ok := gent.GetImportanceScore(iter)
+const IMKImportanceScore IterationMetadataKey = "gent:importance_score"
+
+// ImportanceScorePinned is the minimum importance score for
+// an iteration to be considered "pinned" by the standard
+// compaction strategies. Pinned iterations are always
+// preserved through compaction.
+//
+// The standard strategies use: score >= ImportanceScorePinned.
+const ImportanceScorePinned float64 = 10.0
+
 // Iteration represents a single iteration's message content.
-// Messages must never contain nil elements. All code that constructs or modifies
-// an Iteration must ensure every element in Messages is a valid, non-nil pointer.
+//
+// Messages must never contain nil elements. All code that
+// constructs or modifies an Iteration must ensure every
+// element in Messages is a valid, non-nil pointer.
 type Iteration struct {
 	Messages []*MessageContent
+
+	// Origin indicates how this iteration was created.
+	// Zero value (IterationOriginal) means it was created
+	// normally by the AgentLoop.
+	Origin IterationOrigin
+
+	// Metadata contains optional key-value pairs for this
+	// iteration. The framework defines standard keys (IMK*
+	// constants); users can add custom keys.
+	//
+	// This field is nil by default and lazily initialized on
+	// first write. Always use SetMetadata/GetMetadata helper
+	// methods instead of accessing the map directly to avoid
+	// nil map panics.
+	//
+	//   // WRONG — panics if Metadata is nil:
+	//   iter.Metadata[gent.IMKImportanceScore] = 5.0
+	//
+	//   // CORRECT — safe, initializes map if needed:
+	//   iter.SetMetadata(gent.IMKImportanceScore, 5.0)
+	//
+	//   // CORRECT — safe, returns zero value + false:
+	//   val, ok := iter.GetMetadata(gent.IMKImportanceScore)
+	Metadata map[IterationMetadataKey]any
+}
+
+// SetMetadata sets a metadata value, initializing the map
+// if nil.
+func (i *Iteration) SetMetadata(
+	key IterationMetadataKey,
+	value any,
+) {
+	if i.Metadata == nil {
+		i.Metadata = make(map[IterationMetadataKey]any)
+	}
+	i.Metadata[key] = value
+}
+
+// GetMetadata returns a metadata value and whether it was
+// present. Returns (nil, false) if Metadata is nil or the
+// key is absent.
+func (i *Iteration) GetMetadata(
+	key IterationMetadataKey,
+) (any, bool) {
+	if i.Metadata == nil {
+		return nil, false
+	}
+	val, ok := i.Metadata[key]
+	return val, ok
+}
+
+// GetImportanceScore is a convenience function that returns
+// the importance score for an iteration.
+// Returns (0, false) if the key is absent or not a float64.
+func GetImportanceScore(iter *Iteration) (float64, bool) {
+	val, ok := iter.GetMetadata(IMKImportanceScore)
+	if !ok {
+		return 0, false
+	}
+	score, ok := val.(float64)
+	return score, ok
 }
 
 // MessageContent is wrapper around [llms.MessageContent] used in AgentLoop.
