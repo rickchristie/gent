@@ -417,3 +417,200 @@ func collectLifecycleAndCompaction(
 	}
 	return result
 }
+
+// ----------------------------------------------------------------
+// Test: per-iteration gauges available during trigger check
+//
+// This verifies the critical placement invariant: compaction
+// runs BEFORE BeforeIterationEvent, so per-iteration gauges
+// from the previous iteration are still available for the
+// trigger to inspect.
+// ----------------------------------------------------------------
+
+func TestCompaction_PerIterationGaugesAvailable(
+	t *testing.T,
+) {
+	type input struct {
+		inputTokensPerIter  int
+		outputTokensPerIter int
+	}
+
+	type expected struct {
+		// The per-iteration gauge values captured by the
+		// trigger during the ShouldCompact call before
+		// iteration 2.
+		inputTokens  float64
+		outputTokens float64
+		totalTokens  float64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "gauges reflect previous iteration " +
+				"token usage",
+			input: input{
+				inputTokensPerIter:  150,
+				outputTokensPerIter: 50,
+			},
+			expected: expected{
+				inputTokens:  150,
+				outputTokens: 50,
+				totalTokens:  200,
+			},
+		},
+		{
+			name: "gauges reflect different token " +
+				"counts",
+			input: input{
+				inputTokensPerIter:  500,
+				outputTokensPerIter: 100,
+			},
+			expected: expected{
+				inputTokens:  500,
+				outputTokens: 100,
+				totalTokens:  600,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data := gent.NewBasicLoopData(
+				&gent.Task{Text: "test"},
+			)
+
+			loop := &modelCallingLoop{
+				terminateAt:  2,
+				inputTokens:  tc.input.inputTokensPerIter,
+				outputTokens: tc.input.outputTokensPerIter,
+			}
+
+			// Custom trigger that captures gauge
+			// values during ShouldCompact
+			trigger := &gaugeCapturingTrigger{}
+
+			strategy := tt.NewMockCompactionStrategy()
+
+			exec := executor.New[*gent.BasicLoopData](
+				loop,
+				executor.DefaultConfig(),
+			)
+
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", data,
+			)
+			execCtx.SetLimits(nil)
+			execCtx.SetCompaction(trigger, strategy)
+
+			exec.Execute(execCtx)
+
+			assert.Equal(t,
+				gent.TerminationSuccess,
+				execCtx.Result().TerminationReason,
+			)
+
+			// Verify trigger was called and captured
+			// per-iteration gauges from iteration 1.
+			assert.Equal(t, 1, trigger.callCount,
+				"ShouldCompact should be called once "+
+					"(before iteration 2)",
+			)
+			assert.Equal(t,
+				tc.expected.inputTokens,
+				trigger.capturedInputTokens,
+				"SGInputTokensLastIteration should "+
+					"reflect iteration 1 tokens",
+			)
+			assert.Equal(t,
+				tc.expected.outputTokens,
+				trigger.capturedOutputTokens,
+				"SGOutputTokensLastIteration should "+
+					"reflect iteration 1 tokens",
+			)
+			assert.Equal(t,
+				tc.expected.totalTokens,
+				trigger.capturedTotalTokens,
+				"SGTotalTokensLastIteration should "+
+					"reflect iteration 1 tokens",
+			)
+		})
+	}
+}
+
+// modelCallingLoop is an AgentLoop that publishes
+// AfterModelCallEvent on each iteration to set per-iteration
+// token gauges.
+type modelCallingLoop struct {
+	calls        int
+	terminateAt  int
+	inputTokens  int
+	outputTokens int
+}
+
+func (l *modelCallingLoop) Next(
+	execCtx *gent.ExecutionContext,
+) (*gent.AgentLoopResult, error) {
+	l.calls++
+
+	// Publish model call event to set per-iteration gauges
+	resp := &gent.ContentResponse{
+		Choices: []*gent.ContentChoice{
+			{Content: "response"},
+		},
+		Info: &gent.GenerationInfo{
+			InputTokens:  l.inputTokens,
+			OutputTokens: l.outputTokens,
+		},
+	}
+	execCtx.PublishAfterModelCall(
+		"test-model", nil, resp, 0, nil,
+	)
+
+	// Add iteration to scratchpad
+	iter := &gent.Iteration{
+		Messages: []*gent.MessageContent{},
+	}
+	execCtx.Data().SetScratchPad(
+		append(execCtx.Data().GetScratchPad(), iter),
+	)
+
+	if l.terminateAt > 0 && l.calls >= l.terminateAt {
+		return tt.Terminate("done"), nil
+	}
+	return tt.ContinueWithPrompt(mockObservation), nil
+}
+
+// gaugeCapturingTrigger captures per-iteration gauge values
+// when ShouldCompact is called.
+type gaugeCapturingTrigger struct {
+	callCount            int
+	capturedInputTokens  float64
+	capturedOutputTokens float64
+	capturedTotalTokens  float64
+}
+
+func (t *gaugeCapturingTrigger) ShouldCompact(
+	execCtx *gent.ExecutionContext,
+) bool {
+	t.callCount++
+	stats := execCtx.Stats()
+	t.capturedInputTokens = stats.GetGauge(
+		gent.SGInputTokensLastIteration,
+	)
+	t.capturedOutputTokens = stats.GetGauge(
+		gent.SGOutputTokensLastIteration,
+	)
+	t.capturedTotalTokens = stats.GetGauge(
+		gent.SGTotalTokensLastIteration,
+	)
+	return false // Don't actually compact
+}
+
+func (t *gaugeCapturingTrigger) NotifyCompacted(
+	_ *gent.ExecutionContext,
+) {
+}

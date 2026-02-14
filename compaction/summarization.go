@@ -21,6 +21,70 @@ import (
 // ImportanceScorePinned) are always preserved untouched,
 // regardless of their position.
 //
+// # Result Ordering
+//
+// The compacted scratchpad is ordered as:
+//
+//	[synthetic] → [pinned...] → [toKeep...]
+//
+// This ordering cannot preserve the original chronological
+// positions of pinned iterations. Summarization collapses
+// multiple iterations into one synthetic iteration, so
+// pinned iterations that were interspersed among the
+// summarized iterations lose their original neighbors.
+//
+// For example, with keepRecent=2 and iteration 2 pinned:
+//
+//	Before: [iter0, iter1, iter2(pinned), iter3, iter4, iter5]
+//	After:  [synthetic(0,1,3), iter2(pinned), iter4, iter5]
+//
+// Neither [synthetic, pinned, ...] nor [pinned, synthetic, ...]
+// is chronologically correct — the summary covers events
+// from both before and after the pinned iteration. No linear
+// ordering can faithfully represent this. The only
+// theoretically correct approach would be to split the
+// summary around each pinned iteration (one summary for
+// [0,1], then pinned 2, then another summary for [3]),
+// but this requires multiple model calls per compaction
+// and adds significant complexity for marginal benefit.
+//
+// Given that no ordering is perfect, [synthetic, pinned,
+// toKeep] is chosen because it produces the best agent
+// loop performance:
+//
+//  1. Context before detail. The synthetic summary
+//     establishes what the agent has been doing — the
+//     task, progress, and decisions made. When the LLM
+//     then encounters pinned iterations, it can interpret
+//     them in context. Without that background, pinned
+//     iterations appear in a vacuum ("API returns 429
+//     for batch > 100" is less useful without knowing the
+//     agent is building a batch pipeline).
+//
+//  2. Pinned text is excluded from the summary input, so
+//     the summary provides complementary context — it
+//     tells the narrative around the pinned details.
+//     Reading narrative first, then seeing the preserved
+//     specifics, follows natural information hierarchy:
+//     overview → important details → recent activity.
+//
+//  3. Recency matters most. Recent iterations (toKeep)
+//     are placed last where LLMs attend to them most
+//     strongly. Both orderings achieve this, but
+//     [pinned, synthetic, toKeep] pushes the summary
+//     into the middle which is the lowest-attention zone
+//     for large contexts.
+//
+//  4. Scales with pinned count. With many pinned
+//     iterations (5-10), [pinned, synthetic, toKeep]
+//     front-loads a large block of decontextualized
+//     detail before any framing. This gets worse as
+//     pinned count grows.
+//
+// Note: [SlidingWindowStrategy] does not have this
+// limitation — it preserves relative ordering because it
+// only drops iterations without merging them.
+//
 // # Multi-Modal Handling
 //
 // Non-text content parts (images, audio, etc.) in non-pinned
@@ -190,6 +254,12 @@ func (s *SummarizationStrategy) Compact(
 		)
 	}
 
+	if len(response.Choices) == 0 {
+		return fmt.Errorf(
+			"summarization model returned no choices",
+		)
+	}
+
 	summaryText := response.Choices[0].Content
 
 	// Create synthetic summary iteration
@@ -207,7 +277,10 @@ func (s *SummarizationStrategy) Compact(
 		Origin: gent.IterationCompactedSynthetic,
 	}
 
-	// Rebuild scratchpad: synthetic + pinned + toKeep
+	// Rebuild scratchpad: synthetic + pinned + toKeep.
+	// See "Result Ordering" in the type doc for why this
+	// ordering is used and why chronological ordering
+	// cannot be preserved.
 	result := make(
 		[]*gent.Iteration,
 		0,

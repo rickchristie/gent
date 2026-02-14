@@ -239,6 +239,13 @@ func (ctx *ExecutionContext) SetCompaction(
 	trigger CompactionTrigger,
 	strategy CompactionStrategy,
 ) {
+	if (trigger == nil) != (strategy == nil) {
+		panic(
+			"gent: SetCompaction requires both " +
+				"trigger and strategy to be non-nil, " +
+				"or both nil to disable compaction",
+		)
+	}
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 	ctx.compactionTrigger = trigger

@@ -13,11 +13,12 @@ import (
 
 func TestSummarization_Compact(t *testing.T) {
 	type input struct {
-		keepRecent    int
-		customPrompt  string
-		scratchpad    []*gent.Iteration
-		modelResponse string
-		modelError    error
+		keepRecent       int
+		customPrompt     string
+		scratchpad       []*gent.Iteration
+		modelResponse    string
+		modelError       error
+		modelRawResponse *gent.ContentResponse
 	}
 
 	type expected struct {
@@ -273,6 +274,31 @@ func TestSummarization_Compact(t *testing.T) {
 				outputTokensStat: 5,
 			},
 		},
+		{
+			name: "model returns empty choices " +
+				"returns error",
+			input: input{
+				keepRecent: 0,
+				scratchpad: []*gent.Iteration{
+					makeIter("data"),
+				},
+				modelRawResponse: &gent.ContentResponse{
+					Choices: []*gent.ContentChoice{},
+					Info: &gent.GenerationInfo{
+						InputTokens:  10,
+						OutputTokens: 0,
+					},
+				},
+			},
+			expected: expected{
+				err: "summarization model " +
+					"returned no choices",
+				scratchpadLen:  1,
+				syntheticCount: 0,
+				keptOriginals:  1,
+				pinnedCount:    0,
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -280,6 +306,10 @@ func TestSummarization_Compact(t *testing.T) {
 			model := tt.NewMockModel()
 			if tc.input.modelError != nil {
 				model.AddError(tc.input.modelError)
+			} else if tc.input.modelRawResponse != nil {
+				model.AddRawResponse(
+					tc.input.modelRawResponse,
+				)
 			} else if tc.input.modelResponse != "" {
 				model.AddResponse(
 					tc.input.modelResponse, 10, 5,
@@ -387,30 +417,24 @@ func TestSummarization_Compact(t *testing.T) {
 	}
 }
 
-// TestSummarization_ExistingSummaryIncludedInPrompt
-// verifies that when an existing synthetic summary exists,
-// its text is passed to the model as "Existing Summary".
-func TestSummarization_ExistingSummaryIncludedInPrompt(
-	t *testing.T,
-) {
-	var capturedMessages []llms.MessageContent
-
-	model := &promptCapturingModel{
-		response: &gent.ContentResponse{
-			Choices: []*gent.ContentChoice{
-				{Content: "updated summary"},
-			},
-			Info: &gent.GenerationInfo{
-				InputTokens:  10,
-				OutputTokens: 5,
-			},
-		},
-		capture: func(msgs []llms.MessageContent) {
-			capturedMessages = msgs
-		},
+// TestSummarization_PromptContent verifies that the prompt
+// sent to the summarization model contains the correct
+// content — existing summaries included, pinned iteration
+// text excluded.
+func TestSummarization_PromptContent(t *testing.T) {
+	type input struct {
+		keepRecent    int
+		scratchpad    []*gent.Iteration
+		modelResponse string
 	}
 
-	existing := &gent.Iteration{
+	type expected struct {
+		promptContains    []string
+		promptNotContains []string
+		pinnedInResult    []*gent.Iteration
+	}
+
+	existingSynthetic := &gent.Iteration{
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeGeneric,
@@ -424,112 +448,140 @@ func TestSummarization_ExistingSummaryIncludedInPrompt(
 		Origin: gent.IterationCompactedSynthetic,
 	}
 
-	data := gent.NewBasicLoopData(nil)
-	data.SetScratchPad([]*gent.Iteration{
-		existing,
-		makeIter("new data"),
-	})
-	execCtx := gent.NewExecutionContext(
-		context.Background(), "test", data,
-	)
-	execCtx.SetLimits(nil)
-
-	strategy := NewSummarization(model)
-	err := strategy.Compact(execCtx)
-	assert.NoError(t, err)
-
-	// Verify the prompt included the existing summary
-	assert.Len(t, capturedMessages, 1)
-	prompt := capturedMessages[0].Parts[0].(llms.TextContent)
-	assert.Contains(t, prompt.Text, "old summary text")
-	assert.Contains(t, prompt.Text, "Existing Summary")
-}
-
-// promptCapturingModel captures messages sent to
-// GenerateContent for prompt verification.
-type promptCapturingModel struct {
-	response *gent.ContentResponse
-	capture  func([]llms.MessageContent)
-}
-
-func (m *promptCapturingModel) GenerateContent(
-	execCtx *gent.ExecutionContext,
-	streamID string,
-	streamTopicID string,
-	messages []llms.MessageContent,
-	opts ...llms.CallOption,
-) (*gent.ContentResponse, error) {
-	if execCtx != nil {
-		execCtx.PublishBeforeModelCall(
-			"test-model", messages,
-		)
-	}
-	m.capture(messages)
-	if execCtx != nil {
-		execCtx.PublishAfterModelCall(
-			"test-model", messages,
-			m.response, 0, nil,
-		)
-	}
-	return m.response, nil
-}
-
-// TestSummarization_PinnedNotInSummarizationInput
-// verifies that pinned iterations are not included in the
-// text sent to the summarization model.
-func TestSummarization_PinnedNotInSummarizationInput(
-	t *testing.T,
-) {
-	var capturedMessages []llms.MessageContent
-
-	model := &promptCapturingModel{
-		response: &gent.ContentResponse{
-			Choices: []*gent.ContentChoice{
-				{Content: "summary without pinned"},
-			},
-			Info: &gent.GenerationInfo{
-				InputTokens:  10,
-				OutputTokens: 5,
-			},
-		},
-		capture: func(msgs []llms.MessageContent) {
-			capturedMessages = msgs
-		},
-	}
-
 	pinned := makePinnedIter("secret pinned data")
 
-	data := gent.NewBasicLoopData(nil)
-	data.SetScratchPad([]*gent.Iteration{
-		makeIter("normal step"),
-		pinned,
-		makeIter("another step"),
-	})
-	execCtx := gent.NewExecutionContext(
-		context.Background(), "test", data,
-	)
-	execCtx.SetLimits(nil)
-
-	strategy := NewSummarization(model)
-	err := strategy.Compact(execCtx)
-	assert.NoError(t, err)
-
-	// Verify pinned text NOT in prompt
-	prompt := capturedMessages[0].Parts[0].(llms.TextContent)
-	assert.NotContains(t, prompt.Text, "secret pinned data")
-	// But normal steps are
-	assert.Contains(t, prompt.Text, "normal step")
-	assert.Contains(t, prompt.Text, "another step")
-
-	// Verify pinned iteration is in result
-	result := data.GetScratchPad()
-	foundPinned := false
-	for _, iter := range result {
-		if iter == pinned {
-			foundPinned = true
-			break
-		}
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "existing summary included in " +
+				"prompt",
+			input: input{
+				keepRecent: 0,
+				scratchpad: []*gent.Iteration{
+					existingSynthetic,
+					makeIter("new data"),
+				},
+				modelResponse: "updated summary",
+			},
+			expected: expected{
+				promptContains: []string{
+					"old summary text",
+					"Existing Summary",
+					"new data",
+				},
+				promptNotContains: nil,
+				pinnedInResult:    nil,
+			},
+		},
+		{
+			name: "first compaction shows none as " +
+				"existing summary",
+			input: input{
+				keepRecent: 0,
+				scratchpad: []*gent.Iteration{
+					makeIter("step 1"),
+				},
+				modelResponse: "summary",
+			},
+			expected: expected{
+				promptContains: []string{
+					"None (first compaction)",
+					"step 1",
+				},
+				promptNotContains: nil,
+				pinnedInResult:    nil,
+			},
+		},
+		{
+			name: "pinned iteration text excluded " +
+				"from prompt",
+			input: input{
+				keepRecent: 0,
+				scratchpad: []*gent.Iteration{
+					makeIter("normal step"),
+					pinned,
+					makeIter("another step"),
+				},
+				modelResponse: "summary without pinned",
+			},
+			expected: expected{
+				promptContains: []string{
+					"normal step",
+					"another step",
+				},
+				promptNotContains: []string{
+					"secret pinned data",
+				},
+				pinnedInResult: []*gent.Iteration{
+					pinned,
+				},
+			},
+		},
 	}
-	assert.True(t, foundPinned,
-		"pinned iteration should be in result")
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := tt.NewMockModel()
+			model.AddResponse(
+				tc.input.modelResponse, 10, 5,
+			)
+
+			strategy := NewSummarization(model)
+			if tc.input.keepRecent > 0 {
+				strategy.WithKeepRecent(
+					tc.input.keepRecent,
+				)
+			}
+
+			data := gent.NewBasicLoopData(nil)
+			data.SetScratchPad(tc.input.scratchpad)
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", data,
+			)
+			execCtx.SetLimits(nil)
+
+			err := strategy.Compact(execCtx)
+			assert.NoError(t, err)
+
+			// Verify prompt content
+			assert.Len(t,
+				model.CapturedMessages, 1,
+				"model should be called once",
+			)
+			prompt := model.CapturedMessages[0][0].
+				Parts[0].(llms.TextContent)
+
+			for _, s := range tc.expected.promptContains {
+				assert.Contains(t,
+					prompt.Text, s,
+					"prompt should contain %q", s,
+				)
+			}
+			for _, s := range tc.expected.promptNotContains {
+				assert.NotContains(t,
+					prompt.Text, s,
+					"prompt should not contain %q", s,
+				)
+			}
+
+			// Verify pinned iterations in result
+			result := data.GetScratchPad()
+			for _, pin := range tc.expected.pinnedInResult {
+				found := false
+				for _, iter := range result {
+					if iter == pin {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found,
+					"pinned iteration should be "+
+						"in result",
+				)
+			}
+		})
+	}
 }

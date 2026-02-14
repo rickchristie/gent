@@ -18,6 +18,11 @@ type MockModel struct {
 	responses []*gent.ContentResponse
 	errors    []error
 	callCount int
+
+	// CapturedMessages stores the messages passed to each
+	// GenerateContent call. Populated automatically on
+	// every call.
+	CapturedMessages [][]llms.MessageContent
 }
 
 // NewMockModel creates a new MockModel with the default name "test-model".
@@ -40,6 +45,16 @@ func (m *MockModel) AddResponse(content string, inputTokens, outputTokens int) *
 			OutputTokens: outputTokens,
 		},
 	})
+	return m
+}
+
+// AddRawResponse queues a raw ContentResponse.
+// Use this when you need full control over the response
+// structure (e.g., empty Choices slice).
+func (m *MockModel) AddRawResponse(
+	resp *gent.ContentResponse,
+) *MockModel {
+	m.responses = append(m.responses, resp)
 	return m
 }
 
@@ -68,6 +83,11 @@ func (m *MockModel) GenerateContent(
 ) (*gent.ContentResponse, error) {
 	idx := m.callCount
 	m.callCount++
+
+	// Capture messages for test verification
+	m.CapturedMessages = append(
+		m.CapturedMessages, messages,
+	)
 
 	// Publish BeforeModelCall event
 	if execCtx != nil {
