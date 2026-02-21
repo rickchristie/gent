@@ -178,6 +178,18 @@ func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
 				sub.OnCommonEvent(execCtx, e)
 			}
 		}
+	case *gent.CompactionEvent:
+		for _, s := range r.subscribers {
+			if sub, ok := s.(gent.CompactionSubscriber); ok {
+				sub.OnCompaction(execCtx, e)
+			}
+		}
+	case *gent.LimitExceededEvent:
+		for _, s := range r.subscribers {
+			if sub, ok := s.(gent.LimitExceededSubscriber); ok {
+				sub.OnLimitExceeded(execCtx, e)
+			}
+		}
 	case *gent.CommonDiffEvent:
 		for _, s := range r.subscribers {
 			if sub, ok := s.(gent.CommonDiffEventSubscriber); ok {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
+	"github.com/rickchristie/gent/compaction"
 	"github.com/rickchristie/gent/events"
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/integrationtest/loggers"
@@ -28,6 +29,27 @@ const (
 	ToolChainJSON ToolChainType = "json"
 )
 
+// CompactionType specifies the scratchpad context management strategy.
+type CompactionType string
+
+const (
+	CompactionNone          CompactionType = "none"
+	CompactionSlidingWindow CompactionType = "sliding_window"
+	CompactionSummarization CompactionType = "summarization"
+)
+
+// CompactionConfig configures scratchpad context management.
+type CompactionConfig struct {
+	// Type selects the compaction strategy.
+	Type CompactionType
+	// TriggerIterations: compact every N iterations.
+	TriggerIterations int64
+	// WindowSize: for sliding window, how many recent iterations to keep.
+	WindowSize int
+	// KeepRecent: for summarization, how many recent iterations to preserve.
+	KeepRecent int
+}
+
 // AirlineTestConfig configures how airline test output is displayed.
 type AirlineTestConfig struct {
 	// ToolChain specifies which toolchain format to use (yaml or json).
@@ -42,6 +64,8 @@ type AirlineTestConfig struct {
 	// LogWriter is an optional writer for full debug logging (like test mode).
 	// When set, logs are written here in addition to normal output.
 	LogWriter io.Writer
+	// Compaction configures scratchpad context management.
+	Compaction CompactionConfig
 }
 
 // TestConfig returns a config suitable for go test with YAML toolchain.
@@ -82,6 +106,37 @@ func InteractiveConfigJSON() AirlineTestConfig {
 		ShowIterationHistory: false,
 		ShowEvents:           false,
 	}
+}
+
+// configureCompaction sets up compaction on the execution context
+// based on the config. The model is needed for summarization strategy.
+func configureCompaction(
+	execCtx *gent.ExecutionContext,
+	config CompactionConfig,
+	model gent.Model,
+) {
+	if config.Type == CompactionNone || config.Type == "" {
+		return
+	}
+
+	trigger := compaction.NewStatThresholdTrigger().
+		OnCounter(
+			gent.SCIterations,
+			config.TriggerIterations,
+		)
+
+	var strategy gent.CompactionStrategy
+	switch config.Type {
+	case CompactionSlidingWindow:
+		strategy = compaction.NewSlidingWindow(config.WindowSize)
+	case CompactionSummarization:
+		strategy = compaction.NewSummarization(model).
+			WithKeepRecent(config.KeepRecent)
+	default:
+		return
+	}
+
+	execCtx.SetCompaction(trigger, strategy)
 }
 
 // createToolChain creates the appropriate toolchain based on configuration.
@@ -213,6 +268,9 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 15},
 	})
 
+	// Configure compaction if specified
+	configureCompaction(execCtx, config.Compaction, model)
+
 	// Create event registry
 	registry := events.NewRegistry()
 
@@ -255,6 +313,24 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	printHeader(w, "AIRLINE RESCHEDULE SCENARIO")
 	fmt.Fprintln(w)
 
+	// Print compaction config if enabled
+	if config.Compaction.Type != CompactionNone &&
+		config.Compaction.Type != "" {
+		printSection(w, "Compaction Config")
+		fmt.Fprintf(w, "Strategy: %s\n", config.Compaction.Type)
+		fmt.Fprintf(w, "Trigger: every %d iterations\n",
+			config.Compaction.TriggerIterations)
+		switch config.Compaction.Type {
+		case CompactionSlidingWindow:
+			fmt.Fprintf(w, "Window size: %d\n",
+				config.Compaction.WindowSize)
+		case CompactionSummarization:
+			fmt.Fprintf(w, "Keep recent: %d\n",
+				config.Compaction.KeepRecent)
+		}
+		fmt.Fprintln(w)
+	}
+
 	// Print customer request
 	printSection(w, "Customer Request")
 	fmt.Fprintln(w, customerRequest)
@@ -291,7 +367,10 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 	fmt.Fprintf(w, "Total iterations: %d\n", execCtx.Iteration())
 	fmt.Fprintf(w, "Total input tokens: %d\n", stats.GetTotalInputTokens())
 	fmt.Fprintf(w, "Total output tokens: %d\n", stats.GetTotalOutputTokens())
-	fmt.Fprintf(w, "Total tool calls: %d\n", stats.GetToolCallCount())
+	fmt.Fprintf(w, "Total tool calls: %d\n",
+		stats.GetToolCallCount())
+	fmt.Fprintf(w, "Total compactions: %d\n",
+		stats.GetCounter(gent.SCCompactions))
 	fmt.Fprintf(w, "Duration: %v\n", execCtx.Duration())
 
 	// Print iteration history if configured
@@ -345,6 +424,22 @@ Can you help me reschedule to a later flight on the same day? I'd prefer an even
 				if e.Error != nil {
 					fmt.Fprintf(w, "               error=%v\n", e.Error)
 				}
+			case *gent.CompactionEvent:
+				fmt.Fprintf(w,
+					"Compaction: %d -> %d iterations"+
+						" (removed %d, duration=%s)\n",
+					e.ScratchpadLengthBefore,
+					e.ScratchpadLengthAfter,
+					e.ScratchpadLengthBefore-
+						e.ScratchpadLengthAfter,
+					e.Duration)
+			case *gent.LimitExceededEvent:
+				fmt.Fprintf(w,
+					"LimitExceeded: key=%s, "+
+						"value=%.0f, max=%.0f\n",
+					e.MatchedKey,
+					e.CurrentValue,
+					e.Limit.MaxValue)
 			default:
 				fmt.Fprintf(w, "%T\n", event)
 			}
@@ -403,6 +498,40 @@ func (h *streamingOutputHook) OnAfterToolCall(
 		fmt.Fprintf(h.w, "    Output: %s\n", string(outputJSON))
 	}
 	fmt.Fprintf(h.w, "    Duration: %v\n", event.Duration)
+}
+
+// OnCompaction prints compaction events in real-time.
+func (h *streamingOutputHook) OnCompaction(
+	_ *gent.ExecutionContext,
+	event *gent.CompactionEvent,
+) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	fmt.Fprintf(h.w,
+		"\n\n  [Compaction: %d → %d iterations "+
+			"(removed %d, took %v)]\n",
+		event.ScratchpadLengthBefore,
+		event.ScratchpadLengthAfter,
+		event.ScratchpadLengthBefore-event.ScratchpadLengthAfter,
+		event.Duration,
+	)
+}
+
+// OnLimitExceeded prints limit exceeded events.
+func (h *streamingOutputHook) OnLimitExceeded(
+	_ *gent.ExecutionContext,
+	event *gent.LimitExceededEvent,
+) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	fmt.Fprintf(h.w,
+		"\n\n  [Limit Exceeded: %s = %.0f (max: %.0f)]\n",
+		event.MatchedKey,
+		event.CurrentValue,
+		event.Limit.MaxValue,
+	)
 }
 
 func (h *streamingOutputHook) getCurrentIter() int {
@@ -564,6 +693,9 @@ SkyWings is an international airline. Reply with customer's language.
 	execCtx.SetLimits([]gent.Limit{
 		{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 15},
 	})
+
+	// Configure compaction if specified
+	configureCompaction(execCtx, s.Config.Compaction, s.Model)
 
 	// Create event registry
 	registry := events.NewRegistry()

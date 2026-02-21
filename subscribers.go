@@ -97,6 +97,20 @@ type CommonEventSubscriber interface {
 	OnCommonEvent(execCtx *ExecutionContext, event *CommonEvent)
 }
 
+// CompactionSubscriber receives CompactionEvent events.
+// This is useful for observing scratchpad compaction in real time.
+type CompactionSubscriber interface {
+	OnCompaction(execCtx *ExecutionContext, event *CompactionEvent)
+}
+
+// LimitExceededSubscriber receives LimitExceededEvent events.
+type LimitExceededSubscriber interface {
+	OnLimitExceeded(
+		execCtx *ExecutionContext,
+		event *LimitExceededEvent,
+	)
+}
+
 // CommonDiffEventSubscriber receives CommonDiffEvent events.
 // This is useful for receiving state change events with automatic diff generation.
 type CommonDiffEventSubscriber interface {

@@ -243,7 +243,10 @@ func (h *LoggerSubscriber) OnAfterToolCall(
 	execCtx *gent.ExecutionContext,
 	event *gent.AfterToolCallEvent,
 ) {
-	h.logEvent(fmt.Sprintf("AfterToolCall: %s (duration: %s)", event.ToolName, event.Duration))
+	h.logEvent(fmt.Sprintf(
+		"AfterToolCall: %s (duration: %s)",
+		event.ToolName, event.Duration,
+	))
 
 	if event.Error != nil {
 		h.log("Error: %v", event.Error)
@@ -252,6 +255,40 @@ func (h *LoggerSubscriber) OnAfterToolCall(
 
 	h.log("Output:")
 	h.logYAML(event.Output)
+}
+
+// OnCompaction logs compaction events.
+func (h *LoggerSubscriber) OnCompaction(
+	execCtx *gent.ExecutionContext,
+	event *gent.CompactionEvent,
+) {
+	h.logEvent("Compaction")
+	h.log(strings.Repeat("*", 80))
+	h.log("SCRATCHPAD COMPACTION")
+	h.log(strings.Repeat("*", 80))
+	h.log(
+		"Scratchpad: %d → %d iterations (removed %d)",
+		event.ScratchpadLengthBefore,
+		event.ScratchpadLengthAfter,
+		event.ScratchpadLengthBefore-event.ScratchpadLengthAfter,
+	)
+	h.log("Duration: %s", event.Duration)
+}
+
+// OnLimitExceeded logs limit exceeded events.
+func (h *LoggerSubscriber) OnLimitExceeded(
+	execCtx *gent.ExecutionContext,
+	event *gent.LimitExceededEvent,
+) {
+	h.logEvent("LimitExceeded")
+	h.log("!!! LIMIT EXCEEDED !!!")
+	h.logYAML(map[string]any{
+		"limit_type":    string(event.Limit.Type),
+		"limit_key":     string(event.Limit.Key),
+		"limit_max":     event.Limit.MaxValue,
+		"matched_key":   string(event.MatchedKey),
+		"current_value": event.CurrentValue,
+	})
 }
 
 // Compile-time checks that LoggerSubscriber implements all subscriber interfaces.
@@ -265,4 +302,6 @@ var (
 	_ gent.AfterModelCallSubscriber  = (*LoggerSubscriber)(nil)
 	_ gent.BeforeToolCallSubscriber  = (*LoggerSubscriber)(nil)
 	_ gent.AfterToolCallSubscriber   = (*LoggerSubscriber)(nil)
+	_ gent.CompactionSubscriber      = (*LoggerSubscriber)(nil)
+	_ gent.LimitExceededSubscriber   = (*LoggerSubscriber)(nil)
 )
