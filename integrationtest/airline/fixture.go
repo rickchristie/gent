@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/integrationtest/testutil"
 	"github.com/rickchristie/gent/schema"
 )
 
@@ -125,6 +126,7 @@ type RescheduleBookingResult struct {
 	NewSeatNumber  string  `json:"new_seat_number"`
 	ChangeFee      float64 `json:"change_fee"`
 	FareDifference float64 `json:"fare_difference"`
+	FareCredit     float64 `json:"fare_credit"`
 	TotalCharge    float64 `json:"total_charge"`
 	Message        string  `json:"message"`
 }
@@ -359,6 +361,40 @@ func (f *AirlineFixture) initializeData() {
 			{SeatNumber: "20A", Class: "economy", IsAvailable: true, IsWindow: true, IsAisle: false,
 				HasExtraLeg: false},
 		},
+		"AA102": {
+			// First class
+			{SeatNumber: "1A", Class: "first", IsAvailable: true, IsWindow: true,
+				IsAisle: false, HasExtraLeg: true},
+			{SeatNumber: "1C", Class: "first", IsAvailable: false, IsWindow: false,
+				IsAisle: true, HasExtraLeg: true},
+			// Business
+			{SeatNumber: "4A", Class: "business", IsAvailable: true, IsWindow: true,
+				IsAisle: false, HasExtraLeg: true},
+			{SeatNumber: "4C", Class: "business", IsAvailable: true, IsWindow: false,
+				IsAisle: true, HasExtraLeg: true},
+			{SeatNumber: "5A", Class: "business", IsAvailable: false, IsWindow: true,
+				IsAisle: false, HasExtraLeg: true},
+			// Economy exit row
+			{SeatNumber: "14A", Class: "economy", IsAvailable: false, IsWindow: true,
+				IsAisle: false, HasExtraLeg: true},
+			{SeatNumber: "14B", Class: "economy", IsAvailable: true, IsWindow: false,
+				IsAisle: false, HasExtraLeg: true},
+			{SeatNumber: "14C", Class: "economy", IsAvailable: true, IsWindow: false,
+				IsAisle: true, HasExtraLeg: true},
+			{SeatNumber: "15A", Class: "economy", IsAvailable: true, IsWindow: true,
+				IsAisle: false, HasExtraLeg: true},
+			// Economy regular
+			{SeatNumber: "22A", Class: "economy", IsAvailable: true, IsWindow: true,
+				IsAisle: false, HasExtraLeg: false},
+			{SeatNumber: "22B", Class: "economy", IsAvailable: true, IsWindow: false,
+				IsAisle: false, HasExtraLeg: false},
+			{SeatNumber: "22C", Class: "economy", IsAvailable: true, IsWindow: false,
+				IsAisle: true, HasExtraLeg: false},
+			{SeatNumber: "30A", Class: "economy", IsAvailable: false, IsWindow: true,
+				IsAisle: false, HasExtraLeg: false},
+			{SeatNumber: "30C", Class: "economy", IsAvailable: true, IsWindow: false,
+				IsAisle: true, HasExtraLeg: false},
+		},
 	}
 
 	// Initialize policies (static, not date-dependent)
@@ -521,8 +557,8 @@ func (f *AirlineFixture) SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlineP
 
 			var results []Policy
 			for _, policy := range f.policies {
-				if containsIgnoreCase(policy.Title, input.Keyword) ||
-					containsIgnoreCase(policy.Content, input.Keyword) {
+				if testutil.ContainsIgnoreCase(policy.Title, input.Keyword) ||
+					testutil.ContainsIgnoreCase(policy.Content, input.Keyword) {
 					results = append(results, policy)
 				}
 			}
@@ -628,8 +664,10 @@ func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookin
 			}
 
 			fareDiff := newPrice - oldPrice
+			var fareCredit float64
 			if fareDiff < 0 {
-				fareDiff = 0 // Credit would be issued separately
+				fareCredit = -fareDiff
+				fareDiff = 0
 			}
 
 			// Assign seat if not specified
@@ -644,6 +682,21 @@ func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookin
 			booking.SeatNumber = newSeat
 			booking.TotalPrice = newPrice
 
+			msg := fmt.Sprintf(
+				"Successfully rescheduled from %s to %s. "+
+					"Total charge: $%.2f.",
+				oldFlightNum, input.NewFlightNumber,
+				changeFee+fareDiff,
+			)
+			if fareCredit > 0 {
+				msg += fmt.Sprintf(
+					" A fare credit of $%.2f will be "+
+						"applied to your account within "+
+						"3-5 business days.",
+					fareCredit,
+				)
+			}
+
 			return &RescheduleBookingResult{
 				Success:        true,
 				OldFlightNum:   oldFlightNum,
@@ -651,9 +704,9 @@ func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookin
 				NewSeatNumber:  newSeat,
 				ChangeFee:      changeFee,
 				FareDifference: fareDiff,
+				FareCredit:     fareCredit,
 				TotalCharge:    changeFee + fareDiff,
-				Message: fmt.Sprintf("Successfully rescheduled from %s to %s. "+
-					"Total charge: $%.2f", oldFlightNum, input.NewFlightNumber, changeFee+fareDiff),
+				Message:        msg,
 			}, nil
 		},
 	)
@@ -763,39 +816,3 @@ func (f *AirlineFixture) DayAfterTomorrowDate() string {
 	return dat.Format("2006-01-02")
 }
 
-// -----------------------------------------------------------------------------
-// Helper Functions
-// -----------------------------------------------------------------------------
-
-func containsIgnoreCase(s, substr string) bool {
-	sLower := make([]byte, len(s))
-	substrLower := make([]byte, len(substr))
-	for i := range len(s) {
-		if s[i] >= 'A' && s[i] <= 'Z' {
-			sLower[i] = s[i] + 32
-		} else {
-			sLower[i] = s[i]
-		}
-	}
-	for i := range len(substr) {
-		if substr[i] >= 'A' && substr[i] <= 'Z' {
-			substrLower[i] = substr[i] + 32
-		} else {
-			substrLower[i] = substr[i]
-		}
-	}
-
-	for i := 0; i <= len(sLower)-len(substrLower); i++ {
-		match := true
-		for j := range len(substrLower) {
-			if sLower[i+j] != substrLower[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}

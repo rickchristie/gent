@@ -29,9 +29,9 @@
       "problemMatcher": []
     },
     {
-      "label": "Test: CLI Airline Streaming",
+      "label": "Test: CLI Integration",
       "type": "shell",
-      "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./integrationtest/airline/cliairlinetest",
+      "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./integrationtest/cli",
       "group": "test",
       "options": {
         "cwd": "${workspaceFolder}"

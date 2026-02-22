@@ -1,5 +1,5 @@
-// Package main provides an interactive CLI for testing airline scenarios
-// with real-time streaming output.
+// Package main provides a unified interactive CLI for testing
+// integration scenarios with real-time streaming output.
 package main
 
 import (
@@ -15,6 +15,8 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/rickchristie/gent/integrationtest/airline"
+	"github.com/rickchristie/gent/integrationtest/ecommerce"
+	"github.com/rickchristie/gent/integrationtest/testutil"
 )
 
 // ANSI color codes
@@ -29,18 +31,31 @@ const (
 	colorWhite   = "\033[37m"
 	colorBold    = "\033[1m"
 	colorDim     = "\033[2m"
-
-	// Background colors
-	bgBlack = "\033[40m"
-	bgBlue  = "\033[44m"
 )
 
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr,
-			"%sError: %v%s\n", colorRed, err, colorReset)
+			"%sError: %v%s\n",
+			colorRed, err, colorReset)
 		os.Exit(1)
 	}
+}
+
+type menuItem struct {
+	name        string
+	description string
+	run         func(
+		ctx context.Context,
+		w io.Writer,
+		config testutil.TestConfig,
+	) error
+	configFn func() testutil.TestConfig
+	isChat   bool
+	newChat  func(
+		w io.Writer,
+		config testutil.TestConfig,
+	) (*testutil.InteractiveChat, error)
 }
 
 func run() error {
@@ -52,7 +67,7 @@ func run() error {
 	}
 
 	logFile, err := os.Create(
-		filepath.Join(logDir, "cli_airline.log"))
+		filepath.Join(logDir, "cli_integration.log"))
 	if err != nil {
 		return fmt.Errorf(
 			"failed to create log file: %w", err)
@@ -77,72 +92,130 @@ func run() error {
 				"environment variable is not set!%s\n",
 			colorYellow, colorReset)
 		fmt.Fprintf(os.Stderr,
-			"%sTests will fail. Please set the API key"+
-				" or source your .env file.%s\n",
+			"%sTests will fail. Please set the API "+
+				"key or source your .env file.%s\n",
 			colorYellow, colorReset)
 		fmt.Fprintln(os.Stderr)
 	}
 
 	// Build menu items
-	type menuItem struct {
-		name        string
-		description string
-		run         func(
-			ctx context.Context,
-			w io.Writer,
-			config airline.AirlineTestConfig,
-		) error
-		configFn func() airline.AirlineTestConfig
-		isChat   bool
-	}
-
 	var menuItems []menuItem
 
-	// Add YAML test cases
+	// Airline test cases
 	for _, tc := range airline.GetAirlineTestCases() {
 		menuItems = append(menuItems, menuItem{
 			name:        tc.Name,
 			description: tc.Description,
 			run:         tc.Run,
-			configFn:    airline.InteractiveConfig,
+			configFn:    testutil.InteractiveConfig,
 		})
 	}
-
-	// Add JSON test cases
 	for _, tc := range airline.GetAirlineTestCasesJSON() {
 		menuItems = append(menuItems, menuItem{
 			name:        tc.Name,
 			description: tc.Description,
 			run:         tc.Run,
-			configFn:    airline.InteractiveConfigJSON,
+			configFn:    testutil.InteractiveConfigJSON,
 		})
 	}
 
-	// Add interactive chat options
+	// E-commerce test cases
+	for _, tc := range ecommerce.GetEcommerceTestCases() {
+		menuItems = append(menuItems, menuItem{
+			name:        tc.Name,
+			description: tc.Description,
+			run:         tc.Run,
+			configFn:    testutil.InteractiveConfig,
+		})
+	}
+	for _, tc := range ecommerce.GetEcommerceTestCasesJSON() {
+		menuItems = append(menuItems, menuItem{
+			name:        tc.Name,
+			description: tc.Description,
+			run:         tc.Run,
+			configFn:    testutil.InteractiveConfigJSON,
+		})
+	}
+
+	// Interactive chat options
 	menuItems = append(menuItems, menuItem{
-		name: "Interactive Chat (YAML)",
+		name: "Airline Chat (YAML)",
 		description: "Chat with the airline agent " +
 			"using YAML toolchain",
-		configFn: airline.InteractiveConfig,
+		configFn: testutil.InteractiveConfig,
 		isChat:   true,
+		newChat:  airline.NewAirlineInteractiveChat,
 	})
 	menuItems = append(menuItems, menuItem{
-		name: "Interactive Chat (JSON)",
+		name: "Airline Chat (JSON)",
 		description: "Chat with the airline agent " +
 			"using JSON toolchain",
-		configFn: airline.InteractiveConfigJSON,
+		configFn: testutil.InteractiveConfigJSON,
 		isChat:   true,
+		newChat:  airline.NewAirlineInteractiveChat,
+	})
+	menuItems = append(menuItems, menuItem{
+		name: "E-commerce Chat (YAML)",
+		description: "Chat with the billing agent " +
+			"using YAML toolchain",
+		configFn: testutil.InteractiveConfig,
+		isChat:   true,
+		newChat:  ecommerce.NewEcommerceInteractiveChat,
+	})
+	menuItems = append(menuItems, menuItem{
+		name: "E-commerce Chat (JSON)",
+		description: "Chat with the billing agent " +
+			"using JSON toolchain",
+		configFn: testutil.InteractiveConfigJSON,
+		isChat:   true,
+		newChat:  ecommerce.NewEcommerceInteractiveChat,
 	})
 
-	fmt.Printf("%s%sAvailable Airline Tests:%s\n",
+	// Print menu
+	fmt.Printf("%s%sAvailable Tests:%s\n",
 		colorBold, colorYellow, colorReset)
 	fmt.Printf("%s%s%s\n",
-		colorYellow, strings.Repeat("=", 24), colorReset)
+		colorYellow,
+		strings.Repeat("=", 16),
+		colorReset)
+
+	// Group items by category
+	scenarioCount := 0
+	chatStart := 0
 	for i, item := range menuItems {
+		if item.isChat && chatStart == 0 {
+			chatStart = i
+		}
+		if !item.isChat {
+			scenarioCount++
+		}
+	}
+
+	// Print scenarios
+	for i := 0; i < scenarioCount; i++ {
+		item := menuItems[i]
 		fmt.Printf("  %s%d.%s %s%s%s - %s\n",
 			colorCyan, i+1, colorReset,
 			colorWhite, item.name, colorReset,
 			item.description)
+	}
+
+	// Print chat options
+	if chatStart > 0 {
+		fmt.Println()
+		fmt.Printf("%s%sInteractive Chat:%s\n",
+			colorBold, colorYellow, colorReset)
+		fmt.Printf("%s%s%s\n",
+			colorYellow,
+			strings.Repeat("-", 17),
+			colorReset)
+		for i := chatStart; i < len(menuItems); i++ {
+			item := menuItems[i]
+			fmt.Printf("  %s%d.%s %s%s%s - %s\n",
+				colorCyan, i+1, colorReset,
+				colorWhite, item.name, colorReset,
+				item.description)
+		}
 	}
 	fmt.Println()
 
@@ -162,12 +235,14 @@ func run() error {
 		input = strings.TrimSpace(input)
 		if input == "q" || input == "Q" {
 			fmt.Printf(
-				"%sGoodbye!%s\n", colorGreen, colorReset)
+				"%sGoodbye!%s\n",
+				colorGreen, colorReset)
 			return nil
 		}
 
 		num, err := strconv.Atoi(input)
-		if err != nil || num < 1 || num > len(menuItems) {
+		if err != nil || num < 1 ||
+			num > len(menuItems) {
 			fmt.Printf(
 				"%sInvalid selection. "+
 					"Please enter 1-%d.%s\n\n",
@@ -207,7 +282,8 @@ func run() error {
 		config.Compaction = compactionCfg
 
 		if item.isChat {
-			err = runInteractiveChat(ctx, config)
+			err = runInteractiveChat(
+				ctx, config, item.newChat)
 			if err != nil {
 				fmt.Fprintf(os.Stderr,
 					"%sError: %v%s\n",
@@ -228,7 +304,9 @@ func run() error {
 		cancel()
 
 		fmt.Printf("\n%s%s%s\n\n",
-			colorDim, strings.Repeat("-", 60), colorReset)
+			colorDim,
+			strings.Repeat("-", 60),
+			colorReset)
 	}
 }
 
@@ -236,7 +314,7 @@ func run() error {
 // menu and returns the user's configuration.
 func promptCompaction(
 	rl *readline.Instance,
-) (airline.CompactionConfig, error) {
+) (testutil.CompactionConfig, error) {
 	fmt.Println()
 	fmt.Printf(
 		"%s%sScratchpad Context Management:%s\n",
@@ -251,7 +329,8 @@ func promptCompaction(
 		colorCyan, colorReset)
 	fmt.Printf(
 		"  %s2.%s Summarization   - "+
-			"Summarize older iterations into a synopsis\n",
+			"Summarize older iterations into a "+
+			"synopsis\n",
 		colorCyan, colorReset)
 	fmt.Printf(
 		"  %s3.%s None            - "+
@@ -262,11 +341,13 @@ func promptCompaction(
 	for {
 		oldPrompt := rl.Config.Prompt
 		rl.SetPrompt(
-			colorCyan + "Select strategy [3]: " + colorReset)
+			colorCyan +
+				"Select strategy [3]: " +
+				colorReset)
 		input, err := rl.Readline()
 		rl.SetPrompt(oldPrompt)
 		if err != nil {
-			return airline.CompactionConfig{}, err
+			return testutil.CompactionConfig{}, err
 		}
 
 		input = strings.TrimSpace(input)
@@ -280,8 +361,8 @@ func promptCompaction(
 		case "2":
 			return promptSummarization(rl)
 		case "3":
-			return airline.CompactionConfig{
-				Type: airline.CompactionNone,
+			return testutil.CompactionConfig{
+				Type: testutil.CompactionNone,
 			}, nil
 		default:
 			fmt.Printf(
@@ -294,7 +375,7 @@ func promptCompaction(
 // promptSlidingWindow configures sliding window compaction.
 func promptSlidingWindow(
 	rl *readline.Instance,
-) (airline.CompactionConfig, error) {
+) (testutil.CompactionConfig, error) {
 	fmt.Println()
 	fmt.Printf(
 		"%s%sConfigure Sliding Window:%s\n",
@@ -308,24 +389,25 @@ func promptSlidingWindow(
 		"Window size (recent iterations to keep)",
 		5, 1, 100)
 	if err != nil {
-		return airline.CompactionConfig{}, err
+		return testutil.CompactionConfig{}, err
 	}
 
 	triggerIter, err := promptInt(rl,
 		"Trigger every N iterations",
 		3, 1, 50)
 	if err != nil {
-		return airline.CompactionConfig{}, err
+		return testutil.CompactionConfig{}, err
 	}
 
-	cfg := airline.CompactionConfig{
-		Type:              airline.CompactionSlidingWindow,
+	cfg := testutil.CompactionConfig{
+		Type: testutil.CompactionSlidingWindow,
 		TriggerIterations: int64(triggerIter),
 		WindowSize:        windowSize,
 	}
 
-	fmt.Printf("\n%sSliding Window: window=%d, "+
-		"trigger every %d iterations%s\n",
+	fmt.Printf(
+		"\n%sSliding Window: window=%d, "+
+			"trigger every %d iterations%s\n",
 		colorGreen, windowSize, triggerIter, colorReset)
 
 	return cfg, nil
@@ -334,7 +416,7 @@ func promptSlidingWindow(
 // promptSummarization configures summarization compaction.
 func promptSummarization(
 	rl *readline.Instance,
-) (airline.CompactionConfig, error) {
+) (testutil.CompactionConfig, error) {
 	fmt.Println()
 	fmt.Printf(
 		"%s%sConfigure Summarization:%s\n",
@@ -345,34 +427,36 @@ func promptSummarization(
 		colorReset)
 
 	keepRecent, err := promptInt(rl,
-		"Keep recent (iterations to preserve unsummarized)",
+		"Keep recent (iterations to preserve "+
+			"unsummarized)",
 		3, 0, 50)
 	if err != nil {
-		return airline.CompactionConfig{}, err
+		return testutil.CompactionConfig{}, err
 	}
 
 	triggerIter, err := promptInt(rl,
 		"Trigger every N iterations",
 		3, 1, 50)
 	if err != nil {
-		return airline.CompactionConfig{}, err
+		return testutil.CompactionConfig{}, err
 	}
 
-	cfg := airline.CompactionConfig{
-		Type:              airline.CompactionSummarization,
+	cfg := testutil.CompactionConfig{
+		Type: testutil.CompactionSummarization,
 		TriggerIterations: int64(triggerIter),
 		KeepRecent:        keepRecent,
 	}
 
-	fmt.Printf("\n%sSummarization: keepRecent=%d, "+
-		"trigger every %d iterations%s\n",
+	fmt.Printf(
+		"\n%sSummarization: keepRecent=%d, "+
+			"trigger every %d iterations%s\n",
 		colorGreen, keepRecent, triggerIter, colorReset)
 
 	return cfg, nil
 }
 
-// promptInt prompts the user for an integer value with a
-// default, minimum, and maximum.
+// promptInt prompts for an integer value with a default,
+// minimum, and maximum.
 func promptInt(
 	rl *readline.Instance,
 	label string,
@@ -398,7 +482,8 @@ func promptInt(
 		val, err := strconv.Atoi(input)
 		if err != nil || val < minVal || val > maxVal {
 			fmt.Printf(
-				"%sEnter a number between %d and %d.%s\n",
+				"%sEnter a number between %d "+
+					"and %d.%s\n",
 				colorRed, minVal, maxVal, colorReset)
 			continue
 		}
@@ -408,14 +493,17 @@ func promptInt(
 
 func runInteractiveChat(
 	ctx context.Context,
-	config airline.AirlineTestConfig,
+	config testutil.TestConfig,
+	newChat func(
+		io.Writer, testutil.TestConfig,
+	) (*testutil.InteractiveChat, error),
 ) error {
 	fmt.Println()
 	fmt.Printf("%s%s%s\n",
 		colorYellow,
 		strings.Repeat("=", 80),
 		colorReset)
-	fmt.Printf("%s%sINTERACTIVE AIRLINE CHAT%s\n",
+	fmt.Printf("%s%sINTERACTIVE CHAT%s\n",
 		colorBold, colorYellow, colorReset)
 	fmt.Printf("%s%s%s\n",
 		colorYellow,
@@ -424,7 +512,7 @@ func runInteractiveChat(
 	fmt.Println()
 	fmt.Printf(
 		"%sYou are now chatting with the "+
-			"SkyWings Airlines customer service agent.%s\n",
+			"customer service agent.%s\n",
 		colorWhite, colorReset)
 	fmt.Printf(
 		"%sType your message and press Enter. "+
@@ -434,8 +522,7 @@ func runInteractiveChat(
 		"%sUse arrow keys to edit your input.%s\n",
 		colorDim, colorReset)
 
-	// Print compaction config reminder if enabled
-	if config.Compaction.Type != airline.CompactionNone &&
+	if config.Compaction.Type != testutil.CompactionNone &&
 		config.Compaction.Type != "" {
 		fmt.Printf(
 			"%s[Compaction: %s, trigger every %d "+
@@ -448,7 +535,6 @@ func runInteractiveChat(
 
 	fmt.Println()
 
-	// Create readline instance for chat with custom prompt
 	rl, err := readline.New(
 		colorCyan + colorBold + "You: " + colorReset)
 	if err != nil {
@@ -457,12 +543,9 @@ func runInteractiveChat(
 	}
 	defer rl.Close()
 
-	// Create colored writer for the chat
 	coloredWriter := &ColoredWriter{w: os.Stdout}
 
-	// Create chat session with colored output
-	chat, err := airline.NewInteractiveChat(
-		coloredWriter, config)
+	chat, err := newChat(coloredWriter, config)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to create chat session: %w", err)
@@ -487,7 +570,8 @@ func runInteractiveChat(
 		}
 		if input == "exit" || input == "quit" {
 			fmt.Printf(
-				"\n%sEnding chat session. Goodbye!%s\n",
+				"\n%sEnding chat session. "+
+					"Goodbye!%s\n",
 				colorGreen, colorReset)
 			return nil
 		}
@@ -504,7 +588,8 @@ func runInteractiveChat(
 		err = chat.SendMessage(ctx, input)
 		if err != nil {
 			fmt.Fprintf(os.Stderr,
-				"\n%sError processing message: %v%s\n",
+				"\n%sError processing message: "+
+					"%v%s\n",
 				colorRed, err, colorReset)
 		}
 	}
@@ -523,7 +608,6 @@ func (c *ColoredWriter) Write(
 	text := string(p)
 	trimmed := strings.TrimSpace(text)
 
-	// Color code different types of output
 	switch {
 	case strings.HasPrefix(text, "--- Your Input ---"):
 		return fmt.Fprintf(os.Stdout,
@@ -541,53 +625,64 @@ func (c *ColoredWriter) Write(
 		text, "--- Agent Processing ---"):
 		c.inAgentResponse = false
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorYellow, text, colorReset)
+			"%s%s%s",
+			colorYellow, text, colorReset)
 
 	case strings.HasPrefix(text, "--- ") &&
 		strings.HasSuffix(trimmed, " ---"):
 		c.inAgentResponse = false
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorYellow, text, colorReset)
+			"%s%s%s",
+			colorYellow, text, colorReset)
 
 	case c.inAgentResponse && trimmed != "":
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorGreen, text, colorReset)
+			"%s%s%s",
+			colorGreen, text, colorReset)
 
 	case strings.HasPrefix(text, "[Tool:"):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorBlue, text, colorReset)
+			"%s%s%s",
+			colorBlue, text, colorReset)
 
 	case strings.HasPrefix(text, "    Args:") ||
 		strings.HasPrefix(text, "    Output:"):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorDim, text, colorReset)
+			"%s%s%s",
+			colorDim, text, colorReset)
 
 	case strings.HasPrefix(text, "    Duration:"):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorDim, text, colorReset)
+			"%s%s%s",
+			colorDim, text, colorReset)
 
 	case strings.HasPrefix(text, "    Error:"):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorRed, text, colorReset)
+			"%s%s%s",
+			colorRed, text, colorReset)
 
 	case strings.HasPrefix(text, "[Stats:"):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorDim, text, colorReset)
+			"%s%s%s",
+			colorDim, text, colorReset)
 
 	case strings.HasPrefix(text, "--- Iteration"):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorMagenta, text, colorReset)
+			"%s%s%s",
+			colorMagenta, text, colorReset)
 
 	case strings.HasPrefix(text, "  LLM: "):
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorCyan, text, colorReset)
+			"%s%s%s",
+			colorCyan, text, colorReset)
 
 	case strings.HasPrefix(text, "  [Compaction:"):
 		return fmt.Fprintf(os.Stdout,
 			"%s%s%s%s",
 			colorBold, colorMagenta, text, colorReset)
 
-	case strings.HasPrefix(text, "  [Limit Exceeded:"):
+	case strings.HasPrefix(
+		text, "  [Limit Exceeded:"):
 		return fmt.Fprintf(os.Stdout,
 			"%s%s%s%s",
 			colorBold, colorRed, text, colorReset)
@@ -595,17 +690,20 @@ func (c *ColoredWriter) Write(
 	case trimmed == "<thinking>" ||
 		trimmed == "</thinking>":
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorDim, text, colorReset)
+			"%s%s%s",
+			colorDim, text, colorReset)
 
 	case trimmed == "<action>" ||
 		trimmed == "</action>":
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorBlue, text, colorReset)
+			"%s%s%s",
+			colorBlue, text, colorReset)
 
 	case trimmed == "<answer>" ||
 		trimmed == "</answer>":
 		return fmt.Fprintf(os.Stdout,
-			"%s%s%s", colorGreen, text, colorReset)
+			"%s%s%s",
+			colorGreen, text, colorReset)
 
 	default:
 		return os.Stdout.Write(p)
