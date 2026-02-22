@@ -21,6 +21,7 @@
 Thumbs.db
 
 # Test builds
+/cli
 /clistreamtest
 /cliairlinetest
 
