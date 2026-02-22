@@ -47,11 +47,46 @@ func (s *Schema) Validate(data map[string]any) error {
 	if s == nil || s.compiled == nil {
 		return nil
 	}
+	if data == nil {
+		return &ValidationError{
+			Err: fmt.Errorf(
+				"args is null or missing, expected object"+
+					" with required properties: %s",
+				s.requiredList(),
+			),
+		}
+	}
 	err := s.compiled.Validate(data)
 	if err != nil {
 		return &ValidationError{Err: err}
 	}
 	return nil
+}
+
+// requiredList returns a comma-separated list of required properties
+// from the raw schema, or "(none)" if there are none.
+func (s *Schema) requiredList() string {
+	if s.raw == nil {
+		return "(none)"
+	}
+	req, ok := s.raw["required"]
+	if !ok {
+		return "(none)"
+	}
+	switch v := req.(type) {
+	case []string:
+		return strings.Join(v, ", ")
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				parts = append(parts, str)
+			}
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return "(none)"
+	}
 }
 
 // ValidationError wraps a JSON Schema validation error with a cleaner message.

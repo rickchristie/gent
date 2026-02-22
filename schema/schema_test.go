@@ -81,6 +81,7 @@ func TestSchema_Validate(t *testing.T) {
 	type expected struct {
 		hasErr          bool
 		isValidationErr bool
+		errMsg          string
 	}
 
 	tests := []struct {
@@ -144,6 +145,69 @@ func TestSchema_Validate(t *testing.T) {
 				isValidationErr: true,
 			},
 		},
+		{
+			name: "nil data with required fields",
+			input: input{
+				schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"keyword": map[string]any{
+							"type": "string",
+						},
+					},
+					"required": []any{"keyword"},
+				},
+				data: nil,
+			},
+			expected: expected{
+				hasErr:          true,
+				isValidationErr: true,
+				errMsg: "schema validation failed: " +
+					"args is null or missing, " +
+					"expected object with " +
+					"required properties: keyword",
+			},
+		},
+		{
+			name: "nil data with no required fields",
+			input: input{
+				schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"optional": map[string]any{
+							"type": "string",
+						},
+					},
+				},
+				data: nil,
+			},
+			expected: expected{
+				hasErr:          true,
+				isValidationErr: true,
+				errMsg: "schema validation failed: " +
+					"args is null or missing, " +
+					"expected object with " +
+					"required properties: (none)",
+			},
+		},
+		{
+			name: "nil data with multiple required fields",
+			input: input{
+				schema: Object(map[string]*Property{
+					"query": String("Search query"),
+					"limit": Integer("Max results"),
+				}, "query", "limit"),
+				data: nil,
+			},
+			expected: expected{
+				hasErr:          true,
+				isValidationErr: true,
+				errMsg: "schema validation failed: " +
+					"args is null or missing, " +
+					"expected object with " +
+					"required properties: query, limit",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -157,7 +221,11 @@ func TestSchema_Validate(t *testing.T) {
 				assert.Error(t, err)
 				if tt.expected.isValidationErr {
 					_, ok := err.(*ValidationError)
-					assert.True(t, ok, "expected *ValidationError, got %T", err)
+					assert.True(t, ok,
+						"expected *ValidationError, got %T", err)
+				}
+				if tt.expected.errMsg != "" {
+					assert.Equal(t, tt.expected.errMsg, err.Error())
 				}
 			} else {
 				assert.NoError(t, err)
