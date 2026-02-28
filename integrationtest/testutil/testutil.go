@@ -69,20 +69,9 @@ type TestConfig struct {
 	Compaction CompactionConfig
 }
 
-// DefaultTestConfig returns a config suitable for go test with YAML
+// DefaultTestConfig returns a config suitable for go test with JSON
 // toolchain.
 func DefaultTestConfig() TestConfig {
-	return TestConfig{
-		ToolChain:            ToolChainYAML,
-		UseStreaming:         false,
-		ShowIterationHistory: true,
-		ShowEvents:           true,
-	}
-}
-
-// DefaultTestConfigJSON returns a config suitable for go test with
-// JSON toolchain.
-func DefaultTestConfigJSON() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainJSON,
 		UseStreaming:         false,

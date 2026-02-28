@@ -74,8 +74,22 @@ type Tool[I, TextOutput any] interface {
 	Name() string
 
 	// Description returns a human-readable description for the LLM.
-	// Keep it concise but informative - this appears in the tool catalog.
+	// This appears in the tool catalog. Keep it concise 1-2 sentences, state what the tool does
+	// and its purpose.
 	Description() string
+
+	// Policy returns optional usage policy instructions for the LLM.
+	// This provides dynamic steering on HOW the LLM should use the tool, separate from
+	// the tool's description (which describes WHAT the tool does).
+	//
+	// Examples:
+	//   - Privacy guardrails: "Only search using the exact email/phone from the current user"
+	//   - Rate limiting hints: "Prefer batching multiple IDs in one call"
+	//   - Safety rules: "Never use this tool without explicit user confirmation"
+	//
+	// When non-empty, the ToolChain includes this in the tool catalog prompt.
+	// Return empty string if no policy is needed.
+	Policy() string
 
 	// ParameterSchema returns the JSON Schema for the tool's parameters.
 	// The ToolChain uses this for:
@@ -157,6 +171,7 @@ type ToolResult[TextOutput any] struct {
 type ToolFunc[I, TextOutput any] struct {
 	name        string
 	description string
+	policy      string
 	schema      map[string]any
 	fn          func(ctx context.Context, input I) (TextOutput, error)
 }
@@ -184,6 +199,17 @@ func (t *ToolFunc[I, TextOutput]) Name() string {
 // Description returns a human-readable description for the LLM.
 func (t *ToolFunc[I, TextOutput]) Description() string {
 	return t.description
+}
+
+// Policy returns optional usage policy instructions for the LLM.
+func (t *ToolFunc[I, TextOutput]) Policy() string {
+	return t.policy
+}
+
+// WithPolicy sets the usage policy for this tool and returns self for chaining.
+func (t *ToolFunc[I, TextOutput]) WithPolicy(policy string) *ToolFunc[I, TextOutput] {
+	t.policy = policy
+	return t
 }
 
 // ParameterSchema returns the JSON Schema for the tool's parameters.

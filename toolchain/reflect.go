@@ -15,6 +15,7 @@ import (
 type ToolMeta struct {
 	name        string
 	description string
+	policy      string
 	schema      map[string]any
 	tool        any          // The actual tool (Tool[I, O])
 	inputType   reflect.Type // The input type I
@@ -25,6 +26,9 @@ func (m *ToolMeta) Name() string { return m.name }
 
 // Description returns the tool's description.
 func (m *ToolMeta) Description() string { return m.description }
+
+// Policy returns the tool's usage policy.
+func (m *ToolMeta) Policy() string { return m.policy }
 
 // Schema returns the tool's parameter schema.
 func (m *ToolMeta) Schema() map[string]any { return m.schema }
@@ -392,6 +396,13 @@ func GetToolMeta(tool any) (*ToolMeta, error) {
 	}
 	description := descMethod.Call(nil)[0].String()
 
+	// Get Policy
+	policyMethod := toolVal.MethodByName("Policy")
+	if !policyMethod.IsValid() {
+		return nil, errors.New("tool does not have Policy method")
+	}
+	policy := policyMethod.Call(nil)[0].String()
+
 	// Get ParameterSchema
 	schemaMethod := toolVal.MethodByName("ParameterSchema")
 	if !schemaMethod.IsValid() {
@@ -417,6 +428,7 @@ func GetToolMeta(tool any) (*ToolMeta, error) {
 	return &ToolMeta{
 		name:        name,
 		description: description,
+		policy:      policy,
 		schema:      schema,
 		tool:        tool,
 		inputType:   inputType,

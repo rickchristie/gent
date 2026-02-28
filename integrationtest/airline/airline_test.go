@@ -24,6 +24,7 @@ func TestRescheduleScenarioYAML(t *testing.T) {
 
 	ctx := context.Background()
 	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainYAML
 
 	if err := RunRescheduleScenario(
 		ctx, os.Stdout, config,
@@ -47,7 +48,7 @@ func TestRescheduleScenarioJSON(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	config := testutil.DefaultTestConfigJSON()
+	config := testutil.DefaultTestConfig()
 
 	if err := RunRescheduleScenario(
 		ctx, os.Stdout, config,

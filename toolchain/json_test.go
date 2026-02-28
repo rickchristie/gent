@@ -1387,6 +1387,177 @@ func TestJSON_AvailableToolsPrompt_MultipleTools(t *testing.T) {
 	}
 }
 
+func TestJSON_AvailableToolsPrompt_Policy(t *testing.T) {
+	type mockTool struct {
+		name        string
+		description string
+		policy      string
+		schema      map[string]any
+	}
+
+	type input struct {
+		tools []mockTool
+	}
+
+	type expected struct {
+		catalog string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "tool with policy renders policy line",
+			input: input{
+				tools: []mockTool{
+					{
+						name:        "search_tenant",
+						description: "Search tenant by phone or email.",
+						policy:      "Only search using the exact email/phone from the current user.",
+						schema: schema.Object(map[string]*schema.Property{
+							"query": schema.String("Search query"),
+						}, "query"),
+					},
+				},
+			},
+			expected: expected{
+				catalog: `Available tools:
+
+- search_tenant: Search tenant by phone or email.
+  Policy: Only search using the exact email/phone from the current user.
+  Parameters: {
+    "properties": {
+      "query": {
+        "description": "Search query",
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  }
+`,
+			},
+		},
+		{
+			name: "tool without policy omits policy line",
+			input: input{
+				tools: []mockTool{
+					{
+						name:        "search",
+						description: "Search the web",
+						policy:      "",
+						schema: schema.Object(map[string]*schema.Property{
+							"query": schema.String("Search query"),
+						}, "query"),
+					},
+				},
+			},
+			expected: expected{
+				catalog: `Available tools:
+
+- search: Search the web
+  Parameters: {
+    "properties": {
+      "query": {
+        "description": "Search query",
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  }
+`,
+			},
+		},
+		{
+			name: "mixed tools with and without policy",
+			input: input{
+				tools: []mockTool{
+					{
+						name:        "search_tenant",
+						description: "Search tenant by phone or email.",
+						policy:      "Only search using the exact email/phone from the current user.",
+						schema: schema.Object(map[string]*schema.Property{
+							"query": schema.String("Search query"),
+						}, "query"),
+					},
+					{
+						name:        "get_weather",
+						description: "Get current weather.",
+						policy:      "",
+						schema: schema.Object(map[string]*schema.Property{
+							"city": schema.String("City name"),
+						}, "city"),
+					},
+				},
+			},
+			expected: expected{
+				catalog: `Available tools:
+
+- search_tenant: Search tenant by phone or email.
+  Policy: Only search using the exact email/phone from the current user.
+  Parameters: {
+    "properties": {
+      "query": {
+        "description": "Search query",
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  }
+
+- get_weather: Get current weather.
+  Parameters: {
+    "properties": {
+      "city": {
+        "description": "City name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "city"
+    ],
+    "type": "object"
+  }
+`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			for _, mock := range tt.input.tools {
+				tool := gent.NewToolFunc(
+					mock.name,
+					mock.description,
+					mock.schema,
+					func(
+						ctx context.Context,
+						input map[string]any,
+					) (string, error) {
+						return "ok", nil
+					},
+				).WithPolicy(mock.policy)
+				tc.RegisterTool(tool)
+			}
+
+			catalog := tc.AvailableToolsPrompt()
+
+			assert.Equal(t, tt.expected.catalog, catalog)
+		})
+	}
+}
+
 func TestJSON_Guidance_FormatInstructions(t *testing.T) {
 	type expected struct {
 		guidance string
@@ -1813,6 +1984,7 @@ type instructionsTool struct {
 
 func (t *instructionsTool) Name() string                   { return t.name }
 func (t *instructionsTool) Description() string            { return t.description }
+func (t *instructionsTool) Policy() string                 { return "" }
 func (t *instructionsTool) ParameterSchema() map[string]any { return t.schema }
 func (t *instructionsTool) Call(
 	ctx context.Context,

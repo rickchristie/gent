@@ -20,6 +20,7 @@ func TestDoubleChargeScenarioYAML(t *testing.T) {
 
 	ctx := context.Background()
 	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainYAML
 
 	if err := RunDoubleChargeScenario(
 		ctx, os.Stdout, config,
@@ -41,7 +42,7 @@ func TestDoubleChargeScenarioJSON(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	config := testutil.DefaultTestConfigJSON()
+	config := testutil.DefaultTestConfig()
 
 	if err := RunDoubleChargeScenario(
 		ctx, os.Stdout, config,

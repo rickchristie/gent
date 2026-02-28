@@ -140,6 +140,11 @@ func (c *YAML) AvailableToolsPrompt() string {
 			continue
 		}
 		fmt.Fprintf(&sb, "\n- %s: %s\n", meta.Name(), meta.Description())
+		if policy := meta.Policy(); policy != "" {
+			sb.WriteString("  Policy: ")
+			sb.WriteString(policy)
+			sb.WriteString("\n")
+		}
 		if schema := meta.Schema(); schema != nil {
 			schemaYAML, err := yaml.Marshal(schema)
 			if err == nil {

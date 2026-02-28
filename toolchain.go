@@ -105,7 +105,7 @@ type ToolChain interface {
 
 	// RegisterTool adds a tool to the chain.
 	//
-	// The tool must implement Tool[I, TextOutput] for some types I and TextOutput.
+	// The tool must implement [Tool] as Tool[I, TextOutput] for some types I and TextOutput.
 	// The ToolChain uses reflection to discover and call the tool's methods.
 	//
 	// Panics if:

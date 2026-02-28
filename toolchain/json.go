@@ -113,6 +113,11 @@ func (c *JSON) AvailableToolsPrompt() string {
 			continue
 		}
 		fmt.Fprintf(&sb, "\n- %s: %s\n", meta.Name(), meta.Description())
+		if policy := meta.Policy(); policy != "" {
+			sb.WriteString("  Policy: ")
+			sb.WriteString(policy)
+			sb.WriteString("\n")
+		}
 		if schema := meta.Schema(); schema != nil {
 			schemaJSON, err := json.MarshalIndent(schema, "  ", "  ")
 			if err == nil {
