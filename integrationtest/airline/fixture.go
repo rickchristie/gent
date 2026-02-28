@@ -801,6 +801,138 @@ func (f *AirlineFixture) RegisterAllTools(tc gent.ToolChain) {
 	tc.RegisterTool(f.SendNotificationTool())
 }
 
+// RegisterAllToolsSearch registers all airline tools with
+// IndexableTool metadata for use with SearchJSON toolchain.
+func (f *AirlineFixture) RegisterAllToolsSearch(
+	tc gent.ToolChain,
+) {
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.GetCustomerInfoTool(),
+		"Customer",
+		[]string{"lookup", "customer"},
+		[]string{
+			"customer", "passenger", "profile",
+			"email", "frequent flyer",
+		},
+		[]string{
+			"find customer by email",
+			"look up passenger information",
+			"get customer profile",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.GetBookingInfoTool(),
+		"Booking",
+		[]string{"lookup", "booking"},
+		[]string{
+			"booking", "reservation", "itinerary",
+			"confirmation",
+		},
+		[]string{
+			"find booking details",
+			"look up reservation by ID",
+			"check booking status",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.GetFlightInfoTool(),
+		"Flight",
+		[]string{"lookup", "flight"},
+		[]string{
+			"flight", "departure", "arrival",
+			"status", "aircraft",
+		},
+		[]string{
+			"check flight status",
+			"get flight departure time",
+			"look up flight information",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.GetFlightSeatsInfoTool(),
+		"Flight",
+		[]string{"lookup", "seat"},
+		[]string{
+			"seat", "availability", "window",
+			"aisle", "legroom", "class",
+		},
+		[]string{
+			"check available seats",
+			"find window seat",
+			"seat availability on flight",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.SearchAirlinePolicyTool(),
+		"Policy & Guidance",
+		[]string{"lookup", "policy"},
+		[]string{
+			"policy", "rules", "terms",
+			"conditions", "guidelines",
+		},
+		[]string{
+			"what is the cancellation policy",
+			"check change fee rules",
+			"baggage allowance policy",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.SearchFlightScheduleTool(),
+		"Flight",
+		[]string{"search", "schedule"},
+		[]string{
+			"schedule", "availability", "route",
+			"date", "origin", "destination",
+		},
+		[]string{
+			"search for flights between airports",
+			"find available flights on date",
+			"flight schedule search",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.RescheduleBookingTool(),
+		"Booking",
+		[]string{"mutation", "reschedule"},
+		[]string{
+			"reschedule", "change", "modify",
+			"move", "rebook",
+		},
+		[]string{
+			"reschedule my flight",
+			"change booking to different flight",
+			"move reservation to later time",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.CancelBookingTool(),
+		"Booking",
+		[]string{"mutation", "cancel"},
+		[]string{
+			"cancel", "refund", "void",
+		},
+		[]string{
+			"cancel my booking",
+			"request booking cancellation",
+			"cancel flight reservation",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.SendNotificationTool(),
+		"Communication",
+		[]string{"notification", "communication"},
+		[]string{
+			"email", "sms", "notify", "message",
+			"send", "alert",
+		},
+		[]string{
+			"send email to customer",
+			"notify passenger about changes",
+			"send booking confirmation",
+		},
+	))
+}
+
 // TomorrowDate returns tomorrow's date in YYYY-MM-DD format.
 // Useful for tests that need to search for flights.
 func (f *AirlineFixture) TomorrowDate() string {

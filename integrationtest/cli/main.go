@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/rickchristie/gent/integrationtest/airline"
@@ -42,37 +43,13 @@ func main() {
 	}
 }
 
-type menuItem struct {
-	name        string
-	description string
-	run         func(
-		ctx context.Context,
-		w io.Writer,
-		config testutil.TestConfig,
-	) error
-	configFn func() testutil.TestConfig
-	isChat   bool
-	newChat  func(
-		w io.Writer,
-		config testutil.TestConfig,
-	) (*testutil.InteractiveChat, error)
-}
-
 func run() error {
-	// Create log directory and file
+	// Create log directory
 	logDir := ".logs"
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf(
 			"failed to create log directory: %w", err)
 	}
-
-	logFile, err := os.Create(
-		filepath.Join(logDir, "cli_integration.log"))
-	if err != nil {
-		return fmt.Errorf(
-			"failed to create log file: %w", err)
-	}
-	defer logFile.Close()
 
 	// Create readline instance for menu
 	rl, err := readline.New(
@@ -98,158 +75,86 @@ func run() error {
 		fmt.Fprintln(os.Stderr)
 	}
 
-	// Build menu items
-	var menuItems []menuItem
-
-	// Airline test cases
-	for _, tc := range airline.GetAirlineTestCases() {
-		menuItems = append(menuItems, menuItem{
-			name:        tc.Name,
-			description: tc.Description,
-			run:         tc.Run,
-			configFn:    testutil.InteractiveConfig,
-		})
-	}
-	for _, tc := range airline.GetAirlineTestCasesJSON() {
-		menuItems = append(menuItems, menuItem{
-			name:        tc.Name,
-			description: tc.Description,
-			run:         tc.Run,
-			configFn:    testutil.InteractiveConfigJSON,
-		})
-	}
-
-	// E-commerce test cases
-	for _, tc := range ecommerce.GetEcommerceTestCases() {
-		menuItems = append(menuItems, menuItem{
-			name:        tc.Name,
-			description: tc.Description,
-			run:         tc.Run,
-			configFn:    testutil.InteractiveConfig,
-		})
-	}
-	for _, tc := range ecommerce.GetEcommerceTestCasesJSON() {
-		menuItems = append(menuItems, menuItem{
-			name:        tc.Name,
-			description: tc.Description,
-			run:         tc.Run,
-			configFn:    testutil.InteractiveConfigJSON,
-		})
-	}
-
-	// Interactive chat options
-	menuItems = append(menuItems, menuItem{
-		name: "Airline Chat (YAML)",
-		description: "Chat with the airline agent " +
-			"using YAML toolchain",
-		configFn: testutil.InteractiveConfig,
-		isChat:   true,
-		newChat:  airline.NewAirlineInteractiveChat,
-	})
-	menuItems = append(menuItems, menuItem{
-		name: "Airline Chat (JSON)",
-		description: "Chat with the airline agent " +
-			"using JSON toolchain",
-		configFn: testutil.InteractiveConfigJSON,
-		isChat:   true,
-		newChat:  airline.NewAirlineInteractiveChat,
-	})
-	menuItems = append(menuItems, menuItem{
-		name: "E-commerce Chat (YAML)",
-		description: "Chat with the billing agent " +
-			"using YAML toolchain",
-		configFn: testutil.InteractiveConfig,
-		isChat:   true,
-		newChat:  ecommerce.NewEcommerceInteractiveChat,
-	})
-	menuItems = append(menuItems, menuItem{
-		name: "E-commerce Chat (JSON)",
-		description: "Chat with the billing agent " +
-			"using JSON toolchain",
-		configFn: testutil.InteractiveConfigJSON,
-		isChat:   true,
-		newChat:  ecommerce.NewEcommerceInteractiveChat,
-	})
-
-	// Print menu
-	fmt.Printf("%s%sAvailable Tests:%s\n",
-		colorBold, colorYellow, colorReset)
-	fmt.Printf("%s%s%s\n",
-		colorYellow,
-		strings.Repeat("=", 16),
-		colorReset)
-
-	// Group items by category
-	scenarioCount := 0
-	chatStart := 0
-	for i, item := range menuItems {
-		if item.isChat && chatStart == 0 {
-			chatStart = i
-		}
-		if !item.isChat {
-			scenarioCount++
-		}
-	}
-
-	// Print scenarios
-	for i := 0; i < scenarioCount; i++ {
-		item := menuItems[i]
-		fmt.Printf("  %s%d.%s %s%s%s - %s\n",
-			colorCyan, i+1, colorReset,
-			colorWhite, item.name, colorReset,
-			item.description)
-	}
-
-	// Print chat options
-	if chatStart > 0 {
-		fmt.Println()
-		fmt.Printf("%s%sInteractive Chat:%s\n",
-			colorBold, colorYellow, colorReset)
-		fmt.Printf("%s%s%s\n",
-			colorYellow,
-			strings.Repeat("-", 17),
-			colorReset)
-		for i := chatStart; i < len(menuItems); i++ {
-			item := menuItems[i]
-			fmt.Printf("  %s%d.%s %s%s%s - %s\n",
-				colorCyan, i+1, colorReset,
-				colorWhite, item.name, colorReset,
-				item.description)
-		}
-	}
-	fmt.Println()
-
 	for {
-		input, err := rl.Readline()
+		// Step 1: Scenario
+		scenario, err := promptMenu(rl,
+			"Test Scenario",
+			[]menuOption{
+				{label: "Airline", value: "airline"},
+				{label: "E-commerce", value: "ecommerce"},
+			},
+		)
+		if err != nil {
+			return handleMenuErr(err)
+		}
+
+		// Step 2: Mode
+		mode, err := promptMenu(rl,
+			"Mode",
+			[]menuOption{
+				{label: "One shot", value: "oneshot"},
+				{
+					label: "Interactive chat",
+					value: "chat",
+				},
+			},
+		)
+		if err != nil {
+			return handleMenuErr(err)
+		}
+
+		// Step 3: ToolChain
+		tcType, err := promptMenu(rl,
+			"ToolChain",
+			[]menuOption{
+				{label: "YAML", value: "yaml"},
+				{label: "JSON", value: "json"},
+				{
+					label: "ToolSearchToolChain",
+					value: "search",
+				},
+			},
+		)
+		if err != nil {
+			return handleMenuErr(err)
+		}
+
+		// Step 4: Compaction
+		compactionCfg, err := promptCompaction(rl)
 		if err != nil {
 			if err == readline.ErrInterrupt {
-				fmt.Printf(
-					"\n%sGoodbye!%s\n",
-					colorGreen, colorReset)
-				return nil
+				continue
 			}
-			return fmt.Errorf(
-				"failed to read input: %w", err)
+			return err
 		}
 
-		input = strings.TrimSpace(input)
-		if input == "q" || input == "Q" {
+		// Build config
+		config := buildConfig(tcType)
+		config.Compaction = compactionCfg
+
+		// Create per-run log file
+		logFileName := fmt.Sprintf(
+			"%s_%s_%s_%s.log",
+			time.Now().Format("20060102_150405"),
+			scenario, mode, tcType,
+		)
+		logPath := filepath.Join(
+			logDir, logFileName,
+		)
+		logFile, logErr := os.Create(logPath)
+		if logErr != nil {
+			fmt.Fprintf(os.Stderr,
+				"%sFailed to create log: %v%s\n",
+				colorRed, logErr, colorReset)
+		} else {
+			config.LogWriter = logFile
 			fmt.Printf(
-				"%sGoodbye!%s\n",
-				colorGreen, colorReset)
-			return nil
+				"%sLog file: %s%s\n",
+				colorDim, logPath, colorReset,
+			)
 		}
 
-		num, err := strconv.Atoi(input)
-		if err != nil || num < 1 ||
-			num > len(menuItems) {
-			fmt.Printf(
-				"%sInvalid selection. "+
-					"Please enter 1-%d.%s\n\n",
-				colorRed, len(menuItems), colorReset)
-			continue
-		}
-
+		// Run
 		ctx, cancel := context.WithCancel(
 			context.Background())
 
@@ -265,39 +170,18 @@ func run() error {
 			cancel()
 		}()
 
-		item := menuItems[num-1]
-		config := item.configFn()
-		config.LogWriter = logFile
-
-		// Prompt for compaction configuration
-		compactionCfg, err := promptCompaction(rl)
-		if err != nil {
-			signal.Stop(sigCh)
-			cancel()
-			if err == readline.ErrInterrupt {
-				continue
-			}
-			return err
+		runErr := execute(
+			ctx, scenario, mode, tcType,
+			config,
+		)
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr,
+				"%sError: %v%s\n",
+				colorRed, runErr, colorReset)
 		}
-		config.Compaction = compactionCfg
 
-		if item.isChat {
-			err = runInteractiveChat(
-				ctx, config, item.newChat)
-			if err != nil {
-				fmt.Fprintf(os.Stderr,
-					"%sError: %v%s\n",
-					colorRed, err, colorReset)
-			}
-		} else {
-			fmt.Printf("\n%sRunning test: %s%s\n",
-				colorGreen, item.name, colorReset)
-			err = item.run(ctx, os.Stdout, config)
-			if err != nil {
-				fmt.Fprintf(os.Stderr,
-					"%sError: %v%s\n",
-					colorRed, err, colorReset)
-			}
+		if logFile != nil {
+			logFile.Close()
 		}
 
 		signal.Stop(sigCh)
@@ -308,6 +192,172 @@ func run() error {
 			strings.Repeat("-", 60),
 			colorReset)
 	}
+}
+
+// menuOption represents a single menu choice.
+type menuOption struct {
+	label string
+	value string
+}
+
+// promptMenu displays a numbered menu and returns the
+// selected value. Returns readline.ErrInterrupt on Ctrl-C.
+func promptMenu(
+	rl *readline.Instance,
+	title string,
+	options []menuOption,
+) (string, error) {
+	fmt.Println()
+	fmt.Printf(
+		"%s%s%s:%s\n",
+		colorBold, colorYellow, title, colorReset)
+	fmt.Printf("%s%s%s\n",
+		colorYellow,
+		strings.Repeat("-", len(title)+1),
+		colorReset)
+	for i, opt := range options {
+		fmt.Printf("  %s%d.%s %s\n",
+			colorCyan, i+1, colorReset, opt.label)
+	}
+	fmt.Println()
+
+	for {
+		oldPrompt := rl.Config.Prompt
+		rl.SetPrompt(
+			colorCyan + "Select [1]: " + colorReset)
+		input, err := rl.Readline()
+		rl.SetPrompt(oldPrompt)
+		if err != nil {
+			return "", err
+		}
+
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return options[0].value, nil
+		}
+		if input == "q" || input == "Q" {
+			fmt.Printf(
+				"%sGoodbye!%s\n",
+				colorGreen, colorReset)
+			os.Exit(0)
+		}
+
+		num, err := strconv.Atoi(input)
+		if err != nil || num < 1 ||
+			num > len(options) {
+			fmt.Printf(
+				"%sInvalid. Enter 1-%d.%s\n",
+				colorRed, len(options), colorReset)
+			continue
+		}
+		return options[num-1].value, nil
+	}
+}
+
+// handleMenuErr handles errors from menu prompts.
+func handleMenuErr(err error) error {
+	if err == readline.ErrInterrupt {
+		fmt.Printf(
+			"\n%sGoodbye!%s\n",
+			colorGreen, colorReset)
+		return nil
+	}
+	return err
+}
+
+// buildConfig creates a TestConfig from the selected
+// toolchain type.
+func buildConfig(tcType string) testutil.TestConfig {
+	switch tcType {
+	case "yaml":
+		return testutil.InteractiveConfig()
+	case "json":
+		return testutil.InteractiveConfigJSON()
+	case "search":
+		return testutil.InteractiveConfigSearch()
+	default:
+		return testutil.InteractiveConfig()
+	}
+}
+
+// execute runs the selected scenario/mode combination.
+func execute(
+	ctx context.Context,
+	scenario, mode, tcType string,
+	config testutil.TestConfig,
+) error {
+	if mode == "chat" {
+		return runChat(ctx, scenario, tcType, config)
+	}
+	return runOneShot(ctx, scenario, tcType, config)
+}
+
+// runOneShot runs a one-shot test scenario.
+func runOneShot(
+	ctx context.Context,
+	scenario, tcType string,
+	config testutil.TestConfig,
+) error {
+	name := fmt.Sprintf(
+		"%s — One shot (%s)", scenario, tcType)
+	fmt.Printf("\n%sRunning: %s%s\n",
+		colorGreen, name, colorReset)
+
+	switch scenario {
+	case "airline":
+		if tcType == "search" {
+			return airline.RunRescheduleScenarioSearch(
+				ctx, os.Stdout, config,
+			)
+		}
+		return airline.RunRescheduleScenario(
+			ctx, os.Stdout, config,
+		)
+	case "ecommerce":
+		if tcType == "search" {
+			return ecommerce.RunDoubleChargeScenarioSearch(
+				ctx, os.Stdout, config,
+			)
+		}
+		return ecommerce.RunDoubleChargeScenario(
+			ctx, os.Stdout, config,
+		)
+	default:
+		return fmt.Errorf(
+			"unknown scenario: %s", scenario)
+	}
+}
+
+// runChat starts an interactive chat session.
+func runChat(
+	ctx context.Context,
+	scenario, tcType string,
+	config testutil.TestConfig,
+) error {
+	type chatFactory func(
+		io.Writer, testutil.TestConfig,
+	) (*testutil.InteractiveChat, error)
+
+	var newChat chatFactory
+	switch scenario {
+	case "airline":
+		if tcType == "search" {
+			newChat = airline.NewAirlineInteractiveChatSearch
+		} else {
+			newChat = airline.NewAirlineInteractiveChat
+		}
+	case "ecommerce":
+		if tcType == "search" {
+			newChat = ecommerce.NewEcommerceInteractiveChatSearch
+		} else {
+			newChat = ecommerce.NewEcommerceInteractiveChat
+		}
+	default:
+		return fmt.Errorf(
+			"unknown scenario: %s", scenario)
+	}
+
+	return runInteractiveChat(ctx, config, newChat)
 }
 
 // promptCompaction presents the compaction strategy selection
@@ -324,17 +374,17 @@ func promptCompaction(
 		strings.Repeat("-", 30),
 		colorReset)
 	fmt.Printf(
-		"  %s1.%s Sliding Window  - "+
+		"  %s1.%s None            - "+
+			"No context management (default)\n",
+		colorCyan, colorReset)
+	fmt.Printf(
+		"  %s2.%s Sliding Window  - "+
 			"Keep last N iterations, discard older\n",
 		colorCyan, colorReset)
 	fmt.Printf(
-		"  %s2.%s Summarization   - "+
+		"  %s3.%s Summarization   - "+
 			"Summarize older iterations into a "+
 			"synopsis\n",
-		colorCyan, colorReset)
-	fmt.Printf(
-		"  %s3.%s None            - "+
-			"No context management (default)\n",
 		colorCyan, colorReset)
 	fmt.Println()
 
@@ -342,7 +392,7 @@ func promptCompaction(
 		oldPrompt := rl.Config.Prompt
 		rl.SetPrompt(
 			colorCyan +
-				"Select strategy [3]: " +
+				"Select strategy [1]: " +
 				colorReset)
 		input, err := rl.Readline()
 		rl.SetPrompt(oldPrompt)
@@ -352,18 +402,18 @@ func promptCompaction(
 
 		input = strings.TrimSpace(input)
 		if input == "" {
-			input = "3"
+			input = "1"
 		}
 
 		switch input {
 		case "1":
-			return promptSlidingWindow(rl)
-		case "2":
-			return promptSummarization(rl)
-		case "3":
 			return testutil.CompactionConfig{
 				Type: testutil.CompactionNone,
 			}, nil
+		case "2":
+			return promptSlidingWindow(rl)
+		case "3":
+			return promptSummarization(rl)
 		default:
 			fmt.Printf(
 				"%sInvalid. Enter 1, 2, or 3.%s\n",

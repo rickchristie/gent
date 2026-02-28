@@ -58,3 +58,28 @@ func TestRescheduleScenarioJSON(t *testing.T) {
 		)
 	}
 }
+
+// TestRescheduleScenarioSearch tests the ReAct agent loop
+// handling a flight reschedule request using the SearchJSON
+// toolchain, where tools are discovered via search.
+func TestRescheduleScenarioSearch(t *testing.T) {
+	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
+		t.Skip(
+			"GENT_TEST_XAI_KEY not set, " +
+				"skipping integration test",
+		)
+	}
+
+	ctx := context.Background()
+	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainSearch
+
+	if err := RunRescheduleScenarioSearch(
+		ctx, os.Stdout, config,
+	); err != nil {
+		t.Fatalf(
+			"Reschedule scenario (Search) failed: %v",
+			err,
+		)
+	}
+}

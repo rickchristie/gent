@@ -43,6 +43,19 @@
       },
       "isBackground": false,
       "problemMatcher": []
+    },
+    {
+      "label": "Clean: Transient Files",
+      "type": "shell",
+      "command": "rm -rf .logs/ cli clistreamtest cliairlinetest && echo 'Cleaned transient files.'",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
     }
   ]
 }

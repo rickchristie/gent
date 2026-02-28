@@ -27,8 +27,9 @@ import (
 type ToolChainType string
 
 const (
-	ToolChainYAML ToolChainType = "yaml"
-	ToolChainJSON ToolChainType = "json"
+	ToolChainYAML   ToolChainType = "yaml"
+	ToolChainJSON   ToolChainType = "json"
+	ToolChainSearch ToolChainType = "search"
 )
 
 // CompactionType specifies the scratchpad context management strategy.
@@ -102,6 +103,17 @@ func InteractiveConfigJSON() TestConfig {
 	}
 }
 
+// InteractiveConfigSearch returns a config for interactive
+// CLI with streaming and SearchJSON toolchain.
+func InteractiveConfigSearch() TestConfig {
+	return TestConfig{
+		ToolChain:            ToolChainSearch,
+		UseStreaming:         true,
+		ShowIterationHistory: false,
+		ShowEvents:           false,
+	}
+}
+
 // TestCase represents a test that can be run.
 type TestCase struct {
 	Name        string
@@ -143,14 +155,34 @@ func CreateModel() (gent.StreamingModel, error) {
 		WithModelName("grok-4-1-fast"), nil
 }
 
-// CreateToolChain creates the appropriate toolchain based on config.
+// CreateToolChain creates the appropriate toolchain based
+// on config. For ToolChainSearch, returns a SearchJSON with
+// BM25 and Regex engines — caller must call Initialize()
+// after registering tools.
 func CreateToolChain(config TestConfig) gent.ToolChain {
 	switch config.ToolChain {
 	case ToolChainJSON:
 		return toolchain.NewJSON()
+	case ToolChainSearch:
+		return toolchain.NewSearchJSON().
+			RegisterEngine(
+				toolchain.NewBM25SearchEngine(),
+			).
+			RegisterEngine(
+				toolchain.NewRegexSearchEngine(),
+			)
 	default:
 		return toolchain.NewYAML()
 	}
+}
+
+// InitializeToolChain calls Initialize() on a SearchJSON
+// toolchain. No-op for other toolchain types.
+func InitializeToolChain(tc gent.ToolChain) error {
+	if stc, ok := tc.(*toolchain.SearchJSON); ok {
+		return stc.Initialize()
+	}
+	return nil
 }
 
 // ConfigureCompaction sets up compaction on the execution context
@@ -262,6 +294,11 @@ func RunScenario(
 
 	tc := CreateToolChain(testCfg)
 	scenario.RegisterTools(tc)
+	if err := InitializeToolChain(tc); err != nil {
+		return fmt.Errorf(
+			"failed to initialize toolchain: %w", err,
+		)
+	}
 
 	loop := react.NewAgent(model).
 		WithToolChain(tc).
@@ -724,6 +761,11 @@ func (s *InteractiveChat) SendMessage(
 
 	tc := CreateToolChain(s.Config)
 	s.ChatCfg.RegisterTools(tc)
+	if err := InitializeToolChain(tc); err != nil {
+		return fmt.Errorf(
+			"failed to initialize toolchain: %w", err,
+		)
+	}
 
 	loop := react.NewAgent(s.Model).
 		WithToolChain(tc).

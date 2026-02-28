@@ -725,3 +725,134 @@ func (f *EcommerceFixture) RegisterAllTools(
 	tc.RegisterTool(f.createCaseTool())
 	tc.RegisterTool(f.createCreditRequestTool())
 }
+
+// RegisterAllToolsSearch registers all e-commerce tools
+// with IndexableTool metadata for SearchJSON toolchain.
+func (f *EcommerceFixture) RegisterAllToolsSearch(
+	tc gent.ToolChain,
+) {
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.getCustomerInfoTool(),
+		"Customer",
+		[]string{"lookup", "customer"},
+		[]string{
+			"customer", "profile", "email",
+			"account",
+		},
+		[]string{
+			"find customer by email",
+			"look up customer information",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.getOrdersTool(),
+		"Orders",
+		[]string{"lookup", "orders"},
+		[]string{
+			"order", "purchase", "history",
+			"cursor", "pagination",
+		},
+		[]string{
+			"get customer orders",
+			"list order history",
+			"look up purchases",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.getOrderPaymentsTool(),
+		"Payments",
+		[]string{"lookup", "payment"},
+		[]string{
+			"payment", "charge", "transaction",
+			"billing",
+		},
+		[]string{
+			"get payments for an order",
+			"check payment status",
+			"look up charges on order",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.gatewayGetTxDetailTool(),
+		"Payments",
+		[]string{"lookup", "gateway"},
+		[]string{
+			"gateway", "transaction", "real-time",
+			"verify", "status",
+		},
+		[]string{
+			"verify transaction with gateway",
+			"check real-time payment status",
+			"get gateway transaction details",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.searchGuidancePolicyTool(),
+		"Policy & Guidance",
+		[]string{"lookup", "policy"},
+		[]string{
+			"policy", "guidance", "procedure",
+			"rules", "refund",
+		},
+		[]string{
+			"find company policy",
+			"search guidance procedures",
+			"look up refund policy",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.gatewayCancelTxTool(),
+		"Payments",
+		[]string{"mutation", "gateway"},
+		[]string{
+			"cancel", "void", "transaction",
+			"gateway",
+		},
+		[]string{
+			"cancel a payment transaction",
+			"void gateway transaction",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.processRefundTool(),
+		"Payments",
+		[]string{"mutation", "refund"},
+		[]string{
+			"refund", "return", "reimburse",
+			"credit",
+		},
+		[]string{
+			"process a refund",
+			"refund a payment",
+			"return money to customer",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.createCaseTool(),
+		"Support",
+		[]string{"mutation", "support"},
+		[]string{
+			"case", "ticket", "escalate",
+			"support", "issue",
+		},
+		[]string{
+			"create a support case",
+			"escalate issue to support",
+			"open a ticket",
+		},
+	))
+	tc.RegisterTool(testutil.NewIndexableToolFunc(
+		f.createCreditRequestTool(),
+		"Support",
+		[]string{"mutation", "credit"},
+		[]string{
+			"credit", "store credit", "compensation",
+			"account credit",
+		},
+		[]string{
+			"issue store credit",
+			"create credit request",
+			"compensate customer",
+		},
+	))
+}

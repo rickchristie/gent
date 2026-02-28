@@ -87,6 +87,81 @@ func GetAirlineTestCasesJSON() []testutil.TestCase {
 	}
 }
 
+// GetAirlineTestCasesSearch returns airline test cases for
+// SearchJSON toolchain.
+func GetAirlineTestCasesSearch() []testutil.TestCase {
+	return []testutil.TestCase{
+		{
+			Name: "John Smith — Reschedule (Search)",
+			Description: "John reschedules his morning " +
+				"JFK→LAX flight to evening " +
+				"(SearchJSON toolchain)",
+			Run: RunRescheduleScenarioSearch,
+		},
+	}
+}
+
+// RunRescheduleScenarioSearch runs the flight reschedule
+// scenario using SearchJSON toolchain.
+func RunRescheduleScenarioSearch(
+	ctx context.Context,
+	w io.Writer,
+	config testutil.TestConfig,
+) error {
+	fixture := NewAirlineFixture(nil)
+	tp := fixture.TimeProvider()
+
+	return testutil.RunScenario(
+		ctx, w, config,
+		testutil.ScenarioConfig{
+			Name: "airline-reschedule-search",
+			HeaderTitle: "AIRLINE RESCHEDULE SCENARIO " +
+				"(SearchJSON)",
+			CustomerRequest: `Hi, I'm John Smith and my ` +
+				`email is john.smith@email.com.
+I have a flight booked for tomorrow (flight AA100 ` +
+				`from JFK to LAX) but my meeting is ` +
+				`running late.
+Can you help me reschedule to a later flight on ` +
+				`the same day? I'd prefer an evening ` +
+				`flight if possible.`,
+			MaxIterations: 20,
+			RegisterTools: fixture.RegisterAllToolsSearch,
+			TimeProvider:  tp,
+			SystemPrompt: fmt.Sprintf(`## Task Description
+
+You are a helpful airline customer service agent `+
+				`for SkyWings Airlines.
+Your role is to assist customers with their flight `+
+				`bookings, including checking flight `+
+				`information, rescheduling flights, and `+
+				`answering policy questions.
+
+Today is %s (%s).
+
+Always be polite and professional. When rescheduling, `+
+				`make sure to:
+1. Verify the customer's identity and booking
+2. Check the airline's change policy
+3. Search for available alternative flights
+4. Inform the customer of any fees before making changes
+5. Confirm the change and provide updated booking details
+
+SkyWings is an international airline. Reply with `+
+				`customer's language.
+`, tp.Today(), tp.Weekday()),
+			CriticalRules: `DO NOT HALLUCINATE
+- Every claim in your answer MUST come from tool ` +
+				`outputs or user-provided information
+- NEVER invent specific data (IDs, prices, times, ` +
+				`availability)
+- If information is missing, say so explicitly`,
+			ThinkingPrompt: "Think step by step about " +
+				"how to help the customer.",
+		},
+	)
+}
+
 // NewAirlineInteractiveChat creates an interactive chat session
 // for the airline domain.
 func NewAirlineInteractiveChat(
@@ -131,4 +206,56 @@ SkyWings is an international airline. Reply with customer's `+
 		RegisterTools: fixture.RegisterAllTools,
 		TimeProvider:  tp,
 	})
+}
+
+// NewAirlineInteractiveChatSearch creates an interactive
+// chat session for the airline domain using SearchJSON
+// toolchain.
+func NewAirlineInteractiveChatSearch(
+	w io.Writer,
+	config testutil.TestConfig,
+) (*testutil.InteractiveChat, error) {
+	fixture := NewAirlineFixture(nil)
+	tp := fixture.TimeProvider()
+
+	return testutil.NewInteractiveChat(
+		w, config,
+		testutil.ChatConfig{
+			Name: "airline-search",
+			SystemPrompt: fmt.Sprintf(
+				`## Task Description
+
+You are a helpful airline customer service agent `+
+					`for SkyWings Airlines.
+Your role is to assist customers with their flight `+
+					`bookings, including checking flight `+
+					`information, rescheduling flights, `+
+					`and answering policy questions.
+
+Today is %s (%s).
+
+Always be polite and professional. When rescheduling, `+
+					`make sure to:
+1. Verify the customer's identity and booking
+2. Check the airline's change policy
+3. Search for available alternative flights
+4. Inform the customer of any fees before changes
+5. Confirm the change and provide updated details
+
+SkyWings is an international airline. Reply with `+
+					`customer's language.
+`, tp.Today(), tp.Weekday()),
+			CriticalRules: `DO NOT HALLUCINATE
+- Every claim in your answer MUST come from tool ` +
+				`outputs or user-provided information
+- NEVER invent specific data (IDs, prices, times, ` +
+				`availability)
+- If information is missing, say so explicitly`,
+			ThinkingPrompt: "Think step by step about " +
+				"how to help the customer.",
+			MaxIterations: 20,
+			RegisterTools: fixture.RegisterAllToolsSearch,
+			TimeProvider:  tp,
+		},
+	)
 }
