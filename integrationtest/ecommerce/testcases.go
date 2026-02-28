@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/rickchristie/gent/integrationtest/testutil"
+	"github.com/rickchristie/gent/toolchain"
 )
 
 // RunDoubleChargeScenario runs the double-charge investigation
@@ -63,6 +64,8 @@ Important: Our internal payment records may be `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant ` +
+				`policy/guidance BEFORE taking any action
 - Every claim MUST come from tool outputs or ` +
 				`user-provided information
 - NEVER invent data (IDs, amounts, statuses)
@@ -176,6 +179,8 @@ Important: Our internal payment records may be `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant ` +
+				`policy/guidance BEFORE taking any action
 - Every claim MUST come from tool outputs or ` +
 				`user-provided information
 - NEVER invent data (IDs, amounts, statuses)
@@ -186,6 +191,21 @@ Important: Our internal payment records may be `+
 				"how to investigate and resolve " +
 				"the customer's billing issue.",
 		},
+	)
+}
+
+// RunDoubleChargeScenarioSearchSimpleList runs the
+// double-charge scenario using SearchJSON with SimpleList
+// hint type.
+func RunDoubleChargeScenarioSearchSimpleList(
+	ctx context.Context,
+	w io.Writer,
+	config testutil.TestConfig,
+) error {
+	config.SearchHintType =
+		toolchain.SearchHintSimpleList
+	return RunDoubleChargeScenarioSearch(
+		ctx, w, config,
 	)
 }
 
@@ -230,6 +250,8 @@ Important: Our internal payment records may be `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant ` +
+				`policy/guidance BEFORE taking any action
 - Every claim MUST come from tool outputs or ` +
 				`user-provided information
 - NEVER invent data (IDs, amounts, statuses)
@@ -289,6 +311,8 @@ Important: Our internal payment records may be `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant ` +
+				`policy/guidance BEFORE taking any action
 - Every claim MUST come from tool outputs or ` +
 				`user-provided information
 - NEVER invent data (IDs, amounts, statuses)

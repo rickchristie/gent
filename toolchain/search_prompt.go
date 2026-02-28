@@ -114,34 +114,55 @@ const searchToolName = "tool_registry_search"
 // buildSearchToolPrompt builds the full prompt for the
 // built-in "Tool Registry Search" tool. It follows the same
 // format as JSON.AvailableToolsPrompt().
+//
+// When hintType is SearchHintSimpleList, the prompt lists all
+// tool names. When SearchHintDomainCategories, it shows
+// domain/category summaries with tool counts.
 func buildSearchToolPrompt(
 	tools []gent.IndexableTool,
 	engines []gent.SearchEngine,
 	schemaMap map[string]any,
+	hintType SearchHintType,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("Available tools:\n")
-	sb.WriteString(
-		fmt.Sprintf(
-			"\n- %s: Search the tool registry "+
-				"to discover available tools. "+
-				"There are %d tools across the "+
-				"following domains:\n",
-			searchToolName,
-			len(tools),
-		),
-	)
 
-	// Domain summary
-	domainSummary := buildDomainSummary(tools)
-	if domainSummary != "" {
-		sb.WriteString("  Domains:\n")
-		for _, line := range strings.Split(
-			strings.TrimRight(domainSummary, "\n"), "\n",
-		) {
-			sb.WriteString("  ")
-			sb.WriteString(line)
-			sb.WriteString("\n")
+	if hintType == SearchHintSimpleList {
+		sb.WriteString(
+			fmt.Sprintf(
+				"\n- %s: Search the tool registry "+
+					"to discover available tools. "+
+					"There are %d tools:\n",
+				searchToolName,
+				len(tools),
+			),
+		)
+		sb.WriteString(buildSimpleList(tools))
+	} else {
+		sb.WriteString(
+			fmt.Sprintf(
+				"\n- %s: Search the tool registry "+
+					"to discover available tools. "+
+					"There are %d tools across the "+
+					"following domains:\n",
+				searchToolName,
+				len(tools),
+			),
+		)
+
+		// Domain summary
+		domainSummary := buildDomainSummary(tools)
+		if domainSummary != "" {
+			sb.WriteString("  Domains:\n")
+			for _, line := range strings.Split(
+				strings.TrimRight(
+					domainSummary, "\n",
+				), "\n",
+			) {
+				sb.WriteString("  ")
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
 		}
 	}
 
@@ -166,6 +187,23 @@ func buildSearchToolPrompt(
 		sb.WriteString("\n")
 	}
 
+	return sb.String()
+}
+
+// buildSimpleList generates a flat indented list of tool
+// names from the registered IndexableTool slice.
+//
+// Output format:
+//
+//	  - search_customer
+//	  - get_policy
+func buildSimpleList(
+	tools []gent.IndexableTool,
+) string {
+	var sb strings.Builder
+	for _, tool := range tools {
+		fmt.Fprintf(&sb, "  - %s\n", tool.Name())
+	}
 	return sb.String()
 }
 

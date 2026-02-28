@@ -13,6 +13,21 @@ import (
 	"github.com/rickchristie/gent/schema"
 )
 
+// SearchHintType controls how the tool registry summary
+// is presented in the system prompt.
+type SearchHintType int
+
+const (
+	// SearchHintDomainCategories shows domain/category
+	// summaries with tool counts. Best for large tool sets.
+	// This is the default (zero value).
+	SearchHintDomainCategories SearchHintType = iota
+
+	// SearchHintSimpleList shows a flat list of all tool
+	// names. Best for small tool sets (<20 tools).
+	SearchHintSimpleList
+)
+
 // SearchJSON implements [gent.ToolChain] for dynamic tool
 // discovery. Instead of showing all tools upfront, it exposes
 // a single "Tool Registry Search" tool that the LLM uses to
@@ -24,7 +39,9 @@ import (
 //
 // # Creating and Configuring
 //
-//	tc := toolchain.NewSearchJSON().
+//	tc := toolchain.NewSearchJSON(
+//	    toolchain.SearchHintDomainCategories,
+//	).
 //	    WithPageSize(5).
 //	    RegisterEngine(toolchain.NewBM25SearchEngine()).
 //	    RegisterEngine(toolchain.NewRegexSearchEngine())
@@ -69,6 +86,7 @@ type SearchJSON struct {
 	engineMap map[string]gent.SearchEngine
 
 	// Config
+	hintType         SearchHintType
 	pageSize         int
 	noResultsMessage string
 
@@ -80,10 +98,13 @@ type SearchJSON struct {
 }
 
 // NewSearchJSON creates a new SearchJSON toolchain with
-// default settings.
-func NewSearchJSON() *SearchJSON {
+// the given hint type and default settings.
+func NewSearchJSON(
+	hintType SearchHintType,
+) *SearchJSON {
 	return &SearchJSON{
 		sectionName: "action",
+		hintType:    hintType,
 		tools:       make([]any, 0),
 		toolMap:     make(map[string]any),
 		schemaMap:   make(map[string]*schema.Schema),
@@ -250,6 +271,7 @@ func (c *SearchJSON) Initialize() error {
 		c.indexableTools,
 		c.engines,
 		c.searchToolSchema,
+		c.hintType,
 	)
 
 	c.initialized = true

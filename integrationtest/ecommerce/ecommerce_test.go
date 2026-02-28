@@ -164,6 +164,34 @@ func TestDoubleChargeSearchSummarization(t *testing.T) {
 	}
 }
 
+// TestDoubleChargeScenarioSearchSimpleList tests the
+// double-charge scenario with SearchJSON using SimpleList
+// hint type.
+func TestDoubleChargeScenarioSearchSimpleList(
+	t *testing.T,
+) {
+	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
+		t.Skip(
+			"GENT_TEST_XAI_KEY not set, " +
+				"skipping integration test",
+		)
+	}
+
+	ctx := context.Background()
+	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainSearch
+
+	if err := RunDoubleChargeScenarioSearchSimpleList(
+		ctx, os.Stdout, config,
+	); err != nil {
+		t.Fatalf(
+			"Double charge "+
+				"(Search SimpleList) failed: %v",
+			err,
+		)
+	}
+}
+
 // TestDoubleChargeSearchSlidingWindow tests the double-charge
 // scenario with SearchJSON toolchain and sliding window
 // compaction (trigger=5, window=3).

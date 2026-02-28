@@ -18,6 +18,7 @@ import (
 	"github.com/rickchristie/gent/integrationtest/airline"
 	"github.com/rickchristie/gent/integrationtest/ecommerce"
 	"github.com/rickchristie/gent/integrationtest/testutil"
+	"github.com/rickchristie/gent/toolchain"
 )
 
 // ANSI color codes
@@ -119,6 +120,28 @@ func run() error {
 			return handleMenuErr(err)
 		}
 
+		// Step 3b: Search hint type (only for search)
+		var hintType string
+		if tcType == "search" {
+			hintType, err = promptMenu(rl,
+				"Tool Summary Style",
+				[]menuOption{
+					{
+						label: "Simple list " +
+							"(all tool names)",
+						value: "simple",
+					},
+					{
+						label: "Domain categories",
+						value: "domain",
+					},
+				},
+			)
+			if err != nil {
+				return handleMenuErr(err)
+			}
+		}
+
 		// Step 4: Compaction
 		compactionCfg, err := promptCompaction(rl)
 		if err != nil {
@@ -129,7 +152,7 @@ func run() error {
 		}
 
 		// Build config
-		config := buildConfig(tcType)
+		config := buildConfig(tcType, hintType)
 		config.Compaction = compactionCfg
 
 		// Create per-run log file
@@ -266,18 +289,27 @@ func handleMenuErr(err error) error {
 }
 
 // buildConfig creates a TestConfig from the selected
-// toolchain type.
-func buildConfig(tcType string) testutil.TestConfig {
+// toolchain type and hint type.
+func buildConfig(
+	tcType, hintType string,
+) testutil.TestConfig {
+	var config testutil.TestConfig
 	switch tcType {
 	case "yaml":
-		return testutil.InteractiveConfig()
+		config = testutil.InteractiveConfig()
 	case "json":
-		return testutil.InteractiveConfigJSON()
+		config = testutil.InteractiveConfigJSON()
 	case "search":
-		return testutil.InteractiveConfigSearch()
+		config = testutil.InteractiveConfigSearch()
 	default:
-		return testutil.InteractiveConfig()
+		config = testutil.InteractiveConfig()
 	}
+
+	if hintType == "simple" {
+		config.SearchHintType =
+			toolchain.SearchHintSimpleList
+	}
+	return config
 }
 
 // execute runs the selected scenario/mode combination.

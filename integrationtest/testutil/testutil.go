@@ -58,6 +58,10 @@ type CompactionConfig struct {
 type TestConfig struct {
 	// ToolChain specifies which toolchain format to use.
 	ToolChain ToolChainType
+	// SearchHintType controls how the tool summary is
+	// shown in SearchJSON prompts. Only used when
+	// ToolChain is ToolChainSearch.
+	SearchHintType toolchain.SearchHintType
 	// UseStreaming enables streaming mode for LLM calls.
 	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
@@ -164,7 +168,9 @@ func CreateToolChain(config TestConfig) gent.ToolChain {
 	case ToolChainJSON:
 		return toolchain.NewJSON()
 	case ToolChainSearch:
-		return toolchain.NewSearchJSON().
+		return toolchain.NewSearchJSON(
+			config.SearchHintType,
+		).
 			RegisterEngine(
 				toolchain.NewBM25SearchEngine(),
 			).

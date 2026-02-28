@@ -45,11 +45,24 @@ func TestRegex_Id(t *testing.T) {
 }
 
 func TestRegex_SearchGuidance(t *testing.T) {
-	engine := NewRegexSearchEngine()
-	guidance := engine.SearchGuidance()
-	assert.NotEmpty(t, guidance)
-	assert.Contains(t, guidance, "regex")
-	assert.Contains(t, guidance, "order.*status")
+	t.Run("default", func(t *testing.T) {
+		engine := NewRegexSearchEngine()
+		guidance := engine.SearchGuidance()
+		assert.NotEmpty(t, guidance)
+		assert.Contains(t, guidance, "regex")
+		assert.Contains(
+			t, guidance, "order.*status",
+		)
+	})
+
+	t.Run("custom", func(t *testing.T) {
+		engine := NewRegexSearchEngine().
+			WithSearchGuidance("custom regex tips")
+		assert.Equal(
+			t, "custom regex tips",
+			engine.SearchGuidance(),
+		)
+	})
 }
 
 func TestRegex_IndexAll(t *testing.T) {

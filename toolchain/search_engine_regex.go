@@ -19,7 +19,8 @@ import (
 // Invalid regex patterns return a descriptive error that is
 // surfaced to the LLM so it can fix the query.
 type RegexSearchEngine struct {
-	tools []regexToolEntry
+	tools          []regexToolEntry
+	searchGuidance string
 }
 
 type regexToolEntry struct {
@@ -27,9 +28,25 @@ type regexToolEntry struct {
 	texts []string // all searchable texts for this tool
 }
 
+const defaultRegexGuidance = "Use regex patterns to " +
+	"search tool names, descriptions, keywords, and " +
+	"categories. Patterns are case-insensitive. " +
+	"Examples: \"order.*status\", \"email|sms\", " +
+	"\"^lookup\""
+
 // NewRegexSearchEngine creates a new regex-based search engine.
 func NewRegexSearchEngine() *RegexSearchEngine {
-	return &RegexSearchEngine{}
+	return &RegexSearchEngine{
+		searchGuidance: defaultRegexGuidance,
+	}
+}
+
+// WithSearchGuidance sets custom search guidance text.
+func (e *RegexSearchEngine) WithSearchGuidance(
+	guidance string,
+) *RegexSearchEngine {
+	e.searchGuidance = guidance
+	return e
 }
 
 // Id returns "regex".
@@ -37,13 +54,10 @@ func (e *RegexSearchEngine) Id() string {
 	return "regex"
 }
 
-// SearchGuidance returns instructions for writing regex queries.
+// SearchGuidance returns instructions for writing regex
+// queries. Override with WithSearchGuidance.
 func (e *RegexSearchEngine) SearchGuidance() string {
-	return "Use regex patterns to search tool names, " +
-		"descriptions, keywords, and categories. " +
-		"Patterns are case-insensitive. " +
-		"Examples: \"order.*status\", \"email|sms\", " +
-		"\"^lookup\""
+	return e.searchGuidance
 }
 
 // IndexAll indexes all provided tools for regex searching.

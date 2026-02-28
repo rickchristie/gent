@@ -19,7 +19,8 @@ import (
 //   - Medium (2.0): keywords, categories
 //   - Lower (1.0): domain, synthetic_queries
 type BM25SearchEngine struct {
-	index bleve.Index
+	index           bleve.Index
+	searchGuidance string
 }
 
 // bleveToolDoc is the document structure indexed by Bleve.
@@ -32,9 +33,26 @@ type bleveToolDoc struct {
 	SyntheticQueries string `json:"synthetic_queries"`
 }
 
+const defaultBM25Guidance = "Use natural language " +
+	"queries for full-text search across tool names, " +
+	"descriptions, keywords, and categories. " +
+	"Examples: \"order status\", " +
+	"\"send notification to customer\", " +
+	"\"billing payment\""
+
 // NewBM25SearchEngine creates a new BM25-based search engine.
 func NewBM25SearchEngine() *BM25SearchEngine {
-	return &BM25SearchEngine{}
+	return &BM25SearchEngine{
+		searchGuidance: defaultBM25Guidance,
+	}
+}
+
+// WithSearchGuidance sets custom search guidance text.
+func (e *BM25SearchEngine) WithSearchGuidance(
+	guidance string,
+) *BM25SearchEngine {
+	e.searchGuidance = guidance
+	return e
 }
 
 // Id returns "bm25".
@@ -42,14 +60,10 @@ func (e *BM25SearchEngine) Id() string {
 	return "bm25"
 }
 
-// SearchGuidance returns instructions for writing BM25 queries.
+// SearchGuidance returns instructions for writing BM25
+// queries. Override with WithSearchGuidance.
 func (e *BM25SearchEngine) SearchGuidance() string {
-	return "Use natural language queries for full-text " +
-		"search across tool names, descriptions, " +
-		"keywords, and categories. " +
-		"Examples: \"order status\", " +
-		"\"send notification to customer\", " +
-		"\"billing payment\""
+	return e.searchGuidance
 }
 
 // IndexAll indexes all provided tools. Closes any existing

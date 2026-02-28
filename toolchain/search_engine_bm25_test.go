@@ -15,10 +15,23 @@ func TestBM25_Id(t *testing.T) {
 }
 
 func TestBM25_SearchGuidance(t *testing.T) {
-	engine := NewBM25SearchEngine()
-	guidance := engine.SearchGuidance()
-	assert.NotEmpty(t, guidance)
-	assert.Contains(t, guidance, "natural language")
+	t.Run("default", func(t *testing.T) {
+		engine := NewBM25SearchEngine()
+		guidance := engine.SearchGuidance()
+		assert.NotEmpty(t, guidance)
+		assert.Contains(
+			t, guidance, "natural language",
+		)
+	})
+
+	t.Run("custom", func(t *testing.T) {
+		engine := NewBM25SearchEngine().
+			WithSearchGuidance("custom guidance")
+		assert.Equal(
+			t, "custom guidance",
+			engine.SearchGuidance(),
+		)
+	})
 }
 
 func TestBM25_IndexAll(t *testing.T) {

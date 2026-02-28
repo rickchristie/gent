@@ -121,7 +121,7 @@ func setupSearchJSON(
 	tools []*indexableToolFunc,
 	engines []gent.SearchEngine,
 ) *SearchJSON {
-	tc := NewSearchJSON()
+	tc := NewSearchJSON(SearchHintDomainCategories)
 	for _, eng := range engines {
 		tc.RegisterEngine(eng)
 	}
@@ -166,7 +166,7 @@ func TestSearchJSON_Name(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			if tt.input.customName != "" {
 				tc.WithSectionName(tt.input.customName)
 			}
@@ -176,7 +176,7 @@ func TestSearchJSON_Name(t *testing.T) {
 }
 
 func TestSearchJSON_Guidance(t *testing.T) {
-	tc := NewSearchJSON()
+	tc := NewSearchJSON(SearchHintDomainCategories)
 	guidance := tc.Guidance()
 
 	expectedGuidance := `Call tools using JSON format:
@@ -203,7 +203,7 @@ func TestSearchJSON_Config(t *testing.T) {
 		{
 			name: "default page size",
 			setup: func() *SearchJSON {
-				return NewSearchJSON()
+				return NewSearchJSON(SearchHintDomainCategories)
 			},
 			expected: expected{
 				pageSize: 3,
@@ -216,7 +216,7 @@ func TestSearchJSON_Config(t *testing.T) {
 		{
 			name: "custom page size",
 			setup: func() *SearchJSON {
-				return NewSearchJSON().WithPageSize(5)
+				return NewSearchJSON(SearchHintDomainCategories).WithPageSize(5)
 			},
 			expected: expected{
 				pageSize:         5,
@@ -226,7 +226,7 @@ func TestSearchJSON_Config(t *testing.T) {
 		{
 			name: "custom no-results message",
 			setup: func() *SearchJSON {
-				return NewSearchJSON().
+				return NewSearchJSON(SearchHintDomainCategories).
 					WithNoResultsMessage("Nothing found")
 			},
 			expected: expected{
@@ -257,7 +257,7 @@ func TestSearchJSON_Config(t *testing.T) {
 
 func TestSearchJSON_RegisterTool(t *testing.T) {
 	t.Run("valid indexable tool succeeds", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		tool := newIndexableTool(
 			"test", "Test tool", "General",
 			nil, nil,
@@ -272,7 +272,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 	})
 
 	t.Run("panics on non-IndexableTool", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		tool := gent.NewToolFunc(
 			"test", "Test tool", nil,
 			func(_ context.Context, _ map[string]any) (string, error) {
@@ -285,14 +285,14 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 	})
 
 	t.Run("panics on invalid type", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		assert.Panics(t, func() {
 			tc.RegisterTool("not a tool")
 		})
 	})
 
 	t.Run("panics on duplicate name", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		tool1 := newIndexableTool(
 			"test", "Tool 1", "General",
 			nil, nil,
@@ -314,7 +314,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 	})
 
 	t.Run("method chaining works", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		tool1 := newIndexableTool(
 			"tool1", "Tool 1", "A",
 			nil, nil,
@@ -339,7 +339,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 
 	t.Run("multiple tools registered correctly",
 		func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			for i := range 5 {
 				name := fmt.Sprintf("tool_%d", i)
 				tool := newIndexableTool(
@@ -364,7 +364,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 
 func TestSearchJSON_Initialize(t *testing.T) {
 	t.Run("success with one engine", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		engine := &mockSearchEngine{
 			id:       "mock",
 			guidance: "mock guidance",
@@ -388,7 +388,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 	t.Run("success with multiple engines",
 		func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			eng1 := &mockSearchEngine{
 				id: "eng1", guidance: "g1",
 			}
@@ -414,7 +414,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	)
 
 	t.Run("error when no engines", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		tool := newIndexableTool(
 			"test", "Test", "General",
 			nil, nil,
@@ -433,7 +433,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 	t.Run("error when engine IndexAll fails",
 		func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			engine := &mockSearchEngine{
 				id:       "failing",
 				guidance: "g",
@@ -456,7 +456,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	)
 
 	t.Run("re-initialize updates state", func(t *testing.T) {
-		tc := NewSearchJSON()
+		tc := NewSearchJSON(SearchHintDomainCategories)
 		engine := &mockSearchEngine{
 			id:       "mock",
 			guidance: "guide",
@@ -485,7 +485,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 	t.Run("domain summary with categories and counts",
 		func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			engine := &mockSearchEngine{
 				id: "mock", guidance: "g",
 			}
@@ -619,6 +619,110 @@ func TestSearchJSON_AvailableToolsPrompt(t *testing.T) {
 	)
 }
 
+func TestSearchJSON_AvailableToolsPrompt_SimpleList(
+	t *testing.T,
+) {
+	tools := []*indexableToolFunc{
+		newIndexableTool(
+			"search_customer", "Search customer",
+			"Customer",
+			[]string{"lookup"}, nil,
+			func(
+				_ context.Context,
+				_ map[string]any,
+			) (string, error) {
+				return "ok", nil
+			},
+		),
+		newIndexableTool(
+			"get_policy", "Get policy",
+			"Policy",
+			[]string{"lookup"}, nil,
+			func(
+				_ context.Context,
+				_ map[string]any,
+			) (string, error) {
+				return "ok", nil
+			},
+		),
+		newIndexableTool(
+			"send_email", "Send email",
+			"Communication",
+			[]string{"email"}, nil,
+			func(
+				_ context.Context,
+				_ map[string]any,
+			) (string, error) {
+				return "ok", nil
+			},
+		),
+	}
+
+	eng := &mockSearchEngine{
+		id: "bm25", guidance: "natural language",
+	}
+
+	tc := NewSearchJSON(SearchHintSimpleList)
+	tc.RegisterEngine(eng)
+	for _, tool := range tools {
+		tc.RegisterTool(tool)
+	}
+	err := tc.Initialize()
+	require.NoError(t, err)
+
+	prompt := tc.AvailableToolsPrompt()
+
+	t.Run("lists all tool names",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, "  - search_customer\n",
+			)
+			assert.Contains(
+				t, prompt, "  - get_policy\n",
+			)
+			assert.Contains(
+				t, prompt, "  - send_email\n",
+			)
+		},
+	)
+
+	t.Run("does not contain domain summary",
+		func(t *testing.T) {
+			assert.NotContains(
+				t, prompt, "Domains:",
+			)
+			assert.NotContains(
+				t, prompt, "Customer (lookup)",
+			)
+		},
+	)
+
+	t.Run("includes correct total tool count",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, "3 tools:",
+			)
+		},
+	)
+
+	t.Run("includes search tool name",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, "tool_registry_search",
+			)
+		},
+	)
+
+	t.Run("includes engine guidance",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt,
+				"bm25: natural language",
+			)
+		},
+	)
+}
+
 // -------------------------------------------------------
 // ParseSection Tests
 // -------------------------------------------------------
@@ -700,7 +804,7 @@ func TestSearchJSON_ParseSection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			result, err := tc.ParseSection(
 				nil, tt.input.content,
 			)
@@ -726,7 +830,7 @@ func TestSearchJSON_ParseSection(t *testing.T) {
 func TestSearchJSON_ParseSection_Events(t *testing.T) {
 	t.Run("parse error publishes event",
 		func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			execCtx := newExecCtx()
 
 			_, err := tc.ParseSection(
@@ -748,7 +852,7 @@ func TestSearchJSON_ParseSection_Events(t *testing.T) {
 
 	t.Run("successful parse resets consecutive gauge",
 		func(t *testing.T) {
-			tc := NewSearchJSON()
+			tc := NewSearchJSON(SearchHintDomainCategories)
 			execCtx := newExecCtx()
 
 			// First: cause an error
@@ -977,7 +1081,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 					)
 				},
 			}
-			tcErr := NewSearchJSON().
+			tcErr := NewSearchJSON(SearchHintDomainCategories).
 				RegisterEngine(errEng)
 			tool := newIndexableTool(
 				"t1", "d", "D", nil, nil, okFn,
@@ -1158,7 +1262,7 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			eng := &mockSearchEngine{
 				id: "m", guidance: "g",
 			}
-			tc := NewSearchJSON().RegisterEngine(eng)
+			tc := NewSearchJSON(SearchHintDomainCategories).RegisterEngine(eng)
 			tc.RegisterTool(instructionTool)
 			require.NoError(t, tc.Initialize())
 

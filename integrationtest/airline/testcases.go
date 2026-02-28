@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/rickchristie/gent/integrationtest/testutil"
+	"github.com/rickchristie/gent/toolchain"
 )
 
 // RunRescheduleScenario runs the flight reschedule scenario.
@@ -51,6 +52,8 @@ SkyWings is an international airline. Reply with customer's `+
 			`language.
 `, tp.Today(), tp.Weekday()),
 		CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant policy/guidance ` +
+			`BEFORE taking any action
 - Every claim in your answer MUST come from tool outputs ` +
 			`or user-provided information
 - NEVER invent specific data (IDs, prices, times, ` +
@@ -151,6 +154,8 @@ SkyWings is an international airline. Reply with `+
 				`customer's language.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant ` +
+				`policy/guidance BEFORE taking any action
 - Every claim in your answer MUST come from tool ` +
 				`outputs or user-provided information
 - NEVER invent specific data (IDs, prices, times, ` +
@@ -159,6 +164,21 @@ SkyWings is an international airline. Reply with `+
 			ThinkingPrompt: "Think step by step about " +
 				"how to help the customer.",
 		},
+	)
+}
+
+// RunRescheduleScenarioSearchSimpleList runs the flight
+// reschedule scenario using SearchJSON with SimpleList
+// hint type.
+func RunRescheduleScenarioSearchSimpleList(
+	ctx context.Context,
+	w io.Writer,
+	config testutil.TestConfig,
+) error {
+	config.SearchHintType =
+		toolchain.SearchHintSimpleList
+	return RunRescheduleScenarioSearch(
+		ctx, w, config,
 	)
 }
 
@@ -195,6 +215,8 @@ SkyWings is an international airline. Reply with customer's `+
 			`language.
 `, tp.Today(), tp.Weekday()),
 		CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant policy/guidance ` +
+			`BEFORE taking any action
 - Every claim in your answer MUST come from tool outputs ` +
 			`or user-provided information
 - NEVER invent specific data (IDs, prices, times, ` +
@@ -246,6 +268,8 @@ SkyWings is an international airline. Reply with `+
 					`customer's language.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant ` +
+				`policy/guidance BEFORE taking any action
 - Every claim in your answer MUST come from tool ` +
 				`outputs or user-provided information
 - NEVER invent specific data (IDs, prices, times, ` +

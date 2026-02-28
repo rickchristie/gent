@@ -83,3 +83,30 @@ func TestRescheduleScenarioSearch(t *testing.T) {
 		)
 	}
 }
+
+// TestRescheduleScenarioSearchSimpleList tests the
+// SearchJSON toolchain with SimpleList hint type.
+func TestRescheduleScenarioSearchSimpleList(
+	t *testing.T,
+) {
+	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
+		t.Skip(
+			"GENT_TEST_XAI_KEY not set, " +
+				"skipping integration test",
+		)
+	}
+
+	ctx := context.Background()
+	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainSearch
+
+	if err := RunRescheduleScenarioSearchSimpleList(
+		ctx, os.Stdout, config,
+	); err != nil {
+		t.Fatalf(
+			"Reschedule scenario "+
+				"(Search SimpleList) failed: %v",
+			err,
+		)
+	}
+}

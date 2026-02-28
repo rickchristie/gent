@@ -538,7 +538,11 @@ func (f *EcommerceFixture) searchGuidancePolicyTool() *gent.ToolFunc[
 			}
 			if len(results) == 0 {
 				return nil, fmt.Errorf(
-					"no policies found matching: %s",
+					"no policies found matching: "+
+						"'%s'. Policy search is "+
+						"simple word match "+
+						"(contains), single word "+
+						"search is better",
 					input.Keyword,
 				)
 			}
