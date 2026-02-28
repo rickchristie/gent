@@ -125,46 +125,33 @@ func buildSearchToolPrompt(
 	hintType SearchHintType,
 ) string {
 	var sb strings.Builder
-	sb.WriteString("Available tools:\n")
 
+	// Tool count + hint (domain summary or simple list)
 	if hintType == SearchHintSimpleList {
-		sb.WriteString(
-			fmt.Sprintf(
-				"\n- %s: Search the tool registry "+
-					"to discover available tools. "+
-					"There are %d tools:\n",
-				searchToolName,
-				len(tools),
-			),
+		fmt.Fprintf(
+			&sb, "There are %d tools:\n",
+			len(tools),
 		)
 		sb.WriteString(buildSimpleList(tools))
 	} else {
-		sb.WriteString(
-			fmt.Sprintf(
-				"\n- %s: Search the tool registry "+
-					"to discover available tools. "+
-					"There are %d tools across the "+
-					"following domains:\n",
-				searchToolName,
-				len(tools),
-			),
+		fmt.Fprintf(
+			&sb,
+			"There are %d tools across the "+
+				"following domains:\n",
+			len(tools),
 		)
-
-		// Domain summary
 		domainSummary := buildDomainSummary(tools)
 		if domainSummary != "" {
-			sb.WriteString("  Domains:\n")
-			for _, line := range strings.Split(
-				strings.TrimRight(
-					domainSummary, "\n",
-				), "\n",
-			) {
-				sb.WriteString("  ")
-				sb.WriteString(line)
-				sb.WriteString("\n")
-			}
+			sb.WriteString(domainSummary)
 		}
 	}
+
+	// Search tool definition
+	fmt.Fprintf(
+		&sb,
+		"\n- %s: Search the tool registry.\n",
+		searchToolName,
+	)
 
 	// Per-engine search guidance
 	sb.WriteString("  Search guidance:\n")
