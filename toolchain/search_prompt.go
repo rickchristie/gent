@@ -169,6 +169,14 @@ func buildSearchToolPrompt(
 	return sb.String()
 }
 
+// formatToolDedup returns an abbreviated reference for a
+// tool that has already been printed in full earlier.
+func formatToolDedup(name string) string {
+	return fmt.Sprintf(
+		"- %s: (see definition above)\n", name,
+	)
+}
+
 // formatToolDefinitions formats a list of tool definitions
 // (name, description, policy, schema) for inclusion in search
 // results. Uses the same format as JSON.AvailableToolsPrompt().

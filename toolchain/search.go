@@ -384,12 +384,13 @@ func (c *SearchJSON) Execute(
 
 	var sections []gent.FormattedSection
 	var allMedia []gent.ContentPart
+	seenTools := make(map[string]bool)
 
 	for i, call := range calls {
 		if call.Name == searchToolName {
 			c.executeSearch(
 				ctx, execCtx, call, raw, i,
-				&sections,
+				&sections, seenTools,
 			)
 		} else {
 			c.executeRegularTool(
@@ -407,6 +408,9 @@ func (c *SearchJSON) Execute(
 }
 
 // executeSearch handles the built-in search tool call.
+// seenTools tracks tool names that have already had their
+// full definition printed in a prior search within the same
+// Execute call. Duplicate tools get an abbreviated reference.
 func (c *SearchJSON) executeSearch(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
@@ -414,6 +418,7 @@ func (c *SearchJSON) executeSearch(
 	raw *gent.RawToolChainResult,
 	idx int,
 	sections *[]gent.FormattedSection,
+	seenTools map[string]bool,
 ) {
 	// Validate search args
 	if c.compiledSearchSchema != nil {
@@ -547,17 +552,33 @@ func (c *SearchJSON) executeSearch(
 
 	pageNames := results[startIdx:endIdx]
 
-	// Gather full tool definitions for matched tools
-	var matchedTools []any
+	// Split matched tools into new (full def) vs duplicate
+	// (abbreviated reference for tools already printed).
+	var newTools []any
+	var dupNames []string
 	for _, name := range pageNames {
-		if tool, exists := c.toolMap[name]; exists {
-			matchedTools = append(matchedTools, tool)
+		tool, exists := c.toolMap[name]
+		if !exists {
+			continue
 		}
+		if seenTools[name] {
+			dupNames = append(dupNames, name)
+		} else {
+			newTools = append(newTools, tool)
+		}
+	}
+
+	// Mark all tools from this result as seen
+	for _, name := range pageNames {
+		seenTools[name] = true
 	}
 
 	// Format output
 	var output strings.Builder
-	output.WriteString(formatToolDefinitions(matchedTools))
+	output.WriteString(formatToolDefinitions(newTools))
+	for _, name := range dupNames {
+		output.WriteString(formatToolDedup(name))
+	}
 
 	totalPages := (totalResults + c.pageSize - 1) / c.pageSize
 	fmt.Fprintf(

@@ -1628,6 +1628,307 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 }
 
 // -------------------------------------------------------
+// Execute — Search Dedup Tests
+// -------------------------------------------------------
+
+func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
+	okFn := func(
+		_ context.Context, _ map[string]any,
+	) (string, error) {
+		return "ok", nil
+	}
+
+	tools := []*indexableToolFunc{
+		newIndexableToolWithSchema(
+			"tool_a",
+			"Tool A description",
+			"Domain",
+			[]string{"cat"},
+			[]string{"a"},
+			schema.Object(map[string]*schema.Property{
+				"x": schema.String("X param"),
+			}, "x"),
+			okFn,
+		),
+		newIndexableToolWithSchema(
+			"tool_b",
+			"Tool B description",
+			"Domain",
+			[]string{"cat"},
+			[]string{"b"},
+			schema.Object(map[string]*schema.Property{
+				"y": schema.String("Y param"),
+			}, "y"),
+			okFn,
+		),
+		newIndexableToolWithSchema(
+			"tool_c",
+			"Tool C description",
+			"Domain",
+			[]string{"cat"},
+			[]string{"c"},
+			schema.Object(map[string]*schema.Property{
+				"z": schema.String("Z param"),
+			}, "z"),
+			okFn,
+		),
+	}
+
+	type input struct {
+		content  string
+		searchFn func(
+			ctx context.Context, query string,
+		) ([]string, error)
+	}
+
+	type expected struct {
+		// Tools whose full definition must appear
+		fullDefTools []string
+		// Tools that must appear as dedup reference
+		dedupTools []string
+		// Tools whose description must NOT appear
+		// (to confirm dedup replaced full def)
+		noDescTools []string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "overlapping parallel searches " +
+				"dedup shared tool",
+			input: input{
+				// query1 returns [tool_a, tool_b]
+				// query2 returns [tool_b, tool_c]
+				// tool_b should be deduped in query2
+				searchFn: func(
+					_ context.Context, query string,
+				) ([]string, error) {
+					switch query {
+					case "q1":
+						return []string{
+							"tool_a", "tool_b",
+						}, nil
+					case "q2":
+						return []string{
+							"tool_b", "tool_c",
+						}, nil
+					}
+					return nil, nil
+				},
+				content: `[` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "q1",` +
+					` "query_type": "mock"}},` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "q2",` +
+					` "query_type": "mock"}}]`,
+			},
+			expected: expected{
+				fullDefTools: []string{
+					"tool_a", "tool_b", "tool_c",
+				},
+				dedupTools: []string{"tool_b"},
+				noDescTools: []string{},
+			},
+		},
+		{
+			name: "single search has no dedup",
+			input: input{
+				searchFn: func(
+					_ context.Context, _ string,
+				) ([]string, error) {
+					return []string{
+						"tool_a", "tool_b",
+					}, nil
+				},
+				content: `{"tool": ` +
+					`"tool_registry_search",` +
+					` "args": {"query": "q1",` +
+					` "query_type": "mock"}}`,
+			},
+			expected: expected{
+				fullDefTools: []string{
+					"tool_a", "tool_b",
+				},
+				dedupTools:  []string{},
+				noDescTools: []string{},
+			},
+		},
+		{
+			name: "regular tool call does not " +
+				"interfere with search dedup",
+			input: input{
+				// query returns [tool_a, tool_b]
+				// then regular call to tool_c
+				// then query returns [tool_a, tool_c]
+				// tool_a deduped, tool_c full (not
+				// affected by regular call)
+				searchFn: func(
+					_ context.Context, query string,
+				) ([]string, error) {
+					switch query {
+					case "first":
+						return []string{
+							"tool_a", "tool_b",
+						}, nil
+					case "second":
+						return []string{
+							"tool_a", "tool_c",
+						}, nil
+					}
+					return nil, nil
+				},
+				content: `[` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "first",` +
+					` "query_type": "mock"}},` +
+					`{"tool": "tool_c", "args": ` +
+					`{"z": "val"}},` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "second",` +
+					` "query_type": "mock"}}]`,
+			},
+			expected: expected{
+				fullDefTools: []string{
+					"tool_a", "tool_b", "tool_c",
+				},
+				dedupTools:  []string{"tool_a"},
+				noDescTools: []string{},
+			},
+		},
+		{
+			name: "all tools overlapping across " +
+				"three searches",
+			input: input{
+				searchFn: func(
+					_ context.Context, query string,
+				) ([]string, error) {
+					switch query {
+					case "q1":
+						return []string{
+							"tool_a", "tool_b",
+						}, nil
+					case "q2":
+						return []string{
+							"tool_b", "tool_c",
+						}, nil
+					case "q3":
+						return []string{
+							"tool_a", "tool_b",
+							"tool_c",
+						}, nil
+					}
+					return nil, nil
+				},
+				content: `[` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "q1",` +
+					` "query_type": "mock"}},` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "q2",` +
+					` "query_type": "mock"}},` +
+					`{"tool": "tool_registry_search",` +
+					` "args": {"query": "q3",` +
+					` "query_type": "mock"}}]`,
+			},
+			expected: expected{
+				fullDefTools: []string{
+					"tool_a", "tool_b", "tool_c",
+				},
+				dedupTools: []string{
+					"tool_b",  // deduped in q2
+					"tool_a",  // deduped in q3
+					"tool_b",  // deduped in q3
+					"tool_c",  // deduped in q3
+				},
+				noDescTools: []string{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eng := &mockSearchEngine{
+				id:       "mock",
+				guidance: "mock search",
+				searchFn: tt.input.searchFn,
+			}
+
+			tc := setupSearchJSON(
+				tools, []gent.SearchEngine{eng},
+			)
+			tc.WithPageSize(10) // avoid pagination
+
+			result, err := tc.Execute(
+				nil, tt.input.content,
+				searchTestFormat(),
+			)
+			require.NoError(t, err)
+
+			// Verify full definitions appear
+			for _, name := range tt.expected.fullDefTools {
+				assert.Contains(
+					t, result.Text, name,
+					"expected tool %q in output",
+					name,
+				)
+			}
+
+			// Verify dedup references appear
+			dedupRef := func(name string) string {
+				return fmt.Sprintf(
+					"%s: (see definition above)",
+					name,
+				)
+			}
+			for _, name := range tt.expected.dedupTools {
+				assert.Contains(
+					t, result.Text,
+					dedupRef(name),
+					"expected dedup ref for %q",
+					name,
+				)
+			}
+
+			// For deduped tools, count occurrences of
+			// the full description to verify it only
+			// appears once.
+			descMap := map[string]string{
+				"tool_a": "Tool A description",
+				"tool_b": "Tool B description",
+				"tool_c": "Tool C description",
+			}
+			for _, name := range tt.expected.dedupTools {
+				desc := descMap[name]
+				count := strings.Count(
+					result.Text, desc,
+				)
+				assert.Equal(
+					t, 1, count,
+					"description %q for tool %q "+
+						"should appear exactly "+
+						"once, got %d",
+					desc, name, count,
+				)
+			}
+
+			// Verify noDescTools descriptions are absent
+			for _, name := range tt.expected.noDescTools {
+				desc := descMap[name]
+				assert.NotContains(
+					t, result.Text, desc,
+					"description for %q should "+
+						"not appear", name,
+				)
+			}
+		})
+	}
+}
+
+// -------------------------------------------------------
 // Thread Safety Tests
 // -------------------------------------------------------
 
