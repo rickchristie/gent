@@ -1,382 +1,511 @@
-# ToolSearchToolChain Implementation Plan
+# Programmatic Tool Calling (PTC) via JsToolChainWrapper
 
 ## Context
 
-LLM accuracy degrades beyond 20-30 tools with static loading. ToolSearchToolChain solves this
-by hiding all registered tools behind a single built-in "Tool Registry Search" tool. The LLM
-searches for tools on demand, gets full definitions back, then calls discovered tools. This
-follows Anthropic's Tool Search Tool pattern (85% token reduction, accuracy jump from 49% to 74%).
+LLM agents currently call tools one at a time across iterations (ReAct loop). For multi-step workflows this burns tokens and latency. PTC lets the LLM write JavaScript that orchestrates multiple tool calls in a single iteration — loops, conditionals, chaining results. Research shows 37-85% token reduction and up to 20% accuracy improvement on complex tasks.
 
----
+We use Sobek (grafana/sobek), a pure-Go ES5.1+ engine. Each PTC execution is just a goroutine — no containers, no IPC.
+
+## Architecture Overview
+
+`JsToolChainWrapper` wraps any existing ToolChain. The LLM outputs either:
+- `<direct_call>` — passes through to the wrapped ToolChain unchanged
+- `<code>` — executes JS via Sobek, where `tool.call()` routes back through the wrapped ToolChain
+
+This means all existing stats, events, schema validation, and limits work unchanged for tool calls made from code.
 
 ## File Structure
 
-| File | Purpose |
-|------|---------|
-| `tool_search.go` | `IndexableTool` + `SearchEngine` interfaces (root package) |
-| `toolchain/search.go` | `SearchJSON` struct, constructor, RegisterTool, Initialize, Execute |
-| `toolchain/search_prompt.go` | Domain summary builder, search tool prompt builder |
-| `toolchain/search_engine_bm25.go` | `BM25SearchEngine` using Bleve `NewMemOnly()` |
-| `toolchain/search_engine_regex.go` | `RegexSearchEngine` using Go `regexp` |
-| `toolchain/search_test.go` | SearchJSON tests |
-| `toolchain/search_engine_bm25_test.go` | BM25 engine tests |
-| `toolchain/search_engine_regex_test.go` | Regex engine tests |
+```
+toolchain/
+  jsruntime/
+    runtime.go          - Sobek lifecycle (create, register globals, execute, timeout)
+    runtime_test.go
+    error.go            - LLM-friendly error formatting with source context
+    error_test.go
+    bridge.go           - tool.call() / tool.parallelCall() JS→Go bridge
+    bridge_test.go
+  js_wrapper.go         - JsToolChainWrapper (the ToolChain implementation)
+  js_wrapper_test.go    - All tests wrap SearchJSON as inner ToolChain
 
----
+stats_keys.go           - Add SCCodeExecutions, SGCodeExecutionsErrorConsecutive
+limit.go                - Add code execution error to DefaultLimits()
+```
 
-## 1. Interfaces (`tool_search.go`)
+## Phase 0: Verify Assumptions
 
-### IndexableTool
+Before writing code, verify each assumption with a small spike:
+
+1. **Sobek can execute synchronous Go-backed functions from JS**: Write a minimal test that registers a Go function as a JS global, calls it from `RunString()`, and verifies the return value.
+2. **Sobek's `Interrupt()` stops infinite loops**: Write a test with `while(true){}`, call `Interrupt()` from a goroutine, verify `*InterruptedError` is returned.
+3. **Sobek error types are as documented**: Trigger `*sobek.Exception`, `*CompilerSyntaxError`, verify we can extract line/column/stack via the public API.
+4. **Inner TextFormat can parse sub-sections from raw text**: Create a fresh `format.NewXML()`, register "direct_call" and "code" sections, parse a string like `<direct_call>...</direct_call>`, verify extraction works.
+5. **Wrapped ToolChain.Execute() can be called multiple times**: Call `SearchJSON.Execute()` twice in the same iteration with different tool calls. Verify stats accumulate correctly and no state leaks.
+6. **`context.Context` cancellation can trigger `Interrupt()`**: Verify that cancelling the Go context while Sobek is running triggers the interrupt path.
+
+If any assumption fails, adjust the plan before proceeding.
+
+## Phase 1: Sobek Error Formatter — `toolchain/jsruntime/error.go`
+
+Pure utility, zero dependencies on ToolChain or gent. Converts Sobek errors into LLM-friendly text with source code snippets.
+
+### API
 
 ```go
-type IndexableTool interface {
-    Name() string
-    Description() string
-    Domain() string
-    Categories() []string
-    Keywords() []string
-    SyntheticQueries() []string
+// FormatError converts a Sobek error + original source
+// into an LLM-friendly error message with code context.
+func FormatError(source string, err error) string
+
+// extractSourceContext builds a code snippet around
+// line:col showing 2 lines before/after with a caret.
+func extractSourceContext(
+    source string, line, col int, message string,
+) string
+```
+
+### Output format
+
+```
+TypeError: Cannot read property 'id' of undefined
+
+  1 | const c = tool.call({tool: "lookup", args: {}});
+  2 | const id = c.output.id;
+  3 | const name = c.output.details.name;
+    |                      ^ Cannot read property 'name' of undefined
+  4 | console.log(name);
+```
+
+### Error type handling
+
+| Sobek Type | Handling |
+|---|---|
+| `*sobek.CompilerSyntaxError` | Extract line/col from `File.Position(Offset)`, show source context |
+| `*sobek.Exception` | Use `String()` for full stack, extract first frame's Position for source context |
+| `*sobek.InterruptedError` | Format as timeout message, include source context from first stack frame |
+| Other `error` | Return `err.Error()` as-is |
+
+### Tests — `error_test.go`
+
+Table-driven with explicit `input` (source string + error) and `expected` (full formatted string):
+- Syntax error at various positions (line 1, middle, last line)
+- Runtime TypeError with stack trace
+- ReferenceError (undefined variable)
+- Custom `throw new Error("msg")`
+- Timeout (InterruptedError)
+- Single-line source
+- Empty source string
+- Error at column 1 (caret at start)
+
+## Phase 2: Sobek Runtime — `toolchain/jsruntime/runtime.go`
+
+Manages Sobek lifecycle. No ToolChain awareness.
+
+### API
+
+```go
+type Config struct {
+    Timeout      time.Duration // default 30s
+    MaxCallStack int           // default 1024
 }
-```
 
-Same struct implements both `Tool[I,O]` and `IndexableTool`. The `Name()`/`Description()` methods
-are literally the same method on the same receiver.
+func DefaultConfig() Config
 
-### SearchEngine
-
-```go
-type SearchEngine interface {
-    Id() string
-    SearchGuidance() string
-    IndexAll(tools []IndexableTool) error
-    Search(ctx context.Context, query string) ([]string, error)
+type Result struct {
+    ConsoleLog []string // captured console.log() calls
 }
+
+type Runtime struct { /* unexported fields */ }
+
+func New(config Config) *Runtime
+
+// RegisterFunc registers a synchronous Go function as
+// a JS global. fn receives FunctionCall, returns Value.
+func (r *Runtime) RegisterFunc(
+    name string,
+    fn func(call sobek.FunctionCall) sobek.Value,
+)
+
+// RegisterObject registers a Go object with methods as
+// a JS global (e.g., tool.call, tool.parallelCall).
+func (r *Runtime) RegisterObject(
+    name string,
+    methods map[string]func(sobek.FunctionCall) sobek.Value,
+)
+
+// Execute runs source with timeout and context
+// cancellation. Returns Result or LLM-friendly error
+// (via FormatError).
+func (r *Runtime) Execute(
+    ctx context.Context, source string,
+) (*Result, error)
 ```
 
-- `Search` returns ALL matching tool names ranked by relevance
-- `ToolSearchToolChain` handles pagination over results
-- Error messages from `Search` are surfaced to the LLM
+### Implementation details
 
----
+- `New()` creates `sobek.New()`, registers `console.log` that appends to internal `[]string`, sets `SetMaxCallStackSize`.
+- `Execute()`:
+  1. Start `time.AfterFunc(timeout, func() { vm.Interrupt("timeout") })`
+  2. Start goroutine watching `ctx.Done()` → `vm.Interrupt("cancelled")`
+  3. Call `vm.RunString(source)`
+  4. Cancel timer + context watcher
+  5. On error: return `FormatError(source, err)` wrapped in a custom error type that preserves both the formatted message and the original error
+  6. On success: return `Result{ConsoleLog: captured}`
 
-## 2. SearchJSON (`toolchain/search.go`)
+### Tests — `runtime_test.go`
 
-### Struct
+Table-driven:
+- Execute simple expression, verify no error
+- Execute with registered Go function, verify function called
+- RegisterObject with methods, verify `obj.method()` callable
+- console.log capture (single, multiple, mixed types)
+- Timeout on `while(true){}`
+- Context cancellation interrupts execution
+- Syntax error returns formatted error
+- Runtime error (ReferenceError) returns formatted error
+- Stack overflow returns error
+- Empty source string
+
+## Phase 3: Tool Bridge — `toolchain/jsruntime/bridge.go`
+
+Connects JS `tool.call()` / `tool.parallelCall()` to Go. Uses a callback function to execute tool calls — no direct ToolChain dependency.
+
+### API
 
 ```go
-type SearchJSON struct {
-    mu sync.RWMutex
+// ToolCallFn executes a tool call given JSON content.
+// Returns the ToolChainResult from the wrapped ToolChain.
+// The JSON content is in the same format the wrapped
+// ToolChain expects (e.g., {"tool":"x","args":{...}}).
+type ToolCallFn func(content string) (
+    *gent.ToolChainResult, error,
+)
 
-    // TextSection
-    sectionName string // default "action"
-
-    // Tool registry (same pattern as JSON toolchain)
-    tools     []any
-    toolMap   map[string]any
-    schemaMap map[string]*schema.Schema
-
-    // IndexableTool metadata for search
-    indexableTools []gent.IndexableTool
-
-    // Search engines
-    engines   []gent.SearchEngine
-    engineMap map[string]gent.SearchEngine
-
-    // Config
-    pageSize         int    // default 3
-    noResultsMessage string // configurable
-
-    // Computed by Initialize()
-    initialized          bool
-    searchToolPrompt     string
-    searchToolSchema     map[string]any
-    compiledSearchSchema *schema.Schema
-}
+// RegisterToolBridge registers tool.call() and
+// tool.parallelCall() on the given Sobek runtime.
+//
+// tool.call({tool: "name", args: {...}})
+//   → returns {name, output} or {name, error}
+//
+// tool.parallelCall([{tool, args}, ...])
+//   → returns [{name, output}, ...]
+func RegisterToolBridge(
+    vm *sobek.Runtime,
+    callFn ToolCallFn,
+)
 ```
 
-### Constructor + Builders
+### Implementation
+
+**`tool.call(request)`:**
+1. Export JS argument to `map[string]any` via `vm.ExportTo()`
+2. `json.Marshal()` → JSON string like `{"tool":"x","args":{...}}`
+3. Call `callFn(jsonString)` → `*ToolChainResult`
+4. Parse `ToolChainResult.Raw` to build JS return object: `{name, output}` or `{name, error}`
+5. Return as `vm.ToValue(result)`
+
+**`tool.parallelCall(requests)`:**
+1. Export JS array to `[]map[string]any`
+2. `json.Marshal()` → JSON array `[{...},{...}]`
+3. Call `callFn(jsonArrayString)` once — the wrapped ToolChain handles arrays natively
+4. Parse `ToolChainResult.Raw.Results` to build JS array of results
+5. Return as `vm.ToValue(results)`
+
+Key insight: both methods produce JSON in the exact format the wrapped ToolChain expects. The bridge is purely a marshaling layer.
+
+### Tests — `bridge_test.go`
+
+Uses a mock `ToolCallFn` that records calls and returns preset results:
+- Single tool.call with valid args → verify JSON passed to callFn, verify JS return value
+- tool.call when callFn returns error → verify JS gets `{name, error: "message"}`
+- tool.parallelCall with 2 calls → verify JSON array passed, verify JS array returned
+- tool.parallelCall with empty array → verify no error
+- tool.call with non-object argument → verify JS gets error
+- tool.call with missing "tool" field → verify error propagated
+- Verify `ToolChainResult.Raw` is correctly mapped to JS return structure
+
+## Phase 4: Stats Keys & Default Limits
+
+### `stats_keys.go` — append new keys
 
 ```go
-func NewSearchJSON() *SearchJSON
-func (c *SearchJSON) WithSectionName(name string) *SearchJSON
-func (c *SearchJSON) WithPageSize(size int) *SearchJSON
-func (c *SearchJSON) WithNoResultsMessage(msg string) *SearchJSON
-func (c *SearchJSON) RegisterEngine(engine gent.SearchEngine) *SearchJSON
+// Code execution tracking keys (Programmatic Tool Calling).
+//
+// Auto-updated by JsToolChainWrapper when code blocks
+// are executed.
+const (
+    // Counter: total code blocks executed
+    SCCodeExecutions StatKey = "gent:code_executions"
+
+    // Counter: code blocks that failed
+    SCCodeExecutionsError StatKey = "gent:code_executions_error"
+
+    // Gauge: consecutive code execution errors
+    // (reset on success)
+    SGCodeExecutionsErrorConsecutive StatKey = "gent:code_executions_error_consecutive"
+)
 ```
 
-### RegisterTool
+### `limit.go` — add to DefaultLimits()
 
-1. Extract `Tool[I,O]` metadata via `GetToolMeta()` (reflection) — panic on failure
-2. Type-assert to `gent.IndexableTool` — panic if not implemented
-3. Check duplicate name — panic if exists
-4. Store in `tools`, `toolMap`, `schemaMap`, `indexableTools`
-5. Return self for chaining
-
-Key difference from `JSON.RegisterTool`: panics on invalid tools instead of silently ignoring.
-This is a programmer error (not implementing `IndexableTool`), detected at startup.
-
-### Initialize() error
-
-Takes write lock. Steps:
-1. Validate at least one engine registered
-2. Call `engine.IndexAll(indexableTools)` for each engine
-3. Build domain summary (aggregate Domain → Categories → count)
-4. Build dynamic search tool schema (enum from engine IDs)
-5. Compile search tool schema
-6. Build full search tool prompt
-7. Set `initialized = true`
-
-Can be called multiple times — re-indexes everything, rebuilds state.
-Domain order is deterministic (insertion order of first tool per domain).
-
-### AvailableToolsPrompt()
-
-Takes read lock. Returns pre-computed `searchToolPrompt` from Initialize().
-Shows ONLY the "Tool Registry Search" tool with:
-- Domain summary (domain, categories, tool count)
-- Search guidance per engine
-- Full parameter schema with dynamic `query_type` enum
-
-### Name(), Guidance(), ParseSection()
-
-- `Name()` → `sectionName` (default "action")
-- `Guidance()` → identical to `JSON.Guidance()` (JSON format instructions)
-- `ParseSection()` → identical logic to `JSON.ParseSection()` (parse JSON, publish events, reset gauges)
-
-### Execute()
-
-Takes read lock. Handles two kinds of tool calls:
-
-**Built-in "Tool Registry Search":**
-1. Validate args against compiled search tool schema
-2. Extract `query`, `query_type`, `page` (default 1)
-3. Publish `BeforeToolCall`
-4. Look up engine by `query_type`
-5. Call `engine.Search(ctx, query)`
-6. Paginate: `results[(page-1)*pageSize : page*pageSize]`
-7. Format matched tools as full definitions (name, description, policy, schema)
-8. Append pagination info: "Showing page X of Y (N total results)"
-9. If no results for page, return `noResultsMessage`
-10. Reset consecutive error gauges on success
-11. Publish `AfterToolCall`
-
-**Regular registered tools:**
-Identical flow to `JSON.Execute()`:
-lookup → schema validate → TransformArgsReflect → PublishBeforeToolCall →
-CallToolWithTypedInputReflect → format result → PublishAfterToolCall
-
-Both types can appear in the same JSON array (parallel execution).
-
-### Code Reuse Strategy
-
-The regular tool execution path in `Execute()` and the `ParseSection`/`doParse` logic are
-identical to `JSON`. Following the existing pattern (YAML and JSON each have their own copy),
-we copy the code. The duplication is ~30 lines for parsing and ~80 lines for the tool execution
-loop. This avoids coupling and matches the project's established pattern.
-
-The `formatToolDefinitions()` helper reuses `GetToolMeta()` from `reflect.go` and formats
-output identically to `JSON.AvailableToolsPrompt()`.
-
----
-
-## 3. Prompt Generation (`toolchain/search_prompt.go`)
-
-### buildDomainSummary()
-
-Iterates `indexableTools`, groups by `Domain()`, collects unique `Categories()`, counts tools.
-Maintains insertion order for deterministic output.
-
-Output:
-```
-- Customer (tenant, landlord) - 25 tools
-- Communication (email, SMS, WhatsApp) - 12 tools
-```
-
-### buildSearchToolSchema()
-
-Generates JSON Schema with dynamic `query_type` enum from registered engine IDs:
-```json
+```go
+// Stop after 3 consecutive code execution errors
 {
-  "type": "object",
-  "properties": {
-    "query": {"type": "string", "description": "Search query"},
-    "query_type": {"type": "string", "enum": ["bm25", "regex"], "description": "..."},
-    "page": {"type": "integer", "default": 1, "description": "..."}
-  },
-  "required": ["query", "query_type"]
+    Type:     LimitExactKey,
+    Key:      SGCodeExecutionsErrorConsecutive,
+    MaxValue: 3,
+},
+```
+
+## Phase 5: JsToolChainWrapper — `toolchain/js_wrapper.go`
+
+### Construction
+
+```go
+func NewJsToolChainWrapper(
+    wrapped gent.ToolChain,
+) *JsToolChainWrapper
+
+func (w *JsToolChainWrapper) WithCodeTimeout(
+    d time.Duration,
+) *JsToolChainWrapper
+
+func (w *JsToolChainWrapper) WithCodeGuidance(
+    guidance string,
+) *JsToolChainWrapper
+
+func (w *JsToolChainWrapper) WithInnerFormat(
+    f gent.TextFormat,
+) *JsToolChainWrapper
+```
+
+Default inner format: `format.NewXML()` with `direct_call` and `code` sections registered at construction time (via lightweight TextSection implementations that return the section name and empty guidance).
+
+### Interface delegation
+
+| Method | Behavior |
+|---|---|
+| `Name()` | Delegate to `wrapped.Name()` |
+| `RegisterTool(tool)` | Delegate to `wrapped.RegisterTool(tool)` |
+| `AvailableToolsPrompt()` | Delegate to `wrapped.AvailableToolsPrompt()`, append JS environment description |
+
+### `Guidance()` — combined guidance
+
+Returns text showing both modes:
+
+```
+You can call tools in two ways:
+
+1. Direct call — for simple single or parallel tool calls:
+<direct_call>
+{wrapped ToolChain's Guidance() here}
+</direct_call>
+
+2. Programmatic — for multi-step orchestration with logic:
+<code>
+// Sequential calls (use result of first in second):
+const customer = tool.call(
+  {tool: "lookup_customer", args: {id: "C001"}}
+);
+const orders = tool.call(
+  {tool: "get_orders",
+   args: {customer_id: customer.output.id}}
+);
+
+// Parallel calls:
+const results = tool.parallelCall([
+  {tool: "tool1", args: {...}},
+  {tool: "tool2", args: {...}},
+]);
+
+// Output results (only console.log output is returned):
+console.log(JSON.stringify({customer, orders}));
+</code>
+
+Choose direct_call for simple operations. Choose code when
+you need to chain results, apply conditions, or loop.
+```
+
+### `ParseSection()` — sub-section detection
+
+1. Call `innerFormat.Parse(nil, content)` (nil execCtx — no stats pollution)
+2. Check for `direct_call` → delegate to `wrapped.ParseSection(execCtx, directContent)`
+3. Check for `code` → return code content as `string` (executed in `Execute()`)
+4. If both present → use `direct_call` (simpler, preferred path)
+5. If neither → fallback: try `wrapped.ParseSection(execCtx, content)` (graceful degradation when LLM omits sub-section tags)
+6. On parse error → `execCtx.PublishParseError(ParseErrorTypeToolchain, content, err)`
+
+### `Execute()` — main routing
+
+```
+1. Call innerFormat.Parse(nil, content) to detect mode
+2. If direct_call:
+   → Call wrapped.Execute(execCtx, directContent, textFormat)
+   → Return result as-is
+3. If code:
+   a. IncrCounter(SCCodeExecutions, 1)
+   b. Create jsruntime.Runtime with configured timeout
+   c. Create ToolCallFn closure:
+      func(jsonContent string) (*ToolChainResult, error) {
+          return w.wrapped.Execute(
+              execCtx, jsonContent, textFormat,
+          )
+      }
+   d. RegisterToolBridge(vm, callFn)
+   e. Execute code via runtime.Execute(ctx, codeContent)
+   f. On success:
+      - ResetGauge(SGCodeExecutionsErrorConsecutive)
+      - Build ToolChainResult from console.log output
+      - Collect all Media from accumulated tool results
+   g. On error:
+      - IncrCounter(SCCodeExecutionsError, 1)
+      - IncrGauge(SGCodeExecutionsErrorConsecutive, 1)
+      - Format error as observation section
+      - Return ToolChainResult with error text
+4. If neither (fallback):
+   → Same as direct_call path
+```
+
+### Result collection for code path
+
+The `ToolCallFn` closure accumulates results. After code execution:
+- `Text`: console.log output, joined by newlines. If empty, use "Code executed successfully."
+- `Media`: merged from all `ToolChainResult.Media` across all sub-calls
+- `Raw`: merged `ToolChainResult.Raw` from all sub-calls (all Calls, Results, Errors concatenated)
+
+### Thread safety
+
+No mutex needed. The wrapper itself has no mutable state after construction. The wrapped ToolChain handles its own synchronization (SearchJSON uses RWMutex). Sobek runtimes are created per-execution and not shared.
+
+## Phase 6: Tests — `toolchain/js_wrapper_test.go`
+
+All tests wrap `SearchJSON` as the inner ToolChain.
+
+### Test helper
+
+```go
+func setupJsWrapper() *JsToolChainWrapper {
+    searchTC := NewSearchJSON(SearchHintSimpleList)
+    searchTC.RegisterTool(/* indexable tools */)
+    searchTC.RegisterEngine(/* mock engine */)
+    searchTC.Initialize()
+    return NewJsToolChainWrapper(searchTC)
 }
 ```
 
-### buildSearchToolPrompt()
+Tools for testing:
+- `lookup_customer` — returns customer JSON by ID
+- `get_orders` — returns orders JSON by customer_id
+- `fail_tool` — always returns error
+- `slow_tool` — sleeps (for timeout tests, if needed)
 
-Combines: tool name + description + domain summary + per-engine guidance + parameter schema.
-Same format as `JSON.AvailableToolsPrompt()` output.
+### Test categories
 
----
+**A. Name / Guidance / AvailableToolsPrompt:**
+- `Name()` returns wrapped ToolChain's name
+- `Guidance()` contains both `<direct_call>` and `<code>` sections
+- `Guidance()` contains wrapped ToolChain's guidance inside direct_call
+- `AvailableToolsPrompt()` contains wrapped ToolChain's prompt + JS env description
+- Custom guidance via `WithCodeGuidance()`
 
-## 4. BM25 Search Engine (`toolchain/search_engine_bm25.go`)
+**B. ParseSection — sub-section detection:**
+- Content with `<direct_call>` only → delegates to wrapped ParseSection
+- Content with `<code>` only → returns code string
+- Content with both → prefers direct_call
+- Content with neither → fallback to wrapped ParseSection
+- Malformed sub-sections → proper error handling
+- Empty content → error
 
-Uses `github.com/blevesearch/bleve/v2` with `NewMemOnly()`.
+**C. Execute — direct_call passthrough:**
+- Single tool call passes through to SearchJSON
+- Multiple parallel tool calls pass through
+- Search tool call (tool_registry_search) works through wrapper
+- Error from SearchJSON propagates correctly
+- Stats (SCToolCalls, etc.) are tracked by wrapped ToolChain
 
-### IndexAll
+**D. Execute — code execution:**
+- Simple `tool.call()` → executes tool, console.log output in result
+- Chained calls → result of first used as arg in second
+- `tool.parallelCall()` → multiple tools executed, results returned
+- console.log with multiple calls → all output captured
+- No console.log → "Code executed successfully" fallback
+- JS syntax error → LLM-friendly error with source context in result
+- JS runtime error (ReferenceError) → LLM-friendly error in result
+- Tool call error within code → error returned in tool.call result, code continues
+- Code timeout → proper error and stats
 
-- Close existing index if present (supports re-indexing)
-- Create custom mapping with field-specific boosts:
-  - **High (3.0)**: name, description
-  - **Medium (2.0)**: keywords, categories
-  - **Lower (1.0)**: domain, synthetic_queries
-- Slice fields (Keywords, Categories, SyntheticQueries) joined with space for indexing
-- Index each tool using `tool.Name()` as document ID
+**E. Execute — stats tracking:**
+- `SCCodeExecutions` incremented for each code block
+- `SCCodeExecutionsError` incremented on code error
+- `SGCodeExecutionsErrorConsecutive` incremented on error
+- `SGCodeExecutionsErrorConsecutive` reset on successful code execution
+- Tool call stats (SCToolCalls, SCToolCallsFor) flow through wrapped ToolChain from code path
+- Direct call stats flow through wrapped ToolChain unchanged
+- Code execution does NOT double-count tool call stats
 
-### Search
+**F. Execute — edge cases:**
+- Empty code block
+- Code that calls no tools (just console.log)
+- Code that calls tool.call with malformed request
+- Multiple code sections in same action (only first used)
+- Context cancellation during code execution
 
-- `bleve.NewMatchQuery(query)` with large result size (return all matches)
-- `SearchInContext(ctx, request)` for cancellation support
-- Returns tool names from `hit.ID` in relevance order
+## Phase 7: Limit Tests — `agents/react/agent_executor_limits_test.go`
 
-### Dependency
+Following existing patterns (see existing limit tests in that file):
 
-```
-go get github.com/blevesearch/bleve/v2
-```
+- **Code execution error limit exceeded at iteration 1**: Set `SGCodeExecutionsErrorConsecutive` limit to 0, verify `TerminationLimitExceeded`
+- **Code execution error limit exceeded at iteration N**: Multiple iterations, code errors accumulate, limit triggers at correct iteration
+- **Consecutive gauge resets on success**: Error → success → error sequence, verify gauge tracking
+- **Tool call errors from code path trigger tool call limits**: Code calls a tool that errors, verify `SGToolCallsErrorConsecutive` is tracked (flows through wrapped ToolChain)
 
----
+## Implementation Order
 
-## 5. Regex Search Engine (`toolchain/search_engine_regex.go`)
+1. **Phase 0**: Assumption verification (spike tests, throwaway code)
+2. **Phase 1**: `jsruntime/error.go` + `error_test.go` — zero dependencies
+3. **Phase 2**: `jsruntime/runtime.go` + `runtime_test.go` — depends on Phase 1
+4. **Phase 3**: `jsruntime/bridge.go` + `bridge_test.go` — depends on Phase 2
+5. **Phase 4**: Stats keys + default limits — just declarations
+6. **Phase 5**: `js_wrapper.go` — depends on all above
+7. **Phase 6**: `js_wrapper_test.go` — wrapping SearchJSON
+8. **Phase 7**: Limit tests in `agent_executor_limits_test.go`
 
-### IndexAll
+Each phase is independently testable. Phases 1-3 have zero gent ToolChain dependencies and can be developed/reviewed in isolation.
 
-Stores each tool's searchable texts as flat string slices:
-Name, Description, Domain + Keywords + Categories + SyntheticQueries.
+## Verification
 
-### Search
+1. `go test ./toolchain/jsruntime/...` — runtime, error formatter, bridge tests pass
+2. `go test ./toolchain/...` — wrapper tests pass (wrapping SearchJSON)
+3. `go test ./agents/react/...` — limit tests pass
+4. `go test ./...` — full test suite passes, no regressions
+5. Existing SearchJSON tests still pass (wrapper doesn't modify wrapped ToolChain behavior)
 
-- Compile query as case-insensitive regex: `(?i)` + query
-- Count matches per tool across all searchable texts
-- Sort by match count descending
-- Return tool names
-- Invalid regex returns descriptive error (surfaced to LLM)
+## Key Files to Modify
 
----
+| File | Change |
+|---|---|
+| `stats_keys.go` | Add SCCodeExecutions, SCCodeExecutionsError, SGCodeExecutionsErrorConsecutive |
+| `limit.go` | Add SGCodeExecutionsErrorConsecutive to DefaultLimits() |
+| `go.mod` | Add `github.com/grafana/sobek` dependency |
 
-## 6. Mutex Strategy
+## Key Files to Create
 
-- `Initialize()` — write lock (rebuilds all state)
-- `AvailableToolsPrompt()` — read lock
-- `Execute()` — read lock (search + tool calls are read-only after init)
-- `RegisterTool()` — no lock (called during single-goroutine setup before Initialize)
+| File | Purpose |
+|---|---|
+| `toolchain/jsruntime/error.go` | LLM-friendly Sobek error formatting |
+| `toolchain/jsruntime/error_test.go` | Error formatter tests |
+| `toolchain/jsruntime/runtime.go` | Sobek runtime lifecycle |
+| `toolchain/jsruntime/runtime_test.go` | Runtime tests |
+| `toolchain/jsruntime/bridge.go` | JS→Go tool call bridge |
+| `toolchain/jsruntime/bridge_test.go` | Bridge tests |
+| `toolchain/js_wrapper.go` | JsToolChainWrapper |
+| `toolchain/js_wrapper_test.go` | Wrapper tests (wrapping SearchJSON) |
 
----
+## Key Existing Files to Reference
 
-## 7. Implementation Order
-
-1. `tool_search.go` — interfaces
-2. `toolchain/search_engine_regex.go` + `search_engine_regex_test.go` — simpler engine first
-3. Add Bleve dependency: `go get github.com/blevesearch/bleve/v2`
-4. `toolchain/search_engine_bm25.go` + `search_engine_bm25_test.go`
-5. `toolchain/search_prompt.go` — prompt builders
-6. `toolchain/search.go` — main implementation
-7. `toolchain/search_test.go` — comprehensive tests
-
----
-
-## 8. Tests
-
-### 8a. `search_engine_regex_test.go`
-
-| Test | Scenarios |
-|------|-----------|
-| `TestRegex_Id` | Returns "regex" |
-| `TestRegex_SearchGuidance` | Returns non-empty guidance with examples |
-| `TestRegex_IndexAll` | Single tool; multiple tools; re-index (call twice); empty list |
-| `TestRegex_Search` | Simple pattern; complex regex (dot-star); match across fields; ranking by match count; case insensitive; no matches → empty slice; invalid regex → descriptive error; match in name; match in keywords; match in synthetic queries; match in description; match in domain; match in categories |
-
-### 8b. `search_engine_bm25_test.go`
-
-| Test | Scenarios |
-|------|-----------|
-| `TestBM25_Id` | Returns "bm25" |
-| `TestBM25_SearchGuidance` | Returns non-empty guidance with examples |
-| `TestBM25_IndexAll` | Single tool; multiple tools; re-index (call twice); empty list |
-| `TestBM25_Search` | Match by name; match by description; match by keywords; match by categories; match by domain; match by synthetic queries; no matches → empty slice; not initialized → error; multi-word query |
-
-### 8c. `search_test.go`
-
-**Constructor / Config:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Name` | Default "action"; custom section name |
-| `TestSearchJSON_Guidance` | Returns JSON format instructions |
-| `TestSearchJSON_Config` | Default page size (3); custom page size; default no-results message; custom no-results message |
-
-**RegisterTool:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_RegisterTool` | Valid indexable tool succeeds; panics on non-IndexableTool; panics on non-Tool (invalid type); panics on duplicate name; method chaining works; multiple tools registered correctly |
-
-**Initialize:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Initialize` | Success with one engine; success with multiple engines; error when no engines; error when engine IndexAll fails; re-initialize (call twice) updates state; computes correct domain summary with categories and counts |
-
-**AvailableToolsPrompt:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_AvailableToolsPrompt` | Shows only search tool (not registered tools); includes domain summary; includes all engine IDs in query_type enum; includes per-engine search guidance; includes correct total tool count; schema has query, query_type, page properties |
-
-**ParseSection:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_ParseSection` | Valid single JSON call; valid array of calls; invalid JSON; missing tool name; empty content returns empty slice; parse error publishes event and increments stats; successful parse resets consecutive gauge |
-
-**Execute — Search Tool:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Execute_Search` | Search returns results with full tool definitions (name, desc, policy, schema); pagination page 1 shows first N results; pagination page 2 shows next N; page beyond results returns no-results message; zero results returns configured no-results message; invalid query_type returns error; engine returns error (surfaced to LLM); schema validation error on search args (missing required field); multiple parallel searches in array |
-
-**Execute — Regular Tools:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Execute_RegularTool` | Tool call succeeds with typed result; unknown tool returns error; schema validation fails; tool Call returns error; tool with instructions creates nested sections; tool with media collects media |
-
-**Execute — Mixed Parallel Calls:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Execute_Mixed` | Search + regular tool in same array; two searches + regular tool; regular tool alongside search tool all succeed |
-
-**Execute — Events & Stats:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Execute_Stats` | Search call increments SCToolCalls and SCToolCallsFor; regular tool call increments correct SCToolCalls and SCToolCallsFor; parse error increments toolchain parse error counter and gauge; search error increments tool error stats; successful search resets consecutive error gauges; successful regular tool resets consecutive error gauges |
-
-**Execute — Pagination Details:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_Execute_Pagination` | Page 1 of multi-page results shows correct subset + pagination info; page 2 shows next subset; last page shows remaining tools (partial page); page 0 treated as page 1; page beyond total shows no-results; pagination info format: "Showing page X of Y (N total results)" |
-
-**Thread Safety:**
-
-| Test | Scenarios |
-|------|-----------|
-| `TestSearchJSON_ConcurrentAccess` | Concurrent Execute calls succeed; concurrent Initialize + AvailableToolsPrompt don't race (use -race flag) |
-
----
-
-## 9. Verification
-
-1. `go test ./toolchain/... -v -run TestRegex` — regex engine tests
-2. `go test ./toolchain/... -v -run TestBM25` — BM25 engine tests
-3. `go test ./toolchain/... -v -run TestSearchJSON` — main toolchain tests
-4. `go test ./toolchain/... -race` — race detector for concurrency
-5. `go vet ./...` — static analysis
-6. `go build ./...` — clean build
+| File | Why |
+|---|---|
+| `toolchain/search.go` | Pattern for ToolChain wrapping, Execute flow, stats |
+| `toolchain/search_test.go` | Test patterns, mock tools, setupSearchJSON helper |
+| `toolchain/json.go` | Simpler ToolChain pattern for reference |
+| `format/xml.go` | Inner TextFormat for sub-section parsing |
+| `agents/react/agent_executor_limits_test.go` | Limit test patterns |
