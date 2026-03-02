@@ -1,3 +1,16 @@
+// This file contains a single integration test for the
+// e-commerce scenario, using the most complex configuration:
+// SearchJSON toolchain with summarization compaction.
+//
+// For other variations (YAML/JSON toolchain, sliding window
+// compaction, SimpleList hint type, interactive chat), use the
+// integration CLI instead:
+//
+//	go run ./integrationtest/cli
+//
+// The CLI provides a menu-driven interface to select scenarios,
+// toolchains, compaction strategies, and even an interactive
+// chat mode with real-time streaming output.
 package ecommerce
 
 import (
@@ -8,135 +21,18 @@ import (
 	"github.com/rickchristie/gent/integrationtest/testutil"
 )
 
-// TestDoubleChargeScenarioYAML tests the double-charge
-// investigation scenario without compaction.
-func TestDoubleChargeScenarioYAML(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.ToolChain = testutil.ToolChainYAML
-
-	if err := RunDoubleChargeScenario(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge scenario failed: %v", err,
-		)
-	}
-}
-
-// TestDoubleChargeScenarioJSON tests the double-charge
-// investigation scenario with JSON toolchain.
-func TestDoubleChargeScenarioJSON(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-
-	if err := RunDoubleChargeScenario(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge scenario (JSON) failed: %v",
-			err,
-		)
-	}
-}
-
-// TestDoubleChargeSlidingWindow tests the double-charge
-// scenario with sliding window compaction (trigger=5, window=3).
-func TestDoubleChargeSlidingWindow(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.Compaction = testutil.CompactionConfig{
-		Type:              testutil.CompactionSlidingWindow,
-		TriggerIterations: 5,
-		WindowSize:        3,
-	}
-
-	if err := RunDoubleChargeScenario(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge sliding window failed: %v",
-			err,
-		)
-	}
-}
-
-// TestDoubleChargeSummarization tests the double-charge
-// scenario with summarization compaction (trigger=5, keep=1).
-func TestDoubleChargeSummarization(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.Compaction = testutil.CompactionConfig{
-		Type:              testutil.CompactionSummarization,
-		TriggerIterations: 5,
-		KeepRecent:        1,
-	}
-
-	if err := RunDoubleChargeScenario(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge summarization failed: %v",
-			err,
-		)
-	}
-}
-
-// TestDoubleChargeScenarioSearch tests the double-charge
-// scenario with SearchJSON toolchain (tools discovered via
-// search).
-func TestDoubleChargeScenarioSearch(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.ToolChain = testutil.ToolChainSearch
-
-	if err := RunDoubleChargeScenarioSearch(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge (Search) failed: %v", err,
-		)
-	}
-}
-
 // TestDoubleChargeSearchSummarization tests the double-charge
-// scenario with SearchJSON toolchain and summarization
-// compaction (trigger=5, keep=1).
+// investigation scenario with SearchJSON toolchain and
+// summarization compaction (trigger=5, keep=1).
+//
+// This is the most complex configuration, combining tool
+// discovery via search with context compaction via
+// summarization.
+//
+// Scenario: Customer Alex Rivera notices a duplicate $79.99
+// charge for a "Mighty Mouse" purchase. The agent must
+// investigate the billing issue, discover tools via search,
+// and manage context through summarization compaction.
 func TestDoubleChargeSearchSummarization(t *testing.T) {
 	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
 		t.Skip(
@@ -149,7 +45,7 @@ func TestDoubleChargeSearchSummarization(t *testing.T) {
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
 	config.Compaction = testutil.CompactionConfig{
-		Type:              testutil.CompactionSummarization,
+		Type: testutil.CompactionSummarization,
 		TriggerIterations: 5,
 		KeepRecent:        1,
 	}
@@ -159,64 +55,6 @@ func TestDoubleChargeSearchSummarization(t *testing.T) {
 	); err != nil {
 		t.Fatalf(
 			"Double charge Search+Summarization "+
-				"failed: %v", err,
-		)
-	}
-}
-
-// TestDoubleChargeScenarioSearchSimpleList tests the
-// double-charge scenario with SearchJSON using SimpleList
-// hint type.
-func TestDoubleChargeScenarioSearchSimpleList(
-	t *testing.T,
-) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.ToolChain = testutil.ToolChainSearch
-
-	if err := RunDoubleChargeScenarioSearchSimpleList(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge "+
-				"(Search SimpleList) failed: %v",
-			err,
-		)
-	}
-}
-
-// TestDoubleChargeSearchSlidingWindow tests the double-charge
-// scenario with SearchJSON toolchain and sliding window
-// compaction (trigger=5, window=3).
-func TestDoubleChargeSearchSlidingWindow(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.ToolChain = testutil.ToolChainSearch
-	config.Compaction = testutil.CompactionConfig{
-		Type:              testutil.CompactionSlidingWindow,
-		TriggerIterations: 5,
-		WindowSize:        3,
-	}
-
-	if err := RunDoubleChargeScenarioSearch(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Double charge Search+SlidingWindow "+
 				"failed: %v", err,
 		)
 	}

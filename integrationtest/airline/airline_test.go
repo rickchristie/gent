@@ -1,3 +1,16 @@
+// This file contains a single integration test for the airline
+// scenario, using the most complex configuration: SearchJSON
+// toolchain with summarization compaction.
+//
+// For other variations (YAML/JSON toolchain, sliding window
+// compaction, SimpleList hint type, interactive chat), use the
+// integration CLI instead:
+//
+//	go run ./integrationtest/cli
+//
+// The CLI provides a menu-driven interface to select scenarios,
+// toolchains, compaction strategies, and even an interactive
+// chat mode with real-time streaming output.
 package airline
 
 import (
@@ -8,61 +21,18 @@ import (
 	"github.com/rickchristie/gent/integrationtest/testutil"
 )
 
-// TestRescheduleScenarioYAML tests the ReAct agent loop handling
-// a flight reschedule request.
+// TestRescheduleSearchSummarization tests the ReAct agent
+// loop handling a flight reschedule request using the
+// SearchJSON toolchain with summarization compaction.
 //
-// Scenario: Customer John Smith (C001) wants to reschedule his
-// flight AA100 to a later time on the same day because his
-// meeting ran late.
-func TestRescheduleScenarioYAML(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.ToolChain = testutil.ToolChainYAML
-
-	if err := RunRescheduleScenario(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf("Reschedule scenario failed: %v", err)
-	}
-}
-
-// TestRescheduleScenarioJSON tests the ReAct agent loop handling
-// a flight reschedule request using the JSON toolchain.
+// This is the most complex configuration, combining tool
+// discovery via search with context compaction via
+// summarization (trigger=5, keep=1).
 //
-// Scenario: Customer John Smith (C001) wants to reschedule his
-// flight AA100 to a later time on the same day because his
-// meeting ran late.
-func TestRescheduleScenarioJSON(t *testing.T) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-
-	if err := RunRescheduleScenario(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Reschedule scenario (JSON) failed: %v", err,
-		)
-	}
-}
-
-// TestRescheduleScenarioSearch tests the ReAct agent loop
-// handling a flight reschedule request using the SearchJSON
-// toolchain, where tools are discovered via search.
-func TestRescheduleScenarioSearch(t *testing.T) {
+// Scenario: Customer John Smith (C001) wants to reschedule
+// his flight AA100 to a later time on the same day because
+// his meeting ran late.
+func TestRescheduleSearchSummarization(t *testing.T) {
 	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
 		t.Skip(
 			"GENT_TEST_XAI_KEY not set, " +
@@ -73,40 +43,18 @@ func TestRescheduleScenarioSearch(t *testing.T) {
 	ctx := context.Background()
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
+	config.Compaction = testutil.CompactionConfig{
+		Type: testutil.CompactionSummarization,
+		TriggerIterations: 5,
+		KeepRecent:        1,
+	}
 
 	if err := RunRescheduleScenarioSearch(
 		ctx, os.Stdout, config,
 	); err != nil {
 		t.Fatalf(
-			"Reschedule scenario (Search) failed: %v",
-			err,
-		)
-	}
-}
-
-// TestRescheduleScenarioSearchSimpleList tests the
-// SearchJSON toolchain with SimpleList hint type.
-func TestRescheduleScenarioSearchSimpleList(
-	t *testing.T,
-) {
-	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
-		t.Skip(
-			"GENT_TEST_XAI_KEY not set, " +
-				"skipping integration test",
-		)
-	}
-
-	ctx := context.Background()
-	config := testutil.DefaultTestConfig()
-	config.ToolChain = testutil.ToolChainSearch
-
-	if err := RunRescheduleScenarioSearchSimpleList(
-		ctx, os.Stdout, config,
-	); err != nil {
-		t.Fatalf(
-			"Reschedule scenario "+
-				"(Search SimpleList) failed: %v",
-			err,
+			"Reschedule Search+Summarization "+
+				"failed: %v", err,
 		)
 	}
 }
