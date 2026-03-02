@@ -420,7 +420,8 @@ func TestSummarization_Compact(t *testing.T) {
 // TestSummarization_PromptContent verifies that the prompt
 // sent to the summarization model contains the correct
 // content — existing summaries included, pinned iteration
-// text excluded.
+// text excluded. The default prompt uses a two-message
+// structure (system + user) for prompt caching.
 func TestSummarization_PromptContent(t *testing.T) {
 	type input struct {
 		keepRecent    int
@@ -429,8 +430,10 @@ func TestSummarization_PromptContent(t *testing.T) {
 	}
 
 	type expected struct {
-		promptContains    []string
-		promptNotContains []string
+		messageCount      int
+		systemContains    []string
+		userContains      []string
+		userNotContains   []string
 		pinnedInResult    []*gent.Iteration
 	}
 
@@ -457,7 +460,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 	}{
 		{
 			name: "existing summary included in " +
-				"prompt",
+				"user message",
 			input: input{
 				keepRecent: 0,
 				scratchpad: []*gent.Iteration{
@@ -467,13 +470,20 @@ func TestSummarization_PromptContent(t *testing.T) {
 				modelResponse: "updated summary",
 			},
 			expected: expected{
-				promptContains: []string{
+				messageCount: 2,
+				systemContains: []string{
+					"continuation checkpoint",
+					"Output Format",
+					"Task & Intent",
+					"Rules",
+				},
+				userContains: []string{
 					"old summary text",
 					"Existing Summary",
 					"new data",
 				},
-				promptNotContains: nil,
-				pinnedInResult:    nil,
+				userNotContains: nil,
+				pinnedInResult:  nil,
 			},
 		},
 		{
@@ -487,17 +497,21 @@ func TestSummarization_PromptContent(t *testing.T) {
 				modelResponse: "summary",
 			},
 			expected: expected{
-				promptContains: []string{
+				messageCount: 2,
+				systemContains: []string{
+					"continuation checkpoint",
+				},
+				userContains: []string{
 					"None (first compaction)",
 					"step 1",
 				},
-				promptNotContains: nil,
-				pinnedInResult:    nil,
+				userNotContains: nil,
+				pinnedInResult:  nil,
 			},
 		},
 		{
 			name: "pinned iteration text excluded " +
-				"from prompt",
+				"from user message",
 			input: input{
 				keepRecent: 0,
 				scratchpad: []*gent.Iteration{
@@ -508,11 +522,15 @@ func TestSummarization_PromptContent(t *testing.T) {
 				modelResponse: "summary without pinned",
 			},
 			expected: expected{
-				promptContains: []string{
+				messageCount: 2,
+				systemContains: []string{
+					"continuation checkpoint",
+				},
+				userContains: []string{
 					"normal step",
 					"another step",
 				},
-				promptNotContains: []string{
+				userNotContains: []string{
 					"secret pinned data",
 				},
 				pinnedInResult: []*gent.Iteration{
@@ -546,24 +564,57 @@ func TestSummarization_PromptContent(t *testing.T) {
 			err := strategy.Compact(execCtx)
 			assert.NoError(t, err)
 
-			// Verify prompt content
+			// Verify message structure
 			assert.Len(t,
 				model.CapturedMessages, 1,
 				"model should be called once",
 			)
-			prompt := model.CapturedMessages[0][0].
-				Parts[0].(llms.TextContent)
+			msgs := model.CapturedMessages[0]
+			assert.Len(t,
+				msgs, tc.expected.messageCount,
+				"message count",
+			)
 
-			for _, s := range tc.expected.promptContains {
+			// System message at index 0
+			if tc.expected.messageCount == 2 {
+				assert.Equal(t,
+					llms.ChatMessageTypeSystem,
+					msgs[0].Role,
+					"first message should be system",
+				)
+				sysText := msgs[0].
+					Parts[0].(llms.TextContent)
+				for _, s := range tc.expected.systemContains {
+					assert.Contains(t,
+						sysText.Text, s,
+						"system prompt should "+
+							"contain %q", s,
+					)
+				}
+			}
+
+			// User message (index 1 with system,
+			// index 0 without)
+			userIdx := tc.expected.messageCount - 1
+			assert.Equal(t,
+				llms.ChatMessageTypeHuman,
+				msgs[userIdx].Role,
+				"last message should be user",
+			)
+			userText := msgs[userIdx].
+				Parts[0].(llms.TextContent)
+			for _, s := range tc.expected.userContains {
 				assert.Contains(t,
-					prompt.Text, s,
-					"prompt should contain %q", s,
+					userText.Text, s,
+					"user prompt should "+
+						"contain %q", s,
 				)
 			}
-			for _, s := range tc.expected.promptNotContains {
+			for _, s := range tc.expected.userNotContains {
 				assert.NotContains(t,
-					prompt.Text, s,
-					"prompt should not contain %q", s,
+					userText.Text, s,
+					"user prompt should not "+
+						"contain %q", s,
 				)
 			}
 
@@ -584,4 +635,108 @@ func TestSummarization_PromptContent(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSummarization_WithPromptSingleMessage verifies that
+// WithPrompt sends everything in a single user message
+// (no system message), preserving backward compatibility.
+func TestSummarization_WithPromptSingleMessage(
+	t *testing.T,
+) {
+	model := tt.NewMockModel()
+	model.AddResponse("custom summary", 10, 5)
+
+	strategy := NewSummarization(model).
+		WithPrompt("Custom: %s\n%s")
+
+	data := gent.NewBasicLoopData(nil)
+	data.SetScratchPad([]*gent.Iteration{
+		makeIter("test data"),
+	})
+	execCtx := gent.NewExecutionContext(
+		context.Background(), "test", data,
+	)
+	execCtx.SetLimits(nil)
+
+	err := strategy.Compact(execCtx)
+	assert.NoError(t, err)
+
+	// Should be a single user message (no system)
+	assert.Len(t, model.CapturedMessages, 1)
+	msgs := model.CapturedMessages[0]
+	assert.Len(t, msgs, 1,
+		"WithPrompt should send single message",
+	)
+	assert.Equal(t,
+		llms.ChatMessageTypeHuman,
+		msgs[0].Role,
+	)
+
+	userText := msgs[0].Parts[0].(llms.TextContent)
+	assert.Contains(t, userText.Text, "Custom:")
+	assert.Contains(t, userText.Text, "test data")
+}
+
+// TestSummarization_DefaultTwoMessages verifies that the
+// default configuration sends two messages (system + user)
+// for prompt caching.
+func TestSummarization_DefaultTwoMessages(t *testing.T) {
+	model := tt.NewMockModel()
+	model.AddResponse("summary", 10, 5)
+
+	strategy := NewSummarization(model)
+
+	data := gent.NewBasicLoopData(nil)
+	data.SetScratchPad([]*gent.Iteration{
+		makeIter("step 1"),
+		makeIter("step 2"),
+	})
+	execCtx := gent.NewExecutionContext(
+		context.Background(), "test", data,
+	)
+	execCtx.SetLimits(nil)
+
+	err := strategy.Compact(execCtx)
+	assert.NoError(t, err)
+
+	assert.Len(t, model.CapturedMessages, 1)
+	msgs := model.CapturedMessages[0]
+	assert.Len(t, msgs, 2,
+		"default should send system + user messages",
+	)
+
+	// System message contains static instructions
+	assert.Equal(t,
+		llms.ChatMessageTypeSystem, msgs[0].Role,
+	)
+	sysText := msgs[0].Parts[0].(llms.TextContent)
+	assert.Equal(t,
+		DefaultSummarizationSystemPrompt,
+		sysText.Text,
+		"system message should be the full "+
+			"default system prompt",
+	)
+
+	// User message contains dynamic content only
+	assert.Equal(t,
+		llms.ChatMessageTypeHuman, msgs[1].Role,
+	)
+	userText := msgs[1].Parts[0].(llms.TextContent)
+	assert.Contains(t, userText.Text,
+		"None (first compaction)",
+	)
+	assert.Contains(t, userText.Text, "step 1")
+	assert.Contains(t, userText.Text, "step 2")
+
+	// User message should NOT contain static instructions
+	assert.NotContains(t, userText.Text,
+		"Output Format",
+		"user message should not contain "+
+			"static instructions",
+	)
+	assert.NotContains(t, userText.Text,
+		"continuation checkpoint",
+		"user message should not contain "+
+			"static instructions",
+	)
 }

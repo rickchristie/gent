@@ -99,25 +99,39 @@ import (
 // ExecutionContext's stats (via the model's standard event
 // publishing). The summarization prompt can be customized.
 //
+// # Prompt Caching
+//
+// By default, the strategy sends the static instructions as
+// a system message and the dynamic content (existing summary
+// + new messages) as a user message. This two-message
+// structure enables prompt caching by LLM providers — the
+// system message is identical across compaction calls and
+// can be cached. Override with [WithPrompt] to use a single
+// user message instead (disables prompt caching).
+//
 // # Example
 //
 //	strategy := compaction.NewSummarization(model).
 //	    WithKeepRecent(5)
 type SummarizationStrategy struct {
-	model      gent.Model
-	keepRecent int
-	prompt     string
+	model        gent.Model
+	keepRecent   int
+	systemPrompt string
+	userPrompt   string
 }
 
 // NewSummarization creates a SummarizationStrategy with the
-// given model.
+// given model. By default, the strategy uses a two-message
+// structure (system + user) to enable prompt caching. See
+// [WithPrompt] to override with a single-message format.
 func NewSummarization(
 	model gent.Model,
 ) *SummarizationStrategy {
 	return &SummarizationStrategy{
-		model:      model,
-		keepRecent: 0,
-		prompt:     DefaultSummarizationPrompt,
+		model:        model,
+		keepRecent:   0,
+		systemPrompt: DefaultSummarizationSystemPrompt,
+		userPrompt:   DefaultSummarizationUserPrompt,
 	}
 }
 
@@ -131,25 +145,59 @@ func (s *SummarizationStrategy) WithKeepRecent(
 	return s
 }
 
-// WithPrompt sets a custom summarization prompt.
-// The prompt receives the existing summary (if any) and the
-// new messages to summarize via fmt.Sprintf with two %s
-// placeholders.
+// WithPrompt sets a custom summarization prompt that
+// combines instructions and dynamic content in a single
+// user message. The prompt receives the existing summary
+// (if any) and the new messages to summarize via
+// fmt.Sprintf with two %s placeholders.
+//
+// When WithPrompt is used, the system message is cleared
+// and the entire prompt is sent as a single user message.
+// This disables prompt caching but provides full control
+// over the prompt format.
 func (s *SummarizationStrategy) WithPrompt(
 	prompt string,
 ) *SummarizationStrategy {
-	s.prompt = prompt
+	s.systemPrompt = ""
+	s.userPrompt = prompt
 	return s
 }
 
-// DefaultSummarizationPrompt is the default prompt used
-// by [SummarizationStrategy]. Override it with
-// [SummarizationStrategy.WithPrompt] to customize.
+// WithSystemPrompt sets a custom system prompt containing
+// static instructions. The system prompt is sent as a
+// separate system message, enabling prompt caching.
+func (s *SummarizationStrategy) WithSystemPrompt(
+	prompt string,
+) *SummarizationStrategy {
+	s.systemPrompt = prompt
+	return s
+}
+
+// WithUserPrompt sets a custom user prompt template. The
+// template receives the existing summary and new messages
+// via fmt.Sprintf with two %s placeholders.
+func (s *SummarizationStrategy) WithUserPrompt(
+	prompt string,
+) *SummarizationStrategy {
+	s.userPrompt = prompt
+	return s
+}
+
+// DefaultSummarizationPrompt is the combined prompt used
+// by [SummarizationStrategy.WithPrompt] for single-message
+// mode. It contains both instructions and dynamic content
+// placeholders in a single string.
 //
 // The prompt takes two fmt.Sprintf placeholders:
 //
 //	%s — existing summary block (or "None" on first run)
 //	%s — formatted new messages to incorporate
+//
+// By default, [NewSummarization] uses
+// [DefaultSummarizationSystemPrompt] and
+// [DefaultSummarizationUserPrompt] instead, which split
+// static instructions from dynamic content to enable
+// prompt caching by LLM providers.
 //
 // # Designing a Custom Summarization Prompt
 //
@@ -488,6 +536,91 @@ Pending tasks in priority order. Only include work ` +
 - Write ONLY the summary sections, no preamble or ` +
 	`wrapper tags`
 
+// DefaultSummarizationSystemPrompt is the static system
+// prompt used by [SummarizationStrategy]. It contains the
+// handoff framing, output format instructions, and rules
+// that remain identical across compaction calls — enabling
+// prompt caching by LLM providers.
+//
+// Override with [SummarizationStrategy.WithSystemPrompt].
+const DefaultSummarizationSystemPrompt = `You are ` +
+	`creating a continuation checkpoint for an AI ` +
+	`agent. Another instance will resume this work ` +
+	`using only your summary and any recent iterations ` +
+	`retained after compaction. Your summary must ` +
+	`enable seamless continuation without loss of ` +
+	`critical details.
+
+## Output Format
+
+Write a summary with the following sections. Include ` +
+	`more detail for recent activity and less for ` +
+	`older completed work.
+
+### Task & Intent
+The user's primary request and any refinements or ` +
+	`feedback received. For the most recent user ` +
+	`requests, use verbatim quotes.
+
+### Progress
+What has been accomplished so far. Include specific ` +
+	`identifiers: names, values, file paths, function ` +
+	`signatures, schemas, URLs, and configuration ` +
+	`details. These compress poorly and are critical ` +
+	`for continuation.
+
+### Key Decisions & Findings
+Important decisions made, constraints discovered, ` +
+	`and technical findings that inform future work. ` +
+	`Include rationale where it affects next steps.
+
+### Errors & Resolutions
+Problems encountered and how they were resolved. ` +
+	`Include specific error messages and the fixes ` +
+	`applied. Omit this section entirely if none.
+
+### Current State
+What was being worked on immediately before this ` +
+	`checkpoint. This is the highest-priority section ` +
+	`— provide maximum detail about the most recent ` +
+	`activity including specific outputs, results, ` +
+	`and in-progress work.
+
+### Remaining Work
+Pending tasks in priority order. Only include work ` +
+	`that was explicitly requested or clearly ` +
+	`established as necessary. Do not invent new tasks ` +
+	`or plan beyond what was asked.
+
+## Rules
+- Preserve exact identifiers: names, paths, values, ` +
+	`error messages, and configuration details
+- If an existing summary is provided, extend and ` +
+	`update it — do not repeat it wholesale
+- Do NOT include large verbatim text blocks — ` +
+	`summarize and reference instead
+- Do NOT treat this as a conclusion — the agent's ` +
+	`work continues after this checkpoint
+- Write ONLY the summary sections, no preamble or ` +
+	`wrapper tags`
+
+// DefaultSummarizationUserPrompt is the user message
+// template used by [SummarizationStrategy]. It contains
+// only the dynamic content — existing summary and new
+// messages — that changes on each compaction call.
+//
+// The prompt takes two fmt.Sprintf placeholders:
+//
+//	%s — existing summary block (or "None" on first run)
+//	%s — formatted new messages to incorporate
+//
+// Override with [SummarizationStrategy.WithUserPrompt].
+const DefaultSummarizationUserPrompt = `%s
+
+## New Activity
+
+%s`
+
 // Compact implements gent.CompactionStrategy.
 func (s *SummarizationStrategy) Compact(
 	execCtx *gent.ExecutionContext,
@@ -547,20 +680,50 @@ func (s *SummarizationStrategy) Compact(
 	}
 
 	newMessages := extractTextFromIterations(toSummarize)
-	fullPrompt := fmt.Sprintf(
-		s.prompt, existingText, newMessages,
+	userText := fmt.Sprintf(
+		s.userPrompt, existingText, newMessages,
 	)
 
 	// Call model directly without TextFormat/TextSection.
 	// This is a one-shot call where the entire output is
 	// the summary — no multi-section parsing needed.
-	messages := []llms.MessageContent{
-		{
-			Role: llms.ChatMessageTypeHuman,
-			Parts: []llms.ContentPart{
-				llms.TextContent{Text: fullPrompt},
+	//
+	// When systemPrompt is set, we send two messages
+	// (system + user) to enable prompt caching — the
+	// system message is static across calls. When empty
+	// (e.g., after WithPrompt), we send a single user
+	// message containing everything.
+	var messages []llms.MessageContent
+	if s.systemPrompt != "" {
+		messages = []llms.MessageContent{
+			{
+				Role: llms.ChatMessageTypeSystem,
+				Parts: []llms.ContentPart{
+					llms.TextContent{
+						Text: s.systemPrompt,
+					},
+				},
 			},
-		},
+			{
+				Role: llms.ChatMessageTypeHuman,
+				Parts: []llms.ContentPart{
+					llms.TextContent{
+						Text: userText,
+					},
+				},
+			},
+		}
+	} else {
+		messages = []llms.MessageContent{
+			{
+				Role: llms.ChatMessageTypeHuman,
+				Parts: []llms.ContentPart{
+					llms.TextContent{
+						Text: userText,
+					},
+				},
+			},
+		}
 	}
 	streamID := fmt.Sprintf(
 		"compaction-summarization-%d",
