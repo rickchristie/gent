@@ -128,6 +128,9 @@ func RunDoubleChargeScenarioSearch(
 	w io.Writer,
 	config testutil.TestConfig,
 ) error {
+	config.PinTools = append(
+		config.PinTools, "search_guidance_policy",
+	)
 	fixture := NewEcommerceFixture(nil)
 	tp := fixture.TimeProvider()
 
@@ -275,6 +278,9 @@ func NewEcommerceInteractiveChatSearch(
 	w io.Writer,
 	config testutil.TestConfig,
 ) (*testutil.InteractiveChat, error) {
+	config.PinTools = append(
+		config.PinTools, "search_guidance_policy",
+	)
 	fixture := NewEcommerceFixture(nil)
 	tp := fixture.TimeProvider()
 

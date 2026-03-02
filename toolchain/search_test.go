@@ -724,6 +724,420 @@ func TestSearchJSON_AvailableToolsPrompt_SimpleList(
 }
 
 // -------------------------------------------------------
+// Pin Tests
+// -------------------------------------------------------
+
+func TestSearchJSON_Pin_DomainCategories(
+	t *testing.T,
+) {
+	okFn := func(
+		_ context.Context,
+		_ map[string]any,
+	) (string, error) {
+		return "ok", nil
+	}
+	tools := []*indexableToolFunc{
+		newIndexableToolWithSchema(
+			"search_policy",
+			"Search company policies",
+			"Policy",
+			[]string{"lookup", "policy"},
+			[]string{"policy", "guidance"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"keyword": map[string]any{
+						"type": "string",
+					},
+				},
+				"required": []string{"keyword"},
+			},
+			okFn,
+		),
+		newIndexableTool(
+			"lookup_customer",
+			"Lookup customer by email",
+			"Customer",
+			[]string{"lookup", "customer"},
+			nil, okFn,
+		),
+		newIndexableTool(
+			"get_order", "Get order details",
+			"Orders",
+			[]string{"lookup", "orders"},
+			nil, okFn,
+		),
+	}
+
+	eng := &mockSearchEngine{
+		id:       "bm25",
+		guidance: "natural language",
+	}
+
+	tc := NewSearchJSON(SearchHintDomainCategories)
+	tc.RegisterEngine(eng)
+	for _, tool := range tools {
+		tc.RegisterTool(tool)
+	}
+	tc.Pin("search_policy")
+	err := tc.Initialize()
+	require.NoError(t, err)
+
+	prompt := tc.AvailableToolsPrompt()
+
+	t.Run("shows pinned tool definition",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt,
+				"- search_policy: "+
+					"Search company policies\n",
+			)
+		},
+	)
+
+	t.Run("shows pinned tool schema",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, `"keyword"`,
+			)
+		},
+	)
+
+	t.Run("does not show unpinned tools",
+		func(t *testing.T) {
+			assert.NotContains(
+				t, prompt,
+				"- lookup_customer:",
+			)
+			assert.NotContains(
+				t, prompt,
+				"- get_order:",
+			)
+		},
+	)
+
+	t.Run("changes guidance text when pinned",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt,
+				"Some tools are pinned below.",
+			)
+			assert.Contains(
+				t, prompt,
+				"Use tool_registry_search "+
+					"to discover more.",
+			)
+			assert.NotContains(
+				t, prompt,
+				"Use tool_registry_search "+
+					"for tool discovery.",
+			)
+		},
+	)
+
+	t.Run("still shows domain summary",
+		func(t *testing.T) {
+			assert.Contains(t, prompt, "Policy")
+			assert.Contains(t, prompt, "Customer")
+			assert.Contains(t, prompt, "Orders")
+		},
+	)
+
+	t.Run("includes total tool count",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, "3 tools across",
+			)
+		},
+	)
+}
+
+func TestSearchJSON_Pin_SimpleList(t *testing.T) {
+	okFn := func(
+		_ context.Context,
+		_ map[string]any,
+	) (string, error) {
+		return "ok", nil
+	}
+	tools := []*indexableToolFunc{
+		newIndexableToolWithSchema(
+			"search_policy",
+			"Search company policies",
+			"Policy",
+			[]string{"lookup"},
+			nil,
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"keyword": map[string]any{
+						"type": "string",
+					},
+				},
+				"required": []string{"keyword"},
+			},
+			okFn,
+		),
+		newIndexableTool(
+			"lookup_customer",
+			"Lookup customer",
+			"Customer",
+			[]string{"lookup"}, nil, okFn,
+		),
+	}
+
+	eng := &mockSearchEngine{
+		id:       "bm25",
+		guidance: "natural language",
+	}
+
+	tc := NewSearchJSON(SearchHintSimpleList)
+	tc.RegisterEngine(eng)
+	for _, tool := range tools {
+		tc.RegisterTool(tool)
+	}
+	tc.Pin("search_policy")
+	err := tc.Initialize()
+	require.NoError(t, err)
+
+	prompt := tc.AvailableToolsPrompt()
+
+	t.Run("shows pinned tool definition",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt,
+				"- search_policy: "+
+					"Search company policies\n",
+			)
+		},
+	)
+
+	t.Run("changes guidance text when pinned",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt,
+				"Some tools are pinned below.",
+			)
+			assert.Contains(
+				t, prompt,
+				"Use tool_registry_search "+
+					"to get other tool details.",
+			)
+			assert.NotContains(
+				t, prompt,
+				"Use tool_registry_search "+
+					"to get tool details "+
+					"before calling.",
+			)
+		},
+	)
+
+	t.Run("still lists all tool names",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, "  - search_policy\n",
+			)
+			assert.Contains(
+				t, prompt,
+				"  - lookup_customer\n",
+			)
+		},
+	)
+}
+
+func TestSearchJSON_Pin_NoPins(t *testing.T) {
+	okFn := func(
+		_ context.Context,
+		_ map[string]any,
+	) (string, error) {
+		return "ok", nil
+	}
+
+	eng := &mockSearchEngine{
+		id:       "bm25",
+		guidance: "natural language",
+	}
+
+	t.Run("domain categories without pins",
+		func(t *testing.T) {
+			tc := NewSearchJSON(
+				SearchHintDomainCategories,
+			)
+			tc.RegisterEngine(eng)
+			tc.RegisterTool(newIndexableTool(
+				"tool1", "Tool 1", "D",
+				nil, nil, okFn,
+			))
+			err := tc.Initialize()
+			require.NoError(t, err)
+
+			prompt := tc.AvailableToolsPrompt()
+			assert.Contains(
+				t, prompt,
+				"Use tool_registry_search "+
+					"for tool discovery.",
+			)
+			assert.NotContains(
+				t, prompt,
+				"pinned below",
+			)
+		},
+	)
+
+	t.Run("simple list without pins",
+		func(t *testing.T) {
+			tc := NewSearchJSON(SearchHintSimpleList)
+			tc.RegisterEngine(eng)
+			tc.RegisterTool(newIndexableTool(
+				"tool1", "Tool 1", "D",
+				nil, nil, okFn,
+			))
+			err := tc.Initialize()
+			require.NoError(t, err)
+
+			prompt := tc.AvailableToolsPrompt()
+			assert.Contains(
+				t, prompt,
+				"Use tool_registry_search "+
+					"to get tool details "+
+					"before calling.",
+			)
+			assert.NotContains(
+				t, prompt,
+				"pinned below",
+			)
+		},
+	)
+}
+
+func TestSearchJSON_Pin_InvalidTool(t *testing.T) {
+	eng := &mockSearchEngine{
+		id:       "bm25",
+		guidance: "natural language",
+	}
+
+	tc := NewSearchJSON(SearchHintDomainCategories)
+	tc.RegisterEngine(eng)
+	tc.RegisterTool(newIndexableTool(
+		"tool1", "Tool 1", "D", nil, nil,
+		func(
+			_ context.Context,
+			_ map[string]any,
+		) (string, error) {
+			return "ok", nil
+		},
+	))
+	tc.Pin("nonexistent_tool")
+
+	err := tc.Initialize()
+	assert.Error(t, err)
+	assert.Contains(
+		t, err.Error(),
+		"pinned tool \"nonexistent_tool\" "+
+			"is not registered",
+	)
+}
+
+func TestSearchJSON_Pin_MultiplePins(t *testing.T) {
+	okFn := func(
+		_ context.Context,
+		_ map[string]any,
+	) (string, error) {
+		return "ok", nil
+	}
+
+	eng := &mockSearchEngine{
+		id:       "bm25",
+		guidance: "natural language",
+	}
+
+	tc := NewSearchJSON(SearchHintDomainCategories)
+	tc.RegisterEngine(eng)
+	tc.RegisterTool(newIndexableTool(
+		"tool_a", "Tool A", "D",
+		nil, nil, okFn,
+	))
+	tc.RegisterTool(newIndexableTool(
+		"tool_b", "Tool B", "D",
+		nil, nil, okFn,
+	))
+	tc.RegisterTool(newIndexableTool(
+		"tool_c", "Tool C", "D",
+		nil, nil, okFn,
+	))
+	tc.Pin("tool_a")
+	tc.Pin("tool_c")
+
+	err := tc.Initialize()
+	require.NoError(t, err)
+
+	prompt := tc.AvailableToolsPrompt()
+
+	t.Run("shows both pinned tools",
+		func(t *testing.T) {
+			assert.Contains(
+				t, prompt, "- tool_a: Tool A\n",
+			)
+			assert.Contains(
+				t, prompt, "- tool_c: Tool C\n",
+			)
+		},
+	)
+
+	t.Run("does not show unpinned tool",
+		func(t *testing.T) {
+			assert.NotContains(
+				t, prompt, "- tool_b:",
+			)
+		},
+	)
+}
+
+func TestSearchJSON_Pin_ToolStillSearchable(
+	t *testing.T,
+) {
+	okFn := func(
+		_ context.Context,
+		_ map[string]any,
+	) (string, error) {
+		return "ok", nil
+	}
+
+	eng := &mockSearchEngine{
+		id:       "bm25",
+		guidance: "natural language",
+		searchFn: func(
+			_ context.Context, _ string,
+		) ([]string, error) {
+			return []string{"pinned_tool"}, nil
+		},
+	}
+
+	tc := NewSearchJSON(SearchHintDomainCategories)
+	tc.RegisterEngine(eng)
+	tc.RegisterTool(newIndexableTool(
+		"pinned_tool", "A pinned tool", "D",
+		nil, nil, okFn,
+	))
+	tc.Pin("pinned_tool")
+
+	err := tc.Initialize()
+	require.NoError(t, err)
+
+	// Pinned tool should still be found via search
+	result, err := tc.Execute(
+		newExecCtx(),
+		`{"tool":"tool_registry_search",`+
+			`"args":{"query":"pinned",`+
+			`"query_type":"bm25"}}`,
+		searchTestFormat(),
+	)
+	require.NoError(t, err)
+	assert.Contains(
+		t, result.Text, "pinned_tool",
+	)
+}
+
+// -------------------------------------------------------
 // ParseSection Tests
 // -------------------------------------------------------
 

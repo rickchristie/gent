@@ -62,6 +62,9 @@ type TestConfig struct {
 	// shown in SearchJSON prompts. Only used when
 	// ToolChain is ToolChainSearch.
 	SearchHintType toolchain.SearchHintType
+	// PinTools lists tool names to pin in SearchJSON.
+	// Only used when ToolChain is ToolChainSearch.
+	PinTools []string
 	// UseStreaming enables streaming mode for LLM calls.
 	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
@@ -182,10 +185,17 @@ func CreateToolChain(config TestConfig) gent.ToolChain {
 	}
 }
 
-// InitializeToolChain calls Initialize() on a SearchJSON
-// toolchain. No-op for other toolchain types.
-func InitializeToolChain(tc gent.ToolChain) error {
+// InitializeToolChain applies pinned tools and calls
+// Initialize() on a SearchJSON toolchain. No-op for
+// other toolchain types.
+func InitializeToolChain(
+	tc gent.ToolChain,
+	config TestConfig,
+) error {
 	if stc, ok := tc.(*toolchain.SearchJSON); ok {
+		for _, name := range config.PinTools {
+			stc.Pin(name)
+		}
 		return stc.Initialize()
 	}
 	return nil
@@ -300,7 +310,7 @@ func RunScenario(
 
 	tc := CreateToolChain(testCfg)
 	scenario.RegisterTools(tc)
-	if err := InitializeToolChain(tc); err != nil {
+	if err := InitializeToolChain(tc, testCfg); err != nil {
 		return fmt.Errorf(
 			"failed to initialize toolchain: %w", err,
 		)
@@ -767,7 +777,9 @@ func (s *InteractiveChat) SendMessage(
 
 	tc := CreateToolChain(s.Config)
 	s.ChatCfg.RegisterTools(tc)
-	if err := InitializeToolChain(tc); err != nil {
+	if err := InitializeToolChain(
+		tc, s.Config,
+	); err != nil {
 		return fmt.Errorf(
 			"failed to initialize toolchain: %w", err,
 		)

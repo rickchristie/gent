@@ -87,6 +87,7 @@ type SearchJSON struct {
 
 	// Config
 	hintType         SearchHintType
+	pinnedToolNames  []string
 	pageSize         int
 	noResultsMessage string
 
@@ -149,6 +150,21 @@ func (c *SearchJSON) RegisterEngine(
 ) *SearchJSON {
 	c.engines = append(c.engines, engine)
 	c.engineMap[engine.Id()] = engine
+	return c
+}
+
+// Pin marks a tool to always be displayed in the
+// available tools prompt with its full definition.
+// The tool must be registered before Initialize() is
+// called; validation happens at Initialize() time.
+//
+// Pinned tools are still indexed by search engines.
+func (c *SearchJSON) Pin(
+	toolName string,
+) *SearchJSON {
+	c.pinnedToolNames = append(
+		c.pinnedToolNames, toolName,
+	)
 	return c
 }
 
@@ -266,12 +282,27 @@ func (c *SearchJSON) Initialize() error {
 	}
 	c.compiledSearchSchema = compiled
 
+	// Validate and collect pinned tools
+	var pinnedTools []any
+	for _, name := range c.pinnedToolNames {
+		tool, exists := c.toolMap[name]
+		if !exists {
+			return fmt.Errorf(
+				"SearchJSON.Initialize: pinned "+
+					"tool %q is not registered",
+				name,
+			)
+		}
+		pinnedTools = append(pinnedTools, tool)
+	}
+
 	// Build the prompt
 	c.searchToolPrompt = buildSearchToolPrompt(
 		c.indexableTools,
 		c.engines,
 		c.searchToolSchema,
 		c.hintType,
+		pinnedTools,
 	)
 
 	c.initialized = true

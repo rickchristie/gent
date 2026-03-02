@@ -111,6 +111,9 @@ func RunRescheduleScenarioSearch(
 	w io.Writer,
 	config testutil.TestConfig,
 ) error {
+	config.PinTools = append(
+		config.PinTools, "search_airline_policy",
+	)
 	fixture := NewAirlineFixture(nil)
 	tp := fixture.TimeProvider()
 
@@ -237,6 +240,9 @@ func NewAirlineInteractiveChatSearch(
 	w io.Writer,
 	config testutil.TestConfig,
 ) (*testutil.InteractiveChat, error) {
+	config.PinTools = append(
+		config.PinTools, "search_airline_policy",
+	)
 	fixture := NewAirlineFixture(nil)
 	tp := fixture.TimeProvider()
 

@@ -118,12 +118,18 @@ const searchToolName = "tool_registry_search"
 // When hintType is SearchHintSimpleList, the prompt lists all
 // tool names. When SearchHintDomainCategories, it shows
 // domain/category summaries with tool counts.
+//
+// pinnedTools are displayed with full definitions alongside
+// the search tool. When present, the guidance text changes
+// to indicate not all tools are shown.
 func buildSearchToolPrompt(
 	tools []gent.IndexableTool,
 	engines []gent.SearchEngine,
 	schemaMap map[string]any,
 	hintType SearchHintType,
+	pinnedTools []any,
 ) string {
+	hasPinned := len(pinnedTools) > 0
 	var sb strings.Builder
 
 	// Tool count + hint (domain summary or simple list)
@@ -133,6 +139,22 @@ func buildSearchToolPrompt(
 			len(tools),
 		)
 		sb.WriteString(buildSimpleList(tools))
+		if hasPinned {
+			fmt.Fprintf(
+				&sb,
+				"Some tools are pinned below. "+
+					"Use %s to get other tool "+
+					"details.\n",
+				searchToolName,
+			)
+		} else {
+			fmt.Fprintf(
+				&sb,
+				"Use %s to get tool details "+
+					"before calling.\n",
+				searchToolName,
+			)
+		}
 	} else {
 		fmt.Fprintf(
 			&sb,
@@ -143,6 +165,20 @@ func buildSearchToolPrompt(
 		domainSummary := buildDomainSummary(tools)
 		if domainSummary != "" {
 			sb.WriteString(domainSummary)
+		}
+		if hasPinned {
+			fmt.Fprintf(
+				&sb,
+				"Some tools are pinned below. "+
+					"Use %s to discover more.\n",
+				searchToolName,
+			)
+		} else {
+			fmt.Fprintf(
+				&sb,
+				"Use %s for tool discovery.\n",
+				searchToolName,
+			)
 		}
 	}
 
@@ -172,6 +208,12 @@ func buildSearchToolPrompt(
 		sb.WriteString("  Parameters: ")
 		sb.Write(schemaJSON)
 		sb.WriteString("\n")
+	}
+
+	// Pinned tool definitions
+	if hasPinned {
+		sb.WriteString("\n")
+		sb.WriteString(formatToolDefinitions(pinnedTools))
 	}
 
 	return sb.String()
