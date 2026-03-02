@@ -44,7 +44,7 @@ func TestRescheduleSearchSummarization(t *testing.T) {
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
 	config.Compaction = testutil.CompactionConfig{
-		Type: testutil.CompactionSummarization,
+		Type:              testutil.CompactionSummarization,
 		TriggerIterations: 5,
 		KeepRecent:        1,
 	}
