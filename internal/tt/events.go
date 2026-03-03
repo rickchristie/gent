@@ -89,6 +89,25 @@ func ToolErrorObservation(toolChain *MockToolChain, toolName string) string {
 	return toolChain.FormatToolResult(toolName, "")
 }
 
+// CodeErrorObservation builds the expected NextPrompt for
+// code execution errors. The MockToolChain wraps the error
+// in a code_error section.
+func CodeErrorObservation(
+	format gent.TextFormat,
+	toolChain *MockToolChain,
+) string {
+	codeErr := toolChain.FormatCodeErrorResult(format)
+	return Observation(format, codeErr)
+}
+
+// CodeSuccessObservation builds the expected NextPrompt
+// for successful code execution.
+func CodeSuccessObservation(
+	format gent.TextFormat,
+) string {
+	return Observation(format, "Code executed successfully.")
+}
+
 // Terminate creates an AgentLoopResult with LATerminate action and text result.
 func Terminate(text string) *gent.AgentLoopResult {
 	return &gent.AgentLoopResult{

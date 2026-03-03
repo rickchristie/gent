@@ -296,6 +296,25 @@ const (
 	SCAnswerRejectedBy    StatKey = "gent:answer_rejected_by:" // + validator name
 )
 
+// Code execution tracking keys (Programmatic Tool Calling).
+//
+// Auto-updated by JsToolChainWrapper when code blocks
+// are executed.
+//
+// Default limit: 3 consecutive code execution errors
+// (see DefaultLimits).
+const (
+	// Counter: total code blocks executed
+	SCCodeExecutions StatKey = "gent:code_executions"
+
+	// Counter: code blocks that failed
+	SCCodeExecutionsError StatKey = "gent:code_executions_error"
+
+	// Gauge: consecutive code execution errors
+	// (reset on success)
+	SGCodeExecutionsErrorConsecutive StatKey = "gent:code_executions_error_consecutive"
+)
+
 // Compaction tracking key (Counter).
 //
 // Auto-updated when CompactionEvent is published. Tracks the

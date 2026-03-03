@@ -83,6 +83,7 @@ type Limit struct {
 //   - 3 consecutive parse errors (format, toolchain, section,
 //     termination)
 //   - 3 consecutive tool call errors
+//   - 3 consecutive code execution errors
 //   - 10 total answer rejections
 //
 // Override with ExecutionContext.SetLimits():
@@ -146,6 +147,13 @@ func DefaultLimits() []Limit {
 		{
 			Type:     LimitExactKey,
 			Key:      SGToolCallsErrorConsecutive,
+			MaxValue: 3,
+		},
+
+		// Stop after 3 consecutive code execution errors
+		{
+			Type:     LimitExactKey,
+			Key:      SGCodeExecutionsErrorConsecutive,
 			MaxValue: 3,
 		},
 

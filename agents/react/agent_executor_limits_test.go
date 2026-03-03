@@ -6333,3 +6333,494 @@ func TestExecutorLimits_TotalTokensLastIterationForModel(
 		},
 	)
 }
+
+// ----------------------------------------------------------------------------
+// Test: Code execution error consecutive limit
+// ----------------------------------------------------------------------------
+
+func TestExecutorLimits_CodeExecutionErrorConsecutive(
+	t *testing.T,
+) {
+	t.Run(
+		"stops when code execution error "+
+			"consecutive exceeded at iteration 1",
+		func(t *testing.T) {
+			// 3 code execution errors, then answer.
+			// Limit of 0: first error triggers.
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain().
+				WithCodeExec(0, true).
+				WithCodeExec(1, true).
+				WithCodeExec(2, true)
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGCodeExecutionsErrorConsecutive,
+				0,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit(),
+			)
+			assert.Equal(t, 1, execCtx.Iteration())
+
+			// Stats verification
+			assert.Equal(t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutions,
+				),
+			)
+			assert.Equal(t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutionsError,
+				),
+			)
+			assert.Equal(t, 1.0,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+
+			codeErrObs := tt.CodeErrorObservation(
+				format, toolChain,
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iteration 1: code error
+				// (consecutive: 1 > limit 0)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(
+					0, 1, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 1, "test-model", 100, 50,
+				),
+				tt.LimitExceeded(
+					0, 1, limit, 1,
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+				tt.AfterIter(0, 1,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				tt.AfterExec(
+					0, 1,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(t,
+				expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"stops when code execution error "+
+			"consecutive exceeded at iteration N",
+		func(t *testing.T) {
+			// Iterations 1-2: code success
+			// Iterations 3-5: code error (3rd error
+			//   exceeds limit of 2)
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain().
+				WithCodeExec(0, false).
+				WithCodeExec(1, false).
+				WithCodeExec(2, true).
+				WithCodeExec(3, true).
+				WithCodeExec(4, true)
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGCodeExecutionsErrorConsecutive,
+				2,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit(),
+			)
+			assert.Equal(t, 5, execCtx.Iteration())
+
+			// Stats verification
+			assert.Equal(t, int64(5),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutions,
+				),
+			)
+			assert.Equal(t, int64(3),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutionsError,
+				),
+			)
+			assert.Equal(t, 3.0,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+
+			codeSuccessObs := tt.CodeSuccessObservation(
+				format,
+			)
+			codeErrObs := tt.CodeErrorObservation(
+				format, toolChain,
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iteration 1: code success
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(
+					0, 1, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 1, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 1,
+					tt.ContinueWithPrompt(
+						codeSuccessObs,
+					),
+				),
+				// Iteration 2: code success
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(
+					0, 2, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 2, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 2,
+					tt.ContinueWithPrompt(
+						codeSuccessObs,
+					),
+				),
+				// Iteration 3: code error
+				// (consecutive: 1)
+				tt.BeforeIter(0, 3),
+				tt.BeforeModelCall(
+					0, 3, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 3, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 3,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				// Iteration 4: code error
+				// (consecutive: 2)
+				tt.BeforeIter(0, 4),
+				tt.BeforeModelCall(
+					0, 4, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 4, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 4,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				// Iteration 5: code error
+				// (consecutive: 3 > limit 2)
+				tt.BeforeIter(0, 5),
+				tt.BeforeModelCall(
+					0, 5, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 5, "test-model", 100, 50,
+				),
+				tt.LimitExceeded(
+					0, 5, limit, 3,
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+				tt.AfterIter(0, 5,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				tt.AfterExec(
+					0, 5,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(t,
+				expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+
+	t.Run(
+		"consecutive gauge resets on success",
+		func(t *testing.T) {
+			// Error → success → error → error → error
+			// Consecutive gauge: 1 → 0 → 1 → 2 → 3
+			// Limit of 2: triggers at iteration 5
+			model := tt.NewMockModel().
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<action>code: exec</action>",
+					100, 50,
+				).
+				AddResponse(
+					"<answer>done</answer>", 100, 50,
+				)
+
+			format := tt.NewMockFormat().
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"action": {"code: exec"},
+				}).
+				AddParseResult(map[string][]string{
+					"answer": {"done"},
+				})
+
+			toolChain := tt.NewMockToolChain().
+				WithCodeExec(0, true).
+				WithCodeExec(1, false).
+				WithCodeExec(2, true).
+				WithCodeExec(3, true).
+				WithCodeExec(4, true)
+			termination := tt.NewMockTermination()
+
+			limit := tt.ExactLimit(
+				gent.SGCodeExecutionsErrorConsecutive,
+				2,
+			)
+			limits := []gent.Limit{limit}
+
+			execCtx := runWithLimit(
+				t, model, format,
+				toolChain, termination, limits,
+			)
+
+			assert.Equal(t,
+				gent.TerminationLimitExceeded,
+				execCtx.TerminationReason(),
+			)
+			assert.Equal(t,
+				limit, *execCtx.ExceededLimit(),
+			)
+			assert.Equal(t, 5, execCtx.Iteration())
+
+			// Stats verification
+			assert.Equal(t, int64(5),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutions,
+				),
+			)
+			assert.Equal(t, int64(4),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutionsError,
+				),
+			)
+			// Gauge = 3 (not 4, because reset
+			// happened after success at iter 2)
+			assert.Equal(t, 3.0,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+
+			codeErrObs := tt.CodeErrorObservation(
+				format, toolChain,
+			)
+			codeSuccessObs := tt.CodeSuccessObservation(
+				format,
+			)
+
+			expectedEvents := []gent.Event{
+				tt.BeforeExec(0, 0),
+				// Iteration 1: code error
+				// (consecutive: 1)
+				tt.BeforeIter(0, 1),
+				tt.BeforeModelCall(
+					0, 1, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 1, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 1,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				// Iteration 2: code success
+				// (consecutive: 0, reset)
+				tt.BeforeIter(0, 2),
+				tt.BeforeModelCall(
+					0, 2, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 2, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 2,
+					tt.ContinueWithPrompt(
+						codeSuccessObs,
+					),
+				),
+				// Iteration 3: code error
+				// (consecutive: 1)
+				tt.BeforeIter(0, 3),
+				tt.BeforeModelCall(
+					0, 3, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 3, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 3,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				// Iteration 4: code error
+				// (consecutive: 2)
+				tt.BeforeIter(0, 4),
+				tt.BeforeModelCall(
+					0, 4, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 4, "test-model", 100, 50,
+				),
+				tt.AfterIter(0, 4,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				// Iteration 5: code error
+				// (consecutive: 3 > limit 2)
+				tt.BeforeIter(0, 5),
+				tt.BeforeModelCall(
+					0, 5, "test-model",
+				),
+				tt.AfterModelCall(
+					0, 5, "test-model", 100, 50,
+				),
+				tt.LimitExceeded(
+					0, 5, limit, 3,
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+				tt.AfterIter(0, 5,
+					tt.ContinueWithPrompt(codeErrObs),
+				),
+				tt.AfterExec(
+					0, 5,
+					gent.TerminationLimitExceeded,
+				),
+			}
+			tt.AssertEventsEqual(t,
+				expectedEvents,
+				tt.CollectLifecycleEvents(execCtx),
+			)
+		},
+	)
+}

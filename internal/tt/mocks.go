@@ -135,11 +135,13 @@ type MockToolFunc func(execCtx *gent.ExecutionContext, args map[string]any) (str
 
 // MockToolChain is a configurable mock that implements gent.ToolChain.
 // It publishes BeforeToolCall, AfterToolCall, and ParseError events as required.
+// It can also simulate code execution via WithCodeExec.
 type MockToolChain struct {
-	name        string
-	tools       map[string]MockToolFunc
-	parseErrors []error
-	callIdx     int
+	name           string
+	tools          map[string]MockToolFunc
+	parseErrors    []error
+	codeExecErrors map[int]bool // key=callIdx, true=error
+	callIdx        int
 }
 
 // NewMockToolChain creates a new MockToolChain with default name "action".
@@ -164,6 +166,21 @@ func (tc *MockToolChain) WithTool(
 // WithToolCtx adds a tool that receives the execution context.
 func (tc *MockToolChain) WithToolCtx(name string, fn MockToolFunc) *MockToolChain {
 	tc.tools[name] = fn
+	return tc
+}
+
+// WithCodeExec marks a specific call index as a code
+// execution. When Execute is called at this index, it
+// simulates code execution behavior (increments code
+// execution stats) instead of tool call behavior.
+// If hasError is true, the code execution fails.
+func (tc *MockToolChain) WithCodeExec(
+	index int, hasError bool,
+) *MockToolChain {
+	if tc.codeExecErrors == nil {
+		tc.codeExecErrors = make(map[int]bool)
+	}
+	tc.codeExecErrors[index] = hasError
 	return tc
 }
 
@@ -230,6 +247,13 @@ func (tc *MockToolChain) Execute(
 		execCtx.Stats().ResetGauge(gent.SGToolchainParseErrorConsecutive)
 	}
 
+	// Check for code execution simulation
+	if hasError, isCodeExec := tc.codeExecErrors[idx]; isCodeExec {
+		return tc.executeCodeExec(
+			execCtx, hasError, format,
+		)
+	}
+
 	// Parse tool name from content (simple mock: "tool: <name>")
 	toolName := "test_tool"
 	if len(content) > 6 && content[:6] == "tool: " {
@@ -292,11 +316,76 @@ func (tc *MockToolChain) Execute(
 	}, nil
 }
 
+// executeCodeExec simulates code execution behavior.
+// Increments code execution stats and returns a
+// predictable result.
+func (tc *MockToolChain) executeCodeExec(
+	execCtx *gent.ExecutionContext,
+	hasError bool,
+	format gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	if execCtx != nil {
+		execCtx.Stats().IncrCounter(
+			gent.SCCodeExecutions, 1,
+		)
+	}
+
+	if hasError {
+		if execCtx != nil {
+			execCtx.Stats().IncrCounter(
+				gent.SCCodeExecutionsError, 1,
+			)
+			execCtx.Stats().IncrGauge(
+				gent.SGCodeExecutionsErrorConsecutive,
+				1,
+			)
+		}
+		errorText := format.FormatSections(
+			[]gent.FormattedSection{
+				{
+					Name:    "code_error",
+					Content: "code execution failed",
+				},
+			},
+		)
+		return &gent.ToolChainResult{
+			Text: errorText,
+			Raw:  &gent.RawToolChainResult{},
+		}, nil
+	}
+
+	// Success — reset consecutive error gauge
+	if execCtx != nil {
+		execCtx.Stats().ResetGauge(
+			gent.SGCodeExecutionsErrorConsecutive,
+		)
+	}
+	return &gent.ToolChainResult{
+		Text: "Code executed successfully.",
+		Raw:  &gent.RawToolChainResult{},
+	}, nil
+}
+
 // FormatToolResult returns the tool result text that MockToolChain.Execute generates.
 // This is useful for tests to build expected NextPrompt values.
 // The result format is: <observation>\n<toolname>\noutput\n</toolname>\n</observation>
 func (tc *MockToolChain) FormatToolResult(toolName, output string) string {
 	return "<observation>\n<" + toolName + ">\n" + output + "\n</" + toolName + ">\n</observation>"
+}
+
+// FormatCodeErrorResult returns the code error result text
+// that MockToolChain.executeCodeExec generates with error.
+func (tc *MockToolChain) FormatCodeErrorResult(
+	format gent.TextFormat,
+) string {
+	return format.FormatSections(
+		[]gent.FormattedSection{
+			{
+				Name:    "code_error",
+				Content: "code execution failed",
+			},
+		},
+	)
 }
 
 // -----------------------------------------------------------------------------
