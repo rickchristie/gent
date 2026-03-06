@@ -58,3 +58,37 @@ func TestRescheduleSearchSummarization(t *testing.T) {
 		)
 	}
 }
+
+// TestRescheduleSearchSummarizationPTC tests the
+// flight reschedule scenario with SearchJSON toolchain
+// wrapped in JsToolChainWrapper (programmatic tool
+// calling) and summarization compaction.
+func TestRescheduleSearchSummarizationPTC(
+	t *testing.T,
+) {
+	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
+		t.Skip(
+			"GENT_TEST_XAI_KEY not set, " +
+				"skipping integration test",
+		)
+	}
+
+	ctx := context.Background()
+	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainSearch
+	config.WrapPTC = true
+	config.Compaction = testutil.CompactionConfig{
+		Type:              testutil.CompactionSummarization,
+		TriggerIterations: 5,
+		KeepRecent:        1,
+	}
+
+	if err := RunRescheduleScenarioSearch(
+		ctx, os.Stdout, config,
+	); err != nil {
+		t.Fatalf(
+			"Reschedule Search+Summarization+PTC "+
+				"failed: %v", err,
+		)
+	}
+}

@@ -104,7 +104,26 @@ func run() error {
 			return handleMenuErr(err)
 		}
 
-		// Step 3: ToolChain
+		// Step 3: Programmatic Tool Calling
+		ptcChoice, err := promptMenu(rl,
+			"Programmatic Tool Calling (PTC)",
+			[]menuOption{
+				{
+					label: "No  — standard tool calls",
+					value: "no",
+				},
+				{
+					label: "Yes — wrap in " +
+						"JsToolChainWrapper",
+					value: "yes",
+				},
+			},
+		)
+		if err != nil {
+			return handleMenuErr(err)
+		}
+
+		// Step 4: ToolChain
 		tcType, err := promptMenu(rl,
 			"ToolChain",
 			[]menuOption{
@@ -120,7 +139,7 @@ func run() error {
 			return handleMenuErr(err)
 		}
 
-		// Step 3b: Search hint type (only for search)
+		// Step 4b: Search hint type (only for search)
 		var hintType string
 		if tcType == "search" {
 			hintType, err = promptMenu(rl,
@@ -142,7 +161,7 @@ func run() error {
 			}
 		}
 
-		// Step 4: Compaction
+		// Step 5: Compaction
 		compactionCfg, err := promptCompaction(rl)
 		if err != nil {
 			if err == readline.ErrInterrupt {
@@ -153,13 +172,18 @@ func run() error {
 
 		// Build config
 		config := buildConfig(tcType, hintType)
+		config.WrapPTC = ptcChoice == "yes"
 		config.Compaction = compactionCfg
 
 		// Create per-run log file
+		ptcSuffix := ""
+		if config.WrapPTC {
+			ptcSuffix = "_ptc"
+		}
 		logFileName := fmt.Sprintf(
-			"%s_%s_%s_%s.log",
+			"%s_%s_%s_%s%s.log",
 			time.Now().Format("20060102_150405"),
-			scenario, mode, tcType,
+			scenario, mode, tcType, ptcSuffix,
 		)
 		logPath := filepath.Join(
 			logDir, logFileName,

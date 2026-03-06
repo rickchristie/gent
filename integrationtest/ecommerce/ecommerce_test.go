@@ -45,7 +45,7 @@ func TestDoubleChargeSearchSummarization(t *testing.T) {
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
 	config.Compaction = testutil.CompactionConfig{
-		Type: testutil.CompactionSummarization,
+		Type:              testutil.CompactionSummarization,
 		TriggerIterations: 5,
 		KeepRecent:        1,
 	}
@@ -56,6 +56,40 @@ func TestDoubleChargeSearchSummarization(t *testing.T) {
 		t.Fatalf(
 			"Double charge Search+Summarization "+
 				"failed: %v", err,
+		)
+	}
+}
+
+// TestDoubleChargeSearchSummarizationPTC tests the
+// double-charge scenario with SearchJSON toolchain
+// wrapped in JsToolChainWrapper (programmatic tool
+// calling) and summarization compaction.
+func TestDoubleChargeSearchSummarizationPTC(
+	t *testing.T,
+) {
+	if os.Getenv("GENT_TEST_XAI_KEY") == "" {
+		t.Skip(
+			"GENT_TEST_XAI_KEY not set, " +
+				"skipping integration test",
+		)
+	}
+
+	ctx := context.Background()
+	config := testutil.DefaultTestConfig()
+	config.ToolChain = testutil.ToolChainSearch
+	config.WrapPTC = true
+	config.Compaction = testutil.CompactionConfig{
+		Type:              testutil.CompactionSummarization,
+		TriggerIterations: 5,
+		KeepRecent:        1,
+	}
+
+	if err := RunDoubleChargeScenarioSearch(
+		ctx, os.Stdout, config,
+	); err != nil {
+		t.Fatalf(
+			"Double charge Search+Summarization"+
+				"+PTC failed: %v", err,
 		)
 	}
 }

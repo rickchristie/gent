@@ -65,6 +65,9 @@ type TestConfig struct {
 	// PinTools lists tool names to pin in SearchJSON.
 	// Only used when ToolChain is ToolChainSearch.
 	PinTools []string
+	// WrapPTC wraps the toolchain with
+	// JsToolChainWrapper for programmatic tool calling.
+	WrapPTC bool
 	// UseStreaming enables streaming mode for LLM calls.
 	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
@@ -201,6 +204,19 @@ func InitializeToolChain(
 	return nil
 }
 
+// WrapToolChain wraps the toolchain with
+// JsToolChainWrapper if WrapPTC is enabled. Must be
+// called after InitializeToolChain.
+func WrapToolChain(
+	tc gent.ToolChain,
+	config TestConfig,
+) gent.ToolChain {
+	if config.WrapPTC {
+		return toolchain.NewJsToolChainWrapper(tc)
+	}
+	return tc
+}
+
 // ConfigureCompaction sets up compaction on the execution context
 // based on the config. The model is needed for summarization strategy.
 func ConfigureCompaction(
@@ -315,6 +331,7 @@ func RunScenario(
 			"failed to initialize toolchain: %w", err,
 		)
 	}
+	tc = WrapToolChain(tc, testCfg)
 
 	loop := react.NewAgent(model).
 		WithToolChain(tc).
@@ -784,6 +801,7 @@ func (s *InteractiveChat) SendMessage(
 			"failed to initialize toolchain: %w", err,
 		)
 	}
+	tc = WrapToolChain(tc, s.Config)
 
 	loop := react.NewAgent(s.Model).
 		WithToolChain(tc).

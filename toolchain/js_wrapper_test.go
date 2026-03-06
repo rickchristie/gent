@@ -168,25 +168,22 @@ func TestJsWrapper_AvailableToolsPrompt(t *testing.T) {
 // -------------------------------------------------------
 
 func TestJsWrapper_ParseSection(t *testing.T) {
+	type expected struct {
+		isCode     bool
+		isToolCall bool
+	}
+
 	tests := []struct {
-		name  string
-		input string
-		expected struct {
-			isCode     bool
-			isToolCall bool
-			errContain string
-		}
+		name     string
+		input    string
+		expected expected
 	}{
 		{
 			name: "direct_call delegates to wrapped",
 			input: `<direct_call>
 {"tool": "lookup_customer", "args": {"id": "C1"}}
 </direct_call>`,
-			expected: struct {
-				isCode     bool
-				isToolCall bool
-				errContain string
-			}{
+			expected: expected{
 				isToolCall: true,
 			},
 		},
@@ -196,23 +193,14 @@ func TestJsWrapper_ParseSection(t *testing.T) {
 var x = tool.call({tool: "lookup_customer", args: {id: "C1"}});
 console.log(JSON.stringify(x));
 </code>`,
-			expected: struct {
-				isCode     bool
-				isToolCall bool
-				errContain string
-			}{
+			expected: expected{
 				isCode: true,
 			},
 		},
 		{
 			name: "neither — fallback to wrapped",
-			input: `{"tool": "lookup_customer", ` +
-				`"args": {"id": "C1"}}`,
-			expected: struct {
-				isCode     bool
-				isToolCall bool
-				errContain string
-			}{
+			input: `{"tool": "lookup_customer", "args": {"id": "C1"}}`,
+			expected: expected{
 				isToolCall: true,
 			},
 		},
@@ -225,16 +213,6 @@ console.log(JSON.stringify(x));
 			result, err := w.ParseSection(
 				execCtx, tc.input,
 			)
-
-			if tc.expected.errContain != "" {
-				require.Error(t, err)
-				assert.Contains(
-					t, err.Error(),
-					tc.expected.errContain,
-				)
-				return
-			}
-
 			require.NoError(t, err)
 
 			if tc.expected.isCode {
@@ -261,25 +239,24 @@ console.log(JSON.stringify(x));
 // -------------------------------------------------------
 
 func TestJsWrapper_Execute_DirectCall(t *testing.T) {
+	type expected struct {
+		text string
+	}
+
 	tests := []struct {
-		name  string
-		input string
-		expected struct {
-			textContains string
-			errNil       bool
-		}
+		name     string
+		input    string
+		expected expected
 	}{
 		{
 			name: "single tool call passes through",
 			input: `<direct_call>
 {"tool": "lookup_customer", "args": {"id": "C001"}}
 </direct_call>`,
-			expected: struct {
-				textContains string
-				errNil       bool
-			}{
-				textContains: "Alice",
-				errNil:       true,
+			expected: expected{
+				text: `<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>`,
 			},
 		},
 		{
@@ -288,24 +265,22 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 [{"tool": "lookup_customer", "args": {"id": "C001"}},
  {"tool": "get_orders", "args": {"customer_id": "C001"}}]
 </direct_call>`,
-			expected: struct {
-				textContains string
-				errNil       bool
-			}{
-				textContains: "Alice",
-				errNil:       true,
+			expected: expected{
+				text: `<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>
+<get_orders>
+"[{\"order_id\":\"O1\"}]"
+</get_orders>`,
 			},
 		},
 		{
 			name: "fallback without tags",
-			input: `{"tool": "lookup_customer", ` +
-				`"args": {"id": "C002"}}`,
-			expected: struct {
-				textContains string
-				errNil       bool
-			}{
-				textContains: "Alice",
-				errNil:       true,
+			input: `{"tool": "lookup_customer", "args": {"id": "C002"}}`,
+			expected: expected{
+				text: `<lookup_customer>
+"{\"id\":\"C002\",\"name\":\"Alice\"}"
+</lookup_customer>`,
 			},
 		},
 	}
@@ -319,14 +294,10 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 			result, err := w.Execute(
 				execCtx, tc.input, tf,
 			)
-
-			if tc.expected.errNil {
-				require.NoError(t, err)
-			}
+			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Contains(
-				t, result.Text,
-				tc.expected.textContains,
+			assert.Equal(
+				t, tc.expected.text, result.Text,
 			)
 		})
 	}
@@ -370,14 +341,16 @@ func TestJsWrapper_Execute_DirectCall_Stats(t *testing.T) {
 // -------------------------------------------------------
 
 func TestJsWrapper_Execute_Code(t *testing.T) {
+	type expected struct {
+		text    string
+		hasErr  bool
+		notText string
+	}
+
 	tests := []struct {
-		name  string
-		input string
-		expected struct {
-			textContains   string
-			textNotContain string
-			hasError       bool
-		}
+		name     string
+		input    string
+		expected expected
 	}{
 		{
 			name: "simple tool.call with console.log",
@@ -387,12 +360,8 @@ var c = tool.call(
 );
 console.log(JSON.stringify(c.output));
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "Alice",
+			expected: expected{
+				text: `{"id":"C001","name":"Alice"}`,
 			},
 		},
 		{
@@ -409,12 +378,8 @@ console.log(JSON.stringify({
   customer: c.output, orders: o.output
 }));
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "Alice",
+			expected: expected{
+				text: `{"customer":{"id":"C001","name":"Alice"},"orders":[{"order_id":"O1"}]}`,
 			},
 		},
 		{
@@ -424,12 +389,10 @@ var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "lookup_customer",
+			expected: expected{
+				text: `<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>`,
 			},
 		},
 		{
@@ -437,13 +400,12 @@ var c = tool.call(
 			input: `<code>
 var x = @;
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "SyntaxError",
-				hasError:     true,
+			expected: expected{
+				text: `<code_error>
+SyntaxError: SyntaxError: (anonymous): Line 1:9 Unexpected token ILLEGAL (and 2 more errors)
+
+</code_error>`,
+				hasErr: true,
 			},
 		},
 		{
@@ -451,13 +413,15 @@ var x = @;
 			input: `<code>
 undefinedVar;
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "ReferenceError",
-				hasError:     true,
+			expected: expected{
+				text: `<code_error>
+ReferenceError: undefinedVar is not defined
+
+1 | undefinedVar;
+    ^ ReferenceError: undefinedVar is not defined
+
+</code_error>`,
+				hasErr: true,
 			},
 		},
 		{
@@ -465,12 +429,8 @@ undefinedVar;
 			input: `<code>
 console.log("hello from JS");
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "hello from JS",
+			expected: expected{
+				text: "hello from JS",
 			},
 		},
 		{
@@ -479,12 +439,8 @@ console.log("hello from JS");
 console.log("line1");
 console.log("line2");
 </code>`,
-			expected: struct {
-				textContains   string
-				textNotContain string
-				hasError       bool
-			}{
-				textContains: "line1",
+			expected: expected{
+				text: "line1\nline2",
 			},
 		},
 	}
@@ -503,14 +459,13 @@ console.log("line2");
 			// a Go error — errors are in the result
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Contains(
-				t, result.Text,
-				tc.expected.textContains,
+			assert.Equal(
+				t, tc.expected.text, result.Text,
 			)
-			if tc.expected.textNotContain != "" {
+			if tc.expected.notText != "" {
 				assert.NotContains(
 					t, result.Text,
-					tc.expected.textNotContain,
+					tc.expected.notText,
 				)
 			}
 		})
@@ -733,16 +688,14 @@ func TestJsWrapper_Execute_EdgeCases(t *testing.T) {
 		execCtx := newExecCtx()
 		tf := jsTestFormat()
 
-		content := `<code>
-</code>`
 		result, err := w.Execute(
-			execCtx, content, tf,
+			execCtx, "<code>\n</code>", tf,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		assert.Contains(
-			t, result.Text,
-			"Code executed successfully",
+		assert.Equal(
+			t, "Code executed successfully.",
+			result.Text,
 		)
 	})
 
@@ -791,7 +744,7 @@ while(true) {}
 			result, err := w.Execute(
 				execCtx, content, tf,
 			)
-			// Should return error in result, not as err
+			// Should return error in result, not err
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Contains(
@@ -833,9 +786,6 @@ console.log(JSON.stringify(c.output));
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			// fail_tool always returns error. The
-			// error should show up in the tool.call
-			// result, not crash the JS code.
 			content := `<code>
 var r = tool.call(
   {tool: "fail_tool", args: {}}
@@ -851,16 +801,6 @@ if (r.error) {
 			)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			// The error from fail_tool appears in
-			// the result wrapping, not in JS throw.
-			// But since execute returns an error for
-			// fail_tool, it will be caught by our
-			// MakeToolCallFn wrapper. Let me check
-			// what actually happens...
-			// The wrapped SearchJSON.Execute returns
-			// a result with the error in Raw.Errors.
-			// Our bridge sees this and returns
-			// {name, error} to JS.
 			assert.Contains(
 				t, result.Text, "tool error:",
 			)
@@ -910,5 +850,287 @@ console.log("done");
 	)
 	assert.Contains(
 		t, string(firstOutput), "Alice",
+	)
+}
+
+// -------------------------------------------------------
+// H. Pre-validation
+// -------------------------------------------------------
+
+func TestJsWrapper_PreValidation(t *testing.T) {
+	t.Run(
+		"invalid literal args caught by "+
+			"pre-validation",
+		func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			// lookup_customer requires "id" field
+			content := `<code>
+var r = tool.call(
+  {tool: "lookup_customer", args: {}}
+);
+console.log(r.output);
+</code>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Pre-validation should catch the
+			// missing "id" field
+			assert.Contains(
+				t, result.Text,
+				"schema pre-validation error",
+			)
+			assert.Contains(
+				t, result.Text, "id",
+			)
+
+			// No tools should have been executed
+			assert.Empty(t, result.Raw.Calls)
+
+			// Error stats incremented
+			assert.Equal(
+				t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutions,
+				),
+			)
+			assert.Equal(
+				t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutionsError,
+				),
+			)
+			assert.Equal(
+				t, 1.0,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+		},
+	)
+
+	t.Run(
+		"valid literal args pass pre-validation",
+		func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			content := `<code>
+var r = tool.call(
+  {tool: "lookup_customer", args: {id: "C001"}}
+);
+console.log(JSON.stringify(r.output));
+</code>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Should pass pre-validation and
+			// execute successfully
+			assert.Contains(
+				t, result.Text, "Alice",
+			)
+			assert.NotContains(
+				t, result.Text,
+				"schema pre-validation error",
+			)
+		},
+	)
+
+	t.Run(
+		"dynamic args skip pre-validation",
+		func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			content := `<code>
+var myId = "C001";
+var r = tool.call(
+  {tool: "lookup_customer",
+   args: {id: myId}}
+);
+console.log(JSON.stringify(r.output));
+</code>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Dynamic args are skipped — tool
+			// executes normally
+			assert.Contains(
+				t, result.Text, "Alice",
+			)
+		},
+	)
+
+	t.Run(
+		"multiple invalid calls all reported",
+		func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			content := `<code>
+var r1 = tool.call(
+  {tool: "lookup_customer", args: {}}
+);
+var r2 = tool.call(
+  {tool: "get_orders", args: {}}
+);
+</code>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Both errors reported
+			assert.Contains(
+				t, result.Text,
+				"2 schema pre-validation error",
+			)
+			assert.Contains(
+				t, result.Text,
+				"lookup_customer",
+			)
+			assert.Contains(
+				t, result.Text,
+				"get_orders",
+			)
+		},
+	)
+
+	t.Run(
+		"pre-validation error resets on success",
+		func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			// First: pre-validation error
+			errContent := `<code>
+var r = tool.call(
+  {tool: "lookup_customer", args: {}}
+);
+</code>`
+			_, err := w.Execute(
+				execCtx, errContent, tf,
+			)
+			require.NoError(t, err)
+			assert.Equal(
+				t, 1.0,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+
+			// Second: success
+			okContent := `<code>
+console.log("ok");
+</code>`
+			_, err = w.Execute(
+				execCtx, okContent, tf,
+			)
+			require.NoError(t, err)
+			assert.Equal(
+				t, 0.0,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+		},
+	)
+
+	t.Run(
+		"mixed invalid and dynamic calls",
+		func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			// One invalid literal call, one dynamic
+			content := `<code>
+var r1 = tool.call(
+  {tool: "lookup_customer", args: {}}
+);
+var myArgs = {customer_id: "C001"};
+var r2 = tool.call(
+  {tool: "get_orders", args: myArgs}
+);
+</code>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Only the invalid literal call caught
+			assert.Contains(
+				t, result.Text,
+				"1 schema pre-validation error",
+			)
+			assert.Contains(
+				t, result.Text,
+				"lookup_customer",
+			)
+		},
+	)
+}
+
+// -------------------------------------------------------
+// I. Unknown tool error propagation
+// -------------------------------------------------------
+
+func TestJsWrapper_UnknownToolError(t *testing.T) {
+	w := setupJsWrapper()
+	tf := jsTestFormat()
+
+	content := `<code>
+var r = tool.call({
+  tool: "nonexistent_tool",
+  args: {}
+});
+console.log(r.error);
+</code>`
+
+	execCtx := newExecCtx()
+	result, err := w.Execute(
+		execCtx, content, tf,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	t.Logf("Text: %q", result.Text)
+	for i, e := range result.Raw.Errors {
+		if e != nil {
+			t.Logf("Raw.Errors[%d]: %v", i, e)
+		}
+	}
+
+	// The error propagated from wrapped SearchJSON
+	// should be ErrUnknownTool
+	require.Len(t, result.Raw.Errors, 1)
+	assert.ErrorIs(
+		t, result.Raw.Errors[0],
+		gent.ErrUnknownTool,
+	)
+
+	// The r.error seen by JS is the raw error
+	// string, which console.log outputs as Text.
+	assert.Equal(
+		t,
+		"unknown tool: nonexistent_tool",
+		result.Text,
 	)
 }

@@ -1602,6 +1602,12 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 		assert.ErrorIs(
 			t, result.Raw.Errors[0], gent.ErrUnknownTool,
 		)
+		assert.Contains(
+			t, result.Text,
+			`Error: unknown tool "nonexistent". `+
+				`Use the search tool to find `+
+				`available tools.`,
+		)
 	})
 
 	t.Run("schema validation fails", func(t *testing.T) {

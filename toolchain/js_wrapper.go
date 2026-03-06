@@ -241,6 +241,24 @@ func (w *JsToolChainWrapper) executeCode(
 		)
 	}
 
+	// Check if wrapped toolchain provides schemas
+	var schemaFn jsruntime.SchemaLookupFn
+	if sp, ok := w.wrapped.(SchemaProvider); ok {
+		schemaFn = sp.GetToolSchema
+
+		// Pre-validate: check all literal tool.call()
+		// args against schemas before executing code
+		preErrs, preErr := jsruntime.PreValidate(
+			code, schemaFn,
+		)
+		if preErr == nil && len(preErrs) > 0 {
+			return w.preValidationError(
+				execCtx, textFormat,
+				code, preErrs,
+			)
+		}
+	}
+
 	// Create runtime with configured timeout
 	config := jsruntime.Config{
 		Timeout:      w.codeTimeout,
@@ -264,8 +282,11 @@ func (w *JsToolChainWrapper) executeCode(
 		collector,
 	)
 
-	// Register tool bridge
-	jsruntime.RegisterToolBridge(rt, callFn)
+	// Register tool bridge with source and schema
+	// lookup for runtime error enhancement
+	jsruntime.RegisterToolBridge(
+		rt, callFn, code, schemaFn,
+	)
 
 	// Execute the code
 	ctx := execCtx.Context()
@@ -278,7 +299,8 @@ func (w *JsToolChainWrapper) executeCode(
 				gent.SCCodeExecutionsError, 1,
 			)
 			execCtx.Stats().IncrGauge(
-				gent.SGCodeExecutionsErrorConsecutive, 1,
+				gent.SGCodeExecutionsErrorConsecutive,
+				1,
 			)
 		}
 
@@ -308,9 +330,13 @@ func (w *JsToolChainWrapper) executeCode(
 	// Build result text from console.log output
 	var text string
 	if len(result.ConsoleLog) > 0 {
-		text = strings.Join(result.ConsoleLog, "\n")
+		text = strings.Join(
+			result.ConsoleLog, "\n",
+		)
 	} else if len(collector.TextParts) > 0 {
-		text = strings.Join(collector.TextParts, "\n")
+		text = strings.Join(
+			collector.TextParts, "\n",
+		)
 	} else {
 		text = "Code executed successfully."
 	}
@@ -319,6 +345,41 @@ func (w *JsToolChainWrapper) executeCode(
 		Text:  text,
 		Raw:   collector.BuildRaw(),
 		Media: collector.AllMedia,
+	}, nil
+}
+
+// preValidationError builds the error result when
+// pre-validation catches schema errors before code
+// execution.
+func (w *JsToolChainWrapper) preValidationError(
+	execCtx *gent.ExecutionContext,
+	textFormat gent.TextFormat,
+	code string,
+	preErrs []jsruntime.PreValidationError,
+) (*gent.ToolChainResult, error) {
+	if execCtx != nil {
+		execCtx.Stats().IncrCounter(
+			gent.SCCodeExecutionsError, 1,
+		)
+		execCtx.Stats().IncrGauge(
+			gent.SGCodeExecutionsErrorConsecutive, 1,
+		)
+	}
+
+	msg := jsruntime.FormatPreValidationErrors(
+		code, preErrs,
+	)
+	errorText := textFormat.FormatSections(
+		[]gent.FormattedSection{
+			{
+				Name:    "code_error",
+				Content: msg,
+			},
+		},
+	)
+	return &gent.ToolChainResult{
+		Text: errorText,
+		Raw:  &gent.RawToolChainResult{},
 	}, nil
 }
 
@@ -379,7 +440,12 @@ const results = tool.parallelCall([
 ]);
 
 // Output results (only console.log output is returned):
-console.log(JSON.stringify({customer, orders}));`
+console.log(JSON.stringify({customer, orders}));
+
+// IMPORTANT: Use EXACT argument names and types from ` +
+		`the tool schema.
+// Do NOT guess, rename, or add extra fields. Only ` +
+		`include properties defined in the schema.`
 }
 
 // Compile-time check that JsToolChainWrapper implements

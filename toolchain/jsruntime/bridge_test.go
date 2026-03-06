@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -391,7 +393,7 @@ func TestToolBridge(t *testing.T) {
 			)
 
 			rt := New(DefaultConfig())
-			RegisterToolBridge(rt, callFn)
+			RegisterToolBridge(rt, callFn, "", nil)
 
 			result, err := rt.Execute(
 				context.Background(), tc.input.source,
@@ -423,6 +425,452 @@ func TestToolBridge(t *testing.T) {
 						t, exp, result.ConsoleLog[i],
 					)
 				}
+			}
+		})
+	}
+}
+
+func TestToolBridge_SchemaErrors(t *testing.T) {
+	// Build schemas for tools
+	caseSch, err := schema.Compile(
+		schema.Object(
+			map[string]*schema.Property{
+				"order_id": schema.String(
+					"The order ID",
+				),
+				"details": schema.String(
+					"Description of the issue",
+				),
+			}, "order_id", "details",
+		),
+	)
+	require.NoError(t, err)
+
+	lookupSch, err := schema.Compile(
+		schema.Object(
+			map[string]*schema.Property{
+				"id": schema.String(
+					"Customer ID",
+				),
+			}, "id",
+		),
+	)
+	require.NoError(t, err)
+
+	schemaFn := func(
+		name string,
+	) *schema.Schema {
+		switch name {
+		case "create_case":
+			return caseSch
+		case "lookup_customer":
+			return lookupSch
+		}
+		return nil
+	}
+
+	// Validation errors for test cases
+	valErr := caseSch.Validate(map[string]any{
+		"order_id": "O1",
+	})
+	require.Error(t, valErr)
+
+	valErrNilArgs := caseSch.Validate(nil)
+	require.Error(t, valErrNilArgs)
+
+	valErrLookup := lookupSch.Validate(
+		map[string]any{},
+	)
+	require.Error(t, valErrLookup)
+
+	type input struct {
+		source   string
+		schemaFn SchemaLookupFn
+		results  map[string]*gent.ToolChainResult
+		errs     map[string]error
+	}
+
+	type expected struct {
+		log            string
+		logNotContains []string
+		callCount      int
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "schema error returns enhanced " +
+				"format with field descriptions",
+			input: input{
+				source: `var r = tool.call({
+  tool: "create_case",
+  args: {order_id: "O1"}
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"create_case": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_case"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErr},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "create_case",
+3 |   args: {order_id: "O1"}
+
+Invalid args for tool 'create_case'.
+Errors:
+  - missing property 'details'
+Expected fields:
+  - 'details' (required, string): Description of the issue
+  - 'order_id' (required, string): The order ID
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+`,
+			},
+		},
+		{
+			name: "missing args field entirely",
+			input: input{
+				source: `var r = tool.call({ tool: "create_case" });
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"create_case": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_case"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErrNilArgs,
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({ tool: "create_case" });
+                     ^ schema validation error
+2 | console.log(r.error);
+
+Invalid args for tool 'create_case'.
+Errors:
+  - args is null or missing, expected object with required properties: order_id, details
+Expected fields:
+  - 'details' (required, string): Description of the issue
+  - 'order_id' (required, string): The order ID
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+`,
+			},
+		},
+		{
+			name: "multiple calls with different " +
+				"schema errors",
+			input: input{
+				source: `var r1 = tool.call({
+  tool: "create_case",
+  args: {order_id: "O1"}
+});
+console.log("err1: " + r1.error);
+var r2 = tool.call({
+  tool: "lookup_customer",
+  args: {}
+});
+console.log("err2: " + r2.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"create_case": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_case"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErr,
+							},
+						},
+					},
+					"lookup_customer": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "lookup_customer"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErrLookup,
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 2,
+				log: `err1: tool.call() error at line 1:
+
+1 | var r1 = tool.call({
+                      ^ schema validation error
+2 |   tool: "create_case",
+3 |   args: {order_id: "O1"}
+
+Invalid args for tool 'create_case'.
+Errors:
+  - missing property 'details'
+Expected fields:
+  - 'details' (required, string): Description of the issue
+  - 'order_id' (required, string): The order ID
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+err2: tool.call() error at line 6:
+
+4 | });
+5 | console.log("err1: " + r1.error);
+6 | var r2 = tool.call({
+                      ^ schema validation error
+7 |   tool: "lookup_customer",
+8 |   args: {}
+
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - missing property 'id'
+Expected fields:
+  - 'id' (required, string): Customer ID
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+`,
+			},
+		},
+		{
+			name: "valid args — no error",
+			input: input{
+				source: `var r = tool.call({
+  tool: "create_case",
+  args: {
+    order_id: "O1",
+    details: "broken"
+  }
+});
+console.log(r.error || "no error");`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"create_case": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_case"},
+							},
+							Results: []*gent.RawToolCallResult{
+								{
+									Name:   "create_case",
+									Output: `{"id":"C001"}`,
+								},
+							},
+							Errors: []error{nil},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log:       "no error",
+				logNotContains: []string{
+					"Invalid args",
+					"Expected fields:",
+					"IMPORTANT:",
+				},
+			},
+		},
+		{
+			name: "tool with no schema falls " +
+				"back to raw error",
+			input: input{
+				// schemaFn returns nil for
+				// "unknown_tool", so enhanceSchemaError
+				// can't look up the schema and falls
+				// back to raw valErr.Error().
+				source: `var r = tool.call({
+  tool: "unknown_tool", args: {}
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"unknown_tool": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "unknown_tool"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErr},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log:       valErr.Error(),
+				logNotContains: []string{
+					"Expected fields:",
+					"IMPORTANT:",
+				},
+			},
+		},
+		{
+			name: "non-schema errors unchanged",
+			input: input{
+				source: `var r = tool.call({
+  tool: "fail", args: {}
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"fail": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "fail"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								errors.New(
+									"tool failed",
+								),
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log:       "tool failed",
+				logNotContains: []string{
+					"Expected fields:",
+					"IMPORTANT:",
+				},
+			},
+		},
+		{
+			name: "nil schemaFn falls back to " +
+				"raw error",
+			input: input{
+				source:   "",
+				schemaFn: nil,
+				results: map[string]*gent.ToolChainResult{
+					"create_case": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_case"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErr},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log:       valErr.Error(),
+				logNotContains: []string{
+					"Expected fields:",
+					"IMPORTANT:",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			callFn := mockToolCallFn(
+				tc.input.results,
+				tc.input.errs,
+				&calls,
+			)
+
+			rt := New(DefaultConfig())
+			RegisterToolBridge(
+				rt, callFn,
+				tc.input.source,
+				tc.input.schemaFn,
+			)
+
+			// Use source as JS if present,
+			// otherwise use a simple call
+			jsCode := tc.input.source
+			if jsCode == "" {
+				jsCode = `var r = tool.call({
+  tool: "create_case",
+  args: {order_id: "O1"}
+});
+console.log(r.error || "no error");`
+			}
+
+			result, execErr := rt.Execute(
+				context.Background(), jsCode,
+			)
+
+			require.NoError(t, execErr)
+			require.NotNil(t, result)
+			assert.Equal(
+				t, tc.expected.callCount,
+				len(calls),
+			)
+
+			require.NotEmpty(
+				t, result.ConsoleLog,
+				"expected console output",
+			)
+			log := strings.Join(
+				result.ConsoleLog, "\n",
+			)
+			if tc.expected.log != "" {
+				assert.Equal(
+					t, tc.expected.log, log,
+				)
+			}
+			for _, s := range tc.expected.logNotContains {
+				assert.NotContains(t, log, s)
 			}
 		})
 	}

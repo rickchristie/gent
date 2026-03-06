@@ -2,10 +2,13 @@ package jsruntime
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/grafana/sobek"
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 )
 
 // ToolCallFn executes a tool call given JSON content.
@@ -27,9 +30,15 @@ type ToolCallFn func(content string) (
 // tool.parallelCall([{tool, args}, ...])
 //
 //	→ returns [{name, output|error}, ...]
+//
+// When source and schemaFn are provided, schema validation
+// errors are enhanced with code context and field
+// descriptions.
 func RegisterToolBridge(
 	rt *Runtime,
 	callFn ToolCallFn,
+	source string,
+	schemaFn SchemaLookupFn,
 ) {
 	vm := rt.VM()
 	rt.RegisterObject("tool", map[string]func(
@@ -38,12 +47,18 @@ func RegisterToolBridge(
 		"call": func(
 			call sobek.FunctionCall,
 		) sobek.Value {
-			return toolCall(vm, callFn, call)
+			return toolCall(
+				vm, callFn, call,
+				source, schemaFn,
+			)
 		},
 		"parallelCall": func(
 			call sobek.FunctionCall,
 		) sobek.Value {
-			return toolParallelCall(vm, callFn, call)
+			return toolParallelCall(
+				vm, callFn, call,
+				source, schemaFn,
+			)
 		},
 	})
 }
@@ -53,6 +68,8 @@ func toolCall(
 	vm *sobek.Runtime,
 	callFn ToolCallFn,
 	call sobek.FunctionCall,
+	source string,
+	schemaFn SchemaLookupFn,
 ) sobek.Value {
 	if len(call.Arguments) < 1 {
 		panic(vm.NewTypeError(
@@ -89,6 +106,7 @@ func toolCall(
 	result, execErr := callFn(string(jsonBytes))
 	return buildSingleResult(
 		vm, toolName, result, execErr,
+		source, schemaFn, req,
 	)
 }
 
@@ -98,6 +116,8 @@ func toolParallelCall(
 	vm *sobek.Runtime,
 	callFn ToolCallFn,
 	call sobek.FunctionCall,
+	source string,
+	schemaFn SchemaLookupFn,
 ) sobek.Value {
 	if len(call.Arguments) < 1 {
 		panic(vm.NewTypeError(
@@ -132,6 +152,7 @@ func toolParallelCall(
 	result, execErr := callFn(string(jsonBytes))
 	return buildParallelResults(
 		vm, reqs, result, execErr,
+		source, schemaFn,
 	)
 }
 
@@ -142,6 +163,9 @@ func buildSingleResult(
 	toolName string,
 	result *gent.ToolChainResult,
 	execErr error,
+	source string,
+	schemaFn SchemaLookupFn,
+	req map[string]any,
 ) sobek.Value {
 	jsResult := make(map[string]any)
 	jsResult["name"] = toolName
@@ -159,7 +183,10 @@ func buildSingleResult(
 	// For a single call, use first result/error
 	raw := result.Raw
 	if len(raw.Errors) > 0 && raw.Errors[0] != nil {
-		jsResult["error"] = raw.Errors[0].Error()
+		jsResult["error"] = enhanceSchemaError(
+			vm, raw.Errors[0], toolName,
+			source, schemaFn, req,
+		)
 	} else if len(raw.Results) > 0 &&
 		raw.Results[0] != nil {
 		jsResult["output"] = parseOutputJSON(
@@ -179,6 +206,8 @@ func buildParallelResults(
 	reqs []map[string]any,
 	result *gent.ToolChainResult,
 	execErr error,
+	source string,
+	schemaFn SchemaLookupFn,
 ) sobek.Value {
 	if execErr != nil {
 		// Return error for all calls
@@ -203,8 +232,16 @@ func buildParallelResults(
 		entry := map[string]any{
 			"name": call.Name,
 		}
-		if i < len(raw.Errors) && raw.Errors[i] != nil {
-			entry["error"] = raw.Errors[i].Error()
+		if i < len(raw.Errors) &&
+			raw.Errors[i] != nil {
+			req := map[string]any{}
+			if i < len(reqs) {
+				req = reqs[i]
+			}
+			entry["error"] = enhanceSchemaError(
+				vm, raw.Errors[i], call.Name,
+				source, schemaFn, req,
+			)
 		} else if i < len(raw.Results) &&
 			raw.Results[i] != nil {
 			entry["output"] = parseOutputJSON(
@@ -217,6 +254,75 @@ func buildParallelResults(
 	}
 
 	return vm.ToValue(results)
+}
+
+// enhanceSchemaError checks if err is a schema validation
+// error and, if so, replaces the raw error with an
+// LLM-friendly message including code context and field
+// descriptions. Falls back to err.Error() for non-schema
+// errors or when schemaFn is nil.
+func enhanceSchemaError(
+	vm *sobek.Runtime,
+	err error,
+	toolName string,
+	source string,
+	schemaFn SchemaLookupFn,
+	req map[string]any,
+) string {
+	var valErr *schema.ValidationError
+	if !errors.As(err, &valErr) {
+		return err.Error()
+	}
+	if schemaFn == nil {
+		return err.Error()
+	}
+	sch := schemaFn(toolName)
+	if sch == nil {
+		return err.Error()
+	}
+
+	args, _ := req["args"].(map[string]any)
+	llmMsg := sch.FormatForLLM(toolName, args)
+	if llmMsg == "" {
+		return err.Error()
+	}
+
+	var sb strings.Builder
+
+	// Try to get JS call location for code context
+	if source != "" {
+		frames := vm.CaptureCallStack(10, nil)
+		for _, frame := range frames {
+			pos := frame.Position()
+			if pos.Line > 0 {
+				fmt.Fprintf(&sb,
+					"tool.call() error at "+
+						"line %d:\n\n",
+					pos.Line,
+				)
+				ctx := extractSourceContext(
+					source, pos.Line,
+					pos.Column,
+					"schema validation error",
+					2, 2,
+				)
+				if ctx != "" {
+					sb.WriteString(ctx)
+					sb.WriteString("\n")
+				}
+				break
+			}
+		}
+	}
+
+	sb.WriteString(llmMsg)
+	sb.WriteString(
+		"\nIMPORTANT: Use EXACT argument names " +
+			"and types from the tool schema.\n" +
+			"Fix ALL errors above before " +
+			"re-submitting your code.\n",
+	)
+	return sb.String()
 }
 
 // parseOutputJSON attempts to parse a tool output as JSON.

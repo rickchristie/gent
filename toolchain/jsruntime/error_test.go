@@ -28,116 +28,155 @@ func runAndGetInterruptError(source string) error {
 }
 
 func TestFormatError(t *testing.T) {
+	type input struct {
+		source string
+		err    error
+	}
+
+	type expected struct {
+		output string
+	}
+
+	multiLineSrc := `var a = 1;
+var b = 2;
+var c = @;
+var d = 4;`
+
 	tests := []struct {
 		name     string
-		input    struct {
-			source string
-			err    error
-		}
-		expected string
+		input    input
+		expected expected
 	}{
 		{
 			name: "nil error returns empty string",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "var x = 1;",
 				err:    nil,
 			},
-			expected: "",
+			expected: expected{
+				output: "",
+			},
 		},
 		{
 			name: "non-sobek error returns Error()",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "var x = 1;",
 				err:    errors.New("generic failure"),
 			},
-			expected: "generic failure",
+			expected: expected{
+				output: "generic failure",
+			},
 		},
 		{
 			name: "syntax error at line 1",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "var x = @;",
 				err:    runAndGetError("var x = @;"),
+			},
+			expected: expected{
+				output: `SyntaxError: SyntaxError: (anonymous): Line 1:9 Unexpected token ILLEGAL (and 2 more errors)
+`,
 			},
 		},
 		{
 			name: "syntax error in middle of code",
-			input: struct {
-				source string
-				err    error
-			}{
-				source: "var a = 1;\nvar b = 2;\nvar c = @;\nvar d = 4;",
-				err:    runAndGetError("var a = 1;\nvar b = 2;\nvar c = @;\nvar d = 4;"),
+			input: input{
+				source: multiLineSrc,
+				err:    runAndGetError(multiLineSrc),
+			},
+			expected: expected{
+				output: `SyntaxError: SyntaxError: (anonymous): Line 3:9 Unexpected token ILLEGAL (and 2 more errors)
+`,
 			},
 		},
 		{
 			name: "runtime ReferenceError",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "var x = undefinedVar;",
-				err:    runAndGetError("var x = undefinedVar;"),
+				err: runAndGetError(
+					"var x = undefinedVar;",
+				),
+			},
+			expected: expected{
+				output: `ReferenceError: undefinedVar is not defined
+
+1 | var x = undefinedVar;
+            ^ ReferenceError: undefinedVar is not defined
+`,
 			},
 		},
 		{
 			name: "runtime TypeError on property access",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "var a = null;\nvar b = a.name;",
-				err:    runAndGetError("var a = null;\nvar b = a.name;"),
+				err: runAndGetError(
+					"var a = null;\nvar b = a.name;",
+				),
+			},
+			expected: expected{
+				output: `TypeError: Cannot read property 'name' of undefined
+
+1 | var a = null;
+2 | var b = a.name;
+              ^ TypeError: Cannot read property 'name' of undefined
+`,
 			},
 		},
 		{
 			name: "custom throw new Error",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "throw new Error('custom msg');",
-				err:    runAndGetError("throw new Error('custom msg');"),
+				err: runAndGetError(
+					"throw new Error('custom msg');",
+				),
+			},
+			expected: expected{
+				output: `Error: custom msg
+
+1 | throw new Error('custom msg');
+          ^ Error: custom msg
+`,
 			},
 		},
 		{
 			name: "timeout on infinite loop",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "while(true) {}",
-				err:    runAndGetInterruptError("while(true) {}"),
+				err: runAndGetInterruptError(
+					"while(true) {}",
+				),
+			},
+			expected: expected{
+				output: `execution interrupted: timeout
+
+1 | while(true) {}
+    ^ timeout
+`,
 			},
 		},
 		{
 			name: "single-line source with error",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "x",
 				err:    runAndGetError("x"),
+			},
+			expected: expected{
+				output: `ReferenceError: x is not defined
+
+1 | x
+    ^ ReferenceError: x is not defined
+`,
 			},
 		},
 		{
 			name: "empty source string with error",
-			input: struct {
-				source string
-				err    error
-			}{
+			input: input{
 				source: "",
 				err:    errors.New("some error"),
 			},
-			expected: "some error",
+			expected: expected{
+				output: "some error",
+			},
 		},
 	}
 
@@ -146,219 +185,184 @@ func TestFormatError(t *testing.T) {
 			result := FormatError(
 				tc.input.source, tc.input.err,
 			)
-
-			if tc.expected != "" {
-				assert.Equal(t, tc.expected, result)
-				return
-			}
-
-			// For sobek errors, verify structure
-			if tc.input.err == nil {
-				assert.Empty(t, result)
-				return
-			}
-
-			assert.NotEmpty(t, result)
-
-			// Syntax errors should contain source
-			// context
-			switch tc.input.err.(type) {
-			case *sobek.CompilerSyntaxError:
-				assert.Contains(t, result, "|")
-				assert.Contains(t, result, "^")
-			case *sobek.Exception:
-				// Runtime errors should have the
-				// error message
-				assert.NotEmpty(t, result)
-			case *sobek.InterruptedError:
-				assert.Contains(
-					t, result,
-					"execution interrupted",
-				)
-			}
+			assert.Equal(
+				t, tc.expected.output, result,
+			)
 		})
 	}
 }
 
 func TestExtractSourceContext(t *testing.T) {
+	type input struct {
+		source  string
+		line    int
+		col     int
+		message string
+	}
+
+	type expected struct {
+		output string
+	}
+
 	tests := []struct {
-		name  string
-		input struct {
-			source  string
-			line    int
-			col     int
-			message string
-		}
-		expected string
+		name     string
+		input    input
+		expected expected
 	}{
 		{
 			name: "error at line 3 of 5 line source",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
-				source:  "line1\nline2\nline3\nline4\nline5",
+			input: input{
+				source: `line1
+line2
+line3
+line4
+line5`,
 				line:    3,
 				col:     1,
 				message: "error here",
 			},
-			expected: "1 | line1\n" +
-				"2 | line2\n" +
-				"3 | line3\n" +
-				"    ^ error here\n" +
-				"4 | line4\n" +
-				"5 | line5\n",
+			expected: expected{
+				output: `1 | line1
+2 | line2
+3 | line3
+    ^ error here
+4 | line4
+5 | line5
+`,
+			},
 		},
 		{
 			name: "error at line 1",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
-				source:  "first\nsecond\nthird",
+			input: input{
+				source: `first
+second
+third`,
 				line:    1,
 				col:     3,
 				message: "oops",
 			},
-			expected: "1 | first\n" +
-				"      ^ oops\n" +
-				"2 | second\n" +
-				"3 | third\n",
+			expected: expected{
+				output: `1 | first
+      ^ oops
+2 | second
+3 | third
+`,
+			},
 		},
 		{
 			name: "error at last line",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
-				source:  "a\nb\nc",
+			input: input{
+				source: "a\nb\nc",
 				line:    3,
 				col:     2,
 				message: "end error",
 			},
-			expected: "1 | a\n" +
-				"2 | b\n" +
-				"3 | c\n" +
-				"     ^ end error\n",
+			expected: expected{
+				output: `1 | a
+2 | b
+3 | c
+     ^ end error
+`,
+			},
 		},
 		{
 			name: "empty source returns empty",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
+			input: input{
 				source:  "",
 				line:    1,
 				col:     1,
 				message: "x",
 			},
-			expected: "",
+			expected: expected{output: ""},
 		},
 		{
 			name: "line zero returns empty",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
+			input: input{
 				source:  "hello",
 				line:    0,
 				col:     1,
 				message: "x",
 			},
-			expected: "",
+			expected: expected{output: ""},
 		},
 		{
 			name: "line beyond source returns empty",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
+			input: input{
 				source:  "hello",
 				line:    5,
 				col:     1,
 				message: "x",
 			},
-			expected: "",
+			expected: expected{output: ""},
 		},
 		{
 			name: "col at 1 - caret at start",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
+			input: input{
 				source:  "bad",
 				line:    1,
 				col:     1,
 				message: "here",
 			},
-			expected: "1 | bad\n" +
-				"    ^ here\n",
+			expected: expected{
+				output: `1 | bad
+    ^ here
+`,
+			},
 		},
 		{
 			name: "col zero means no caret",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
+			input: input{
 				source:  "ok",
 				line:    1,
 				col:     0,
 				message: "msg",
 			},
-			expected: "1 | ok\n",
+			expected: expected{
+				output: "1 | ok\n",
+			},
 		},
 		{
 			name: "single-line source",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
+			input: input{
 				source:  "only line",
 				line:    1,
 				col:     5,
 				message: "err",
 			},
-			expected: "1 | only line\n" +
-				"        ^ err\n",
+			expected: expected{
+				output: `1 | only line
+        ^ err
+`,
+			},
 		},
 		{
 			name: "double-digit line numbers align",
-			input: struct {
-				source  string
-				line    int
-				col     int
-				message string
-			}{
-				source: "1\n2\n3\n4\n5\n6\n" +
-					"7\n8\n9\n10\n11\n12",
+			input: input{
+				source: `1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12`,
 				line:    10,
 				col:     1,
 				message: "x",
 			},
-			expected: " 8 | 8\n" +
-				" 9 | 9\n" +
-				"10 | 10\n" +
-				"     ^ x\n" +
-				"11 | 11\n" +
-				"12 | 12\n",
+			expected: expected{
+				output: ` 8 | 8
+ 9 | 9
+10 | 10
+     ^ x
+11 | 11
+12 | 12
+`,
+			},
 		},
 	}
 
@@ -369,8 +373,11 @@ func TestExtractSourceContext(t *testing.T) {
 				tc.input.line,
 				tc.input.col,
 				tc.input.message,
+				2, 2,
 			)
-			assert.Equal(t, tc.expected, result)
+			assert.Equal(
+				t, tc.expected.output, result,
+			)
 		})
 	}
 }

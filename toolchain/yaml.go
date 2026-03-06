@@ -403,8 +403,14 @@ func (c *YAML) Execute(
 			raw.Errors[i] = fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
 			// Add error as a section
 			sections = append(sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", raw.Errors[i]),
+				Name: call.Name,
+				Content: fmt.Sprintf(
+					"Error: unknown tool %q. "+
+						"Review the available "+
+						"tools section for valid "+
+						"tool names.",
+					call.Name,
+				),
 			})
 			// Publish AfterToolCall for the failed call
 			if execCtx != nil {
@@ -523,5 +529,16 @@ func (c *YAML) Execute(
 	}, nil
 }
 
+// GetToolSchema returns the compiled schema for the
+// named tool, or nil if not found.
+func (c *YAML) GetToolSchema(
+	name string,
+) *schema.Schema {
+	return c.schemaMap[name]
+}
+
 // Compile-time check that YAML implements gent.ToolChain.
 var _ gent.ToolChain = (*YAML)(nil)
+
+// Compile-time check that YAML implements SchemaProvider.
+var _ SchemaProvider = (*YAML)(nil)

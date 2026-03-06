@@ -2449,3 +2449,23 @@ func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 			"iteration 2: tool2 consecutive accumulated")
 	})
 }
+
+func TestYAML_UnknownToolErrorMessage(t *testing.T) {
+	tc := NewYAML()
+	result, err := tc.Execute(
+		nil,
+		"tool: nonexistent\nargs: {}",
+		testFormat(),
+	)
+	require.NoError(t, err)
+	assert.ErrorIs(
+		t, result.Raw.Errors[0],
+		gent.ErrUnknownTool,
+	)
+	assert.Contains(
+		t, result.Text,
+		`Error: unknown tool "nonexistent". `+
+			`Review the available tools `+
+			`section for valid tool names.`,
+	)
+}

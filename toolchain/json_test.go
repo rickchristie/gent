@@ -2436,3 +2436,23 @@ func TestJSON_Execute_WithInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestJSON_UnknownToolErrorMessage(t *testing.T) {
+	tc := NewJSON()
+	result, err := tc.Execute(
+		nil,
+		`{"tool": "nonexistent", "args": {}}`,
+		testFormat(),
+	)
+	require.NoError(t, err)
+	assert.ErrorIs(
+		t, result.Raw.Errors[0],
+		gent.ErrUnknownTool,
+	)
+	assert.Contains(
+		t, result.Text,
+		`Error: unknown tool "nonexistent". `+
+			`Review the available tools `+
+			`section for valid tool names.`,
+	)
+}

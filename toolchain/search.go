@@ -688,7 +688,11 @@ func (c *SearchJSON) executeRegularTool(
 			*sections, gent.FormattedSection{
 				Name: call.Name,
 				Content: fmt.Sprintf(
-					"Error: %v", raw.Errors[idx],
+					"Error: unknown tool %q. "+
+						"Use the search tool "+
+						"to find available "+
+						"tools.",
+					call.Name,
 				),
 			},
 		)
@@ -843,5 +847,19 @@ func (c *SearchJSON) executeRegularTool(
 	}
 }
 
+// GetToolSchema returns the compiled schema for the
+// named tool, or nil if not found. Thread-safe.
+func (c *SearchJSON) GetToolSchema(
+	name string,
+) *schema.Schema {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.schemaMap[name]
+}
+
 // Compile-time check that SearchJSON implements ToolChain.
 var _ gent.ToolChain = (*SearchJSON)(nil)
+
+// Compile-time check that SearchJSON implements
+// SchemaProvider.
+var _ SchemaProvider = (*SearchJSON)(nil)

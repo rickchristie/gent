@@ -40,7 +40,7 @@ func formatSyntaxError(
 		pos := err.File.Position(err.Offset)
 		ctx := extractSourceContext(
 			source, pos.Line, pos.Column,
-			err.Message,
+			err.Message, 2, 2,
 		)
 		if ctx != "" {
 			sb.WriteString("\n")
@@ -66,7 +66,7 @@ func formatException(
 		if pos.Line > 0 {
 			ctx := extractSourceContext(
 				source, pos.Line, pos.Column,
-				err.Value().String(),
+				err.Value().String(), 2, 2,
 			)
 			if ctx != "" {
 				sb.WriteString("\n")
@@ -95,7 +95,7 @@ func formatInterruptedError(
 		if pos.Line > 0 {
 			ctx := extractSourceContext(
 				source, pos.Line, pos.Column,
-				val,
+				val, 2, 2,
 			)
 			if ctx != "" {
 				sb.WriteString("\n")
@@ -111,7 +111,10 @@ func formatInterruptedError(
 // line:col showing 2 lines before/after with a caret
 // pointing at the error.
 func extractSourceContext(
-	source string, line, col int, message string,
+	source string,
+	line, col int,
+	message string,
+	before, after int,
 ) string {
 	if source == "" || line <= 0 {
 		return ""
@@ -124,9 +127,8 @@ func extractSourceContext(
 
 	var sb strings.Builder
 
-	// Show context: 2 lines before, error line, 2 after
-	startLine := max(line-2, 1)
-	endLine := min(line+2, len(lines))
+	startLine := max(line-before, 1)
+	endLine := min(line+after, len(lines))
 
 	// Calculate width needed for line numbers
 	width := len(fmt.Sprintf("%d", endLine))

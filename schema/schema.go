@@ -18,7 +18,9 @@ package schema
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -87,6 +89,177 @@ func (s *Schema) requiredList() string {
 	default:
 		return "(none)"
 	}
+}
+
+// DescribeFields returns a formatted list of all properties from the schema,
+// including their types, descriptions, and whether they are required.
+// Properties are sorted alphabetically for deterministic output.
+// Returns "" if the schema is nil or has no properties.
+func (s *Schema) DescribeFields() string {
+	if s == nil || s.raw == nil {
+		return ""
+	}
+	propsRaw, ok := s.raw["properties"]
+	if !ok {
+		return ""
+	}
+	props, ok := propsRaw.(map[string]any)
+	if !ok || len(props) == 0 {
+		return ""
+	}
+
+	requiredSet := make(map[string]bool)
+	if req, ok := s.raw["required"]; ok {
+		switch v := req.(type) {
+		case []string:
+			for _, r := range v {
+				requiredSet[r] = true
+			}
+		case []any:
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					requiredSet[str] = true
+				}
+			}
+		}
+	}
+
+	names := make([]string, 0, len(props))
+	for name := range props {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var sb strings.Builder
+	for _, name := range names {
+		propRaw := props[name]
+		propMap, ok := propRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		typStr := describeType(propMap)
+		desc, _ := propMap["description"].(string)
+
+		sb.WriteString("  - '")
+		sb.WriteString(name)
+		sb.WriteString("' (")
+		if requiredSet[name] {
+			sb.WriteString("required, ")
+		}
+		sb.WriteString(typStr)
+		sb.WriteString(")")
+		if desc != "" {
+			sb.WriteString(": ")
+			sb.WriteString(desc)
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// describeType returns a human-readable type string for a property map.
+func describeType(propMap map[string]any) string {
+	typ, _ := propMap["type"].(string)
+	if typ == "array" {
+		if items, ok := propMap["items"].(map[string]any); ok {
+			if itemType, ok := items["type"].(string); ok {
+				return "array of " + itemType
+			}
+		}
+		return "array"
+	}
+	if typ == "" {
+		return "any"
+	}
+	return typ
+}
+
+// FormatForLLM validates data against the schema and returns an
+// LLM-friendly error message if validation fails, or "" if valid.
+func (s *Schema) FormatForLLM(
+	toolName string,
+	data map[string]any,
+) string {
+	if s == nil {
+		return ""
+	}
+	err := s.Validate(data)
+	if err == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Invalid args for tool '")
+	sb.WriteString(toolName)
+	sb.WriteString("'.\nErrors:\n")
+
+	var ve *jsonschema.ValidationError
+	if errors.As(err, &ve) {
+		output := ve.BasicOutput()
+		for _, e := range output.Errors {
+			if e.Error == nil {
+				continue
+			}
+			msg := cleanErrorMsg(
+				e.Error.String(),
+				e.InstanceLocation,
+			)
+			if msg == "" {
+				continue
+			}
+			sb.WriteString("  - ")
+			sb.WriteString(msg)
+			sb.WriteString("\n")
+		}
+	} else {
+		msg := err.Error()
+		msg = strings.TrimPrefix(
+			msg, "schema validation failed: ",
+		)
+		sb.WriteString("  - ")
+		sb.WriteString(msg)
+		sb.WriteString("\n")
+	}
+
+	fields := s.DescribeFields()
+	if fields != "" {
+		sb.WriteString("Expected fields:\n")
+		sb.WriteString(fields)
+	}
+	return sb.String()
+}
+
+// cleanErrorMsg strips noisy prefixes from jsonschema error messages
+// and appends property context from the instance location if present.
+func cleanErrorMsg(msg, instanceLoc string) string {
+	// Skip top-level "doesn't validate with" or
+	// "jsonschema validation failed" messages.
+	if strings.Contains(msg, "doesn't validate with") {
+		return ""
+	}
+	if strings.HasPrefix(
+		msg, "jsonschema validation failed",
+	) {
+		return ""
+	}
+
+	// If the instance location points to a specific property,
+	// append context like "for 'propname'".
+	if instanceLoc != "" && instanceLoc != "/" {
+		prop := instanceLoc
+		// Extract last path segment for nested paths.
+		if idx := strings.LastIndex(
+			prop, "/",
+		); idx != -1 {
+			prop = prop[idx+1:]
+		}
+		if prop != "" {
+			msg = msg + " for '" + prop + "'"
+		}
+	}
+
+	return msg
 }
 
 // ValidationError wraps a JSON Schema validation error with a cleaner message.

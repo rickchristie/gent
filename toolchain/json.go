@@ -260,8 +260,14 @@ func (c *JSON) Execute(
 			raw.Errors[i] = fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
 			// Add error as a section
 			sections = append(sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", raw.Errors[i]),
+				Name: call.Name,
+				Content: fmt.Sprintf(
+					"Error: unknown tool %q. "+
+						"Review the available "+
+						"tools section for valid "+
+						"tool names.",
+					call.Name,
+				),
 			})
 			// Publish AfterToolCall for the failed call
 			if execCtx != nil {
@@ -380,5 +386,16 @@ func (c *JSON) Execute(
 	}, nil
 }
 
+// GetToolSchema returns the compiled schema for the
+// named tool, or nil if not found.
+func (c *JSON) GetToolSchema(
+	name string,
+) *schema.Schema {
+	return c.schemaMap[name]
+}
+
 // Compile-time check that JSON implements gent.ToolChain.
 var _ gent.ToolChain = (*JSON)(nil)
+
+// Compile-time check that JSON implements SchemaProvider.
+var _ SchemaProvider = (*JSON)(nil)
