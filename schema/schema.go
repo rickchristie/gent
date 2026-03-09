@@ -141,7 +141,7 @@ func (s *Schema) DescribeFields() string {
 		typStr := describeType(propMap)
 		desc, _ := propMap["description"].(string)
 
-		sb.WriteString("  - '")
+		sb.WriteString("  - 'args.")
 		sb.WriteString(name)
 		sb.WriteString("' (")
 		if requiredSet[name] {
@@ -173,6 +173,84 @@ func describeType(propMap map[string]any) string {
 		return "any"
 	}
 	return typ
+}
+
+// ExampleObject builds a representative example object from the
+// schema. Each field gets a zero-value placeholder for its type:
+// string → "...", integer → 0, number → 0, boolean → false,
+// arrays of objects → single-element array with nested example.
+// Returns nil if the schema is nil or has no properties.
+func (s *Schema) ExampleObject() map[string]any {
+	if s == nil || s.raw == nil {
+		return nil
+	}
+	return exampleFromRaw(s.raw)
+}
+
+// exampleFromRaw recursively builds an example object from a
+// raw schema map.
+func exampleFromRaw(raw map[string]any) map[string]any {
+	propsRaw, ok := raw["properties"]
+	if !ok {
+		return nil
+	}
+	props, ok := propsRaw.(map[string]any)
+	if !ok || len(props) == 0 {
+		return nil
+	}
+
+	result := make(map[string]any, len(props))
+	for name, propRaw := range props {
+		propMap, ok := propRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		result[name] = exampleValue(propMap)
+	}
+	return result
+}
+
+// exampleValue returns a placeholder value for a property schema.
+func exampleValue(propMap map[string]any) any {
+	typ, _ := propMap["type"].(string)
+	switch typ {
+	case "string":
+		return "..."
+	case "integer":
+		return 0
+	case "number":
+		return 0
+	case "boolean":
+		return false
+	case "array":
+		items, ok := propMap["items"].(map[string]any)
+		if !ok {
+			return []any{}
+		}
+		itemType, _ := items["type"].(string)
+		if itemType == "object" {
+			nested := exampleFromRaw(items)
+			if nested != nil {
+				return []any{nested}
+			}
+		}
+		return []any{exampleValue(items)}
+	case "object":
+		nested := exampleFromRaw(propMap)
+		if nested != nil {
+			return nested
+		}
+		// Map type: additionalProperties defines value schema
+		if addProps, ok :=
+			propMap["additionalProperties"].(map[string]any); ok {
+			return map[string]any{
+				"<key>": exampleValue(addProps),
+			}
+		}
+		return map[string]any{}
+	default:
+		return nil
+	}
 }
 
 // FormatForLLM validates data against the schema and returns an
@@ -245,21 +323,52 @@ func cleanErrorMsg(msg, instanceLoc string) string {
 	}
 
 	// If the instance location points to a specific property,
-	// append context like "for 'propname'".
-	if instanceLoc != "" && instanceLoc != "/" {
-		prop := instanceLoc
-		// Extract last path segment for nested paths.
-		if idx := strings.LastIndex(
-			prop, "/",
-		); idx != -1 {
-			prop = prop[idx+1:]
-		}
-		if prop != "" {
-			msg = msg + " for '" + prop + "'"
-		}
+	// append context like "for 'args.propname'".
+	path := instanceLocToArgsPath(instanceLoc)
+	if path != "" {
+		msg = msg + " for '" + path + "'"
 	}
 
 	return msg
+}
+
+// instanceLocToArgsPath converts a jsonschema instance location
+// to an args.-prefixed dot path. Numeric segments (array indices)
+// are rendered as [] to show the structural path rather than a
+// specific index.
+// Examples: "" → "", "/" → "", "/count" → "args.count",
+// "/items/0" → "args.items[]", "/items/0/qty" → "args.items[].qty"
+func instanceLocToArgsPath(loc string) string {
+	if loc == "" || loc == "/" {
+		return ""
+	}
+	parts := strings.Split(
+		strings.TrimPrefix(loc, "/"), "/",
+	)
+	var sb strings.Builder
+	sb.WriteString("args")
+	for _, p := range parts {
+		if isDigit(p) {
+			sb.WriteString("[]")
+		} else {
+			sb.WriteString(".")
+			sb.WriteString(p)
+		}
+	}
+	return sb.String()
+}
+
+// isDigit returns true if s is a non-empty string of ASCII digits.
+func isDigit(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidationError wraps a JSON Schema validation error with a cleaner message.

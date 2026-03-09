@@ -1,6 +1,7 @@
 package jsruntime
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,9 +91,9 @@ func toolCall(
 
 	toolName, _ := req["tool"].(string)
 	if toolName == "" {
-		panic(vm.NewTypeError(
-			"tool.call: 'tool' field is required",
-		))
+		return buildMissingToolError(
+			vm, source,
+		)
 	}
 
 	// Marshal to JSON for the wrapped ToolChain
@@ -256,6 +257,41 @@ func buildParallelResults(
 	return vm.ToValue(results)
 }
 
+// writeCallContext writes the "tool.call() error at
+// line N:" header and source context snippet to sb.
+func writeCallContext(
+	sb *strings.Builder,
+	vm *sobek.Runtime,
+	source string,
+	annotation string,
+) {
+	if source == "" {
+		return
+	}
+	frames := vm.CaptureCallStack(10, nil)
+	for _, frame := range frames {
+		pos := frame.Position()
+		if pos.Line > 0 {
+			fmt.Fprintf(sb,
+				"tool.call() error at "+
+					"line %d:\n\n",
+				pos.Line,
+			)
+			ctx := extractSourceContext(
+				source, pos.Line,
+				pos.Column,
+				annotation,
+				2, 2,
+			)
+			if ctx != "" {
+				sb.WriteString(ctx)
+				sb.WriteString("\n")
+			}
+			break
+		}
+	}
+}
+
 // enhanceSchemaError checks if err is a schema validation
 // error and, if so, replaces the raw error with an
 // LLM-friendly message including code context and field
@@ -288,41 +324,75 @@ func enhanceSchemaError(
 	}
 
 	var sb strings.Builder
-
-	// Try to get JS call location for code context
-	if source != "" {
-		frames := vm.CaptureCallStack(10, nil)
-		for _, frame := range frames {
-			pos := frame.Position()
-			if pos.Line > 0 {
-				fmt.Fprintf(&sb,
-					"tool.call() error at "+
-						"line %d:\n\n",
-					pos.Line,
-				)
-				ctx := extractSourceContext(
-					source, pos.Line,
-					pos.Column,
-					"schema validation error",
-					2, 2,
-				)
-				if ctx != "" {
-					sb.WriteString(ctx)
-					sb.WriteString("\n")
-				}
-				break
-			}
-		}
-	}
-
-	sb.WriteString(llmMsg)
-	sb.WriteString(
-		"\nIMPORTANT: Use EXACT argument names " +
-			"and types from the tool schema.\n" +
-			"Fix ALL errors above before " +
-			"re-submitting your code.\n",
+	writeCallContext(
+		&sb, vm, source, "schema validation error",
 	)
+	sb.WriteString(llmMsg)
+	writeExampleCall(&sb, toolName, sch)
 	return sb.String()
+}
+
+// writeExampleCall appends a tool.call() example to sb
+// using the schema's ExampleObject. Writes nothing if the
+// schema has no properties.
+func writeExampleCall(
+	sb *strings.Builder,
+	toolName string,
+	sch *schema.Schema,
+) {
+	example := sch.ExampleObject()
+	if example == nil {
+		return
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("    ", "  ")
+	if err := enc.Encode(example); err != nil {
+		return
+	}
+	argsJSON := bytes.TrimRight(
+		buf.Bytes(), "\n",
+	)
+	sb.WriteString("Example:\n")
+	sb.WriteString("  tool.call({\n")
+	sb.WriteString("    tool: \"")
+	sb.WriteString(toolName)
+	sb.WriteString("\",\n")
+	sb.WriteString("    args: ")
+	sb.Write(argsJSON)
+	sb.WriteString("\n  });\n")
+}
+
+// buildMissingToolError returns a JS error result with
+// code context when tool.call() is missing the required
+// 'tool' field.
+func buildMissingToolError(
+	vm *sobek.Runtime,
+	source string,
+) sobek.Value {
+	var sb strings.Builder
+	writeCallContext(
+		&sb, vm, source, "missing required field",
+	)
+	sb.WriteString(
+		"Invalid tool.call() request.\n" +
+			"Errors:\n" +
+			"  - missing required 'tool' field\n" +
+			"Expected format:\n" +
+			"  tool.call({tool: \"tool_name\"," +
+			" args: {...}})\n" +
+			"\nIMPORTANT: Use EXACT argument " +
+			"names and types from the tool " +
+			"schema.\n" +
+			"Fix ALL errors above before " +
+			"re-submitting your code.",
+	)
+	jsResult := map[string]any{
+		"name":  "",
+		"error": sb.String(),
+	}
+	return vm.ToValue(jsResult)
 }
 
 // parseOutputJSON attempts to parse a tool output as JSON.
@@ -386,6 +456,18 @@ func (c *CollectedResults) Add(
 			c.TextParts, result.Text,
 		)
 	}
+}
+
+// HasSchemaErrors returns true if any collected error
+// is a schema.ValidationError.
+func (c *CollectedResults) HasSchemaErrors() bool {
+	for _, err := range c.AllErrors {
+		var valErr *schema.ValidationError
+		if errors.As(err, &valErr) {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildRaw returns the merged RawToolChainResult.

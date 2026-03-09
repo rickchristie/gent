@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -199,6 +200,13 @@ func (tc *MockToolChain) Guidance() string { return "Use YAML format for tool ca
 // AvailableToolsPrompt implements gent.ToolChain.
 func (tc *MockToolChain) AvailableToolsPrompt() string {
 	return "Available tools: test tools"
+}
+
+// GetToolSchema implements gent.ToolChain.
+func (tc *MockToolChain) GetToolSchema(
+	_ string,
+) *schema.Schema {
+	return nil
 }
 
 // RegisterTool implements gent.ToolChain.

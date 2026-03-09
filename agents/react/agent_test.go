@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
@@ -86,6 +87,12 @@ func (m *mockToolChain) AvailableToolsPrompt() string { return "mock available t
 
 func (m *mockToolChain) ParseSection(_ *gent.ExecutionContext, content string) (any, error) {
 	return content, nil
+}
+
+func (m *mockToolChain) GetToolSchema(
+	_ string,
+) *schema.Schema {
+	return nil
 }
 
 func (m *mockToolChain) RegisterTool(_ any) gent.ToolChain {

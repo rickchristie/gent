@@ -1,6 +1,9 @@
 package gent
 
-import "github.com/tmc/langchaingo/llms"
+import (
+	"github.com/rickchristie/gent/schema"
+	"github.com/tmc/langchaingo/llms"
+)
 
 // ToolCall represents a parsed tool invocation from LLM output.
 type ToolCall struct {
@@ -124,6 +127,12 @@ type ToolChain interface {
 	// Note: Format instructions for HOW to call tools (e.g., "use YAML format")
 	// are provided by Guidance(), which is inherited from TextSection.
 	AvailableToolsPrompt() string
+
+	// GetToolSchema returns the compiled schema for the named tool,
+	// or nil if the tool has no schema or doesn't exist.
+	// Used by wrappers (e.g., JsToolChainWrapper) for schema
+	// validation and error reporting.
+	GetToolSchema(name string) *schema.Schema
 
 	// Execute parses tool calls from content and executes them.
 	//

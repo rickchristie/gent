@@ -2,7 +2,6 @@ package toolchain
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -60,6 +59,374 @@ func setupJsWrapper() *JsToolChainWrapper {
 				args map[string]any,
 			) (string, error) {
 				return `[{"order_id":"O1"}]`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"create_order",
+			"Create an order with line items",
+			"orders",
+			[]string{"create"},
+			[]string{"order", "create"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"customer_id": map[string]any{
+						"type": "string",
+					},
+					"items": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"name": map[string]any{
+									"type": "string",
+								},
+								"qty": map[string]any{
+									"type": "integer",
+								},
+							},
+							"required": []any{
+								"name", "qty",
+							},
+						},
+					},
+				},
+				"required": []any{
+					"customer_id", "items",
+				},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"created"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"update_address",
+			"Update customer address",
+			"customers",
+			[]string{"update"},
+			[]string{"address", "update"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"address": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"street": map[string]any{
+								"type": "string",
+							},
+							"city": map[string]any{
+								"type": "string",
+							},
+						},
+						"required": []any{
+							"street", "city",
+						},
+					},
+				},
+				"required": []any{"id", "address"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"updated"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"update_stock",
+			"Update stock quantities",
+			"inventory",
+			[]string{"stock"},
+			[]string{"stock", "update"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"quantities": map[string]any{
+						"type": "object",
+						"additionalProperties": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"amount": map[string]any{
+									"type": "integer",
+								},
+								"unit": map[string]any{
+									"type": "string",
+								},
+							},
+							"required": []any{
+								"amount", "unit",
+							},
+						},
+					},
+				},
+				"required": []any{"id", "quantities"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"updated"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"update_geo",
+			"Update geo coordinates",
+			"customers",
+			[]string{"geo"},
+			[]string{"geo", "update"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"address": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"street": map[string]any{
+								"type": "string",
+							},
+							"geo": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"lat": map[string]any{
+										"type": "number",
+									},
+									"lng": map[string]any{
+										"type": "number",
+									},
+								},
+								"required": []any{
+									"lat", "lng",
+								},
+							},
+						},
+						"required": []any{
+							"street", "geo",
+						},
+					},
+				},
+				"required": []any{"id", "address"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"updated"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"create_shipment",
+			"Create a shipment with orders",
+			"shipping",
+			[]string{"shipment"},
+			[]string{"shipment", "create"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"orders": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"order_id": map[string]any{
+									"type": "string",
+								},
+								"items": map[string]any{
+									"type": "array",
+									"items": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"name": map[string]any{
+												"type": "string",
+											},
+											"qty": map[string]any{
+												"type": "integer",
+											},
+										},
+										"required": []any{
+											"name", "qty",
+										},
+									},
+								},
+							},
+							"required": []any{
+								"order_id", "items",
+							},
+						},
+					},
+				},
+				"required": []any{"id", "orders"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"created"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"update_regions",
+			"Update region zones",
+			"geography",
+			[]string{"regions"},
+			[]string{"region", "update"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"regions": map[string]any{
+						"type": "object",
+						"additionalProperties": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"zones": map[string]any{
+									"type": "object",
+									"additionalProperties": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"code": map[string]any{
+												"type": "string",
+											},
+											"population": map[string]any{
+												"type": "integer",
+											},
+										},
+										"required": []any{
+											"code",
+											"population",
+										},
+									},
+								},
+							},
+							"required": []any{"zones"},
+						},
+					},
+				},
+				"required": []any{"id", "regions"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"updated"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"update_products",
+			"Update product attributes",
+			"products",
+			[]string{"products"},
+			[]string{"product", "update"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"items": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"name": map[string]any{
+									"type": "string",
+								},
+								"attributes": map[string]any{
+									"type": "object",
+									"additionalProperties": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"value": map[string]any{
+												"type": "string",
+											},
+											"unit": map[string]any{
+												"type": "string",
+											},
+										},
+										"required": []any{
+											"value", "unit",
+										},
+									},
+								},
+							},
+							"required": []any{
+								"name", "attributes",
+							},
+						},
+					},
+				},
+				"required": []any{"id", "items"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"updated"}`, nil
+			},
+		),
+		newIndexableToolWithSchema(
+			"update_catalog",
+			"Update product catalog",
+			"catalog",
+			[]string{"catalog"},
+			[]string{"catalog", "update"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type": "string",
+					},
+					"categories": map[string]any{
+						"type": "object",
+						"additionalProperties": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"products": map[string]any{
+									"type": "array",
+									"items": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"name": map[string]any{
+												"type": "string",
+											},
+											"price": map[string]any{
+												"type": "number",
+											},
+										},
+										"required": []any{
+											"name", "price",
+										},
+									},
+								},
+							},
+							"required": []any{
+								"products",
+							},
+						},
+					},
+				},
+				"required": []any{"id", "categories"},
+			},
+			func(
+				ctx context.Context,
+				args map[string]any,
+			) (string, error) {
+				return `{"status":"updated"}`, nil
 			},
 		),
 		newIndexableTool(
@@ -168,6 +535,10 @@ func TestJsWrapper_AvailableToolsPrompt(t *testing.T) {
 // -------------------------------------------------------
 
 func TestJsWrapper_ParseSection(t *testing.T) {
+	type input struct {
+		content string
+	}
+
 	type expected struct {
 		isCode     bool
 		isToolCall bool
@@ -175,31 +546,37 @@ func TestJsWrapper_ParseSection(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		input    string
+		input    input
 		expected expected
 	}{
 		{
 			name: "direct_call delegates to wrapped",
-			input: `<direct_call>
+			input: input{
+				content: `<direct_call>
 {"tool": "lookup_customer", "args": {"id": "C1"}}
 </direct_call>`,
+			},
 			expected: expected{
 				isToolCall: true,
 			},
 		},
 		{
 			name: "code returns string",
-			input: `<code>
+			input: input{
+				content: `<code>
 var x = tool.call({tool: "lookup_customer", args: {id: "C1"}});
 console.log(JSON.stringify(x));
 </code>`,
+			},
 			expected: expected{
 				isCode: true,
 			},
 		},
 		{
 			name: "neither — fallback to wrapped",
-			input: `{"tool": "lookup_customer", "args": {"id": "C1"}}`,
+			input: input{
+				content: `{"tool": "lookup_customer", "args": {"id": "C1"}}`,
+			},
 			expected: expected{
 				isToolCall: true,
 			},
@@ -211,7 +588,7 @@ console.log(JSON.stringify(x));
 			w := setupJsWrapper()
 			execCtx := newExecCtx()
 			result, err := w.ParseSection(
-				execCtx, tc.input,
+				execCtx, tc.input.content,
 			)
 			require.NoError(t, err)
 
@@ -239,20 +616,26 @@ console.log(JSON.stringify(x));
 // -------------------------------------------------------
 
 func TestJsWrapper_Execute_DirectCall(t *testing.T) {
+	type input struct {
+		content string
+	}
+
 	type expected struct {
 		text string
 	}
 
 	tests := []struct {
 		name     string
-		input    string
+		input    input
 		expected expected
 	}{
 		{
 			name: "single tool call passes through",
-			input: `<direct_call>
+			input: input{
+				content: `<direct_call>
 {"tool": "lookup_customer", "args": {"id": "C001"}}
 </direct_call>`,
+			},
 			expected: expected{
 				text: `<lookup_customer>
 "{\"id\":\"C001\",\"name\":\"Alice\"}"
@@ -261,10 +644,12 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 		},
 		{
 			name: "parallel tool calls pass through",
-			input: `<direct_call>
+			input: input{
+				content: `<direct_call>
 [{"tool": "lookup_customer", "args": {"id": "C001"}},
  {"tool": "get_orders", "args": {"customer_id": "C001"}}]
 </direct_call>`,
+			},
 			expected: expected{
 				text: `<lookup_customer>
 "{\"id\":\"C001\",\"name\":\"Alice\"}"
@@ -276,7 +661,9 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 		},
 		{
 			name: "fallback without tags",
-			input: `{"tool": "lookup_customer", "args": {"id": "C002"}}`,
+			input: input{
+				content: `{"tool": "lookup_customer", "args": {"id": "C002"}}`,
+			},
 			expected: expected{
 				text: `<lookup_customer>
 "{\"id\":\"C002\",\"name\":\"Alice\"}"
@@ -292,7 +679,7 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 			tf := jsTestFormat()
 
 			result, err := w.Execute(
-				execCtx, tc.input, tf,
+				execCtx, tc.input.content, tf,
 			)
 			require.NoError(t, err)
 			require.NotNil(t, result)
@@ -341,32 +728,39 @@ func TestJsWrapper_Execute_DirectCall_Stats(t *testing.T) {
 // -------------------------------------------------------
 
 func TestJsWrapper_Execute_Code(t *testing.T) {
+	type input struct {
+		content string
+	}
+
 	type expected struct {
-		text    string
-		hasErr  bool
-		notText string
+		text   string
+		jsonEq bool // use JSONEq instead of Equal
 	}
 
 	tests := []struct {
 		name     string
-		input    string
+		input    input
 		expected expected
 	}{
 		{
 			name: "simple tool.call with console.log",
-			input: `<code>
+			input: input{
+				content: `<code>
 var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
 console.log(JSON.stringify(c.output));
 </code>`,
+			},
 			expected: expected{
-				text: `{"id":"C001","name":"Alice"}`,
+				text:   `{"id":"C001","name":"Alice"}`,
+				jsonEq: true,
 			},
 		},
 		{
 			name: "chained calls",
-			input: `<code>
+			input: input{
+				content: `<code>
 var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
@@ -378,17 +772,21 @@ console.log(JSON.stringify({
   customer: c.output, orders: o.output
 }));
 </code>`,
+			},
 			expected: expected{
-				text: `{"customer":{"id":"C001","name":"Alice"},"orders":[{"order_id":"O1"}]}`,
+				text:   `{"customer":{"id":"C001","name":"Alice"},"orders":[{"order_id":"O1"}]}`,
+				jsonEq: true,
 			},
 		},
 		{
 			name: "no console.log uses tool output",
-			input: `<code>
+			input: input{
+				content: `<code>
 var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
 </code>`,
+			},
 			expected: expected{
 				text: `<lookup_customer>
 "{\"id\":\"C001\",\"name\":\"Alice\"}"
@@ -397,22 +795,25 @@ var c = tool.call(
 		},
 		{
 			name: "JS syntax error",
-			input: `<code>
+			input: input{
+				content: `<code>
 var x = @;
 </code>`,
+			},
 			expected: expected{
 				text: `<code_error>
 SyntaxError: SyntaxError: (anonymous): Line 1:9 Unexpected token ILLEGAL (and 2 more errors)
 
 </code_error>`,
-				hasErr: true,
 			},
 		},
 		{
 			name: "JS runtime error (ReferenceError)",
-			input: `<code>
+			input: input{
+				content: `<code>
 undefinedVar;
 </code>`,
+			},
 			expected: expected{
 				text: `<code_error>
 ReferenceError: undefinedVar is not defined
@@ -421,24 +822,27 @@ ReferenceError: undefinedVar is not defined
     ^ ReferenceError: undefinedVar is not defined
 
 </code_error>`,
-				hasErr: true,
 			},
 		},
 		{
 			name: "code that calls no tools",
-			input: `<code>
+			input: input{
+				content: `<code>
 console.log("hello from JS");
 </code>`,
+			},
 			expected: expected{
 				text: "hello from JS",
 			},
 		},
 		{
 			name: "multiple console.log calls",
-			input: `<code>
+			input: input{
+				content: `<code>
 console.log("line1");
 console.log("line2");
 </code>`,
+			},
 			expected: expected{
 				text: "line1\nline2",
 			},
@@ -452,20 +856,22 @@ console.log("line2");
 			tf := jsTestFormat()
 
 			result, err := w.Execute(
-				execCtx, tc.input, tf,
+				execCtx, tc.input.content, tf,
 			)
 
 			// Code execution should never return
 			// a Go error — errors are in the result
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Equal(
-				t, tc.expected.text, result.Text,
-			)
-			if tc.expected.notText != "" {
-				assert.NotContains(
-					t, result.Text,
-					tc.expected.notText,
+			if tc.expected.jsonEq {
+				assert.JSONEq(
+					t, tc.expected.text,
+					result.Text,
+				)
+			} else {
+				assert.Equal(
+					t, tc.expected.text,
+					result.Text,
 				)
 			}
 		})
@@ -700,17 +1106,18 @@ func TestJsWrapper_Execute_EdgeCases(t *testing.T) {
 	})
 
 	t.Run(
-		"code with malformed tool.call request",
+		"malformed tool.call returns error result",
 		func(t *testing.T) {
 			w := setupJsWrapper()
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
 			content := `<code>
-try {
-  tool.call({args: {}});
-} catch(e) {
-  console.log("caught: " + e.message);
+var r = tool.call({args: {}});
+if (r.error) {
+  console.log("got error");
+} else {
+  console.log("unexpected success");
 }
 </code>`
 			result, err := w.Execute(
@@ -718,8 +1125,8 @@ try {
 			)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Contains(
-				t, result.Text, "caught:",
+			assert.Equal(
+				t, "got error", result.Text,
 			)
 		},
 	)
@@ -747,8 +1154,16 @@ while(true) {}
 			// Should return error in result, not err
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Contains(
-				t, result.Text, "interrupted",
+			assert.Equal(
+				t,
+				`<code_error>
+execution interrupted: cancelled
+
+1 | while(true) {}
+    ^ cancelled
+
+</code_error>`,
+				result.Text,
 			)
 		},
 	)
@@ -801,8 +1216,11 @@ if (r.error) {
 			)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Contains(
-				t, result.Text, "tool error:",
+			assert.Equal(
+				t,
+				"tool error: assert.AnError "+
+					"general error for testing",
+				result.Text,
 			)
 		},
 	)
@@ -845,11 +1263,13 @@ console.log("done");
 	assert.Len(t, result.Raw.Results, 2)
 
 	// Verify first result contains customer data
-	firstOutput, _ := json.Marshal(
-		result.Raw.Results[0].Output,
-	)
-	assert.Contains(
-		t, string(firstOutput), "Alice",
+	firstOutput, ok := result.Raw.Results[0].
+		Output.(string)
+	require.True(t, ok)
+	assert.Equal(
+		t,
+		`{"id":"C001","name":"Alice"}`,
+		firstOutput,
 	)
 }
 
@@ -858,209 +1278,333 @@ console.log("done");
 // -------------------------------------------------------
 
 func TestJsWrapper_PreValidation(t *testing.T) {
-	t.Run(
-		"invalid literal args caught by "+
-			"pre-validation",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
+	type input struct {
+		content string
+	}
 
-			// lookup_customer requires "id" field
-			content := `<code>
+	type expected struct {
+		text       string
+		jsonEq     bool
+		emptyCalls bool
+		codeExec   int64
+		codeErr    int64
+		errGauge   float64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "invalid literal args caught",
+			input: input{
+				content: `<code>
 var r = tool.call(
   {tool: "lookup_customer", args: {}}
 );
 console.log(r.output);
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
 
-			// Pre-validation should catch the
-			// missing "id" field
-			assert.Contains(
-				t, result.Text,
-				"schema pre-validation error",
-			)
-			assert.Contains(
-				t, result.Text, "id",
-			)
+--- Error 1: tool.call() at line 2 ---
 
-			// No tools should have been executed
-			assert.Empty(t, result.Raw.Calls)
+2 |   {tool: "lookup_customer", args: {}}
+      ^
+3 | );
+4 | console.log(r.output);
 
-			// Error stats incremented
-			assert.Equal(
-				t, int64(1),
-				execCtx.Stats().GetCounter(
-					gent.SCCodeExecutions,
-				),
-			)
-			assert.Equal(
-				t, int64(1),
-				execCtx.Stats().GetCounter(
-					gent.SCCodeExecutionsError,
-				),
-			)
-			assert.Equal(
-				t, 1.0,
-				execCtx.Stats().GetGauge(
-					gent.SGCodeExecutionsErrorConsecutive,
-				),
-			)
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - missing property 'id'
+Expected fields:
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
 		},
-	)
-
-	t.Run(
-		"valid literal args pass pre-validation",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
+		{
+			name: "valid literal args pass",
+			input: input{
+				content: `<code>
 var r = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
 console.log(JSON.stringify(r.output));
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-
-			// Should pass pre-validation and
-			// execute successfully
-			assert.Contains(
-				t, result.Text, "Alice",
-			)
-			assert.NotContains(
-				t, result.Text,
-				"schema pre-validation error",
-			)
+</code>`,
+			},
+			expected: expected{
+				text:     `{"id":"C001","name":"Alice"}`,
+				jsonEq:   true,
+				codeExec: 1,
+			},
 		},
-	)
-
-	t.Run(
-		"dynamic args skip pre-validation",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
+		{
+			name: "dynamic args skip pre-validation",
+			input: input{
+				content: `<code>
 var myId = "C001";
 var r = tool.call(
   {tool: "lookup_customer",
    args: {id: myId}}
 );
 console.log(JSON.stringify(r.output));
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-
-			// Dynamic args are skipped — tool
-			// executes normally
-			assert.Contains(
-				t, result.Text, "Alice",
-			)
+</code>`,
+			},
+			expected: expected{
+				text:     `{"id":"C001","name":"Alice"}`,
+				jsonEq:   true,
+				codeExec: 1,
+			},
 		},
-	)
-
-	t.Run(
-		"multiple invalid calls all reported",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
+		{
+			name: "multiple invalid calls all reported",
+			input: input{
+				content: `<code>
 var r1 = tool.call(
   {tool: "lookup_customer", args: {}}
 );
 var r2 = tool.call(
   {tool: "get_orders", args: {}}
 );
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+2 schema pre-validation error(s):
 
-			// Both errors reported
-			assert.Contains(
-				t, result.Text,
-				"2 schema pre-validation error",
-			)
-			assert.Contains(
-				t, result.Text,
-				"lookup_customer",
-			)
-			assert.Contains(
-				t, result.Text,
-				"get_orders",
-			)
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "lookup_customer", args: {}}
+      ^
+3 | );
+4 | var r2 = tool.call(
+
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - missing property 'id'
+Expected fields:
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
+
+--- Error 2: tool.call() at line 5 ---
+
+5 |   {tool: "get_orders", args: {}}
+      ^
+6 | );
+
+Invalid args for tool 'get_orders'.
+Errors:
+  - missing property 'customer_id'
+Expected fields:
+  - 'args.customer_id' (required, string)
+Example:
+  tool.call({
+    tool: "get_orders",
+    args: {
+      "customer_id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
 		},
-	)
-
-	t.Run(
-		"pre-validation error resets on success",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			// First: pre-validation error
-			errContent := `<code>
+		{
+			name: "nested object missing sub-field",
+			input: input{
+				content: `<code>
 var r = tool.call(
-  {tool: "lookup_customer", args: {}}
+  {tool: "update_address", args: {
+    id: "1",
+    address: { street: "123 Main St" }
+  }}
 );
-</code>`
-			_, err := w.Execute(
-				execCtx, errContent, tf,
-			)
-			require.NoError(t, err)
-			assert.Equal(
-				t, 1.0,
-				execCtx.Stats().GetGauge(
-					gent.SGCodeExecutionsErrorConsecutive,
-				),
-			)
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
 
-			// Second: success
-			okContent := `<code>
-console.log("ok");
-</code>`
-			_, err = w.Execute(
-				execCtx, okContent, tf,
-			)
-			require.NoError(t, err)
-			assert.Equal(
-				t, 0.0,
-				execCtx.Stats().GetGauge(
-					gent.SGCodeExecutionsErrorConsecutive,
-				),
-			)
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "update_address", args: {
+      ^
+3 |     id: "1",
+4 |     address: { street: "123 Main St" }
+
+Invalid args for tool 'update_address'.
+Errors:
+  - missing property 'city' for 'args.address'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_address",
+    args: {
+      "address": {
+        "city": "...",
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
 		},
-	)
+		{
+			name: "array of objects missing " +
+				"item field",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "create_order", args: {
+    customer_id: "C1",
+    items: [{ name: "Widget" }]
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
 
-	t.Run(
-		"mixed invalid and dynamic calls",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
+--- Error 1: tool.call() at line 2 ---
 
-			// One invalid literal call, one dynamic
-			content := `<code>
+2 |   {tool: "create_order", args: {
+      ^
+3 |     customer_id: "C1",
+4 |     items: [{ name: "Widget" }]
+
+Invalid args for tool 'create_order'.
+Errors:
+  - missing property 'qty' for 'args.items[]'
+Expected fields:
+  - 'args.customer_id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_order",
+    args: {
+      "customer_id": "...",
+      "items": [
+        {
+          "name": "...",
+          "qty": 0
+        }
+      ]
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "map of objects missing " +
+				"value field",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "update_stock", args: {
+    id: "S1",
+    quantities: { apples: { amount: 5 } }
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "update_stock", args: {
+      ^
+3 |     id: "S1",
+4 |     quantities: { apples: { amount: 5 } }
+
+Invalid args for tool 'update_stock'.
+Errors:
+  - missing property 'unit' for 'args.quantities.apples'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.quantities' (required, object)
+Example:
+  tool.call({
+    tool: "update_stock",
+    args: {
+      "id": "...",
+      "quantities": {
+        "<key>": {
+          "amount": 0,
+          "unit": "..."
+        }
+      }
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "mixed invalid literal and dynamic",
+			input: input{
+				content: `<code>
 var r1 = tool.call(
   {tool: "lookup_customer", args: {}}
 );
@@ -1068,28 +1612,1075 @@ var myArgs = {customer_id: "C001"};
 var r2 = tool.call(
   {tool: "get_orders", args: myArgs}
 );
-</code>`
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "lookup_customer", args: {}}
+      ^
+3 | );
+4 | var myArgs = {customer_id: "C001"};
+
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - missing property 'id'
+Expected fields:
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "object contains object " +
+				"missing deep field",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "update_geo", args: {
+    id: "1",
+    address: {
+      street: "Main St",
+      geo: { lat: 1.0 }
+    }
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "update_geo", args: {
+      ^
+3 |     id: "1",
+4 |     address: {
+
+Invalid args for tool 'update_geo'.
+Errors:
+  - missing property 'lng' for 'args.address.geo'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_geo",
+    args: {
+      "address": {
+        "geo": {
+          "lat": 0,
+          "lng": 0
+        },
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "array of object contains " +
+				"array of object",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "create_shipment", args: {
+    id: "S1",
+    orders: [{
+      order_id: "O1",
+      items: [{ name: "Widget" }]
+    }]
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "create_shipment", args: {
+      ^
+3 |     id: "S1",
+4 |     orders: [{
+
+Invalid args for tool 'create_shipment'.
+Errors:
+  - missing property 'qty' for 'args.orders[].items[]'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.orders' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_shipment",
+    args: {
+      "id": "...",
+      "orders": [
+        {
+          "items": [
+            {
+              "name": "...",
+              "qty": 0
+            }
+          ],
+          "order_id": "..."
+        }
+      ]
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "map of object contains " +
+				"map of object",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "update_regions", args: {
+    id: "R1",
+    regions: {
+      us: { zones: {
+        west: { population: 1000 }
+      }}
+    }
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "update_regions", args: {
+      ^
+3 |     id: "R1",
+4 |     regions: {
+
+Invalid args for tool 'update_regions'.
+Errors:
+  - missing property 'code' for 'args.regions.us.zones.west'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.regions' (required, object)
+Example:
+  tool.call({
+    tool: "update_regions",
+    args: {
+      "id": "...",
+      "regions": {
+        "<key>": {
+          "zones": {
+            "<key>": {
+              "code": "...",
+              "population": 0
+            }
+          }
+        }
+      }
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "array of object contains " +
+				"map of object",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "update_products", args: {
+    id: "P1",
+    items: [{
+      name: "Widget",
+      attributes: {
+        weight: { value: "5" }
+      }
+    }]
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "update_products", args: {
+      ^
+3 |     id: "P1",
+4 |     items: [{
+
+Invalid args for tool 'update_products'.
+Errors:
+  - missing property 'unit' for 'args.items[].attributes.weight'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "update_products",
+    args: {
+      "id": "...",
+      "items": [
+        {
+          "attributes": {
+            "<key>": {
+              "unit": "...",
+              "value": "..."
+            }
+          },
+          "name": "..."
+        }
+      ]
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+		{
+			name: "map of object contains " +
+				"array of object",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "update_catalog", args: {
+    id: "C1",
+    categories: {
+      electronics: {
+        products: [{ name: "Phone" }]
+      }
+    }
+  }}
+);
+console.log(r.output);
+</code>`,
+			},
+			expected: expected{
+				text: `<code_error>
+1 schema pre-validation error(s):
+
+--- Error 1: tool.call() at line 2 ---
+
+2 |   {tool: "update_catalog", args: {
+      ^
+3 |     id: "C1",
+4 |     categories: {
+
+Invalid args for tool 'update_catalog'.
+Errors:
+  - missing property 'price' for 'args.categories.electronics.products[]'
+Expected fields:
+  - 'args.categories' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_catalog",
+    args: {
+      "categories": {
+        "<key>": {
+          "products": [
+            {
+              "name": "...",
+              "price": 0
+            }
+          ]
+        }
+      },
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.
+
+</code_error>`,
+				emptyCalls: true,
+				codeExec:   1,
+				codeErr:    1,
+				errGauge:   1.0,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
 			result, err := w.Execute(
-				execCtx, content, tf,
+				execCtx, tc.input.content, tf,
 			)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
-			// Only the invalid literal call caught
-			assert.Contains(
-				t, result.Text,
-				"1 schema pre-validation error",
+			if tc.expected.jsonEq {
+				assert.JSONEq(
+					t, tc.expected.text,
+					result.Text,
+				)
+			} else {
+				assert.Equal(
+					t, tc.expected.text,
+					result.Text,
+				)
+			}
+
+			if tc.expected.emptyCalls {
+				assert.Empty(t, result.Raw.Calls)
+			}
+
+			assert.Equal(
+				t, tc.expected.codeExec,
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutions,
+				),
 			)
-			assert.Contains(
-				t, result.Text,
-				"lookup_customer",
+			assert.Equal(
+				t, tc.expected.codeErr,
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutionsError,
+				),
 			)
-		},
+			assert.Equal(
+				t, tc.expected.errGauge,
+				execCtx.Stats().GetGauge(
+					gent.SGCodeExecutionsErrorConsecutive,
+				),
+			)
+		})
+	}
+}
+
+func TestJsWrapper_PreValidation_ConsecutiveReset(
+	t *testing.T,
+) {
+	w := setupJsWrapper()
+	execCtx := newExecCtx()
+	tf := jsTestFormat()
+
+	// First: pre-validation error
+	errContent := `<code>
+var r = tool.call(
+  {tool: "lookup_customer", args: {}}
+);
+</code>`
+	_, err := w.Execute(execCtx, errContent, tf)
+	require.NoError(t, err)
+	assert.Equal(
+		t, 1.0,
+		execCtx.Stats().GetGauge(
+			gent.SGCodeExecutionsErrorConsecutive,
+		),
+	)
+
+	// Second: success
+	okContent := `<code>
+console.log("ok");
+</code>`
+	_, err = w.Execute(execCtx, okContent, tf)
+	require.NoError(t, err)
+	assert.Equal(
+		t, 0.0,
+		execCtx.Stats().GetGauge(
+			gent.SGCodeExecutionsErrorConsecutive,
+		),
 	)
 }
 
 // -------------------------------------------------------
-// I. Unknown tool error propagation
+// I. Bridge-path errors (dynamic args bypass
+//    pre-validation, errors caught at runtime)
+// -------------------------------------------------------
+
+func TestJsWrapper_BridgeSchemaError(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		text     string
+		codeExec int64
+		codeErr  int64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "dynamic args missing required field",
+			input: input{
+				content: `<code>
+var badArgs = {};
+var r = tool.call(
+  {tool: "lookup_customer", args: badArgs}
+);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 2:
+
+1 | var badArgs = {};
+2 | var r = tool.call(
+                     ^ schema validation error
+3 |   {tool: "lookup_customer", args: badArgs}
+4 | );
+
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - missing property 'id'
+Expected fields:
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "missing tool field in req",
+			input: input{
+				content: `<code>
+var req = {args: {id: "C001"}};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 2:
+
+1 | var req = {args: {id: "C001"}};
+2 | var r = tool.call(req);
+                     ^ missing required field
+3 | console.log(r.error);
+
+Invalid tool.call() request.
+Errors:
+  - missing required 'tool' field
+Expected format:
+  tool.call({tool: "tool_name", args: {...}})
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "missing args field in req",
+			input: input{
+				content: `<code>
+var req = {tool: "lookup_customer"};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 2:
+
+1 | var req = {tool: "lookup_customer"};
+2 | var r = tool.call(req);
+                     ^ schema validation error
+3 | console.log(r.error);
+
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - args is null or missing, expected object with required properties: id
+Expected fields:
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "wrong field name in args",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "lookup_customer",
+  args: {name: "Alice"}
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 5:
+
+3 |   args: {name: "Alice"}
+4 | };
+5 | var r = tool.call(req);
+                     ^ schema validation error
+6 | console.log(r.error);
+
+Invalid args for tool 'lookup_customer'.
+Errors:
+  - missing property 'id'
+Expected fields:
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "deep field error in array item",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "create_order",
+  args: {
+    customer_id: "C001",
+    items: [{name: "Widget"}]
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 8:
+
+6 |   }
+7 | };
+8 | var r = tool.call(req);
+                     ^ schema validation error
+9 | console.log(r.error);
+
+Invalid args for tool 'create_order'.
+Errors:
+  - missing property 'qty' for 'args.items[]'
+Expected fields:
+  - 'args.customer_id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_order",
+    args: {
+      "customer_id": "...",
+      "items": [
+        {
+          "name": "...",
+          "qty": 0
+        }
+      ]
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "nested object bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "update_address",
+  args: {
+    id: "1",
+    address: { street: "123 Main St" }
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 8:
+
+6 |   }
+7 | };
+8 | var r = tool.call(req);
+                     ^ schema validation error
+9 | console.log(r.error);
+
+Invalid args for tool 'update_address'.
+Errors:
+  - missing property 'city' for 'args.address'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_address",
+    args: {
+      "address": {
+        "city": "...",
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "map of objects bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "update_stock",
+  args: {
+    id: "S1",
+    quantities: {
+      apples: { amount: 5 }
+    }
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 10:
+
+ 8 |   }
+ 9 | };
+10 | var r = tool.call(req);
+                      ^ schema validation error
+11 | console.log(r.error);
+
+Invalid args for tool 'update_stock'.
+Errors:
+  - missing property 'unit' for 'args.quantities.apples'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.quantities' (required, object)
+Example:
+  tool.call({
+    tool: "update_stock",
+    args: {
+      "id": "...",
+      "quantities": {
+        "<key>": {
+          "amount": 0,
+          "unit": "..."
+        }
+      }
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "object contains object " +
+				"bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "update_geo",
+  args: {
+    id: "1",
+    address: {
+      street: "Main St",
+      geo: { lat: 1.0 }
+    }
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 11:
+
+ 9 |   }
+10 | };
+11 | var r = tool.call(req);
+                      ^ schema validation error
+12 | console.log(r.error);
+
+Invalid args for tool 'update_geo'.
+Errors:
+  - missing property 'lng' for 'args.address.geo'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_geo",
+    args: {
+      "address": {
+        "geo": {
+          "lat": 0,
+          "lng": 0
+        },
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "array of object contains " +
+				"array of object bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "create_shipment",
+  args: {
+    id: "S1",
+    orders: [{
+      order_id: "O1",
+      items: [{ name: "Widget" }]
+    }]
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 11:
+
+ 9 |   }
+10 | };
+11 | var r = tool.call(req);
+                      ^ schema validation error
+12 | console.log(r.error);
+
+Invalid args for tool 'create_shipment'.
+Errors:
+  - missing property 'qty' for 'args.orders[].items[]'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.orders' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_shipment",
+    args: {
+      "id": "...",
+      "orders": [
+        {
+          "items": [
+            {
+              "name": "...",
+              "qty": 0
+            }
+          ],
+          "order_id": "..."
+        }
+      ]
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "map of object contains " +
+				"map of object bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "update_regions",
+  args: {
+    id: "R1",
+    regions: {
+      us: {
+        zones: {
+          west: { population: 1000 }
+        }
+      }
+    }
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 14:
+
+12 |   }
+13 | };
+14 | var r = tool.call(req);
+                      ^ schema validation error
+15 | console.log(r.error);
+
+Invalid args for tool 'update_regions'.
+Errors:
+  - missing property 'code' for 'args.regions.us.zones.west'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.regions' (required, object)
+Example:
+  tool.call({
+    tool: "update_regions",
+    args: {
+      "id": "...",
+      "regions": {
+        "<key>": {
+          "zones": {
+            "<key>": {
+              "code": "...",
+              "population": 0
+            }
+          }
+        }
+      }
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "array of object contains " +
+				"map of object bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "update_products",
+  args: {
+    id: "P1",
+    items: [{
+      name: "Widget",
+      attributes: {
+        weight: { value: "5" }
+      }
+    }]
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 13:
+
+11 |   }
+12 | };
+13 | var r = tool.call(req);
+                      ^ schema validation error
+14 | console.log(r.error);
+
+Invalid args for tool 'update_products'.
+Errors:
+  - missing property 'unit' for 'args.items[].attributes.weight'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "update_products",
+    args: {
+      "id": "...",
+      "items": [
+        {
+          "attributes": {
+            "<key>": {
+              "unit": "...",
+              "value": "..."
+            }
+          },
+          "name": "..."
+        }
+      ]
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+		{
+			name: "map of object contains " +
+				"array of object bridge error",
+			input: input{
+				content: `<code>
+var req = {
+  tool: "update_catalog",
+  args: {
+    id: "C1",
+    categories: {
+      electronics: {
+        products: [{ name: "Phone" }]
+      }
+    }
+  }
+};
+var r = tool.call(req);
+console.log(r.error);
+</code>`,
+			},
+			expected: expected{
+				text: `tool.call() error at line 12:
+
+10 |   }
+11 | };
+12 | var r = tool.call(req);
+                      ^ schema validation error
+13 | console.log(r.error);
+
+Invalid args for tool 'update_catalog'.
+Errors:
+  - missing property 'price' for 'args.categories.electronics.products[]'
+Expected fields:
+  - 'args.categories' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_catalog",
+    args: {
+      "categories": {
+        "<key>": {
+          "products": [
+            {
+              "name": "...",
+              "price": 0
+            }
+          ]
+        }
+      },
+      "id": "..."
+    }
+  });
+
+IMPORTANT: Use EXACT argument names and types from the tool schema.
+Fix ALL errors above before re-submitting your code.`,
+				codeExec: 1,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			result, err := w.Execute(
+				execCtx, tc.input.content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(
+				t, tc.expected.text, result.Text,
+			)
+			assert.Equal(
+				t, tc.expected.codeExec,
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutions,
+				),
+			)
+			assert.Equal(
+				t, tc.expected.codeErr,
+				execCtx.Stats().GetCounter(
+					gent.SCCodeExecutionsError,
+				),
+			)
+		})
+	}
+}
+
+// -------------------------------------------------------
+// J. Unknown tool error propagation
 // -------------------------------------------------------
 
 func TestJsWrapper_UnknownToolError(t *testing.T) {
@@ -1110,13 +2701,6 @@ console.log(r.error);
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-
-	t.Logf("Text: %q", result.Text)
-	for i, e := range result.Raw.Errors {
-		if e != nil {
-			t.Logf("Raw.Errors[%d]: %v", i, e)
-		}
-	}
 
 	// The error propagated from wrapped SearchJSON
 	// should be ErrUnknownTool

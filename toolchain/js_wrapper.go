@@ -6,6 +6,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
+	"github.com/rickchristie/gent/schema"
 	"github.com/rickchristie/gent/toolchain/jsruntime"
 )
 
@@ -72,6 +73,13 @@ func (w *JsToolChainWrapper) WithInnerFormat(
 // Name returns the wrapped ToolChain's section name.
 func (w *JsToolChainWrapper) Name() string {
 	return w.wrapped.Name()
+}
+
+// GetToolSchema delegates to the wrapped ToolChain.
+func (w *JsToolChainWrapper) GetToolSchema(
+	name string,
+) *schema.Schema {
+	return w.wrapped.GetToolSchema(name)
 }
 
 // RegisterTool delegates to the wrapped ToolChain.
@@ -241,22 +249,22 @@ func (w *JsToolChainWrapper) executeCode(
 		)
 	}
 
-	// Check if wrapped toolchain provides schemas
-	var schemaFn jsruntime.SchemaLookupFn
-	if sp, ok := w.wrapped.(SchemaProvider); ok {
-		schemaFn = sp.GetToolSchema
+	// Use wrapped toolchain's schema lookup for
+	// pre-validation and runtime error enhancement
+	schemaFn := jsruntime.SchemaLookupFn(
+		w.wrapped.GetToolSchema,
+	)
 
-		// Pre-validate: check all literal tool.call()
-		// args against schemas before executing code
-		preErrs, preErr := jsruntime.PreValidate(
-			code, schemaFn,
+	// Pre-validate: check all literal tool.call()
+	// args against schemas before executing code
+	preErrs, preErr := jsruntime.PreValidate(
+		code, schemaFn,
+	)
+	if preErr == nil && len(preErrs) > 0 {
+		return w.preValidationError(
+			execCtx, textFormat,
+			code, preErrs,
 		)
-		if preErr == nil && len(preErrs) > 0 {
-			return w.preValidationError(
-				execCtx, textFormat,
-				code, preErrs,
-			)
-		}
 	}
 
 	// Create runtime with configured timeout
@@ -339,6 +347,15 @@ func (w *JsToolChainWrapper) executeCode(
 		)
 	} else {
 		text = "Code executed successfully."
+	}
+
+	// Append schema error footer once if any
+	// tool.call() hit a schema validation error
+	if collector.HasSchemaErrors() {
+		text += "\nIMPORTANT: Use EXACT argument " +
+			"names and types from the tool schema." +
+			"\nFix ALL errors above before " +
+			"re-submitting your code."
 	}
 
 	return &gent.ToolChainResult{

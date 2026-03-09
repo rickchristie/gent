@@ -397,5 +397,3 @@ func (c *JSON) GetToolSchema(
 // Compile-time check that JSON implements gent.ToolChain.
 var _ gent.ToolChain = (*JSON)(nil)
 
-// Compile-time check that JSON implements SchemaProvider.
-var _ SchemaProvider = (*JSON)(nil)

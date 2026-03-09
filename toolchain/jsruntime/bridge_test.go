@@ -275,13 +275,17 @@ func TestToolBridge(t *testing.T) {
 			},
 		},
 		{
-			name: "tool.call missing tool field throws",
+			name: "tool.call missing tool field " +
+				"returns error",
 			input: struct {
 				source  string
 				results map[string]*gent.ToolChainResult
 				errs    map[string]error
 			}{
-				source:  `tool.call({args: {}});`,
+				source: `var r = tool.call({args: {}});` +
+					`console.log(` +
+					`r.error ? "has_error" ` +
+					`: "no_error");`,
 				results: map[string]*gent.ToolChainResult{},
 				errs:    map[string]error{},
 			},
@@ -290,7 +294,8 @@ func TestToolBridge(t *testing.T) {
 				callCount      int
 				errContain     string
 			}{
-				errContain: "'tool' field is required",
+				callCount:      0,
+				consoleLogJSON: []string{"has_error"},
 			},
 		},
 		{
@@ -457,6 +462,270 @@ func TestToolBridge_SchemaErrors(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	addressSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"address": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"street": map[string]any{
+						"type": "string",
+					},
+					"city": map[string]any{
+						"type": "string",
+					},
+				},
+				"required": []any{
+					"street", "city",
+				},
+			},
+		},
+		"required": []any{"id", "address"},
+	})
+	require.NoError(t, err)
+
+	orderSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"customer_id": map[string]any{
+				"type": "string",
+			},
+			"items": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type": "string",
+						},
+						"qty": map[string]any{
+							"type": "integer",
+						},
+					},
+					"required": []any{
+						"name", "qty",
+					},
+				},
+			},
+		},
+		"required": []any{
+			"customer_id", "items",
+		},
+	})
+	require.NoError(t, err)
+
+	stockSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"quantities": map[string]any{
+				"type": "object",
+				"additionalProperties": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount": map[string]any{
+							"type": "integer",
+						},
+						"unit": map[string]any{
+							"type": "string",
+						},
+					},
+					"required": []any{
+						"amount", "unit",
+					},
+				},
+			},
+		},
+		"required": []any{"id", "quantities"},
+	})
+	require.NoError(t, err)
+
+	geoSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"address": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"street": map[string]any{
+						"type": "string",
+					},
+					"geo": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"lat": map[string]any{
+								"type": "number",
+							},
+							"lng": map[string]any{
+								"type": "number",
+							},
+						},
+						"required": []any{
+							"lat", "lng",
+						},
+					},
+				},
+				"required": []any{
+					"street", "geo",
+				},
+			},
+		},
+		"required": []any{"id", "address"},
+	})
+	require.NoError(t, err)
+
+	shipmentSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"orders": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"order_id": map[string]any{
+							"type": "string",
+						},
+						"items": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"qty": map[string]any{
+										"type": "integer",
+									},
+								},
+								"required": []any{
+									"name", "qty",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"order_id", "items",
+					},
+				},
+			},
+		},
+		"required": []any{"id", "orders"},
+	})
+	require.NoError(t, err)
+
+	regionsSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"regions": map[string]any{
+				"type": "object",
+				"additionalProperties": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"zones": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"code": map[string]any{
+										"type": "string",
+									},
+									"population": map[string]any{
+										"type": "integer",
+									},
+								},
+								"required": []any{
+									"code",
+									"population",
+								},
+							},
+						},
+					},
+					"required": []any{"zones"},
+				},
+			},
+		},
+		"required": []any{"id", "regions"},
+	})
+	require.NoError(t, err)
+
+	productsSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"items": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type": "string",
+						},
+						"attributes": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"value": map[string]any{
+										"type": "string",
+									},
+									"unit": map[string]any{
+										"type": "string",
+									},
+								},
+								"required": []any{
+									"value", "unit",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"name", "attributes",
+					},
+				},
+			},
+		},
+		"required": []any{"id", "items"},
+	})
+	require.NoError(t, err)
+
+	catalogSch, err := schema.Compile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"categories": map[string]any{
+				"type": "object",
+				"additionalProperties": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"products": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"price": map[string]any{
+										"type": "number",
+									},
+								},
+								"required": []any{
+									"name", "price",
+								},
+							},
+						},
+					},
+					"required": []any{"products"},
+				},
+			},
+		},
+		"required": []any{"id", "categories"},
+	})
+	require.NoError(t, err)
+
 	schemaFn := func(
 		name string,
 	) *schema.Schema {
@@ -465,6 +734,22 @@ func TestToolBridge_SchemaErrors(t *testing.T) {
 			return caseSch
 		case "lookup_customer":
 			return lookupSch
+		case "update_address":
+			return addressSch
+		case "create_order":
+			return orderSch
+		case "update_stock":
+			return stockSch
+		case "update_geo":
+			return geoSch
+		case "create_shipment":
+			return shipmentSch
+		case "update_regions":
+			return regionsSch
+		case "update_products":
+			return productsSch
+		case "update_catalog":
+			return catalogSch
 		}
 		return nil
 	}
@@ -482,6 +767,97 @@ func TestToolBridge_SchemaErrors(t *testing.T) {
 		map[string]any{},
 	)
 	require.Error(t, valErrLookup)
+
+	valErrAddress := addressSch.Validate(map[string]any{
+		"id": "1",
+		"address": map[string]any{
+			"street": "123 Main St",
+		},
+	})
+	require.Error(t, valErrAddress)
+
+	valErrOrder := orderSch.Validate(map[string]any{
+		"customer_id": "C1",
+		"items": []any{
+			map[string]any{"name": "Widget"},
+		},
+	})
+	require.Error(t, valErrOrder)
+
+	valErrStock := stockSch.Validate(map[string]any{
+		"id": "S1",
+		"quantities": map[string]any{
+			"apples": map[string]any{
+				"amount": 5,
+			},
+		},
+	})
+	require.Error(t, valErrStock)
+
+	valErrGeo := geoSch.Validate(map[string]any{
+		"id": "1",
+		"address": map[string]any{
+			"street": "Main St",
+			"geo":    map[string]any{"lat": 1.0},
+		},
+	})
+	require.Error(t, valErrGeo)
+
+	valErrShipment := shipmentSch.Validate(map[string]any{
+		"id": "S1",
+		"orders": []any{
+			map[string]any{
+				"order_id": "O1",
+				"items": []any{
+					map[string]any{"name": "Widget"},
+				},
+			},
+		},
+	})
+	require.Error(t, valErrShipment)
+
+	valErrRegions := regionsSch.Validate(map[string]any{
+		"id": "R1",
+		"regions": map[string]any{
+			"us": map[string]any{
+				"zones": map[string]any{
+					"west": map[string]any{
+						"population": 1000,
+					},
+				},
+			},
+		},
+	})
+	require.Error(t, valErrRegions)
+
+	valErrProducts := productsSch.Validate(
+		map[string]any{
+			"id": "P1",
+			"items": []any{
+				map[string]any{
+					"name": "Widget",
+					"attributes": map[string]any{
+						"weight": map[string]any{
+							"value": "5",
+						},
+					},
+				},
+			},
+		},
+	)
+	require.Error(t, valErrProducts)
+
+	valErrCatalog := catalogSch.Validate(map[string]any{
+		"id": "C1",
+		"categories": map[string]any{
+			"electronics": map[string]any{
+				"products": []any{
+					map[string]any{"name": "Phone"},
+				},
+			},
+		},
+	})
+	require.Error(t, valErrCatalog)
 
 	type input struct {
 		source   string
@@ -539,11 +915,16 @@ Invalid args for tool 'create_case'.
 Errors:
   - missing property 'details'
 Expected fields:
-  - 'details' (required, string): Description of the issue
-  - 'order_id' (required, string): The order ID
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.
+  - 'args.details' (required, string): Description of the issue
+  - 'args.order_id' (required, string): The order ID
+Example:
+  tool.call({
+    tool: "create_case",
+    args: {
+      "details": "...",
+      "order_id": "..."
+    }
+  });
 `,
 			},
 		},
@@ -582,11 +963,16 @@ Invalid args for tool 'create_case'.
 Errors:
   - args is null or missing, expected object with required properties: order_id, details
 Expected fields:
-  - 'details' (required, string): Description of the issue
-  - 'order_id' (required, string): The order ID
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.
+  - 'args.details' (required, string): Description of the issue
+  - 'args.order_id' (required, string): The order ID
+Example:
+  tool.call({
+    tool: "create_case",
+    args: {
+      "details": "...",
+      "order_id": "..."
+    }
+  });
 `,
 			},
 		},
@@ -648,11 +1034,16 @@ Invalid args for tool 'create_case'.
 Errors:
   - missing property 'details'
 Expected fields:
-  - 'details' (required, string): Description of the issue
-  - 'order_id' (required, string): The order ID
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.
+  - 'args.details' (required, string): Description of the issue
+  - 'args.order_id' (required, string): The order ID
+Example:
+  tool.call({
+    tool: "create_case",
+    args: {
+      "details": "...",
+      "order_id": "..."
+    }
+  });
 
 err2: tool.call() error at line 6:
 
@@ -667,10 +1058,14 @@ Invalid args for tool 'lookup_customer'.
 Errors:
   - missing property 'id'
 Expected fields:
-  - 'id' (required, string): Customer ID
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.
+  - 'args.id' (required, string): Customer ID
+Example:
+  tool.call({
+    tool: "lookup_customer",
+    args: {
+      "id": "..."
+    }
+  });
 `,
 			},
 		},
@@ -815,6 +1210,525 @@ console.log(r.error);`,
 					"Expected fields:",
 					"IMPORTANT:",
 				},
+			},
+		},
+		{
+			name: "nested object missing sub-field",
+			input: input{
+				source: `var r = tool.call({
+  tool: "update_address",
+  args: {
+    id: "1",
+    address: { street: "123 Main St" }
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"update_address": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "update_address"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErrAddress},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "update_address",
+3 |   args: {
+
+Invalid args for tool 'update_address'.
+Errors:
+  - missing property 'city' for 'args.address'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_address",
+    args: {
+      "address": {
+        "city": "...",
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "array of objects missing " +
+				"item field",
+			input: input{
+				source: `var r = tool.call({
+  tool: "create_order",
+  args: {
+    customer_id: "C1",
+    items: [{ name: "Widget" }]
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"create_order": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_order"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErrOrder},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "create_order",
+3 |   args: {
+
+Invalid args for tool 'create_order'.
+Errors:
+  - missing property 'qty' for 'args.items[]'
+Expected fields:
+  - 'args.customer_id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_order",
+    args: {
+      "customer_id": "...",
+      "items": [
+        {
+          "name": "...",
+          "qty": 0
+        }
+      ]
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "map of objects missing " +
+				"value field",
+			input: input{
+				source: `var r = tool.call({
+  tool: "update_stock",
+  args: {
+    id: "S1",
+    quantities: {
+      apples: { amount: 5 }
+    }
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"update_stock": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "update_stock"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErrStock},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "update_stock",
+3 |   args: {
+
+Invalid args for tool 'update_stock'.
+Errors:
+  - missing property 'unit' for 'args.quantities.apples'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.quantities' (required, object)
+Example:
+  tool.call({
+    tool: "update_stock",
+    args: {
+      "id": "...",
+      "quantities": {
+        "<key>": {
+          "amount": 0,
+          "unit": "..."
+        }
+      }
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "object contains object " +
+				"missing deep field",
+			input: input{
+				source: `var r = tool.call({
+  tool: "update_geo",
+  args: {
+    id: "1",
+    address: {
+      street: "Main St",
+      geo: { lat: 1.0 }
+    }
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"update_geo": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "update_geo"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{valErrGeo},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "update_geo",
+3 |   args: {
+
+Invalid args for tool 'update_geo'.
+Errors:
+  - missing property 'lng' for 'args.address.geo'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_geo",
+    args: {
+      "address": {
+        "geo": {
+          "lat": 0,
+          "lng": 0
+        },
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "array of object contains " +
+				"array of object",
+			input: input{
+				source: `var r = tool.call({
+  tool: "create_shipment",
+  args: {
+    id: "S1",
+    orders: [{
+      order_id: "O1",
+      items: [{ name: "Widget" }]
+    }]
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"create_shipment": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "create_shipment"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErrShipment,
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "create_shipment",
+3 |   args: {
+
+Invalid args for tool 'create_shipment'.
+Errors:
+  - missing property 'qty' for 'args.orders[].items[]'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.orders' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_shipment",
+    args: {
+      "id": "...",
+      "orders": [
+        {
+          "items": [
+            {
+              "name": "...",
+              "qty": 0
+            }
+          ],
+          "order_id": "..."
+        }
+      ]
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "map of object contains " +
+				"map of object",
+			input: input{
+				source: `var r = tool.call({
+  tool: "update_regions",
+  args: {
+    id: "R1",
+    regions: {
+      us: {
+        zones: {
+          west: { population: 1000 }
+        }
+      }
+    }
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"update_regions": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "update_regions"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErrRegions,
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "update_regions",
+3 |   args: {
+
+Invalid args for tool 'update_regions'.
+Errors:
+  - missing property 'code' for 'args.regions.us.zones.west'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.regions' (required, object)
+Example:
+  tool.call({
+    tool: "update_regions",
+    args: {
+      "id": "...",
+      "regions": {
+        "<key>": {
+          "zones": {
+            "<key>": {
+              "code": "...",
+              "population": 0
+            }
+          }
+        }
+      }
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "array of object contains " +
+				"map of object",
+			input: input{
+				source: `var r = tool.call({
+  tool: "update_products",
+  args: {
+    id: "P1",
+    items: [{
+      name: "Widget",
+      attributes: {
+        weight: { value: "5" }
+      }
+    }]
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"update_products": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "update_products"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErrProducts,
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "update_products",
+3 |   args: {
+
+Invalid args for tool 'update_products'.
+Errors:
+  - missing property 'unit' for 'args.items[].attributes.weight'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "update_products",
+    args: {
+      "id": "...",
+      "items": [
+        {
+          "attributes": {
+            "<key>": {
+              "unit": "...",
+              "value": "..."
+            }
+          },
+          "name": "..."
+        }
+      ]
+    }
+  });
+`,
+			},
+		},
+		{
+			name: "map of object contains " +
+				"array of object",
+			input: input{
+				source: `var r = tool.call({
+  tool: "update_catalog",
+  args: {
+    id: "C1",
+    categories: {
+      electronics: {
+        products: [{ name: "Phone" }]
+      }
+    }
+  }
+});
+console.log(r.error);`,
+				schemaFn: schemaFn,
+				results: map[string]*gent.ToolChainResult{
+					"update_catalog": {
+						Raw: &gent.RawToolChainResult{
+							Calls: []*gent.ToolCall{
+								{Name: "update_catalog"},
+							},
+							Results: []*gent.RawToolCallResult{
+								nil,
+							},
+							Errors: []error{
+								valErrCatalog,
+							},
+						},
+					},
+				},
+				errs: map[string]error{},
+			},
+			expected: expected{
+				callCount: 1,
+				log: `tool.call() error at line 1:
+
+1 | var r = tool.call({
+                     ^ schema validation error
+2 |   tool: "update_catalog",
+3 |   args: {
+
+Invalid args for tool 'update_catalog'.
+Errors:
+  - missing property 'price' for 'args.categories.electronics.products[]'
+Expected fields:
+  - 'args.categories' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_catalog",
+    args: {
+      "categories": {
+        "<key>": {
+          "products": [
+            {
+              "name": "...",
+              "price": 0
+            }
+          ]
+        }
+      },
+      "id": "..."
+    }
+  });
+`,
 			},
 		},
 	}

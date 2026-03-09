@@ -540,5 +540,3 @@ func (c *YAML) GetToolSchema(
 // Compile-time check that YAML implements gent.ToolChain.
 var _ gent.ToolChain = (*YAML)(nil)
 
-// Compile-time check that YAML implements SchemaProvider.
-var _ SchemaProvider = (*YAML)(nil)

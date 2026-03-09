@@ -465,10 +465,10 @@ func TestSchema_DescribeFields(t *testing.T) {
 			},
 			expected: expected{
 				output: "" +
-					"  - 'active' (boolean): Is active\n" +
-					"  - 'age' (integer): User age\n" +
-					"  - 'name' (string): User name\n" +
-					"  - 'score' (number): User score\n",
+					"  - 'args.active' (boolean): Is active\n" +
+					"  - 'args.age' (integer): User age\n" +
+					"  - 'args.name' (string): User name\n" +
+					"  - 'args.score' (number): User score\n",
 			},
 		},
 		{
@@ -485,11 +485,11 @@ func TestSchema_DescribeFields(t *testing.T) {
 			},
 			expected: expected{
 				output: "" +
-					"  - 'count' (integer): " +
+					"  - 'args.count' (integer): " +
 					"Optional count\n" +
-					"  - 'details' (required, string):" +
+					"  - 'args.details' (required, string):" +
 					" Description\n" +
-					"  - 'order_id' (required, string):" +
+					"  - 'args.order_id' (required, string):" +
 					" The order ID\n",
 			},
 		},
@@ -507,7 +507,7 @@ func TestSchema_DescribeFields(t *testing.T) {
 				)),
 			},
 			expected: expected{
-				output: "  - 'tags' (required," +
+				output: "  - 'args.tags' (required," +
 					" array of string): List of tags\n",
 			},
 		},
@@ -526,7 +526,7 @@ func TestSchema_DescribeFields(t *testing.T) {
 				)),
 			},
 			expected: expected{
-				output: "  - 'users'" +
+				output: "  - 'args.users'" +
 					" (array of object):" +
 					" List of users\n",
 			},
@@ -553,7 +553,7 @@ func TestSchema_DescribeFields(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "  - 'address'" +
+				output: "  - 'args.address'" +
 					" (required, object):" +
 					" Mailing address\n",
 			},
@@ -591,9 +591,9 @@ func TestSchema_DescribeFields(t *testing.T) {
 			},
 			expected: expected{
 				output: "" +
-					"  - 'enabled' (required," +
+					"  - 'args.enabled' (required," +
 					" boolean): Is enabled\n" +
-					"  - 'price' (number):" +
+					"  - 'args.price' (number):" +
 					" Item price\n",
 			},
 		},
@@ -612,7 +612,7 @@ func TestSchema_DescribeFields(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "  - 'id' (string)\n",
+				output: "  - 'args.id' (string)\n",
 			},
 		},
 	}
@@ -665,11 +665,11 @@ func TestSchema_FormatForLLM(t *testing.T) {
 					"Errors:\n" +
 					"  - missing property 'details'\n" +
 					"Expected fields:\n" +
-					"  - 'count' (integer):" +
+					"  - 'args.count' (integer):" +
 					" Optional count\n" +
-					"  - 'details' (required, string):" +
+					"  - 'args.details' (required, string):" +
 					" Description of the issue\n" +
-					"  - 'order_id' (required, string):" +
+					"  - 'args.order_id' (required, string):" +
 					" The order ID\n",
 			},
 		},
@@ -687,11 +687,11 @@ func TestSchema_FormatForLLM(t *testing.T) {
 					"  - missing properties" +
 					" 'order_id', 'details'\n" +
 					"Expected fields:\n" +
-					"  - 'count' (integer):" +
+					"  - 'args.count' (integer):" +
 					" Optional count\n" +
-					"  - 'details' (required, string):" +
+					"  - 'args.details' (required, string):" +
 					" Description of the issue\n" +
-					"  - 'order_id' (required, string):" +
+					"  - 'args.order_id' (required, string):" +
 					" The order ID\n",
 			},
 		},
@@ -711,13 +711,13 @@ func TestSchema_FormatForLLM(t *testing.T) {
 					"Invalid args for tool 'create_case'.\n" +
 					"Errors:\n" +
 					"  - got string, want integer" +
-					" for 'count'\n" +
+					" for 'args.count'\n" +
 					"Expected fields:\n" +
-					"  - 'count' (integer):" +
+					"  - 'args.count' (integer):" +
 					" Optional count\n" +
-					"  - 'details' (required, string):" +
+					"  - 'args.details' (required, string):" +
 					" Description of the issue\n" +
-					"  - 'order_id' (required, string):" +
+					"  - 'args.order_id' (required, string):" +
 					" The order ID\n",
 			},
 		},
@@ -751,11 +751,11 @@ func TestSchema_FormatForLLM(t *testing.T) {
 					" required properties:" +
 					" order_id, details\n" +
 					"Expected fields:\n" +
-					"  - 'count' (integer):" +
+					"  - 'args.count' (integer):" +
 					" Optional count\n" +
-					"  - 'details' (required, string):" +
+					"  - 'args.details' (required, string):" +
 					" Description of the issue\n" +
-					"  - 'order_id' (required, string):" +
+					"  - 'args.order_id' (required, string):" +
 					" The order ID\n",
 			},
 		},
@@ -781,9 +781,537 @@ func TestSchema_FormatForLLM(t *testing.T) {
 					"Errors:\n" +
 					"  - missing property 'tags'\n" +
 					"Expected fields:\n" +
-					"  - 'meta' (string): Metadata\n" +
-					"  - 'tags' (required," +
+					"  - 'args.meta' (string): Metadata\n" +
+					"  - 'args.tags' (required," +
 					" array of string): Tag list\n",
+			},
+		},
+		{
+			name: "nested object missing sub-field",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"address": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"street": map[string]any{
+									"type": "string",
+								},
+								"city": map[string]any{
+									"type": "string",
+								},
+							},
+							"required": []any{
+								"street", "city",
+							},
+						},
+					},
+					"required": []any{
+						"id", "address",
+					},
+				}),
+				toolName: "update_address",
+				data: map[string]any{
+					"id": "1",
+					"address": map[string]any{
+						"street": "123 Main St",
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'update_address'.\n" +
+					"Errors:\n" +
+					"  - missing property 'city'" +
+					" for 'args.address'\n" +
+					"Expected fields:\n" +
+					"  - 'args.address'" +
+					" (required, object)\n" +
+					"  - 'args.id'" +
+					" (required, string)\n",
+			},
+		},
+		{
+			name: "array of objects missing " +
+				"item field",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"items": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"qty": map[string]any{
+										"type": "integer",
+									},
+								},
+								"required": []any{
+									"name", "qty",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"id", "items",
+					},
+				}),
+				toolName: "create_order",
+				data: map[string]any{
+					"id": "O1",
+					"items": []any{
+						map[string]any{
+							"name": "Widget",
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'create_order'.\n" +
+					"Errors:\n" +
+					"  - missing property 'qty'" +
+					" for 'args.items[]'\n" +
+					"Expected fields:\n" +
+					"  - 'args.id'" +
+					" (required, string)\n" +
+					"  - 'args.items'" +
+					" (required," +
+					" array of object)\n",
+			},
+		},
+		{
+			name: "map of objects missing " +
+				"value field",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"quantities": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"amount": map[string]any{
+										"type": "integer",
+									},
+									"unit": map[string]any{
+										"type": "string",
+									},
+								},
+								"required": []any{
+									"amount", "unit",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"id", "quantities",
+					},
+				}),
+				toolName: "update_stock",
+				data: map[string]any{
+					"id": "S1",
+					"quantities": map[string]any{
+						"apples": map[string]any{
+							"amount": 5,
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'update_stock'.\n" +
+					"Errors:\n" +
+					"  - missing property 'unit'" +
+					" for 'args.quantities.apples'\n" +
+					"Expected fields:\n" +
+					"  - 'args.id'" +
+					" (required, string)\n" +
+					"  - 'args.quantities'" +
+					" (required, object)\n",
+			},
+		},
+		{
+			name: "object contains object " +
+				"missing deep field",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"address": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"street": map[string]any{
+									"type": "string",
+								},
+								"geo": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"lat": map[string]any{
+											"type": "number",
+										},
+										"lng": map[string]any{
+											"type": "number",
+										},
+									},
+									"required": []any{
+										"lat", "lng",
+									},
+								},
+							},
+							"required": []any{
+								"street", "geo",
+							},
+						},
+					},
+					"required": []any{
+						"id", "address",
+					},
+				}),
+				toolName: "update_geo",
+				data: map[string]any{
+					"id": "1",
+					"address": map[string]any{
+						"street": "Main St",
+						"geo": map[string]any{
+							"lat": 1.0,
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'update_geo'.\n" +
+					"Errors:\n" +
+					"  - missing property 'lng'" +
+					" for 'args.address.geo'\n" +
+					"Expected fields:\n" +
+					"  - 'args.address'" +
+					" (required, object)\n" +
+					"  - 'args.id'" +
+					" (required, string)\n",
+			},
+		},
+		{
+			name: "array of object contains " +
+				"array of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"orders": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"order_id": map[string]any{
+										"type": "string",
+									},
+									"items": map[string]any{
+										"type": "array",
+										"items": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"name": map[string]any{
+													"type": "string",
+												},
+												"qty": map[string]any{
+													"type": "integer",
+												},
+											},
+											"required": []any{
+												"name", "qty",
+											},
+										},
+									},
+								},
+								"required": []any{
+									"order_id", "items",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"id", "orders",
+					},
+				}),
+				toolName: "create_shipment",
+				data: map[string]any{
+					"id": "S1",
+					"orders": []any{
+						map[string]any{
+							"order_id": "O1",
+							"items": []any{
+								map[string]any{
+									"name": "Widget",
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'create_shipment'.\n" +
+					"Errors:\n" +
+					"  - missing property 'qty'" +
+					" for 'args.orders[].items[]'\n" +
+					"Expected fields:\n" +
+					"  - 'args.id'" +
+					" (required, string)\n" +
+					"  - 'args.orders'" +
+					" (required, array of object)\n",
+			},
+		},
+		{
+			name: "map of object contains " +
+				"map of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"regions": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"zones": map[string]any{
+										"type": "object",
+										"additionalProperties": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"code": map[string]any{
+													"type": "string",
+												},
+												"population": map[string]any{
+													"type": "integer",
+												},
+											},
+											"required": []any{
+												"code",
+												"population",
+											},
+										},
+									},
+								},
+								"required": []any{
+									"zones",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"id", "regions",
+					},
+				}),
+				toolName: "update_regions",
+				data: map[string]any{
+					"id": "R1",
+					"regions": map[string]any{
+						"us": map[string]any{
+							"zones": map[string]any{
+								"west": map[string]any{
+									"population": 1000,
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'update_regions'.\n" +
+					"Errors:\n" +
+					"  - missing property 'code'" +
+					" for" +
+					" 'args.regions.us.zones.west'\n" +
+					"Expected fields:\n" +
+					"  - 'args.id'" +
+					" (required, string)\n" +
+					"  - 'args.regions'" +
+					" (required, object)\n",
+			},
+		},
+		{
+			name: "array of object contains " +
+				"map of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"items": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"attributes": map[string]any{
+										"type": "object",
+										"additionalProperties": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"value": map[string]any{
+													"type": "string",
+												},
+												"unit": map[string]any{
+													"type": "string",
+												},
+											},
+											"required": []any{
+												"value", "unit",
+											},
+										},
+									},
+								},
+								"required": []any{
+									"name",
+									"attributes",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"id", "items",
+					},
+				}),
+				toolName: "update_products",
+				data: map[string]any{
+					"id": "P1",
+					"items": []any{
+						map[string]any{
+							"name": "Widget",
+							"attributes": map[string]any{
+								"weight": map[string]any{
+									"value": "5",
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'update_products'.\n" +
+					"Errors:\n" +
+					"  - missing property 'unit'" +
+					" for" +
+					" 'args.items[].attributes" +
+					".weight'\n" +
+					"Expected fields:\n" +
+					"  - 'args.id'" +
+					" (required, string)\n" +
+					"  - 'args.items'" +
+					" (required, array of object)\n",
+			},
+		},
+		{
+			name: "map of object contains " +
+				"array of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"categories": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"products": map[string]any{
+										"type": "array",
+										"items": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"name": map[string]any{
+													"type": "string",
+												},
+												"price": map[string]any{
+													"type": "number",
+												},
+											},
+											"required": []any{
+												"name",
+												"price",
+											},
+										},
+									},
+								},
+								"required": []any{
+									"products",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"id", "categories",
+					},
+				}),
+				toolName: "update_catalog",
+				data: map[string]any{
+					"id": "C1",
+					"categories": map[string]any{
+						"electronics": map[string]any{
+							"products": []any{
+								map[string]any{
+									"name": "Phone",
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: expected{
+				output: "" +
+					"Invalid args for tool" +
+					" 'update_catalog'.\n" +
+					"Errors:\n" +
+					"  - missing property 'price'" +
+					" for" +
+					" 'args.categories.electronics" +
+					".products[]'\n" +
+					"Expected fields:\n" +
+					"  - 'args.categories'" +
+					" (required, object)\n" +
+					"  - 'args.id'" +
+					" (required, string)\n",
 			},
 		},
 		{
@@ -806,6 +1334,426 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				tt.input.data,
 			)
 			assert.Equal(t, tt.expected.output, result)
+		})
+	}
+}
+
+func TestSchema_ExampleObject(t *testing.T) {
+	type input struct {
+		schema *Schema
+	}
+
+	type expected struct {
+		output map[string]any
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "simple types",
+			input: input{
+				schema: MustCompile(Object(
+					map[string]*Property{
+						"name":   String("Name"),
+						"count":  Integer("Count"),
+						"price":  Number("Price"),
+						"active": Boolean("Active"),
+					},
+				)),
+			},
+			expected: expected{
+				output: map[string]any{
+					"name":   "...",
+					"count":  0,
+					"price":  0,
+					"active": false,
+				},
+			},
+		},
+		{
+			name: "array of objects",
+			input: input{
+				schema: MustCompile(Object(
+					map[string]*Property{
+						"items": Array(
+							"Items",
+							Object(
+								map[string]*Property{
+									"name": String("Name"),
+									"qty":  Integer("Qty"),
+								},
+								"name", "qty",
+							),
+						),
+					},
+				)),
+			},
+			expected: expected{
+				output: map[string]any{
+					"items": []any{
+						map[string]any{
+							"name": "...",
+							"qty":  0,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "array of strings",
+			input: input{
+				schema: MustCompile(Object(
+					map[string]*Property{
+						"tags": Array(
+							"Tags",
+							map[string]any{
+								"type": "string",
+							},
+						),
+					},
+				)),
+			},
+			expected: expected{
+				output: map[string]any{
+					"tags": []any{"..."},
+				},
+			},
+		},
+		{
+			name: "nested object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"address": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"street": map[string]any{
+									"type": "string",
+								},
+								"city": map[string]any{
+									"type": "string",
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"address": map[string]any{
+						"street": "...",
+						"city":   "...",
+					},
+				},
+			},
+		},
+		{
+			name: "map of objects via " +
+				"additionalProperties",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"quantities": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"amount": map[string]any{
+										"type": "integer",
+									},
+									"unit": map[string]any{
+										"type": "string",
+									},
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"quantities": map[string]any{
+						"<key>": map[string]any{
+							"amount": 0,
+							"unit":   "...",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "object contains object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type": "string",
+						},
+						"address": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"street": map[string]any{
+									"type": "string",
+								},
+								"geo": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"lat": map[string]any{
+											"type": "number",
+										},
+										"lng": map[string]any{
+											"type": "number",
+										},
+									},
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"id": "...",
+					"address": map[string]any{
+						"street": "...",
+						"geo": map[string]any{
+							"lat": 0,
+							"lng": 0,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "array of object contains " +
+				"array of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"orders": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"order_id": map[string]any{
+										"type": "string",
+									},
+									"items": map[string]any{
+										"type": "array",
+										"items": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"name": map[string]any{
+													"type": "string",
+												},
+												"qty": map[string]any{
+													"type": "integer",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"orders": []any{
+						map[string]any{
+							"order_id": "...",
+							"items": []any{
+								map[string]any{
+									"name": "...",
+									"qty":  0,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "map of object contains " +
+				"map of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"regions": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"zones": map[string]any{
+										"type": "object",
+										"additionalProperties": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"code": map[string]any{
+													"type": "string",
+												},
+												"population": map[string]any{
+													"type": "integer",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"regions": map[string]any{
+						"<key>": map[string]any{
+							"zones": map[string]any{
+								"<key>": map[string]any{
+									"code":       "...",
+									"population": 0,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "array of object contains " +
+				"map of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"items": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"attributes": map[string]any{
+										"type": "object",
+										"additionalProperties": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"value": map[string]any{
+													"type": "string",
+												},
+												"unit": map[string]any{
+													"type": "string",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"items": []any{
+						map[string]any{
+							"name": "...",
+							"attributes": map[string]any{
+								"<key>": map[string]any{
+									"unit":  "...",
+									"value": "...",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "map of object contains " +
+				"array of object",
+			input: input{
+				schema: MustCompile(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"categories": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"products": map[string]any{
+										"type": "array",
+										"items": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"name": map[string]any{
+													"type": "string",
+												},
+												"price": map[string]any{
+													"type": "number",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}),
+			},
+			expected: expected{
+				output: map[string]any{
+					"categories": map[string]any{
+						"<key>": map[string]any{
+							"products": []any{
+								map[string]any{
+									"name":  "...",
+									"price": 0,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "nil schema",
+			input: input{
+				schema: nil,
+			},
+			expected: expected{
+				output: nil,
+			},
+		},
+		{
+			name: "no properties",
+			input: input{
+				schema: MustCompile(
+					map[string]any{"type": "object"},
+				),
+			},
+			expected: expected{
+				output: nil,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.input.schema.ExampleObject()
+			assert.Equal(
+				t, tt.expected.output, result,
+			)
 		})
 	}
 }

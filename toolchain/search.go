@@ -860,6 +860,3 @@ func (c *SearchJSON) GetToolSchema(
 // Compile-time check that SearchJSON implements ToolChain.
 var _ gent.ToolChain = (*SearchJSON)(nil)
 
-// Compile-time check that SearchJSON implements
-// SchemaProvider.
-var _ SchemaProvider = (*SearchJSON)(nil)

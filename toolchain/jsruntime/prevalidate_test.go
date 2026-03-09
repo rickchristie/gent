@@ -338,12 +338,274 @@ func TestPreValidate(t *testing.T) {
 		),
 	)
 
+	addressSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"address": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"street": map[string]any{
+						"type": "string",
+					},
+					"city": map[string]any{
+						"type": "string",
+					},
+				},
+				"required": []any{"street", "city"},
+			},
+		},
+		"required": []any{"id", "address"},
+	})
+
+	orderSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"customer_id": map[string]any{
+				"type": "string",
+			},
+			"items": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type": "string",
+						},
+						"qty": map[string]any{
+							"type": "integer",
+						},
+					},
+					"required": []any{"name", "qty"},
+				},
+			},
+		},
+		"required": []any{"customer_id", "items"},
+	})
+
+	stockSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"quantities": map[string]any{
+				"type": "object",
+				"additionalProperties": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount": map[string]any{
+							"type": "integer",
+						},
+						"unit": map[string]any{
+							"type": "string",
+						},
+					},
+					"required": []any{"amount", "unit"},
+				},
+			},
+		},
+		"required": []any{"id", "quantities"},
+	})
+
+	geoSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"address": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"street": map[string]any{
+						"type": "string",
+					},
+					"geo": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"lat": map[string]any{
+								"type": "number",
+							},
+							"lng": map[string]any{
+								"type": "number",
+							},
+						},
+						"required": []any{
+							"lat", "lng",
+						},
+					},
+				},
+				"required": []any{"street", "geo"},
+			},
+		},
+		"required": []any{"id", "address"},
+	})
+
+	shipmentSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"orders": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"order_id": map[string]any{
+							"type": "string",
+						},
+						"items": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"qty": map[string]any{
+										"type": "integer",
+									},
+								},
+								"required": []any{
+									"name", "qty",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"order_id", "items",
+					},
+				},
+			},
+		},
+		"required": []any{"id", "orders"},
+	})
+
+	regionsSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"regions": map[string]any{
+				"type": "object",
+				"additionalProperties": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"zones": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"code": map[string]any{
+										"type": "string",
+									},
+									"population": map[string]any{
+										"type": "integer",
+									},
+								},
+								"required": []any{
+									"code",
+									"population",
+								},
+							},
+						},
+					},
+					"required": []any{"zones"},
+				},
+			},
+		},
+		"required": []any{"id", "regions"},
+	})
+
+	productsSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"items": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type": "string",
+						},
+						"attributes": map[string]any{
+							"type": "object",
+							"additionalProperties": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"value": map[string]any{
+										"type": "string",
+									},
+									"unit": map[string]any{
+										"type": "string",
+									},
+								},
+								"required": []any{
+									"value", "unit",
+								},
+							},
+						},
+					},
+					"required": []any{
+						"name", "attributes",
+					},
+				},
+			},
+		},
+		"required": []any{"id", "items"},
+	})
+
+	catalogSchema := schema.MustCompile(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+			"categories": map[string]any{
+				"type": "object",
+				"additionalProperties": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"products": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"name": map[string]any{
+										"type": "string",
+									},
+									"price": map[string]any{
+										"type": "number",
+									},
+								},
+								"required": []any{
+									"name", "price",
+								},
+							},
+						},
+					},
+					"required": []any{"products"},
+				},
+			},
+		},
+		"required": []any{"id", "categories"},
+	})
+
 	lookupFn := func(name string) *schema.Schema {
 		switch name {
 		case "search":
 			return searchSchema
 		case "get":
 			return getSchema
+		case "update_address":
+			return addressSchema
+		case "create_order":
+			return orderSchema
+		case "update_stock":
+			return stockSchema
+		case "update_geo":
+			return geoSchema
+		case "create_shipment":
+			return shipmentSchema
+		case "update_regions":
+			return regionsSchema
+		case "update_products":
+			return productsSchema
+		case "update_catalog":
+			return catalogSchema
 		default:
 			return nil
 		}
@@ -386,8 +648,16 @@ func TestPreValidate(t *testing.T) {
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 				},
@@ -415,8 +685,16 @@ tool.call({
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 					{
@@ -425,7 +703,14 @@ Expected fields:
 Errors:
   - missing property 'id'
 Expected fields:
-  - 'id' (required, string): Item ID
+  - 'args.id' (required, string): Item ID
+Example:
+  tool.call({
+    tool: "get",
+    args: {
+      "id": "..."
+    }
+  });
 `,
 					},
 				},
@@ -483,8 +768,16 @@ tool.call(opts);`,
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 				},
@@ -504,8 +797,16 @@ Expected fields:
 Errors:
   - args is null or missing, expected object with required properties: query
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 				},
@@ -554,6 +855,373 @@ tool.call({
 				schemaFn: lookupFn,
 			},
 			expected: expected{},
+		},
+		{
+			name: "nested object missing sub-field",
+			input: input{
+				source: `tool.call({
+  tool: "update_address",
+  args: {
+    id: "1",
+    address: { street: "123 Main St" }
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "update_address",
+						errorMessage: `Invalid args for tool 'update_address'.
+Errors:
+  - missing property 'city' for 'args.address'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_address",
+    args: {
+      "address": {
+        "city": "...",
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "array of objects missing item field",
+			input: input{
+				source: `tool.call({
+  tool: "create_order",
+  args: {
+    customer_id: "C1",
+    items: [{ name: "Widget" }]
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "create_order",
+						errorMessage: `Invalid args for tool 'create_order'.
+Errors:
+  - missing property 'qty' for 'args.items[]'
+Expected fields:
+  - 'args.customer_id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_order",
+    args: {
+      "customer_id": "...",
+      "items": [
+        {
+          "name": "...",
+          "qty": 0
+        }
+      ]
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "map of objects missing value field",
+			input: input{
+				source: `tool.call({
+  tool: "update_stock",
+  args: {
+    id: "S1",
+    quantities: { apples: { amount: 5 } }
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "update_stock",
+						errorMessage: `Invalid args for tool 'update_stock'.
+Errors:
+  - missing property 'unit' for 'args.quantities.apples'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.quantities' (required, object)
+Example:
+  tool.call({
+    tool: "update_stock",
+    args: {
+      "id": "...",
+      "quantities": {
+        "<key>": {
+          "amount": 0,
+          "unit": "..."
+        }
+      }
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "object contains object missing " +
+				"deep field",
+			input: input{
+				source: `tool.call({
+  tool: "update_geo",
+  args: {
+    id: "1",
+    address: {
+      street: "Main St",
+      geo: { lat: 1.0 }
+    }
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "update_geo",
+						errorMessage: `Invalid args for tool 'update_geo'.
+Errors:
+  - missing property 'lng' for 'args.address.geo'
+Expected fields:
+  - 'args.address' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_geo",
+    args: {
+      "address": {
+        "geo": {
+          "lat": 0,
+          "lng": 0
+        },
+        "street": "..."
+      },
+      "id": "..."
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "array of object contains array " +
+				"of object",
+			input: input{
+				source: `tool.call({
+  tool: "create_shipment",
+  args: {
+    id: "S1",
+    orders: [
+      {
+        order_id: "O1",
+        items: [{ name: "Widget" }]
+      }
+    ]
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "create_shipment",
+						errorMessage: `Invalid args for tool 'create_shipment'.
+Errors:
+  - missing property 'qty' for 'args.orders[].items[]'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.orders' (required, array of object)
+Example:
+  tool.call({
+    tool: "create_shipment",
+    args: {
+      "id": "...",
+      "orders": [
+        {
+          "items": [
+            {
+              "name": "...",
+              "qty": 0
+            }
+          ],
+          "order_id": "..."
+        }
+      ]
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "map of object contains map " +
+				"of object",
+			input: input{
+				source: `tool.call({
+  tool: "update_regions",
+  args: {
+    id: "R1",
+    regions: {
+      us: {
+        zones: {
+          west: { population: 1000 }
+        }
+      }
+    }
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "update_regions",
+						errorMessage: `Invalid args for tool 'update_regions'.
+Errors:
+  - missing property 'code' for 'args.regions.us.zones.west'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.regions' (required, object)
+Example:
+  tool.call({
+    tool: "update_regions",
+    args: {
+      "id": "...",
+      "regions": {
+        "<key>": {
+          "zones": {
+            "<key>": {
+              "code": "...",
+              "population": 0
+            }
+          }
+        }
+      }
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "array of object contains map " +
+				"of object",
+			input: input{
+				source: `tool.call({
+  tool: "update_products",
+  args: {
+    id: "P1",
+    items: [
+      {
+        name: "Widget",
+        attributes: {
+          weight: { value: "5" }
+        }
+      }
+    ]
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "update_products",
+						errorMessage: `Invalid args for tool 'update_products'.
+Errors:
+  - missing property 'unit' for 'args.items[].attributes.weight'
+Expected fields:
+  - 'args.id' (required, string)
+  - 'args.items' (required, array of object)
+Example:
+  tool.call({
+    tool: "update_products",
+    args: {
+      "id": "...",
+      "items": [
+        {
+          "attributes": {
+            "<key>": {
+              "unit": "...",
+              "value": "..."
+            }
+          },
+          "name": "..."
+        }
+      ]
+    }
+  });
+`,
+					},
+				},
+			},
+		},
+		{
+			name: "map of object contains array " +
+				"of object",
+			input: input{
+				source: `tool.call({
+  tool: "update_catalog",
+  args: {
+    id: "C1",
+    categories: {
+      electronics: {
+        products: [{ name: "Phone" }]
+      }
+    }
+  }
+});`,
+				schemaFn: lookupFn,
+			},
+			expected: expected{
+				errors: []expectedError{
+					{
+						toolName: "update_catalog",
+						errorMessage: `Invalid args for tool 'update_catalog'.
+Errors:
+  - missing property 'price' for 'args.categories.electronics.products[]'
+Expected fields:
+  - 'args.categories' (required, object)
+  - 'args.id' (required, string)
+Example:
+  tool.call({
+    tool: "update_catalog",
+    args: {
+      "categories": {
+        "<key>": {
+          "products": [
+            {
+              "name": "...",
+              "price": 0
+            }
+          ]
+        }
+      },
+      "id": "..."
+    }
+  });
+`,
+					},
+				},
+			},
 		},
 	}
 
@@ -618,8 +1286,16 @@ console.log("done");`,
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 				},
@@ -636,8 +1312,16 @@ Invalid args for tool 'search'.
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
@@ -664,8 +1348,16 @@ console.log("done");`,
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 					{
@@ -678,7 +1370,14 @@ Expected fields:
 Errors:
   - missing property 'id'
 Expected fields:
-  - 'id' (required, string): Item ID
+  - 'args.id' (required, string): Item ID
+Example:
+  tool.call({
+    tool: "get",
+    args: {
+      "id": "..."
+    }
+  });
 `,
 					},
 				},
@@ -696,8 +1395,16 @@ Invalid args for tool 'search'.
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 
 --- Error 2: tool.call() at line 5 ---
 
@@ -709,7 +1416,14 @@ Invalid args for tool 'get'.
 Errors:
   - missing property 'id'
 Expected fields:
-  - 'id' (required, string): Item ID
+  - 'args.id' (required, string): Item ID
+Example:
+  tool.call({
+    tool: "get",
+    args: {
+      "id": "..."
+    }
+  });
 
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
@@ -730,8 +1444,16 @@ Fix ALL errors above before re-submitting your code.
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 `,
 					},
 				},
@@ -747,8 +1469,16 @@ Invalid args for tool 'search'.
 Errors:
   - missing property 'query'
 Expected fields:
-  - 'limit' (integer): Max results
-  - 'query' (required, string): Search query
+  - 'args.limit' (integer): Max results
+  - 'args.query' (required, string): Search query
+Example:
+  tool.call({
+    tool: "search",
+    args: {
+      "limit": 0,
+      "query": "..."
+    }
+  });
 
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.

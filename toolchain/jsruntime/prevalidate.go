@@ -90,9 +90,14 @@ func PreValidate(
 			site.ToolName, site.Args,
 		)
 		if msg != "" {
+			var sb strings.Builder
+			sb.WriteString(msg)
+			writeExampleCall(
+				&sb, site.ToolName, sch,
+			)
 			errs = append(errs, PreValidationError{
 				Site:         site,
-				ErrorMessage: msg,
+				ErrorMessage: sb.String(),
 			})
 		}
 	}
