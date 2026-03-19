@@ -151,7 +151,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 </testing_standards>
 
 <standards_convention>
-- MAX line length: 100 characters, don't break line before 100 chars.
+- MAX line length: 100 characters, DO NOT break line before 100 chars.
 - NEVER swallow errors. Errors must be either returned, or logged.
 </standards_convention>
 

@@ -219,32 +219,25 @@ func WrapToolChain(
 }
 
 // ConfigureCompaction sets up compaction on the execution context
-// based on the config. The model and textFormat are needed for
-// summarization strategy.
+// based on the config. The model and textFormat are needed for summarization strategy.
 func ConfigureCompaction(
-	execCtx *gent.ExecutionContext,
-	config CompactionConfig,
-	model gent.Model,
-	textFormat gent.TextFormat,
+	execCtx *gent.ExecutionContext, config CompactionConfig,
+	model gent.Model, textFormat gent.TextFormat,
 ) {
 	if config.Type == CompactionNone || config.Type == "" {
 		return
 	}
 
 	trigger := compaction.NewStatThresholdTrigger().
-		OnCounter(
-			gent.SCIterations,
-			config.TriggerIterations,
-		)
+		OnCounter(gent.SCIterations, config.TriggerIterations)
 
 	var strategy gent.CompactionStrategy
 	switch config.Type {
 	case CompactionSlidingWindow:
 		strategy = compaction.NewSlidingWindow(config.WindowSize)
 	case CompactionSummarization:
-		strategy = compaction.NewSummarization(
-			model, textFormat,
-		).WithKeepRecent(config.KeepRecent)
+		strategy = compaction.NewSummarization(model, textFormat).
+			WithKeepRecent(config.KeepRecent)
 	default:
 		return
 	}

@@ -37,6 +37,7 @@ type Agent struct {
 	thinkingSection     gent.TextSection
 	timeProvider        gent.TimeProvider
 	useStreaming        bool
+	callOptions         []llms.CallOption
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -131,6 +132,13 @@ func (r *Agent) WithThinkingSection(s gent.TextSection) *Agent {
 // Default: false (uses non-streaming GenerateContent)
 func (r *Agent) WithStreaming(enabled bool) *Agent {
 	r.useStreaming = enabled
+	return r
+}
+
+// WithCallOptions sets LLM call options (e.g., temperature, top-p, max tokens) that are
+// forwarded to the model on every GenerateContent call.
+func (r *Agent) WithCallOptions(options ...llms.CallOption) *Agent {
+	r.callOptions = options
 	return r
 }
 
@@ -529,26 +537,104 @@ func (r *Agent) callModel(
 	streamTopicId string,
 	messages []llms.MessageContent,
 ) (*gent.ContentResponse, error) {
+	opts := r.effectiveCallOptions()
+	r.warnRestrictiveSampling(execCtx, opts)
+
 	// Check if streaming is enabled and model supports it
 	if r.useStreaming {
 		if streamingModel, ok := r.model.(gent.StreamingModel); ok {
-			return r.callModelStreaming(execCtx, streamingModel, streamId, streamTopicId, messages)
+			return r.callModelStreaming(
+				execCtx, streamingModel, streamId, streamTopicId, messages, opts,
+			)
 		}
 	}
 
 	// Fall back to non-streaming
-	return r.model.GenerateContent(execCtx, streamId, streamTopicId, messages)
+	return r.model.GenerateContent(execCtx, streamId, streamTopicId, messages, opts...)
+}
+
+// effectiveCallOptions returns the merged call options: model-appropriate defaults followed
+// by user-provided options. User options are applied last and override defaults (langchaingo
+// applies CallOptions sequentially).
+func (r *Agent) effectiveCallOptions() []llms.CallOption {
+	params := gent.DefaultSamplingParams(r.model)
+
+	var opts []llms.CallOption
+	if params.Temperature.Directive == gent.ParamOverride {
+		opts = append(opts, llms.WithTemperature(params.Temperature.Value))
+	}
+	if params.TopP.Directive == gent.ParamOverride {
+		opts = append(opts, llms.WithTopP(params.TopP.Value))
+	}
+
+	opts = append(opts, r.callOptions...)
+	return opts
+}
+
+// warnRestrictiveSampling publishes a warning event when the effective temperature and
+// top-p are both set to restrictive values. Vendor guidance (Anthropic, OpenAI) recommends
+// adjusting one parameter at a time.
+func (r *Agent) warnRestrictiveSampling(
+	execCtx *gent.ExecutionContext, opts []llms.CallOption,
+) {
+	if execCtx == nil {
+		return
+	}
+
+	// Resolve effective values by applying all options.
+	var resolved llms.CallOptions
+	for _, opt := range opts {
+		opt(&resolved)
+	}
+
+	// Both restrictive: temperature < 0.3 (but set) and top-p < 0.8 (but set).
+	// Zero values mean unset.
+	if resolved.Temperature > 0 && resolved.Temperature < 0.3 &&
+		resolved.TopP > 0 && resolved.TopP < 0.8 {
+		execCtx.PublishCommonEvent(
+			"gent:sampling_params_restrictive",
+			fmt.Sprintf(
+				"temperature (%.2f) and top-p (%.2f) are both restrictive; "+
+					"adjust one at a time",
+				resolved.Temperature, resolved.TopP,
+			),
+			nil,
+		)
+	}
+
+	// Warn if user sets forbidden params.
+	params := gent.DefaultSamplingParams(r.model)
+	if params.Temperature.Directive == gent.ParamForbidden && resolved.Temperature > 0 {
+		execCtx.PublishCommonEvent(
+			"gent:sampling_param_forbidden",
+			fmt.Sprintf(
+				"temperature (%.2f) is forbidden for this model and may cause an API error",
+				resolved.Temperature,
+			),
+			nil,
+		)
+	}
+	if params.TopP.Directive == gent.ParamForbidden && resolved.TopP > 0 {
+		execCtx.PublishCommonEvent(
+			"gent:sampling_param_forbidden",
+			fmt.Sprintf(
+				"top-p (%.2f) is forbidden for this model and may cause an API error",
+				resolved.TopP,
+			),
+			nil,
+		)
+	}
 }
 
 // callModelStreaming calls the model with streaming and accumulates the response.
 func (r *Agent) callModelStreaming(
-	execCtx *gent.ExecutionContext,
-	model gent.StreamingModel,
-	streamId string,
-	streamTopicId string,
-	messages []llms.MessageContent,
+	execCtx *gent.ExecutionContext, model gent.StreamingModel,
+	streamId string, streamTopicId string,
+	messages []llms.MessageContent, opts []llms.CallOption,
 ) (*gent.ContentResponse, error) {
-	stream, err := model.GenerateContentStream(execCtx, streamId, streamTopicId, messages)
+	stream, err := model.GenerateContentStream(
+		execCtx, streamId, streamTopicId, messages, opts...,
+	)
 	if err != nil {
 		return nil, err
 	}

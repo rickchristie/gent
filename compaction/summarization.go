@@ -121,19 +121,13 @@ type SummarizationStrategy struct {
 	userPrompt   string
 }
 
-// NewSummarization creates a SummarizationStrategy with the
-// given model and text format. The text format is used to
-// wrap the summary output in a "prior_work_summary" section
-// so the agent LLM can distinguish compacted content from
-// regular messages.
+// NewSummarization creates a SummarizationStrategy with the given model and text format.
+// The text format is used to wrap the summary output in a "prior_work_summary" section so the
+// agent LLM can distinguish compacted content from regular messages.
 //
-// By default, the strategy uses a two-message structure
-// (system + user) to enable prompt caching. See [WithPrompt]
-// to override with a single-message format.
-func NewSummarization(
-	model gent.Model,
-	textFormat gent.TextFormat,
-) *SummarizationStrategy {
+// By default, the strategy uses a two-message structure (system + user) to enable prompt
+// caching. See [WithPrompt] to override with a single-message format.
+func NewSummarization(model gent.Model, textFormat gent.TextFormat) *SummarizationStrategy {
 	return &SummarizationStrategy{
 		model:        model,
 		textFormat:   textFormat,

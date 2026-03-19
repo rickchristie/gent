@@ -38,6 +38,11 @@ func (m *LCGWrapper) WithModelName(name string) *LCGWrapper {
 	return m
 }
 
+// ModelName returns the model name. Implements [gent.ModelNamer].
+func (m *LCGWrapper) ModelName() string {
+	return m.modelName
+}
+
 // Unwrap returns the underlying llms.Model.
 func (m *LCGWrapper) Unwrap() llms.Model {
 	return m.model
