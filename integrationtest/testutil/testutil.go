@@ -69,6 +69,10 @@ type TestConfig struct {
 	// WrapPTC wraps the toolchain with
 	// JsToolChainWrapper for programmatic tool calling.
 	WrapPTC bool
+	// PTCCodeOnly disables direct_call in the PTC
+	// wrapper, forcing all tool calls through code
+	// execution. Only used when WrapPTC is true.
+	PTCCodeOnly bool
 	// UseStreaming enables streaming mode for LLM calls.
 	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
@@ -213,7 +217,11 @@ func WrapToolChain(
 	config TestConfig,
 ) gent.ToolChain {
 	if config.WrapPTC {
-		return toolchain.NewJsToolChainWrapper(tc)
+		w := toolchain.NewJsToolChainWrapper(tc)
+		if config.PTCCodeOnly {
+			w.WithDirectCallDisabled()
+		}
+		return w
 	}
 	return tc
 }

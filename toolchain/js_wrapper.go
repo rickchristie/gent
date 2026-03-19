@@ -25,10 +25,12 @@ import (
 // All existing stats, events, schema validation, and
 // limits work unchanged for tool calls made from code.
 type JsToolChainWrapper struct {
-	wrapped      gent.ToolChain
-	codeTimeout  time.Duration
-	codeGuidance string
-	innerFormat  gent.TextFormat
+	wrapped             gent.ToolChain
+	codeTimeout         time.Duration
+	codeGuidance        string
+	directCallGuidance  string
+	directCallDisabled  bool
+	innerFormat         gent.TextFormat
 }
 
 // NewJsToolChainWrapper creates a wrapper around the
@@ -61,6 +63,25 @@ func (w *JsToolChainWrapper) WithCodeGuidance(
 	guidance string,
 ) *JsToolChainWrapper {
 	w.codeGuidance = guidance
+	return w
+}
+
+// WithDirectCallGuidance sets custom guidance for the
+// direct_call section. Defaults to the wrapped
+// ToolChain's Guidance().
+func (w *JsToolChainWrapper) WithDirectCallGuidance(
+	guidance string,
+) *JsToolChainWrapper {
+	w.directCallGuidance = guidance
+	return w
+}
+
+// WithDirectCallDisabled forces all tool calls through
+// code execution. The guidance will only show the code
+// pattern, and direct_call sections are treated as code
+// fallback.
+func (w *JsToolChainWrapper) WithDirectCallDisabled() *JsToolChainWrapper {
+	w.directCallDisabled = true
 	return w
 }
 
@@ -100,8 +121,19 @@ func (w *JsToolChainWrapper) AvailableToolsPrompt() string {
 	return w.wrapped.AvailableToolsPrompt()
 }
 
-// Guidance returns combined guidance for both modes.
+// Guidance returns the action section guidance. When
+// direct call is enabled (default), shows both modes.
+// When disabled, shows only the code pattern.
 func (w *JsToolChainWrapper) Guidance() string {
+	if w.directCallDisabled {
+		return w.codeOnlyGuidance()
+	}
+	return w.dualModeGuidance()
+}
+
+// dualModeGuidance returns guidance showing both
+// direct_call and code modes.
+func (w *JsToolChainWrapper) dualModeGuidance() string {
 	var sb strings.Builder
 	sb.WriteString(
 		"You can call tools in two ways:\n\n",
@@ -111,7 +143,11 @@ func (w *JsToolChainWrapper) Guidance() string {
 			"parallel tool calls:\n",
 	)
 	sb.WriteString("<direct_call>\n")
-	sb.WriteString(w.wrapped.Guidance())
+	if w.directCallGuidance != "" {
+		sb.WriteString(w.directCallGuidance)
+	} else {
+		sb.WriteString(w.wrapped.Guidance())
+	}
 	sb.WriteString("\n</direct_call>\n\n")
 
 	sb.WriteString(
@@ -134,9 +170,27 @@ func (w *JsToolChainWrapper) Guidance() string {
 	return sb.String()
 }
 
+// codeOnlyGuidance returns guidance showing only the
+// code pattern, with no mention of direct_call.
+func (w *JsToolChainWrapper) codeOnlyGuidance() string {
+	var sb strings.Builder
+	sb.WriteString(
+		"Call tools using JavaScript code:\n\n",
+	)
+	sb.WriteString("<code>\n")
+	if w.codeGuidance != "" {
+		sb.WriteString(w.codeGuidance)
+	} else {
+		sb.WriteString(defaultCodeGuidance())
+	}
+	sb.WriteString("\n</code>")
+	return sb.String()
+}
+
 // ParseSection detects sub-section mode and returns
 // either parsed tool calls (for direct_call) or the
-// code string (for code).
+// code string (for code). When direct call is disabled,
+// all content is treated as code.
 func (w *JsToolChainWrapper) ParseSection(
 	execCtx *gent.ExecutionContext,
 	content string,
@@ -145,12 +199,14 @@ func (w *JsToolChainWrapper) ParseSection(
 	// to avoid stats pollution from inner format parsing)
 	sections, err := w.innerFormat.Parse(nil, content)
 	if err == nil {
-		// Check for direct_call first (preferred)
-		if dc, ok := sections["direct_call"]; ok &&
-			len(dc) > 0 {
-			return w.wrapped.ParseSection(
-				execCtx, dc[0],
-			)
+		// Check for direct_call (skip if disabled)
+		if !w.directCallDisabled {
+			if dc, ok := sections["direct_call"]; ok &&
+				len(dc) > 0 {
+				return w.wrapped.ParseSection(
+					execCtx, dc[0],
+				)
+			}
 		}
 
 		// Check for code
@@ -158,6 +214,12 @@ func (w *JsToolChainWrapper) ParseSection(
 			len(code) > 0 {
 			return code[0], nil
 		}
+	}
+
+	// When direct call is disabled, treat raw content
+	// as code (the LLM may omit <code> tags)
+	if w.directCallDisabled {
+		return content, nil
 	}
 
 	// Fallback: try wrapped ParseSection directly
@@ -187,9 +249,12 @@ func (w *JsToolChainWrapper) Execute(
 	var hasCode bool
 
 	if err == nil {
-		if dc, ok := sections["direct_call"]; ok &&
-			len(dc) > 0 {
-			dcContent = dc[0]
+		// Ignore direct_call when disabled
+		if !w.directCallDisabled {
+			if dc, ok := sections["direct_call"]; ok &&
+				len(dc) > 0 {
+				dcContent = dc[0]
+			}
 		}
 		if code, ok := sections["code"]; ok {
 			hasCode = true
@@ -226,6 +291,14 @@ func (w *JsToolChainWrapper) Execute(
 		return w.executeDualMode(
 			execCtx, dcContent, codeContent,
 			textFormat,
+		)
+	}
+
+	// When direct call is disabled, treat unrecognized
+	// content as code (LLM may omit <code> tags)
+	if w.directCallDisabled {
+		return w.executeSingleCode(
+			execCtx, content, textFormat,
 		)
 	}
 

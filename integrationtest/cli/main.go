@@ -108,15 +108,9 @@ func run() error {
 		ptcChoice, err := promptMenu(rl,
 			"Programmatic Tool Calling (PTC)",
 			[]menuOption{
-				{
-					label: "No  — standard tool calls",
-					value: "no",
-				},
-				{
-					label: "Yes — wrap in " +
-						"JsToolChainWrapper",
-					value: "yes",
-				},
+				{label: "No  — standard tool calls", value: "no"},
+				{label: "Yes — hybrid (direct_call + code)", value: "hybrid"},
+				{label: "Yes — code only (no direct_call)", value: "code_only"},
 			},
 		)
 		if err != nil {
@@ -172,13 +166,17 @@ func run() error {
 
 		// Build config
 		config := buildConfig(tcType, hintType)
-		config.WrapPTC = ptcChoice == "yes"
+		config.WrapPTC = ptcChoice != "no"
+		config.PTCCodeOnly = ptcChoice == "code_only"
 		config.Compaction = compactionCfg
 
 		// Create per-run log file
 		ptcSuffix := ""
-		if config.WrapPTC {
+		switch ptcChoice {
+		case "hybrid":
 			ptcSuffix = "_ptc"
+		case "code_only":
+			ptcSuffix = "_ptc_code_only"
 		}
 		logFileName := fmt.Sprintf(
 			"%s_%s_%s_%s%s.log",

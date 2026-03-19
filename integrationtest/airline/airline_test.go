@@ -39,6 +39,7 @@ func TestRescheduleSearchSummarizationPTC(
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
 	config.WrapPTC = true
+	// config.PTCCodeOnly = true
 	config.Compaction = testutil.CompactionConfig{
 		Type:              testutil.CompactionSummarization,
 		TriggerIterations: 5,

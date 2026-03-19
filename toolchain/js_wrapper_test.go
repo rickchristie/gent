@@ -3537,3 +3537,153 @@ computed: 42
 		})
 	}
 }
+
+// -------------------------------------------------------
+// M. Direct call disabled — code-only mode
+// -------------------------------------------------------
+
+func TestJsWrapper_DirectCallDisabled(t *testing.T) {
+	setupCodeOnly := func() *JsToolChainWrapper {
+		return setupJsWrapper().
+			WithDirectCallDisabled()
+	}
+
+	t.Run("guidance shows code only", func(t *testing.T) {
+		w := setupCodeOnly()
+		guidance := w.Guidance()
+		assert.Contains(t, guidance, "<code>")
+		assert.Contains(
+			t, guidance, "Call tools using JavaScript",
+		)
+		assert.NotContains(
+			t, guidance, "direct_call",
+		)
+		assert.NotContains(
+			t, guidance, "two ways",
+		)
+	})
+
+	t.Run(
+		"guidance with custom code guidance",
+		func(t *testing.T) {
+			w := setupCodeOnly().WithCodeGuidance(
+				"Custom code instructions",
+			)
+			guidance := w.Guidance()
+			assert.Contains(
+				t, guidance,
+				"Custom code instructions",
+			)
+			assert.NotContains(
+				t, guidance, "direct_call",
+			)
+		},
+	)
+
+	t.Run(
+		"direct_call tags ignored in Execute",
+		func(t *testing.T) {
+			w := setupCodeOnly()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			content := `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// direct_call ignored, content treated as
+			// code fallback (not valid JS, errors)
+			assert.Contains(
+				t, result.Text, "<output>",
+			)
+		},
+	)
+
+	t.Run(
+		"code executes normally",
+		func(t *testing.T) {
+			w := setupCodeOnly()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			content := `<code>
+var r = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+console.log(r.output.name);
+</code>`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(
+				t,
+				`<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>
+<output>
+Alice
+</output>`,
+				result.Text,
+			)
+		},
+	)
+
+	t.Run(
+		"raw content without code tags "+
+			"treated as code",
+		func(t *testing.T) {
+			w := setupCodeOnly()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			content := `console.log("hello");`
+			result, err := w.Execute(
+				execCtx, content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(
+				t,
+				`<output>
+hello
+</output>`,
+				result.Text,
+			)
+		},
+	)
+
+	t.Run(
+		"ParseSection skips direct_call",
+		func(t *testing.T) {
+			w := setupCodeOnly()
+			execCtx := newExecCtx()
+
+			content := `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>
+<code>
+console.log("from code");
+</code>`
+			parsed, err := w.ParseSection(
+				execCtx, content,
+			)
+			require.NoError(t, err)
+
+			// Should return the code string, not
+			// parsed tool calls
+			str, ok := parsed.(string)
+			assert.True(t, ok, "expected string")
+			assert.Contains(
+				t, str, "console.log",
+			)
+		},
+	)
+}
