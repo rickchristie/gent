@@ -1790,6 +1790,218 @@ console.log(r.error || "no error");`
 	}
 }
 
+func TestNormalizeOutput(t *testing.T) {
+	type taggedStruct struct {
+		CaseID  string `json:"case_id"`
+		OrderID string `json:"order_id"`
+		Status  string `json:"status"`
+	}
+
+	type nestedStruct struct {
+		ID      string        `json:"id"`
+		Details *taggedStruct `json:"details"`
+	}
+
+	type input struct {
+		output any
+	}
+
+	type expected struct {
+		output any
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "string JSON parsed to map",
+			input: input{
+				output: `{"name":"Alice","age":30}`,
+			},
+			expected: expected{
+				output: map[string]any{
+					"name": "Alice",
+					"age":  float64(30),
+				},
+			},
+		},
+		{
+			name: "string JSON array parsed",
+			input: input{
+				output: `[1, 2, 3]`,
+			},
+			expected: expected{
+				output: []any{
+					float64(1),
+					float64(2),
+					float64(3),
+				},
+			},
+		},
+		{
+			name: "plain string returned as-is",
+			input: input{
+				output: "not json",
+			},
+			expected: expected{
+				output: "not json",
+			},
+		},
+		{
+			name: "nil returns nil",
+			input: input{
+				output: nil,
+			},
+			expected: expected{
+				output: nil,
+			},
+		},
+		{
+			name: "struct with json tags " +
+				"normalized to snake_case",
+			input: input{
+				output: &taggedStruct{
+					CaseID:  "CASE-1",
+					OrderID: "ORD-1",
+					Status:  "open",
+				},
+			},
+			expected: expected{
+				output: map[string]any{
+					"case_id":  "CASE-1",
+					"order_id": "ORD-1",
+					"status":   "open",
+				},
+			},
+		},
+		{
+			name: "nested struct with json tags",
+			input: input{
+				output: &nestedStruct{
+					ID: "N1",
+					Details: &taggedStruct{
+						CaseID:  "CASE-2",
+						OrderID: "ORD-2",
+						Status:  "closed",
+					},
+				},
+			},
+			expected: expected{
+				output: map[string]any{
+					"id": "N1",
+					"details": map[string]any{
+						"case_id":  "CASE-2",
+						"order_id": "ORD-2",
+						"status":   "closed",
+					},
+				},
+			},
+		},
+		{
+			name: "struct value (not pointer)" +
+				" normalized",
+			input: input{
+				output: taggedStruct{
+					CaseID:  "CASE-3",
+					OrderID: "ORD-3",
+					Status:  "open",
+				},
+			},
+			expected: expected{
+				output: map[string]any{
+					"case_id":  "CASE-3",
+					"order_id": "ORD-3",
+					"status":   "open",
+				},
+			},
+		},
+		{
+			name: "map passes through unchanged",
+			input: input{
+				output: map[string]any{
+					"already": "a map",
+				},
+			},
+			expected: expected{
+				output: map[string]any{
+					"already": "a map",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := normalizeOutput(tc.input.output)
+			assert.Equal(
+				t, tc.expected.output, result,
+			)
+		})
+	}
+}
+
+// TestToolBridge_StructOutput verifies that tool outputs
+// with Go structs are normalized via json tags so the JS
+// code sees snake_case field names matching the schema.
+func TestToolBridge_StructOutput(t *testing.T) {
+	type caseResult struct {
+		CaseID  string `json:"case_id"`
+		OrderID string `json:"order_id"`
+		Status  string `json:"status"`
+	}
+
+	var calls []string
+	callFn := mockToolCallFn(
+		map[string]*gent.ToolChainResult{
+			"create_case": {
+				Raw: &gent.RawToolChainResult{
+					Calls: []*gent.ToolCall{
+						{Name: "create_case"},
+					},
+					Results: []*gent.RawToolCallResult{
+						{
+							Name: "create_case",
+							Output: &caseResult{
+								CaseID:  "CASE-1",
+								OrderID: "ORD-1",
+								Status:  "open",
+							},
+						},
+					},
+					Errors: []error{nil},
+				},
+			},
+		},
+		map[string]error{},
+		&calls,
+	)
+
+	rt := New(DefaultConfig())
+	RegisterToolBridge(rt, callFn, "", nil)
+
+	// Access output fields using snake_case names
+	// (from json tags, not Go PascalCase)
+	result, err := rt.Execute(
+		context.Background(),
+		`var r = tool.call(
+  {tool: "create_case", args: {}}
+);
+console.log(r.output.case_id);
+console.log(r.output.order_id);
+console.log(r.output.status);`,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 1, len(calls))
+	require.Len(t, result.ConsoleLog, 3)
+	assert.Equal(t, "CASE-1", result.ConsoleLog[0])
+	assert.Equal(t, "ORD-1", result.ConsoleLog[1])
+	assert.Equal(t, "open", result.ConsoleLog[2])
+}
+
 func TestCollectedResults(t *testing.T) {
 	c := NewCollectedResults()
 

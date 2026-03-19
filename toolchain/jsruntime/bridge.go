@@ -190,7 +190,7 @@ func buildSingleResult(
 		)
 	} else if len(raw.Results) > 0 &&
 		raw.Results[0] != nil {
-		jsResult["output"] = parseOutputJSON(
+		jsResult["output"] = normalizeOutput(
 			raw.Results[0].Output,
 		)
 	} else {
@@ -245,7 +245,7 @@ func buildParallelResults(
 			)
 		} else if i < len(raw.Results) &&
 			raw.Results[i] != nil {
-			entry["output"] = parseOutputJSON(
+			entry["output"] = normalizeOutput(
 				raw.Results[i].Output,
 			)
 		} else {
@@ -328,14 +328,14 @@ func enhanceSchemaError(
 		&sb, vm, source, "schema validation error",
 	)
 	sb.WriteString(llmMsg)
-	writeExampleCall(&sb, toolName, sch)
+	WriteExampleCall(&sb, toolName, sch)
 	return sb.String()
 }
 
-// writeExampleCall appends a tool.call() example to sb
+// WriteExampleCall appends a tool.call() example to sb
 // using the schema's ExampleObject. Writes nothing if the
 // schema has no properties.
-func writeExampleCall(
+func WriteExampleCall(
 	sb *strings.Builder,
 	toolName string,
 	sch *schema.Schema,
@@ -395,24 +395,56 @@ func buildMissingToolError(
 	return vm.ToValue(jsResult)
 }
 
-// parseOutputJSON attempts to parse a tool output as JSON.
-// If the output is a string that looks like JSON, it
-// parses it so the JS code gets a proper object. Otherwise
-// returns the value as-is.
-func parseOutputJSON(output any) any {
-	str, ok := output.(string)
-	if !ok {
-		return output
+// normalizeOutput converts a tool output to a JS-friendly
+// value. If the output is a string that looks like JSON, it
+// parses it into a map/slice. If the output is a Go struct
+// or other typed value, it round-trips through JSON to
+// respect json tags (e.g., json:"snake_case") so the JS
+// code sees the same field names as the schema.
+func normalizeOutput(output any) any {
+	if output == nil {
+		return nil
 	}
 
-	// Try to parse as JSON object or array
-	var parsed any
-	if err := json.Unmarshal(
-		[]byte(str), &parsed,
-	); err != nil {
-		return str
+	str, ok := output.(string)
+	if ok {
+		// Try to parse as JSON object or array
+		var parsed any
+		if err := json.Unmarshal(
+			[]byte(str), &parsed,
+		); err != nil {
+			return str
+		}
+		return parsed
 	}
-	return parsed
+
+	// Non-string output (Go struct, pointer, etc.):
+	// round-trip through JSON so json tags are respected.
+	data, err := json.Marshal(output)
+	if err != nil {
+		return output
+	}
+	var normalized any
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return output
+	}
+	return normalized
+}
+
+// ToolCallEntry represents a single tool call with its
+// result or error.
+type ToolCallEntry struct {
+	Call   *gent.ToolCall
+	Result *gent.RawToolCallResult
+	Error  error
+}
+
+// ToolCallGroup represents one or more tool calls from a
+// single tool.call() or tool.parallelCall() invocation.
+// Sequential calls produce groups with one entry; parallel
+// calls produce groups with multiple entries.
+type ToolCallGroup struct {
+	Entries []ToolCallEntry
 }
 
 // CollectedResults accumulates ToolChainResults from
@@ -425,6 +457,7 @@ type CollectedResults struct {
 	AllErrors  []error
 	AllMedia   []gent.ContentPart
 	TextParts  []string
+	Groups     []ToolCallGroup
 }
 
 // NewCollectedResults creates an empty collector.
@@ -449,6 +482,24 @@ func (c *CollectedResults) Add(
 		c.AllErrors = append(
 			c.AllErrors, result.Raw.Errors...,
 		)
+
+		// Build group for sequential/parallel tracking
+		group := ToolCallGroup{}
+		for i, call := range result.Raw.Calls {
+			entry := ToolCallEntry{Call: call}
+			if i < len(result.Raw.Results) {
+				entry.Result = result.Raw.Results[i]
+			}
+			if i < len(result.Raw.Errors) {
+				entry.Error = result.Raw.Errors[i]
+			}
+			group.Entries = append(
+				group.Entries, entry,
+			)
+		}
+		if len(group.Entries) > 0 {
+			c.Groups = append(c.Groups, group)
+		}
 	}
 	c.AllMedia = append(c.AllMedia, result.Media...)
 	if result.Text != "" {

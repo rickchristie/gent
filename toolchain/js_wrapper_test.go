@@ -7,6 +7,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
+	"github.com/rickchristie/gent/toolchain/jsruntime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -524,10 +525,8 @@ func TestJsWrapper_AvailableToolsPrompt(t *testing.T) {
 	// Contains wrapped prompt content
 	assert.Contains(t, prompt, "tool_registry_search")
 
-	// Contains JS environment description
-	assert.Contains(t, prompt, "tool.call")
-	assert.Contains(t, prompt, "tool.parallelCall")
-	assert.Contains(t, prompt, "console.log")
+	// JS environment details are in Guidance(), not here
+	assert.NotContains(t, prompt, "JavaScript Environment")
 }
 
 // -------------------------------------------------------
@@ -733,8 +732,7 @@ func TestJsWrapper_Execute_Code(t *testing.T) {
 	}
 
 	type expected struct {
-		text   string
-		jsonEq bool // use JSONEq instead of Equal
+		text string
 	}
 
 	tests := []struct {
@@ -749,12 +747,17 @@ func TestJsWrapper_Execute_Code(t *testing.T) {
 var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
-console.log(JSON.stringify(c.output));
+console.log(c.output.id + ":" + c.output.name);
 </code>`,
 			},
 			expected: expected{
-				text:   `{"id":"C001","name":"Alice"}`,
-				jsonEq: true,
+				text: "<tool_call_log>\n" +
+					`[1] lookup_customer({"id":"C001"})` +
+					` -> {"id":"C001","name":"Alice"}` +
+					"\n</tool_call_log>\n" +
+					"<output>\n" +
+					"C001:Alice" +
+					"\n</output>",
 			},
 		},
 		{
@@ -768,14 +771,23 @@ var o = tool.call(
   {tool: "get_orders",
    args: {customer_id: c.output.id}}
 );
-console.log(JSON.stringify({
-  customer: c.output, orders: o.output
-}));
+console.log(
+  "customer=" + c.output.id +
+  " orders=" + o.output[0].order_id
+);
 </code>`,
 			},
 			expected: expected{
-				text:   `{"customer":{"id":"C001","name":"Alice"},"orders":[{"order_id":"O1"}]}`,
-				jsonEq: true,
+				text: "<tool_call_log>\n" +
+					`[1] lookup_customer({"id":"C001"})` +
+					` -> {"id":"C001","name":"Alice"}` +
+					"\n" +
+					`[2] get_orders({"customer_id":"C001"})` +
+					` -> [{"order_id":"O1"}]` +
+					"\n</tool_call_log>\n" +
+					"<output>\n" +
+					"customer=C001 orders=O1" +
+					"\n</output>",
 			},
 		},
 		{
@@ -788,9 +800,10 @@ var c = tool.call(
 </code>`,
 			},
 			expected: expected{
-				text: `<lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
-</lookup_customer>`,
+				text: "<tool_call_log>\n" +
+					`[1] lookup_customer({"id":"C001"})` +
+					` -> {"id":"C001","name":"Alice"}` +
+					"\n</tool_call_log>",
 			},
 		},
 		{
@@ -832,7 +845,9 @@ console.log("hello from JS");
 </code>`,
 			},
 			expected: expected{
-				text: "hello from JS",
+				text: "<output>\n" +
+					"hello from JS" +
+					"\n</output>",
 			},
 		},
 		{
@@ -844,7 +859,9 @@ console.log("line2");
 </code>`,
 			},
 			expected: expected{
-				text: "line1\nline2",
+				text: "<output>\n" +
+					"line1\nline2" +
+					"\n</output>",
 			},
 		},
 	}
@@ -863,17 +880,10 @@ console.log("line2");
 			// a Go error — errors are in the result
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			if tc.expected.jsonEq {
-				assert.JSONEq(
-					t, tc.expected.text,
-					result.Text,
-				)
-			} else {
-				assert.Equal(
-					t, tc.expected.text,
-					result.Text,
-				)
-			}
+			assert.Equal(
+				t, tc.expected.text,
+				result.Text,
+			)
 		})
 	}
 }
@@ -1126,7 +1136,9 @@ if (r.error) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Equal(
-				t, "got error", result.Text,
+				t,
+				"<output>\ngot error\n</output>",
+				result.Text,
 			)
 		},
 	)
@@ -1218,8 +1230,15 @@ if (r.error) {
 			require.NotNil(t, result)
 			assert.Equal(
 				t,
-				"tool error: assert.AnError "+
-					"general error for testing",
+				"<tool_call_log>\n"+
+					"[1] fail_tool({}) -> error: "+
+					"assert.AnError general "+
+					"error for testing\n"+
+					"</tool_call_log>\n"+
+					"<output>\n"+
+					"tool error: assert.AnError "+
+					"general error for testing\n"+
+					"</output>",
 				result.Text,
 			)
 		},
@@ -1284,7 +1303,6 @@ func TestJsWrapper_PreValidation(t *testing.T) {
 
 	type expected struct {
 		text       string
-		jsonEq     bool
 		emptyCalls bool
 		codeExec   int64
 		codeErr    int64
@@ -1347,12 +1365,17 @@ Fix ALL errors above before re-submitting your code.
 var r = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
-console.log(JSON.stringify(r.output));
+console.log(r.output.id + ":" + r.output.name);
 </code>`,
 			},
 			expected: expected{
-				text:     `{"id":"C001","name":"Alice"}`,
-				jsonEq:   true,
+				text: "<tool_call_log>\n" +
+					`[1] lookup_customer({"id":"C001"})` +
+					` -> {"id":"C001","name":"Alice"}` +
+					"\n</tool_call_log>\n" +
+					"<output>\n" +
+					"C001:Alice" +
+					"\n</output>",
 				codeExec: 1,
 			},
 		},
@@ -1365,12 +1388,17 @@ var r = tool.call(
   {tool: "lookup_customer",
    args: {id: myId}}
 );
-console.log(JSON.stringify(r.output));
+console.log(r.output.id + ":" + r.output.name);
 </code>`,
 			},
 			expected: expected{
-				text:     `{"id":"C001","name":"Alice"}`,
-				jsonEq:   true,
+				text: "<tool_call_log>\n" +
+					`[1] lookup_customer({"id":"C001"})` +
+					` -> {"id":"C001","name":"Alice"}` +
+					"\n</tool_call_log>\n" +
+					"<output>\n" +
+					"C001:Alice" +
+					"\n</output>",
 				codeExec: 1,
 			},
 		},
@@ -1975,17 +2003,10 @@ Fix ALL errors above before re-submitting your code.
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
-			if tc.expected.jsonEq {
-				assert.JSONEq(
-					t, tc.expected.text,
-					result.Text,
-				)
-			} else {
-				assert.Equal(
-					t, tc.expected.text,
-					result.Text,
-				)
-			}
+			assert.Equal(
+				t, tc.expected.text,
+				result.Text,
+			)
 
 			if tc.expected.emptyCalls {
 				assert.Empty(t, result.Raw.Calls)
@@ -2054,13 +2075,62 @@ console.log("ok");
 //    pre-validation, errors caught at runtime)
 // -------------------------------------------------------
 
+// enhancedSchemaLog builds the enhanced log entry for
+// the tool_call_log section when a schema validation
+// error occurs. prefix is e.g. "[1] lookup_customer({})".
+// Uses FormatForLLM + WriteExampleCall to produce the
+// same output as writeLogEntry in js_wrapper.go.
+func enhancedSchemaLog(
+	t *testing.T,
+	w *JsToolChainWrapper,
+	prefix string,
+	toolName string,
+	args map[string]any,
+) string {
+	t.Helper()
+	sch := w.GetToolSchema(toolName)
+	require.NotNil(t, sch)
+	msg := sch.FormatForLLM(toolName, args)
+	require.NotEmpty(t, msg)
+	var sb strings.Builder
+	sb.WriteString(prefix)
+	sb.WriteString(" -> error:\n")
+	sb.WriteString(msg)
+	jsruntime.WriteExampleCall(
+		&sb, toolName, sch,
+	)
+	return strings.TrimRight(
+		sb.String(), "\n",
+	)
+}
+
 func TestJsWrapper_BridgeSchemaError(t *testing.T) {
+	// Use shared wrapper to get enhanced schema errors
+	// via enhancedSchemaLog, avoiding machine-specific
+	// file paths from the jsonschema library.
+	w := setupJsWrapper()
+
+	// bridgeText builds the expected result.Text for
+	// bridge schema errors. logEntry is the enhanced
+	// error for tool_call_log; outputBody is the
+	// enhanced error from console.log(r.error).
+	bridgeText := func(
+		logEntry string, outputBody string,
+	) string {
+		return "<tool_call_log>\n" +
+			logEntry +
+			"\n</tool_call_log>\n" +
+			"<output>\n" +
+			outputBody +
+			"\n</output>"
+	}
+
 	type input struct {
 		content string
 	}
 
 	type expected struct {
-		text     string
+		textFn   func() string
 		codeExec int64
 		codeErr  int64
 	}
@@ -2071,7 +2141,8 @@ func TestJsWrapper_BridgeSchemaError(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "dynamic args missing required field",
+			name: "dynamic args missing " +
+				"required field",
 			input: input{
 				content: `<code>
 var badArgs = {};
@@ -2082,7 +2153,16 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 2:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						"[1] lookup_customer({})",
+						"lookup_customer",
+						map[string]any{},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 2:
 
 1 | var badArgs = {};
 2 | var r = tool.call(
@@ -2102,9 +2182,9 @@ Example:
       "id": "..."
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2118,7 +2198,9 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 2:
+				textFn: func() string {
+					return `<output>
+tool.call() error at line 2:
 
 1 | var req = {args: {id: "C001"}};
 2 | var r = tool.call(req);
@@ -2132,7 +2214,9 @@ Expected format:
   tool.call({tool: "tool_name", args: {...}})
 
 IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+Fix ALL errors above before re-submitting your code.
+</output>`
+				},
 				codeExec: 1,
 			},
 		},
@@ -2146,7 +2230,16 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 2:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						"[1] lookup_customer",
+						"lookup_customer",
+						nil,
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 2:
 
 1 | var req = {tool: "lookup_customer"};
 2 | var r = tool.call(req);
@@ -2165,9 +2258,9 @@ Example:
       "id": "..."
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2184,7 +2277,19 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 5:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] lookup_customer`+
+							`({"name":"Alice"})`,
+						"lookup_customer",
+						map[string]any{
+							"name": "Alice",
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 5:
 
 3 |   args: {name: "Alice"}
 4 | };
@@ -2204,9 +2309,9 @@ Example:
       "id": "..."
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2226,7 +2331,26 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 8:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] create_order(`+
+							`{"customer_id":`+
+							`"C001","items":`+
+							`[{"name":"Widget"}]})`,
+						"create_order",
+						map[string]any{
+							"customer_id": "C001",
+							"items": []any{
+								map[string]any{
+									"name": "Widget",
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 8:
 
 6 |   }
 7 | };
@@ -2253,9 +2377,9 @@ Example:
       ]
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2275,7 +2399,24 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 8:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] update_address(`+
+							`{"address":`+
+							`{"street":"123 Main St"},`+
+							`"id":"1"})`,
+						"update_address",
+						map[string]any{
+							"id": "1",
+							"address": map[string]any{
+								"street": "123 Main St",
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 8:
 
 6 |   }
 7 | };
@@ -2300,9 +2441,9 @@ Example:
       "id": "..."
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2324,7 +2465,27 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 10:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] update_stock(`+
+							`{"id":"S1",`+
+							`"quantities":`+
+							`{"apples":`+
+							`{"amount":5}}})`,
+						"update_stock",
+						map[string]any{
+							"id": "S1",
+							"quantities": map[string]any{
+								"apples": map[string]any{
+									"amount": 5,
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 10:
 
  8 |   }
  9 | };
@@ -2351,9 +2512,9 @@ Example:
       }
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2377,7 +2538,28 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 11:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] update_geo(`+
+							`{"address":`+
+							`{"geo":{"lat":1},`+
+							`"street":"Main St"},`+
+							`"id":"1"})`,
+						"update_geo",
+						map[string]any{
+							"id": "1",
+							"address": map[string]any{
+								"street": "Main St",
+								"geo": map[string]any{
+									"lat": 1.0,
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 11:
 
  9 |   }
 10 | };
@@ -2405,9 +2587,9 @@ Example:
       "id": "..."
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2431,7 +2613,32 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 11:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] create_shipment(`+
+							`{"id":"S1",`+
+							`"orders":[{"items":`+
+							`[{"name":"Widget"}],`+
+							`"order_id":"O1"}]})`,
+						"create_shipment",
+						map[string]any{
+							"id": "S1",
+							"orders": []any{
+								map[string]any{
+									"order_id": "O1",
+									"items": []any{
+										map[string]any{
+											"name": "Widget",
+										},
+									},
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 11:
 
  9 |   }
 10 | };
@@ -2463,9 +2670,9 @@ Example:
       ]
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2492,7 +2699,32 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 14:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] update_regions(`+
+							`{"id":"R1",`+
+							`"regions":{"us":`+
+							`{"zones":{"west":`+
+							`{"population":`+
+							`1000}}}}})`,
+						"update_regions",
+						map[string]any{
+							"id": "R1",
+							"regions": map[string]any{
+								"us": map[string]any{
+									"zones": map[string]any{
+										"west": map[string]any{
+											"population": 1000,
+										},
+									},
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 14:
 
 12 |   }
 13 | };
@@ -2523,9 +2755,9 @@ Example:
       }
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2551,7 +2783,32 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 13:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] update_products(`+
+							`{"id":"P1",`+
+							`"items":[{"attributes":`+
+							`{"weight":{"value":"5"}},`+
+							`"name":"Widget"}]})`,
+						"update_products",
+						map[string]any{
+							"id": "P1",
+							"items": []any{
+								map[string]any{
+									"name": "Widget",
+									"attributes": map[string]any{
+										"weight": map[string]any{
+											"value": "5",
+										},
+									},
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 13:
 
 11 |   }
 12 | };
@@ -2583,9 +2840,9 @@ Example:
       ]
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2610,7 +2867,32 @@ console.log(r.error);
 </code>`,
 			},
 			expected: expected{
-				text: `tool.call() error at line 12:
+				textFn: func() string {
+					logEntry := enhancedSchemaLog(
+						t, w,
+						`[1] update_catalog(`+
+							`{"categories":`+
+							`{"electronics":`+
+							`{"products":`+
+							`[{"name":"Phone"}]}},`+
+							`"id":"C1"})`,
+						"update_catalog",
+						map[string]any{
+							"id": "C1",
+							"categories": map[string]any{
+								"electronics": map[string]any{
+									"products": []any{
+										map[string]any{
+											"name": "Phone",
+										},
+									},
+								},
+							},
+						},
+					)
+					return bridgeText(
+						logEntry,
+						`tool.call() error at line 12:
 
 10 |   }
 11 | };
@@ -2641,9 +2923,9 @@ Example:
       "id": "..."
     }
   });
-
-IMPORTANT: Use EXACT argument names and types from the tool schema.
-Fix ALL errors above before re-submitting your code.`,
+`,
+					)
+				},
 				codeExec: 1,
 			},
 		},
@@ -2651,7 +2933,6 @@ Fix ALL errors above before re-submitting your code.`,
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			w := setupJsWrapper()
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
@@ -2661,7 +2942,8 @@ Fix ALL errors above before re-submitting your code.`,
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Equal(
-				t, tc.expected.text, result.Text,
+				t, tc.expected.textFn(),
+				result.Text,
 			)
 			assert.Equal(
 				t, tc.expected.codeExec,
@@ -2710,11 +2992,270 @@ console.log(r.error);
 		gent.ErrUnknownTool,
 	)
 
-	// The r.error seen by JS is the raw error
-	// string, which console.log outputs as Text.
+	// Result text has tool_call_log with the error
+	// plus output with what console.log printed.
 	assert.Equal(
 		t,
-		"unknown tool: nonexistent_tool",
+		"<tool_call_log>\n"+
+			"[1] nonexistent_tool({}) -> error: "+
+			"unknown tool: nonexistent_tool\n"+
+			"</tool_call_log>\n"+
+			"<output>\n"+
+			"unknown tool: nonexistent_tool\n"+
+			"</output>",
 		result.Text,
 	)
+}
+
+// -------------------------------------------------------
+// K. Tool call log observation split — comprehensive
+//    tests for the <tool_call_log> + <output> format.
+// -------------------------------------------------------
+
+func TestJsWrapper_ToolCallLog(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		text string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "tool error then success — " +
+				"both appear in log",
+			input: input{
+				content: `<code>
+var r1 = tool.call(
+  {tool: "fail_tool", args: {}}
+);
+var r2 = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+console.log(
+  "err=" + (r1.error ? "yes" : "no") +
+  " ok=" + (r2.error ? "no" : "yes")
+);
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1] fail_tool({}) -> error: assert.AnError general error for testing
+[2] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>
+<output>
+err=yes ok=yes
+</output>`,
+			},
+		},
+		{
+			name: "success then error — " +
+				"both appear in log",
+			input: input{
+				content: `<code>
+var r1 = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+var r2 = tool.call(
+  {tool: "fail_tool", args: {}}
+);
+console.log(
+  "ok=" + (r1.error ? "no" : "yes") +
+  " err=" + (r2.error ? "yes" : "no")
+);
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+[2] fail_tool({}) -> error: assert.AnError general error for testing
+</tool_call_log>
+<output>
+ok=yes err=yes
+</output>`,
+			},
+		},
+		{
+			name: "parallel calls all success",
+			input: input{
+				content: `<code>
+var results = tool.parallelCall([
+  {tool: "lookup_customer",
+   args: {id: "C001"}},
+  {tool: "get_orders",
+   args: {customer_id: "C001"}}
+]);
+console.log("done");
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1a] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+[1b] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
+</tool_call_log>
+<output>
+done
+</output>`,
+			},
+		},
+		{
+			name: "parallel calls all failed",
+			input: input{
+				content: `<code>
+var results = tool.parallelCall([
+  {tool: "fail_tool", args: {}},
+  {tool: "fail_tool", args: {}}
+]);
+console.log(
+  "a=" + (results[0].error ? "err" : "ok") +
+  " b=" + (results[1].error ? "err" : "ok")
+);
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1a] fail_tool({}) -> error: assert.AnError general error for testing
+[1b] fail_tool({}) -> error: assert.AnError general error for testing
+</tool_call_log>
+<output>
+a=err b=err
+</output>`,
+			},
+		},
+		{
+			name: "parallel calls partial " +
+				"success and failure",
+			input: input{
+				content: `<code>
+var results = tool.parallelCall([
+  {tool: "lookup_customer",
+   args: {id: "C001"}},
+  {tool: "fail_tool", args: {}}
+]);
+console.log(
+  "a=" + (results[0].error ? "err" : "ok") +
+  " b=" + (results[1].error ? "err" : "ok")
+);
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1a] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+[1b] fail_tool({}) -> error: assert.AnError general error for testing
+</tool_call_log>
+<output>
+a=ok b=err
+</output>`,
+			},
+		},
+		{
+			name: "sequential then parallel — " +
+				"mixed numbering",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+var results = tool.parallelCall([
+  {tool: "get_orders",
+   args: {customer_id: "C001"}},
+  {tool: "get_orders",
+   args: {customer_id: "C001"}}
+]);
+console.log("done");
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+[2a] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
+[2b] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
+</tool_call_log>
+<output>
+done
+</output>`,
+			},
+		},
+		{
+			name: "no tool calls no console.log",
+			input: input{
+				content: `<code>
+var x = 1 + 2;
+</code>`,
+			},
+			expected: expected{
+				text: "Code executed successfully.",
+			},
+		},
+		{
+			name: "tool calls but no console.log " +
+				"— only tool_call_log",
+			input: input{
+				content: `<code>
+tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>`,
+			},
+		},
+		{
+			name: "runtime error after successful " +
+				"tool call — log + code_error",
+			input: input{
+				content: `<code>
+var r = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+undefinedVar;
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>
+<code_error>
+ReferenceError: undefinedVar is not defined
+
+3 |    args: {id: "C001"}}
+4 | );
+5 | undefinedVar;
+    ^ ReferenceError: undefinedVar is not defined
+
+</code_error>`,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			result, err := w.Execute(
+				execCtx, tc.input.content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(
+				t, tc.expected.text,
+				result.Text,
+			)
+		})
+	}
 }

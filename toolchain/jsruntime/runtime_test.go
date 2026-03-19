@@ -258,3 +258,274 @@ func TestRuntimeExecute(t *testing.T) {
 		})
 	}
 }
+
+func TestConsoleLog(t *testing.T) {
+	type input struct {
+		source string
+	}
+
+	type expected struct {
+		consoleLog []string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		// Primitives
+		{
+			name:  "string",
+			input: input{source: `console.log("hello");`},
+			expected: expected{
+				consoleLog: []string{"hello"},
+			},
+		},
+		{
+			name:  "integer",
+			input: input{source: `console.log(42);`},
+			expected: expected{
+				consoleLog: []string{"42"},
+			},
+		},
+		{
+			name:  "float",
+			input: input{source: `console.log(3.14);`},
+			expected: expected{
+				consoleLog: []string{"3.14"},
+			},
+		},
+		{
+			name:  "boolean true",
+			input: input{source: `console.log(true);`},
+			expected: expected{
+				consoleLog: []string{"true"},
+			},
+		},
+		{
+			name:  "boolean false",
+			input: input{source: `console.log(false);`},
+			expected: expected{
+				consoleLog: []string{"false"},
+			},
+		},
+		{
+			name:  "null",
+			input: input{source: `console.log(null);`},
+			expected: expected{
+				consoleLog: []string{"null"},
+			},
+		},
+		{
+			name: "undefined",
+			input: input{
+				source: `console.log(undefined);`,
+			},
+			expected: expected{
+				consoleLog: []string{"undefined"},
+			},
+		},
+		{
+			name:  "empty string",
+			input: input{source: `console.log("");`},
+			expected: expected{
+				consoleLog: []string{""},
+			},
+		},
+
+		// Objects — auto-stringified as JSON
+		{
+			name: "simple object",
+			input: input{
+				source: `console.log({a: 1, b: "two"});`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`{"a":1,"b":"two"}`,
+				},
+			},
+		},
+		{
+			name: "nested object",
+			input: input{
+				source: `console.log(` +
+					`{user: {name: "Alice", ` +
+					`age: 30}});`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`{"user":{"name":"Alice",` +
+						`"age":30}}`,
+				},
+			},
+		},
+		{
+			name: "empty object",
+			input: input{
+				source: `console.log({});`,
+			},
+			expected: expected{
+				consoleLog: []string{`{}`},
+			},
+		},
+
+		// Arrays — auto-stringified as JSON
+		{
+			name: "array of numbers",
+			input: input{
+				source: `console.log([1, 2, 3]);`,
+			},
+			expected: expected{
+				consoleLog: []string{`[1,2,3]`},
+			},
+		},
+		{
+			name: "array of strings",
+			input: input{
+				source: `console.log(["a", "b"]);`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`["a","b"]`,
+				},
+			},
+		},
+		{
+			name: "array of objects",
+			input: input{
+				source: `console.log(` +
+					`[{id: 1}, {id: 2}]);`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`[{"id":1},{"id":2}]`,
+				},
+			},
+		},
+		{
+			name: "empty array",
+			input: input{
+				source: `console.log([]);`,
+			},
+			expected: expected{
+				consoleLog: []string{`[]`},
+			},
+		},
+		{
+			name: "nested array",
+			input: input{
+				source: `console.log([[1, 2], [3]]);`,
+			},
+			expected: expected{
+				consoleLog: []string{`[[1,2],[3]]`},
+			},
+		},
+
+		// Mixed arguments
+		{
+			name: "string and object",
+			input: input{
+				source: `console.log(` +
+					`"result:", {id: "C001"});`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`result: {"id":"C001"}`,
+				},
+			},
+		},
+		{
+			name: "string number and array",
+			input: input{
+				source: `console.log(` +
+					`"items:", 3, [1, 2, 3]);`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`items: 3 [1,2,3]`,
+				},
+			},
+		},
+		{
+			name: "label with nested object",
+			input: input{
+				source: `console.log("filtered:",` +
+					` {users: [{name: "Alice"}]});`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`filtered: {"users":` +
+						`[{"name":"Alice"}]}`,
+				},
+			},
+		},
+
+		// Multiple console.log calls
+		{
+			name: "multiple calls mixed types",
+			input: input{
+				source: `console.log("start");
+console.log({status: "ok"});
+console.log([1, 2]);
+console.log("end");`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					"start",
+					`{"status":"ok"}`,
+					`[1,2]`,
+					"end",
+				},
+			},
+		},
+
+		// Edge cases
+		{
+			name: "object with null value",
+			input: input{
+				source: `console.log({a: null});`,
+			},
+			expected: expected{
+				consoleLog: []string{`{"a":null}`},
+			},
+		},
+		{
+			name: "no arguments",
+			input: input{
+				source: `console.log();`,
+			},
+			expected: expected{
+				consoleLog: []string{""},
+			},
+		},
+		{
+			name: "computed value from expression",
+			input: input{
+				source: `var x = {a: 1};
+var y = {b: 2};
+console.log("merged:", {a: x.a, b: y.b});`,
+			},
+			expected: expected{
+				consoleLog: []string{
+					`merged: {"a":1,"b":2}`,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := New(DefaultConfig())
+			result, err := r.Execute(
+				context.Background(),
+				tc.input.source,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(
+				t, tc.expected.consoleLog,
+				result.ConsoleLog,
+			)
+		})
+	}
+}

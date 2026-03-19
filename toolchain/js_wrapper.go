@@ -1,6 +1,9 @@
 package toolchain
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -90,26 +93,11 @@ func (w *JsToolChainWrapper) RegisterTool(
 	return w
 }
 
-// AvailableToolsPrompt returns the wrapped ToolChain's
-// prompt plus a JS environment description.
+// AvailableToolsPrompt delegates to the wrapped
+// ToolChain. JS environment details (tool.call,
+// console.log, etc.) are covered in Guidance().
 func (w *JsToolChainWrapper) AvailableToolsPrompt() string {
-	var sb strings.Builder
-	sb.WriteString(w.wrapped.AvailableToolsPrompt())
-	sb.WriteString("\n\n")
-	sb.WriteString(
-		"JavaScript Environment:\n" +
-			"When using <code> mode, the following " +
-			"functions are available:\n" +
-			"- tool.call({tool, args}) — call a single" +
-			" tool, returns {name, output} or " +
-			"{name, error}\n" +
-			"- tool.parallelCall([{tool, args}, ...]) " +
-			"— call multiple tools, returns array of " +
-			"results\n" +
-			"- console.log(...) — output results " +
-			"(only console.log output is returned)\n",
-	)
-	return sb.String()
+	return w.wrapped.AvailableToolsPrompt()
 }
 
 // Guidance returns combined guidance for both modes.
@@ -312,17 +300,28 @@ func (w *JsToolChainWrapper) executeCode(
 			)
 		}
 
-		// Return error as observation text
-		errorText := textFormat.FormatSections(
-			[]gent.FormattedSection{
-				{
-					Name:    "code_error",
-					Content: err.Error(),
+		// Build sections: tool_call_log (if any calls
+		// happened before the error) + code_error
+		var sections []gent.FormattedSection
+		logText := buildToolCallLog(collector.Groups, schemaFn)
+		if logText != "" {
+			sections = append(
+				sections, gent.FormattedSection{
+					Name:    "tool_call_log",
+					Content: logText,
 				},
+			)
+		}
+		sections = append(
+			sections, gent.FormattedSection{
+				Name:    "code_error",
+				Content: err.Error(),
 			},
 		)
 		return &gent.ToolChainResult{
-			Text:  errorText,
+			Text: textFormat.FormatSections(
+				sections,
+			),
 			Raw:   collector.BuildRaw(),
 			Media: collector.AllMedia,
 		}, nil
@@ -335,32 +334,48 @@ func (w *JsToolChainWrapper) executeCode(
 		)
 	}
 
-	// Build result text from console.log output
-	var text string
-	if len(result.ConsoleLog) > 0 {
-		text = strings.Join(
-			result.ConsoleLog, "\n",
+	// Build observation sections
+	var sections []gent.FormattedSection
+
+	// Tool call log — always include if there were
+	// any tool calls, so the LLM sees what happened
+	logText := buildToolCallLog(collector.Groups, schemaFn)
+	if logText != "" {
+		sections = append(
+			sections, gent.FormattedSection{
+				Name:    "tool_call_log",
+				Content: logText,
+			},
 		)
-	} else if len(collector.TextParts) > 0 {
-		text = strings.Join(
-			collector.TextParts, "\n",
-		)
-	} else {
-		text = "Code executed successfully."
 	}
 
-	// Append schema error footer once if any
-	// tool.call() hit a schema validation error
-	if collector.HasSchemaErrors() {
-		text += "\nIMPORTANT: Use EXACT argument " +
-			"names and types from the tool schema." +
-			"\nFix ALL errors above before " +
-			"re-submitting your code."
+	// Script output from console.log
+	var output string
+	if len(result.ConsoleLog) > 0 {
+		output = strings.Join(
+			result.ConsoleLog, "\n",
+		)
+	}
+	if output != "" {
+		sections = append(
+			sections, gent.FormattedSection{
+				Name:    "output",
+				Content: output,
+			},
+		)
+	}
+
+	if len(sections) == 0 {
+		return &gent.ToolChainResult{
+			Text:  "Code executed successfully.",
+			Raw:   collector.BuildRaw(),
+			Media: collector.AllMedia,
+		}, nil
 	}
 
 	return &gent.ToolChainResult{
-		Text:  text,
-		Raw:   collector.BuildRaw(),
+		Text: textFormat.FormatSections(sections),
+		Raw:  collector.BuildRaw(),
 		Media: collector.AllMedia,
 	}, nil
 }
@@ -398,6 +413,156 @@ func (w *JsToolChainWrapper) preValidationError(
 		Text: errorText,
 		Raw:  &gent.RawToolChainResult{},
 	}, nil
+}
+
+// buildToolCallLog formats all tool call groups into a
+// human-readable log. Sequential calls get [1], [2], etc.
+// Parallel calls get [2a], [2b], [2c], etc.
+// schemaFn is used to produce enhanced error messages for
+// schema validation errors.
+func buildToolCallLog(
+	groups []jsruntime.ToolCallGroup,
+	schemaFn jsruntime.SchemaLookupFn,
+) string {
+	if len(groups) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	groupNum := 0
+	for _, group := range groups {
+		groupNum++
+		if len(group.Entries) == 1 {
+			writeLogEntry(
+				&sb,
+				fmt.Sprintf("[%d]", groupNum),
+				group.Entries[0],
+				schemaFn,
+			)
+		} else {
+			for i, entry := range group.Entries {
+				writeLogEntry(
+					&sb,
+					fmt.Sprintf(
+						"[%d%c]",
+						groupNum, 'a'+rune(i),
+					),
+					entry,
+					schemaFn,
+				)
+			}
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// writeLogEntry writes a single tool call log entry
+// in the format: [N] name(args) -> output or error.
+// For schema validation errors, uses FormatForLLM +
+// WriteExampleCall to produce enhanced error messages.
+func writeLogEntry(
+	sb *strings.Builder,
+	prefix string,
+	entry jsruntime.ToolCallEntry,
+	schemaFn jsruntime.SchemaLookupFn,
+) {
+	name := ""
+	if entry.Call != nil {
+		name = entry.Call.Name
+	}
+	sb.WriteString(prefix)
+	sb.WriteString(" ")
+	sb.WriteString(name)
+
+	// Append args
+	if entry.Call != nil && entry.Call.Args != nil {
+		sb.WriteString("(")
+		sb.WriteString(formatOutput(entry.Call.Args))
+		sb.WriteString(")")
+	}
+
+	if entry.Error != nil {
+		enhanced := enhanceLogError(
+			entry, schemaFn,
+		)
+		if enhanced != "" {
+			sb.WriteString(" -> error:\n")
+			sb.WriteString(enhanced)
+		} else {
+			sb.WriteString(" -> error: ")
+			sb.WriteString(entry.Error.Error())
+			sb.WriteString("\n")
+		}
+		return
+	}
+
+	if entry.Result != nil && entry.Result.Output != nil {
+		sb.WriteString(" -> ")
+		sb.WriteString(
+			formatOutput(entry.Result.Output),
+		)
+	}
+	sb.WriteString("\n")
+}
+
+// enhanceLogError returns an enhanced error message for
+// schema validation errors using FormatForLLM +
+// WriteExampleCall. Returns "" for non-schema errors.
+func enhanceLogError(
+	entry jsruntime.ToolCallEntry,
+	schemaFn jsruntime.SchemaLookupFn,
+) string {
+	if schemaFn == nil || entry.Call == nil {
+		return ""
+	}
+	var ve *schema.ValidationError
+	if !errors.As(entry.Error, &ve) {
+		return ""
+	}
+	sch := schemaFn(entry.Call.Name)
+	if sch == nil {
+		return ""
+	}
+	msg := sch.FormatForLLM(
+		entry.Call.Name, entry.Call.Args,
+	)
+	if msg == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(msg)
+	jsruntime.WriteExampleCall(
+		&sb, entry.Call.Name, sch,
+	)
+	return sb.String()
+}
+
+// formatOutput converts a tool output to a JSON string
+// for display in the tool call log. Handles Go structs
+// (json.Marshal respects json tags), JSON strings
+// (returned as-is), and plain strings (quoted).
+func formatOutput(output any) string {
+	if output == nil {
+		return "null"
+	}
+
+	// String output: if it's valid JSON, return as-is.
+	// Otherwise marshal to get a quoted string.
+	if str, ok := output.(string); ok {
+		if json.Valid([]byte(str)) {
+			return str
+		}
+		data, _ := json.Marshal(str)
+		return string(data)
+	}
+
+	// Go struct or other type — marshal respects json
+	// tags, producing snake_case keys.
+	data, err := json.Marshal(output)
+	if err != nil {
+		return fmt.Sprintf("%v", output)
+	}
+	return string(data)
 }
 
 // hasCodeTags returns true if content contains <code>
@@ -440,29 +605,41 @@ func buildDefaultInnerFormat() gent.TextFormat {
 // defaultCodeGuidance returns the default guidance text
 // for the code section.
 func defaultCodeGuidance() string {
-	return `// Sequential calls (use result of first ` +
-		`in second):
-const customer = tool.call(
-  {tool: "lookup_customer", args: {id: "C001"}}
+	return `(function() {
+// Sequential calls — check .error before using .output:
+const result1 = tool.call(
+  {tool: "tool1", args: {id: "C001"}}
 );
-const orders = tool.call(
-  {tool: "get_orders",
-   args: {customer_id: customer.output.id}}
+// Errors automatically logged, return immediately.
+if (result1.error) return;
+
+const result2 = tool.call(
+  {tool: "tool2", args: {id: result1.output.tag}}
 );
+if (result2.error) return;
 
 // Parallel calls:
 const results = tool.parallelCall([
-  {tool: "tool1", args: {}},
-  {tool: "tool2", args: {}},
+  {tool: "tool3", args: {name: result2.output.name}},
+  {tool: "tool4",
+   args: {category: result2.output.category}},
 ]);
+if (results[0].error || results[1].error) return;
 
-// Output results (only console.log output is returned):
-console.log(JSON.stringify({customer, orders}));
+// Tool call results appear automatically in output, ` +
+		`do not console.log them.
+// The above script will automatically print ` +
+		`result.output of tool1, tool2, tool3, tool4.
+// Only use console.log for values you computed ` +
+		`or customized.
+})();
 
-// IMPORTANT: Use EXACT argument names and types from ` +
-		`the tool schema.
+// IMPORTANT: Use EXACT argument names and types ` +
+		`from the tool schema.
 // Do NOT guess, rename, or add extra fields. Only ` +
-		`include properties defined in the schema.`
+		`include properties defined in the schema.
+// Always wrap code in (function() { ... })(); so ` +
+		`return works for early exit on errors.`
 }
 
 // Compile-time check that JsToolChainWrapper implements

@@ -35,13 +35,22 @@ func TestSummarization_Compact(t *testing.T) {
 	pinned1 := makePinnedIter("important finding")
 	pinned2 := makePinnedIter("critical data")
 
+	mockFmt := tt.NewMockFormat()
+
 	existingSynthetic := &gent.Iteration{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeGeneric,
+				Role: llms.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
 					llms.TextContent{
-						Text: "Previous summary content",
+						Text: mockFmt.FormatSections(
+							[]gent.FormattedSection{
+								{
+									Name:    "prior_work_summary",
+									Content: "Previous summary content",
+								},
+							},
+						),
 					},
 				},
 			},
@@ -119,7 +128,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    0,
 				pinnedCount:      0,
-				summaryContains:  "Summary of steps 1-3",
+				summaryContains: "<prior_work_summary>" +
+					"\nSummary of steps 1-3" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -142,7 +153,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    2,
 				pinnedCount:      0,
-				summaryContains:  "Summary of old 1-2",
+				summaryContains: "<prior_work_summary>" +
+					"\nSummary of old 1-2" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -164,7 +177,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    0,
 				pinnedCount:      0,
-				summaryContains:  "Updated summary",
+				summaryContains: "<prior_work_summary>" +
+					"\nUpdated summary" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -186,7 +201,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    1,
 				pinnedCount:      1,
-				summaryContains:  "Summary of old",
+				summaryContains: "<prior_work_summary>" +
+					"\nSummary of old" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -209,7 +226,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    0,
 				pinnedCount:      2,
-				summaryContains:  "Summary of a and b",
+				summaryContains: "<prior_work_summary>" +
+					"\nSummary of a and b" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -230,7 +249,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    0,
 				pinnedCount:      0,
-				summaryContains:  "Summary with text only",
+				summaryContains: "<prior_work_summary>" +
+					"\nSummary with text only" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -269,7 +290,9 @@ func TestSummarization_Compact(t *testing.T) {
 				syntheticCount:   1,
 				keptOriginals:    0,
 				pinnedCount:      0,
-				summaryContains:  "Custom summarized",
+				summaryContains: "<prior_work_summary>" +
+					"\nCustom summarized" +
+					"\n</prior_work_summary>\n",
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -316,7 +339,9 @@ func TestSummarization_Compact(t *testing.T) {
 				)
 			}
 
-			strategy := NewSummarization(model)
+			strategy := NewSummarization(
+				model, mockFmt,
+			)
 			if tc.input.keepRecent > 0 {
 				strategy.WithKeepRecent(
 					tc.input.keepRecent,
@@ -437,13 +462,22 @@ func TestSummarization_PromptContent(t *testing.T) {
 		pinnedInResult    []*gent.Iteration
 	}
 
+	mockFmt := tt.NewMockFormat()
+
 	existingSynthetic := &gent.Iteration{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeGeneric,
+				Role: llms.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
 					llms.TextContent{
-						Text: "old summary text",
+						Text: mockFmt.FormatSections(
+							[]gent.FormattedSection{
+								{
+									Name:    "prior_work_summary",
+									Content: "old summary text",
+								},
+							},
+						),
 					},
 				},
 			},
@@ -547,7 +581,9 @@ func TestSummarization_PromptContent(t *testing.T) {
 				tc.input.modelResponse, 10, 5,
 			)
 
-			strategy := NewSummarization(model)
+			strategy := NewSummarization(
+				model, mockFmt,
+			)
 			if tc.input.keepRecent > 0 {
 				strategy.WithKeepRecent(
 					tc.input.keepRecent,
@@ -646,7 +682,8 @@ func TestSummarization_WithPromptSingleMessage(
 	model := tt.NewMockModel()
 	model.AddResponse("custom summary", 10, 5)
 
-	strategy := NewSummarization(model).
+	mockFmt := tt.NewMockFormat()
+	strategy := NewSummarization(model, mockFmt).
 		WithPrompt("Custom: %s\n%s")
 
 	data := gent.NewBasicLoopData(nil)
@@ -684,7 +721,8 @@ func TestSummarization_DefaultTwoMessages(t *testing.T) {
 	model := tt.NewMockModel()
 	model.AddResponse("summary", 10, 5)
 
-	strategy := NewSummarization(model)
+	mockFmt := tt.NewMockFormat()
+	strategy := NewSummarization(model, mockFmt)
 
 	data := gent.NewBasicLoopData(nil)
 	data.SetScratchPad([]*gent.Iteration{

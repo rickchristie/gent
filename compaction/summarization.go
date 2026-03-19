@@ -111,24 +111,32 @@ import (
 //
 // # Example
 //
-//	strategy := compaction.NewSummarization(model).
+//	strategy := compaction.NewSummarization(model, textFormat).
 //	    WithKeepRecent(5)
 type SummarizationStrategy struct {
 	model        gent.Model
+	textFormat   gent.TextFormat
 	keepRecent   int
 	systemPrompt string
 	userPrompt   string
 }
 
 // NewSummarization creates a SummarizationStrategy with the
-// given model. By default, the strategy uses a two-message
-// structure (system + user) to enable prompt caching. See
-// [WithPrompt] to override with a single-message format.
+// given model and text format. The text format is used to
+// wrap the summary output in a "prior_work_summary" section
+// so the agent LLM can distinguish compacted content from
+// regular messages.
+//
+// By default, the strategy uses a two-message structure
+// (system + user) to enable prompt caching. See [WithPrompt]
+// to override with a single-message format.
 func NewSummarization(
 	model gent.Model,
+	textFormat gent.TextFormat,
 ) *SummarizationStrategy {
 	return &SummarizationStrategy{
 		model:        model,
+		textFormat:   textFormat,
 		keepRecent:   0,
 		systemPrompt: DefaultSummarizationSystemPrompt,
 		userPrompt:   DefaultSummarizationUserPrompt,
@@ -747,13 +755,20 @@ func (s *SummarizationStrategy) Compact(
 		)
 	}
 
-	summaryText := response.Choices[0].Content
+	summaryText := s.textFormat.FormatSections(
+		[]gent.FormattedSection{
+			{
+				Name:    "prior_work_summary",
+				Content: response.Choices[0].Content,
+			},
+		},
+	)
 
 	// Create synthetic summary iteration
 	synthetic := &gent.Iteration{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeGeneric,
+				Role: llms.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
 					llms.TextContent{
 						Text: summaryText,

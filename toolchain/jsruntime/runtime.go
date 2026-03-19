@@ -47,7 +47,9 @@ func New(config Config) *Runtime {
 
 	vm.SetMaxCallStackSize(config.MaxCallStack)
 
-	// Register console.log
+	// Register console.log — auto-stringifies objects
+	// and arrays via JSON.stringify, similar to Node.js
+	// inspect behavior. Prevents [object Object] output.
 	console := vm.NewObject()
 	err := console.Set(
 		"log",
@@ -56,7 +58,7 @@ func New(config Config) *Runtime {
 				[]string, len(call.Arguments),
 			)
 			for i, arg := range call.Arguments {
-				args[i] = arg.String()
+				args[i] = stringifyArg(vm, arg)
 			}
 			var sb strings.Builder
 			for i, a := range args {
@@ -171,4 +173,46 @@ func (r *Runtime) Execute(
 	copy(logs, r.consoleLog)
 
 	return &Result{ConsoleLog: logs}, nil
+}
+
+// stringifyArg converts a JS value to a string for
+// console.log. Objects and arrays are JSON.stringified
+// to avoid [object Object]. Primitives use toString().
+func stringifyArg(
+	vm *sobek.Runtime, val sobek.Value,
+) string {
+	if val == nil || sobek.IsUndefined(val) {
+		return "undefined"
+	}
+	if sobek.IsNull(val) {
+		return "null"
+	}
+
+	// Check if it's an object (not a primitive)
+	obj := val.ToObject(vm)
+	if obj == nil {
+		return val.String()
+	}
+
+	// Use className to distinguish objects/arrays
+	// from boxed primitives
+	switch obj.ClassName() {
+	case "Object", "Array":
+		stringify := vm.Get("JSON").
+			ToObject(vm).
+			Get("stringify")
+		fn, ok := sobek.AssertFunction(stringify)
+		if !ok {
+			return val.String()
+		}
+		result, err := fn(
+			sobek.Undefined(), val,
+		)
+		if err != nil {
+			return val.String()
+		}
+		return result.String()
+	default:
+		return val.String()
+	}
 }
