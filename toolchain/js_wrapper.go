@@ -166,7 +166,10 @@ func (w *JsToolChainWrapper) ParseSection(
 	return w.wrapped.ParseSection(execCtx, content)
 }
 
-// Execute detects the mode and routes accordingly.
+// Execute detects the mode(s) and routes accordingly.
+// Supports direct_call only, code only, or both in the
+// same action. When both are present, results are wrapped
+// in <direct_call> and <code_execution> sections.
 func (w *JsToolChainWrapper) Execute(
 	execCtx *gent.ExecutionContext,
 	content string,
@@ -176,51 +179,191 @@ func (w *JsToolChainWrapper) Execute(
 		panic("textFormat must not be nil")
 	}
 
-	// Detect mode via inner format
+	// Detect modes via inner format
 	sections, err := w.innerFormat.Parse(nil, content)
 
-	// Direct call path
+	var dcContent string
+	var codeContent string
+	var hasCode bool
+
 	if err == nil {
 		if dc, ok := sections["direct_call"]; ok &&
 			len(dc) > 0 {
-			return w.wrapped.Execute(
-				execCtx, dc[0], textFormat,
-			)
+			dcContent = dc[0]
+		}
+		if code, ok := sections["code"]; ok {
+			hasCode = true
+			if len(code) > 0 {
+				codeContent = code[0]
+			}
 		}
 	}
 
-	// Code path
-	if err == nil {
-		if code, ok := sections["code"]; ok &&
-			len(code) > 0 {
-			return w.executeCode(
-				execCtx, code[0], textFormat,
-			)
-		}
-
-		// Empty code block (tags present but no
-		// content) — return noop result
-		if _, ok := sections["code"]; ok {
-			return &gent.ToolChainResult{
-				Text: "Code executed successfully.",
-				Raw:  &gent.RawToolChainResult{},
-			}, nil
-		}
+	// Check for <code> tags even if parse failed
+	if !hasCode && hasCodeTags(content) {
+		hasCode = true
 	}
 
-	// Check if content has <code> tags even if parse
-	// failed (e.g. empty content between tags)
-	if hasCodeTags(content) {
-		return &gent.ToolChainResult{
-			Text: "Code executed successfully.",
-			Raw:  &gent.RawToolChainResult{},
-		}, nil
+	hasDC := dcContent != ""
+	dualMode := hasDC && hasCode
+
+	// Single mode: direct_call only
+	if hasDC && !hasCode {
+		return w.executeDirectCall(
+			execCtx, dcContent, textFormat,
+		)
+	}
+
+	// Single mode: code only
+	if hasCode && !hasDC {
+		return w.executeSingleCode(
+			execCtx, codeContent, textFormat,
+		)
+	}
+
+	// Dual mode: both direct_call and code
+	if dualMode {
+		return w.executeDualMode(
+			execCtx, dcContent, codeContent,
+			textFormat,
+		)
 	}
 
 	// Fallback: pass through to wrapped ToolChain
 	return w.wrapped.Execute(
 		execCtx, content, textFormat,
 	)
+}
+
+// executeDirectCall delegates to the wrapped ToolChain.
+func (w *JsToolChainWrapper) executeDirectCall(
+	execCtx *gent.ExecutionContext,
+	content string,
+	textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	return w.wrapped.Execute(
+		execCtx, content, textFormat,
+	)
+}
+
+// executeSingleCode runs code and returns the result
+// without any wrapper section.
+func (w *JsToolChainWrapper) executeSingleCode(
+	execCtx *gent.ExecutionContext,
+	code string,
+	textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	if code == "" {
+		return &gent.ToolChainResult{
+			Text: "Code executed successfully.",
+			Raw:  &gent.RawToolChainResult{},
+		}, nil
+	}
+	return w.executeCode(
+		execCtx, code, textFormat,
+	)
+}
+
+// executeDualMode runs both direct_call and code, then
+// combines results with <direct_call> and
+// <code_execution> wrapper sections.
+func (w *JsToolChainWrapper) executeDualMode(
+	execCtx *gent.ExecutionContext,
+	dcContent, codeContent string,
+	textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	// Run direct_call
+	dcResult, dcErr := w.executeDirectCall(
+		execCtx, dcContent, textFormat,
+	)
+
+	// Run code (even if direct_call failed)
+	var codeResult *gent.ToolChainResult
+	var codeErr error
+	if codeContent == "" {
+		codeResult = &gent.ToolChainResult{
+			Text: "Code executed successfully.",
+			Raw:  &gent.RawToolChainResult{},
+		}
+	} else {
+		codeResult, codeErr = w.executeCode(
+			execCtx, codeContent, textFormat,
+		)
+	}
+
+	// If both errored, return the first Go-level error
+	if dcErr != nil && codeErr != nil {
+		return nil, dcErr
+	}
+	if dcErr != nil {
+		return nil, dcErr
+	}
+	if codeErr != nil {
+		return nil, codeErr
+	}
+
+	// Wrap results in sections
+	var outerSections []gent.FormattedSection
+	if dcResult != nil && dcResult.Text != "" {
+		outerSections = append(
+			outerSections, gent.FormattedSection{
+				Name:    "direct_call",
+				Content: dcResult.Text,
+			},
+		)
+	}
+	if codeResult != nil && codeResult.Text != "" {
+		outerSections = append(
+			outerSections, gent.FormattedSection{
+				Name:    "code_execution",
+				Content: codeResult.Text,
+			},
+		)
+	}
+
+	// Merge raw results
+	merged := mergeRaw(dcResult, codeResult)
+
+	// Merge media
+	var media []gent.ContentPart
+	if dcResult != nil {
+		media = append(media, dcResult.Media...)
+	}
+	if codeResult != nil {
+		media = append(media, codeResult.Media...)
+	}
+
+	text := textFormat.FormatSections(outerSections)
+	if text == "" {
+		text = "Code executed successfully."
+	}
+
+	return &gent.ToolChainResult{
+		Text:  text,
+		Raw:   merged,
+		Media: media,
+	}, nil
+}
+
+// mergeRaw combines RawToolChainResults from two results.
+func mergeRaw(
+	a, b *gent.ToolChainResult,
+) *gent.RawToolChainResult {
+	merged := &gent.RawToolChainResult{}
+	for _, r := range []*gent.ToolChainResult{a, b} {
+		if r != nil && r.Raw != nil {
+			merged.Calls = append(
+				merged.Calls, r.Raw.Calls...,
+			)
+			merged.Results = append(
+				merged.Results, r.Raw.Results...,
+			)
+			merged.Errors = append(
+				merged.Errors, r.Raw.Errors...,
+			)
+		}
+	}
+	return merged
 }
 
 // executeCode runs JavaScript code via Sobek, routing
@@ -301,7 +444,8 @@ func (w *JsToolChainWrapper) executeCode(
 		}
 
 		// Build sections: tool_call_log (if any calls
-		// happened before the error) + code_error
+		// happened before the error) + output with
+		// the error message.
 		var sections []gent.FormattedSection
 		logText := buildToolCallLog(collector.Groups, schemaFn)
 		if logText != "" {
@@ -314,7 +458,7 @@ func (w *JsToolChainWrapper) executeCode(
 		}
 		sections = append(
 			sections, gent.FormattedSection{
-				Name:    "code_error",
+				Name:    "output",
 				Content: err.Error(),
 			},
 		)
@@ -349,29 +493,20 @@ func (w *JsToolChainWrapper) executeCode(
 		)
 	}
 
-	// Script output from console.log
-	var output string
+	// Script output — always present on success.
+	// Shows console.log content or a confirmation.
+	output := "Code executed successfully."
 	if len(result.ConsoleLog) > 0 {
 		output = strings.Join(
 			result.ConsoleLog, "\n",
 		)
 	}
-	if output != "" {
-		sections = append(
-			sections, gent.FormattedSection{
-				Name:    "output",
-				Content: output,
-			},
-		)
-	}
-
-	if len(sections) == 0 {
-		return &gent.ToolChainResult{
-			Text:  "Code executed successfully.",
-			Raw:   collector.BuildRaw(),
-			Media: collector.AllMedia,
-		}, nil
-	}
+	sections = append(
+		sections, gent.FormattedSection{
+			Name:    "output",
+			Content: output,
+		},
+	)
 
 	return &gent.ToolChainResult{
 		Text: textFormat.FormatSections(sections),
@@ -404,7 +539,7 @@ func (w *JsToolChainWrapper) preValidationError(
 	errorText := textFormat.FormatSections(
 		[]gent.FormattedSection{
 			{
-				Name:    "code_error",
+				Name:    "output",
 				Content: msg,
 			},
 		},

@@ -800,10 +800,12 @@ var c = tool.call(
 </code>`,
 			},
 			expected: expected{
-				text: "<tool_call_log>\n" +
-					`[1] lookup_customer({"id":"C001"})` +
-					` -> {"id":"C001","name":"Alice"}` +
-					"\n</tool_call_log>",
+				text: `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>
+<output>
+Code executed successfully.
+</output>`,
 			},
 		},
 		{
@@ -814,10 +816,10 @@ var x = @;
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 SyntaxError: SyntaxError: (anonymous): Line 1:9 Unexpected token ILLEGAL (and 2 more errors)
 
-</code_error>`,
+</output>`,
 			},
 		},
 		{
@@ -828,13 +830,13 @@ undefinedVar;
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 ReferenceError: undefinedVar is not defined
 
 1 | undefinedVar;
     ^ ReferenceError: undefinedVar is not defined
 
-</code_error>`,
+</output>`,
 			},
 		},
 		{
@@ -1168,13 +1170,13 @@ while(true) {}
 			require.NotNil(t, result)
 			assert.Equal(
 				t,
-				`<code_error>
+				`<output>
 execution interrupted: cancelled
 
 1 | while(true) {}
     ^ cancelled
 
-</code_error>`,
+</output>`,
 				result.Text,
 			)
 		},
@@ -1325,7 +1327,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1351,7 +1353,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1415,7 +1417,7 @@ var r2 = tool.call(
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 2 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1460,7 +1462,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1481,7 +1483,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1512,7 +1514,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1534,7 +1536,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1567,7 +1569,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1589,7 +1591,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1622,7 +1624,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1643,7 +1645,7 @@ var r2 = tool.call(
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1669,7 +1671,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1694,7 +1696,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1728,7 +1730,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1753,7 +1755,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1791,7 +1793,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1817,7 +1819,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1854,7 +1856,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1881,7 +1883,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1919,7 +1921,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -1945,7 +1947,7 @@ console.log(r.output);
 </code>`,
 			},
 			expected: expected{
-				text: `<code_error>
+				text: `<output>
 1 schema pre-validation error(s):
 
 --- Error 1: tool.call() at line 2 ---
@@ -1982,7 +1984,7 @@ Example:
 IMPORTANT: Use EXACT argument names and types from the tool schema.
 Fix ALL errors above before re-submitting your code.
 
-</code_error>`,
+</output>`,
 				emptyCalls: true,
 				codeExec:   1,
 				codeErr:    1,
@@ -3192,12 +3194,13 @@ var x = 1 + 2;
 </code>`,
 			},
 			expected: expected{
-				text: "Code executed successfully.",
+				text: `<output>
+Code executed successfully.
+</output>`,
 			},
 		},
 		{
-			name: "tool calls but no console.log " +
-				"— only tool_call_log",
+			name: "tool calls but no console.log",
 			input: input{
 				content: `<code>
 tool.call(
@@ -3209,7 +3212,10 @@ tool.call(
 			expected: expected{
 				text: `<tool_call_log>
 [1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
-</tool_call_log>`,
+</tool_call_log>
+<output>
+Code executed successfully.
+</output>`,
 			},
 		},
 		{
@@ -3228,7 +3234,7 @@ undefinedVar;
 				text: `<tool_call_log>
 [1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
 </tool_call_log>
-<code_error>
+<output>
 ReferenceError: undefinedVar is not defined
 
 3 |    args: {id: "C001"}}
@@ -3236,7 +3242,7 @@ ReferenceError: undefinedVar is not defined
 5 | undefinedVar;
     ^ ReferenceError: undefinedVar is not defined
 
-</code_error>`,
+</output>`,
 			},
 		},
 	}
@@ -3256,6 +3262,278 @@ ReferenceError: undefinedVar is not defined
 				t, tc.expected.text,
 				result.Text,
 			)
+		})
+	}
+}
+
+// -------------------------------------------------------
+// L. Dual mode — direct_call + code in same action
+// -------------------------------------------------------
+
+func TestJsWrapper_DualMode(t *testing.T) {
+	type input struct {
+		content string
+	}
+
+	type expected struct {
+		text          string
+		codeExec      int64
+		toolCallCount int64
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "both direct_call and code",
+			input: input{
+				content: `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>
+<code>
+(function() {
+var r = tool.call(
+  {tool: "get_orders",
+   args: {customer_id: "C001"}}
+);
+if (r.error) return;
+})();
+</code>`,
+			},
+			expected: expected{
+				text: `<direct_call>
+<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>
+</direct_call>
+<code_execution>
+<tool_call_log>
+[1] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
+</tool_call_log>
+<output>
+Code executed successfully.
+</output>
+</code_execution>`,
+				codeExec:      1,
+				toolCallCount: 2,
+			},
+		},
+		{
+			name: "direct_call with code " +
+				"console.log output",
+			input: input{
+				content: `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>
+<code>
+(function() {
+var r = tool.call(
+  {tool: "get_orders",
+   args: {customer_id: "C001"}}
+);
+if (r.error) return;
+console.log("orders: " + r.output.length);
+})();
+</code>`,
+			},
+			expected: expected{
+				text: `<direct_call>
+<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>
+</direct_call>
+<code_execution>
+<tool_call_log>
+[1] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
+</tool_call_log>
+<output>
+orders: 1
+</output>
+</code_execution>`,
+				codeExec:      1,
+				toolCallCount: 2,
+			},
+		},
+		{
+			name: "direct_call error does not " +
+				"block code",
+			input: input{
+				content: `<direct_call>
+{"tool": "nonexistent", "args": {}}
+</direct_call>
+<code>
+(function() {
+var r = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+if (r.error) return;
+console.log("found: " + r.output.name);
+})();
+</code>`,
+			},
+			expected: expected{
+				codeExec:      1,
+				toolCallCount: 1,
+			},
+		},
+		{
+			name: "code error does not block " +
+				"direct_call result",
+			input: input{
+				content: `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>
+<code>
+undefinedVar;
+</code>`,
+			},
+			expected: expected{
+				text: `<direct_call>
+<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>
+</direct_call>
+<code_execution>
+<output>
+ReferenceError: undefinedVar is not defined
+
+1 | undefinedVar;
+    ^ ReferenceError: undefinedVar is not defined
+
+</output>
+</code_execution>`,
+				codeExec:      1,
+				toolCallCount: 1,
+			},
+		},
+		{
+			name: "direct_call only — no wrapper",
+			input: input{
+				content: `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>`,
+			},
+			expected: expected{
+				text: `<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>`,
+				toolCallCount: 1,
+			},
+		},
+		{
+			name: "code only — no wrapper",
+			input: input{
+				content: `<code>
+(function() {
+var r = tool.call(
+  {tool: "lookup_customer",
+   args: {id: "C001"}}
+);
+if (r.error) return;
+})();
+</code>`,
+			},
+			expected: expected{
+				text: `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>
+<output>
+Code executed successfully.
+</output>`,
+				codeExec:      1,
+				toolCallCount: 1,
+			},
+		},
+		{
+			name: "both with empty code block",
+			input: input{
+				content: `<direct_call>
+{"tool": "lookup_customer", "args": {"id": "C001"}}
+</direct_call>
+<code>
+</code>`,
+			},
+			expected: expected{
+				text: `<direct_call>
+<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>
+</direct_call>
+<code_execution>
+Code executed successfully.
+</code_execution>`,
+				toolCallCount: 1,
+			},
+		},
+		{
+			name: "both with parallel direct_call",
+			input: input{
+				content: `<direct_call>
+[{"tool": "lookup_customer", "args": {"id": "C001"}},
+ {"tool": "get_orders", "args": {"customer_id": "C001"}}]
+</direct_call>
+<code>
+console.log("computed: 42");
+</code>`,
+			},
+			expected: expected{
+				text: `<direct_call>
+<lookup_customer>
+"{\"id\":\"C001\",\"name\":\"Alice\"}"
+</lookup_customer>
+<get_orders>
+"[{\"order_id\":\"O1\"}]"
+</get_orders>
+</direct_call>
+<code_execution>
+<output>
+computed: 42
+</output>
+</code_execution>`,
+				codeExec:      1,
+				toolCallCount: 2,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := setupJsWrapper()
+			execCtx := newExecCtx()
+			tf := jsTestFormat()
+
+			result, err := w.Execute(
+				execCtx, tc.input.content, tf,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			if tc.expected.text != "" {
+				assert.Equal(
+					t, tc.expected.text,
+					result.Text,
+				)
+			}
+
+			if tc.expected.codeExec > 0 {
+				assert.Equal(
+					t, tc.expected.codeExec,
+					execCtx.Stats().GetCounter(
+						gent.SCCodeExecutions,
+					),
+				)
+			}
+			if tc.expected.toolCallCount > 0 {
+				assert.Equal(
+					t, tc.expected.toolCallCount,
+					execCtx.Stats().GetCounter(
+						gent.SCToolCalls,
+					),
+				)
+			}
 		})
 	}
 }
