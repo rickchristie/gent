@@ -32,6 +32,7 @@ require (
 	github.com/blevesearch/zapx/v14 v14.4.2 // indirect
 	github.com/blevesearch/zapx/v15 v15.4.2 // indirect
 	github.com/blevesearch/zapx/v16 v16.2.8 // indirect
+	github.com/daulet/tokenizers v1.26.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
@@ -44,6 +45,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
+	github.com/yalue/onnxruntime_go v1.27.0 // indirect
 	go.etcd.io/bbolt v1.4.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect

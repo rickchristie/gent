@@ -43,8 +43,8 @@ const (
 //	    toolchain.SearchHintDomainCategories,
 //	).
 //	    WithPageSize(5).
-//	    RegisterEngine(toolchain.NewBM25SearchEngine()).
-//	    RegisterEngine(toolchain.NewRegexSearchEngine())
+//	    RegisterEngine(toolchain.NewBM25ToolSearchEngine()).
+//	    RegisterEngine(toolchain.NewRegexToolSearchEngine())
 //
 // # Registering Tools
 //
@@ -82,8 +82,8 @@ type SearchJSON struct {
 	indexableTools []gent.IndexableTool
 
 	// Search engines
-	engines   []gent.SearchEngine
-	engineMap map[string]gent.SearchEngine
+	engines   []gent.ToolSearchEngine
+	engineMap map[string]gent.ToolSearchEngine
 
 	// Config
 	hintType         SearchHintType
@@ -109,8 +109,8 @@ func NewSearchJSON(
 		tools:       make([]any, 0),
 		toolMap:     make(map[string]any),
 		schemaMap:   make(map[string]*schema.Schema),
-		engines:     make([]gent.SearchEngine, 0),
-		engineMap:   make(map[string]gent.SearchEngine),
+		engines:     make([]gent.ToolSearchEngine, 0),
+		engineMap:   make(map[string]gent.ToolSearchEngine),
 		pageSize:    3,
 		noResultsMessage: "No tools found matching " +
 			"your query. Try different keywords or " +
@@ -146,7 +146,7 @@ func (c *SearchJSON) WithNoResultsMessage(
 // RegisterEngine adds a search engine. Call before
 // Initialize().
 func (c *SearchJSON) RegisterEngine(
-	engine gent.SearchEngine,
+	engine gent.ToolSearchEngine,
 ) *SearchJSON {
 	c.engines = append(c.engines, engine)
 	c.engineMap[engine.Id()] = engine

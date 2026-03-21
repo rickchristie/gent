@@ -183,10 +183,10 @@ func CreateToolChain(config TestConfig) gent.ToolChain {
 			config.SearchHintType,
 		).
 			RegisterEngine(
-				toolchain.NewBM25SearchEngine(),
+				toolchain.NewBM25ToolSearchEngine(),
 			).
 			RegisterEngine(
-				toolchain.NewRegexSearchEngine(),
+				toolchain.NewRegexToolSearchEngine(),
 			)
 	default:
 		return toolchain.NewYAML()

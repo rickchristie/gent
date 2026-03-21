@@ -10,13 +10,13 @@ import (
 )
 
 func TestBM25_Id(t *testing.T) {
-	engine := NewBM25SearchEngine()
+	engine := NewBM25ToolSearchEngine()
 	assert.Equal(t, "bm25", engine.Id())
 }
 
 func TestBM25_SearchGuidance(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		engine := NewBM25SearchEngine()
+		engine := NewBM25ToolSearchEngine()
 		guidance := engine.SearchGuidance()
 		assert.NotEmpty(t, guidance)
 		assert.Contains(
@@ -25,7 +25,7 @@ func TestBM25_SearchGuidance(t *testing.T) {
 	})
 
 	t.Run("custom", func(t *testing.T) {
-		engine := NewBM25SearchEngine().
+		engine := NewBM25ToolSearchEngine().
 			WithSearchGuidance("custom guidance")
 		assert.Equal(
 			t, "custom guidance",
@@ -88,7 +88,7 @@ func TestBM25_IndexAll(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewBM25SearchEngine()
+			engine := NewBM25ToolSearchEngine()
 			err := engine.IndexAll(tt.input.tools)
 
 			if tt.expected.err != nil {
@@ -101,7 +101,7 @@ func TestBM25_IndexAll(t *testing.T) {
 }
 
 func TestBM25_IndexAll_Reindex(t *testing.T) {
-	engine := NewBM25SearchEngine()
+	engine := NewBM25ToolSearchEngine()
 
 	firstTools := []gent.IndexableTool{
 		&mockIndexableTool{
@@ -266,7 +266,7 @@ func TestBM25_Search(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewBM25SearchEngine()
+			engine := NewBM25ToolSearchEngine()
 			err := engine.IndexAll(tools)
 			require.NoError(t, err)
 
@@ -294,7 +294,7 @@ func TestBM25_Search(t *testing.T) {
 }
 
 func TestBM25_Search_NotInitialized(t *testing.T) {
-	engine := NewBM25SearchEngine()
+	engine := NewBM25ToolSearchEngine()
 	results, err := engine.Search(
 		context.Background(), "test",
 	)

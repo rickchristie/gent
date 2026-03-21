@@ -11,14 +11,14 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-// BM25SearchEngine searches tools using BM25 full-text search
+// BM25ToolSearchEngine searches tools using BM25 full-text search
 // via Bleve's in-memory index.
 //
 // Fields are indexed with different boosts:
 //   - High (3.0): name, description
 //   - Medium (2.0): keywords, categories
 //   - Lower (1.0): domain, synthetic_queries
-type BM25SearchEngine struct {
+type BM25ToolSearchEngine struct {
 	index           bleve.Index
 	searchGuidance string
 }
@@ -40,35 +40,35 @@ const defaultBM25Guidance = "Use natural language " +
 	"\"send notification to customer\", " +
 	"\"billing payment\""
 
-// NewBM25SearchEngine creates a new BM25-based search engine.
-func NewBM25SearchEngine() *BM25SearchEngine {
-	return &BM25SearchEngine{
+// NewBM25ToolSearchEngine creates a new BM25-based search engine.
+func NewBM25ToolSearchEngine() *BM25ToolSearchEngine {
+	return &BM25ToolSearchEngine{
 		searchGuidance: defaultBM25Guidance,
 	}
 }
 
 // WithSearchGuidance sets custom search guidance text.
-func (e *BM25SearchEngine) WithSearchGuidance(
+func (e *BM25ToolSearchEngine) WithSearchGuidance(
 	guidance string,
-) *BM25SearchEngine {
+) *BM25ToolSearchEngine {
 	e.searchGuidance = guidance
 	return e
 }
 
 // Id returns "bm25".
-func (e *BM25SearchEngine) Id() string {
+func (e *BM25ToolSearchEngine) Id() string {
 	return "bm25"
 }
 
 // SearchGuidance returns instructions for writing BM25
 // queries. Override with WithSearchGuidance.
-func (e *BM25SearchEngine) SearchGuidance() string {
+func (e *BM25ToolSearchEngine) SearchGuidance() string {
 	return e.searchGuidance
 }
 
 // IndexAll indexes all provided tools. Closes any existing
 // index and creates a new one.
-func (e *BM25SearchEngine) IndexAll(
+func (e *BM25ToolSearchEngine) IndexAll(
 	tools []gent.IndexableTool,
 ) error {
 	// Close existing index if present (supports re-indexing)
@@ -116,7 +116,7 @@ func (e *BM25SearchEngine) IndexAll(
 
 // buildMapping creates the Bleve index mapping.
 // All fields use standard text analysis for BM25 scoring.
-func (e *BM25SearchEngine) buildMapping() mapping.IndexMapping {
+func (e *BM25ToolSearchEngine) buildMapping() mapping.IndexMapping {
 	textField := bleve.NewTextFieldMapping()
 	textField.Analyzer = "standard"
 	textField.Store = false
@@ -145,7 +145,7 @@ func (e *BM25SearchEngine) buildMapping() mapping.IndexMapping {
 }
 
 // Search finds tools matching the query using BM25 scoring.
-func (e *BM25SearchEngine) Search(
+func (e *BM25ToolSearchEngine) Search(
 	ctx context.Context,
 	query string,
 ) ([]string, error) {
@@ -172,6 +172,6 @@ func (e *BM25SearchEngine) Search(
 	return names, nil
 }
 
-// Compile-time check that BM25SearchEngine implements
-// SearchEngine.
-var _ gent.SearchEngine = (*BM25SearchEngine)(nil)
+// Compile-time check that BM25ToolSearchEngine implements
+// ToolSearchEngine.
+var _ gent.ToolSearchEngine = (*BM25ToolSearchEngine)(nil)

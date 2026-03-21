@@ -9,7 +9,7 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-// RegexSearchEngine searches tools using regex pattern matching.
+// RegexToolSearchEngine searches tools using regex pattern matching.
 //
 // It stores each tool's searchable texts (name, description,
 // domain, keywords, categories, synthetic queries) and counts
@@ -18,7 +18,7 @@ import (
 //
 // Invalid regex patterns return a descriptive error that is
 // surfaced to the LLM so it can fix the query.
-type RegexSearchEngine struct {
+type RegexToolSearchEngine struct {
 	tools          []regexToolEntry
 	searchGuidance string
 }
@@ -34,34 +34,34 @@ const defaultRegexGuidance = "Use regex patterns to " +
 	"Examples: \"order.*status\", \"email|sms\", " +
 	"\"^lookup\""
 
-// NewRegexSearchEngine creates a new regex-based search engine.
-func NewRegexSearchEngine() *RegexSearchEngine {
-	return &RegexSearchEngine{
+// NewRegexToolSearchEngine creates a new regex-based search engine.
+func NewRegexToolSearchEngine() *RegexToolSearchEngine {
+	return &RegexToolSearchEngine{
 		searchGuidance: defaultRegexGuidance,
 	}
 }
 
 // WithSearchGuidance sets custom search guidance text.
-func (e *RegexSearchEngine) WithSearchGuidance(
+func (e *RegexToolSearchEngine) WithSearchGuidance(
 	guidance string,
-) *RegexSearchEngine {
+) *RegexToolSearchEngine {
 	e.searchGuidance = guidance
 	return e
 }
 
 // Id returns "regex".
-func (e *RegexSearchEngine) Id() string {
+func (e *RegexToolSearchEngine) Id() string {
 	return "regex"
 }
 
 // SearchGuidance returns instructions for writing regex
 // queries. Override with WithSearchGuidance.
-func (e *RegexSearchEngine) SearchGuidance() string {
+func (e *RegexToolSearchEngine) SearchGuidance() string {
 	return e.searchGuidance
 }
 
 // IndexAll indexes all provided tools for regex searching.
-func (e *RegexSearchEngine) IndexAll(
+func (e *RegexToolSearchEngine) IndexAll(
 	tools []gent.IndexableTool,
 ) error {
 	entries := make([]regexToolEntry, len(tools))
@@ -83,7 +83,7 @@ func (e *RegexSearchEngine) IndexAll(
 }
 
 // Search finds tools matching the regex pattern.
-func (e *RegexSearchEngine) Search(
+func (e *RegexToolSearchEngine) Search(
 	_ context.Context,
 	query string,
 ) ([]string, error) {
@@ -125,6 +125,6 @@ func (e *RegexSearchEngine) Search(
 	return names, nil
 }
 
-// Compile-time check that RegexSearchEngine implements
-// SearchEngine.
-var _ gent.SearchEngine = (*RegexSearchEngine)(nil)
+// Compile-time check that RegexToolSearchEngine implements
+// ToolSearchEngine.
+var _ gent.ToolSearchEngine = (*RegexToolSearchEngine)(nil)

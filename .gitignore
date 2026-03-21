@@ -24,6 +24,7 @@ Thumbs.db
 /cli
 /clistreamtest
 /cliairlinetest
+/gent
 
 # Log files
 .logs/

@@ -445,8 +445,8 @@ func setupJsWrapper() *JsToolChainWrapper {
 		),
 	}
 
-	engines := []gent.SearchEngine{
-		&mockSearchEngine{
+	engines := []gent.ToolSearchEngine{
+		&mockToolSearchEngine{
 			id:       "keyword",
 			guidance: "Search by keyword",
 			searchFn: func(
