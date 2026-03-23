@@ -619,6 +619,48 @@ func TestSearchJSON_AvailableToolsPrompt(t *testing.T) {
 	)
 }
 
+func TestSearchJSON_OutputSchema_PinnedTools(t *testing.T) {
+	pinnedTool := newIndexableTool(
+		"get_item", "Get an item", "Items",
+		[]string{"lookup"}, nil,
+		func(
+			_ context.Context, _ map[string]any,
+		) (string, error) {
+			return "", nil
+		},
+	)
+
+	eng := &mockToolSearcher{
+		id: "bm25", guidance: "search",
+	}
+
+	t.Run("output schema disabled by default",
+		func(t *testing.T) {
+			tc := NewSearchJSON(SearchHintDomainCategories).
+				RegisterEngine(eng)
+			tc.RegisterTool(pinnedTool)
+			tc.Pin("get_item")
+			require.NoError(t, tc.Initialize())
+			prompt := tc.AvailableToolsPrompt()
+			assert.NotContains(t, prompt, "Returns:")
+		},
+	)
+
+	t.Run("output schema enabled on pinned tools",
+		func(t *testing.T) {
+			tc := NewSearchJSON(SearchHintDomainCategories).
+				WithOutputSchema(true).
+				RegisterEngine(eng)
+			tc.RegisterTool(pinnedTool)
+			tc.Pin("get_item")
+			require.NoError(t, tc.Initialize())
+			prompt := tc.AvailableToolsPrompt()
+			assert.Contains(t, prompt, "Returns:")
+			assert.Contains(t, prompt, `"type": "string"`)
+		},
+	)
+}
+
 func TestSearchJSON_AvailableToolsPrompt_SimpleList(
 	t *testing.T,
 ) {

@@ -170,7 +170,7 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	toolsPrompt := r.toolChain.AvailableToolsPrompt()
 
 	// Build messages for model call
-	messages := r.buildMessages(data, outputPrompt, toolsPrompt)
+	messages := r.buildMessages(execCtx, data, outputPrompt, toolsPrompt)
 
 	// Generate stream ID based on iteration for unique identification
 	streamId := fmt.Sprintf("iter-%d", execCtx.Iteration())
@@ -374,18 +374,19 @@ func (r *Agent) buildOutputSections() []gent.TextOutputSection {
 
 // buildMessages constructs the message list for the model call.
 // Message structure:
-//  1. System prompt (from SystemPromptBuilder) - typically 1 message
+//  1. System prompt (from SystemPromptBuilder + BeforeSystemPromptEvent) - x1
 //  2. Task (role: user) - x1, text + media parts, panics if both empty
 //  3. Scratchpad (N messages interleaved: role: AI, then role: human)
 //  4. BEGIN!/CONTINUE! (role: user) - x1
 func (r *Agent) buildMessages(
+	execCtx *gent.ExecutionContext,
 	data gent.LoopData,
 	outputPrompt string,
 	toolsPrompt string,
 ) []llms.MessageContent {
 	var messages []llms.MessageContent
 
-	// 1. System prompt(s) from builder
+	// 1. System prompt: build sections, publish event, format
 	ctx := SystemPromptContext{
 		Format:             r.format,
 		BehaviorAndContext: r.behaviorAndContext,
@@ -394,13 +395,17 @@ func (r *Agent) buildMessages(
 		ToolsPrompt:        toolsPrompt,
 		Time:               r.timeProvider,
 	}
-	systemMessages := r.systemPromptBuilder(ctx)
-	for _, msg := range systemMessages {
-		messages = append(messages, llms.MessageContent{
-			Role:  msg.Role,
-			Parts: toLLMParts(msg.Parts),
-		})
-	}
+	sections := r.systemPromptBuilder(ctx)
+
+	// Publish BeforeSystemPromptEvent — subscribers may modify sections
+	event := execCtx.PublishBeforeSystemPrompt(sections)
+	sections = event.Sections
+
+	systemContent := r.format.FormatSections(sections)
+	messages = append(messages, llms.MessageContent{
+		Role:  llms.ChatMessageTypeSystem,
+		Parts: []llms.ContentPart{llms.TextContent{Text: systemContent}},
+	})
 
 	// 2. Task message (role: user) - text + media parts
 	messages = append(messages, r.buildTaskMessage(data))

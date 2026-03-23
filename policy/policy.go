@@ -138,26 +138,33 @@ type PolicyChunkAdapter struct{}
 func (a *PolicyChunkAdapter) Chunks(
 	p *Policy, tc search.TokenCounter, maxTokens int,
 ) ([]search.Chunk, error) {
-	tokenCount := func(s string) int { return len(s) / 4 }
-	if tc != nil {
-		tokenCount = tc.TokenCount
-	}
-	if maxTokens == 0 {
-		maxTokens = 512
-	}
 
 	// Primary content with policy ID as heading.
 	primary := fmt.Sprintf("# %s\n\n%s", p.Id, p.FullContent)
-	chunker := &search.MarkdownChunker{ChunkSize: maxTokens, TokenCount: tokenCount}
+	chunker := &search.MarkdownChunker{
+		ChunkSize: maxTokens, TokenCount: tc.TokenCount,
+	}
 	chunks := chunker.Chunk(primary)
 
 	// Additional chunk for synthetic queries — helps semantic search match on
 	// intent-phrased queries independently from policy body text.
+	// The Snippet is set to the first content chunk so search results show actual
+	// policy content rather than the synthetic query text.
 	if len(p.SyntheticQueries) > 0 {
-		sqText := fmt.Sprintf("# %s\n\n%s", p.Id, strings.Join(p.SyntheticQueries, "\n"))
+		sqText := fmt.Sprintf(
+			"# %s\n\n%s",
+			p.Id, strings.Join(p.SyntheticQueries, "\n"),
+		)
+		var snippet string
+		if len(chunks) > 0 {
+			snippet = chunks[0].Text
+		}
 		chunks = append(chunks, search.Chunk{
-			Text:     sqText,
-			Metadata: map[string]string{"h1": p.Id, "type": "synthetic_queries"},
+			Text:    sqText,
+			Snippet: snippet,
+			Metadata: map[string]string{
+				"h1": p.Id, "type": "synthetic_queries",
+			},
 		})
 	}
 

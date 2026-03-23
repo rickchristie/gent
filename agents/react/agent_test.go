@@ -20,10 +20,11 @@ import (
 // ----------------------------------------------------------------------------
 
 type mockModel struct {
-	responses       []*gent.ContentResponse
-	errors          []error
-	callCount       int
-	capturedOptions [][]llms.CallOption
+	responses        []*gent.ContentResponse
+	errors           []error
+	callCount        int
+	capturedOptions  [][]llms.CallOption
+	capturedMessages [][]llms.MessageContent
 }
 
 func newMockModel(responses ...*gent.ContentResponse) *mockModel {
@@ -39,9 +40,10 @@ func (m *mockModel) GenerateContent(
 	_ *gent.ExecutionContext,
 	_ string,
 	_ string,
-	_ []llms.MessageContent,
+	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (*gent.ContentResponse, error) {
+	m.capturedMessages = append(m.capturedMessages, messages)
 	m.capturedOptions = append(
 		m.capturedOptions, options,
 	)
@@ -332,8 +334,9 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithTermination(term)
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
+		execCtx := newTestExecCtx(data)
 
-		messages := loop.buildMessages(data, "output prompt", "tools prompt")
+		messages := loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
 
 		// Expected structure: system, task, BEGIN!
 		require.Len(t, messages, 3, "expected 3 messages: system, task, BEGIN!")
@@ -381,11 +384,13 @@ func TestAgent_BuildMessages(t *testing.T) {
 			},
 		}
 		data.SetScratchPad([]*gent.Iteration{iter})
+		execCtx := newTestExecCtx(data)
 
-		messages := loop.buildMessages(data, "output prompt", "tools prompt")
+		messages := loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
 
 		// Expected: system, task, AI, observation, CONTINUE!
-		require.Len(t, messages, 5, "expected 5 messages: system, task, AI, observation, CONTINUE!")
+		require.Len(t, messages, 5,
+			"expected 5 messages: system, task, AI, observation, CONTINUE!")
 
 		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
 		assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role) // task
@@ -411,9 +416,10 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithTermination(term)
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "", Media: nil})
+		execCtx := newTestExecCtx(data)
 
 		assert.Panics(t, func() {
-			loop.buildMessages(data, "output prompt", "tools prompt")
+			loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
 		})
 	})
 
@@ -429,9 +435,10 @@ func TestAgent_BuildMessages(t *testing.T) {
 			WithTermination(term)
 
 		data := gent.NewBasicLoopData(nil)
+		execCtx := newTestExecCtx(data)
 
 		assert.Panics(t, func() {
-			loop.buildMessages(data, "output prompt", "tools prompt")
+			loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
 		})
 	})
 }
@@ -1095,7 +1102,7 @@ func TestAgent_WithTimeProvider(t *testing.T) {
 }
 
 func TestDefaultSystemPromptBuilder(t *testing.T) {
-	t.Run("formats all sections with TextFormat", func(t *testing.T) {
+	t.Run("returns all sections", func(t *testing.T) {
 		format := newMockFormat()
 		ctx := SystemPromptContext{
 			Format:             format,
@@ -1106,23 +1113,18 @@ func TestDefaultSystemPromptBuilder(t *testing.T) {
 			Time:               gent.NewDefaultTimeProvider(),
 		}
 
-		messages := DefaultSystemPromptBuilder(ctx)
+		sections := DefaultSystemPromptBuilder(ctx)
 
-		require.Len(t, messages, 1)
-		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
-
-		// Check that content contains all formatted sections
-		content, ok := messages[0].Parts[0].(llms.TextContent)
-		require.True(t, ok)
-
-		// All sections should be formatted with XML tags (from mockFormat)
-		assert.Contains(t, content.Text, "<behavior>")
-		assert.Contains(t, content.Text, "You are helpful.")
-		assert.Contains(t, content.Text, "<re_act>")
-		assert.Contains(t, content.Text, "<critical_rules>")
-		assert.Contains(t, content.Text, "Never lie.")
-		assert.Contains(t, content.Text, "<available_tools>")
-		assert.Contains(t, content.Text, "<output_format>")
+		require.Len(t, sections, 5)
+		assert.Equal(t, "behavior", sections[0].Name)
+		assert.Equal(t, "You are helpful.", sections[0].Content)
+		assert.Equal(t, "re_act", sections[1].Name)
+		assert.Equal(t, "critical_rules", sections[2].Name)
+		assert.Equal(t, "Never lie.", sections[2].Content)
+		assert.Equal(t, "available_tools", sections[3].Name)
+		assert.Equal(t, "Available tools: search", sections[3].Content)
+		assert.Equal(t, "output_format", sections[4].Name)
+		assert.Equal(t, "Use XML tags.", sections[4].Content)
 	})
 
 	t.Run("skips empty optional sections", func(t *testing.T) {
@@ -1136,20 +1138,12 @@ func TestDefaultSystemPromptBuilder(t *testing.T) {
 			Time:               gent.NewDefaultTimeProvider(),
 		}
 
-		messages := DefaultSystemPromptBuilder(ctx)
+		sections := DefaultSystemPromptBuilder(ctx)
 
-		require.Len(t, messages, 1)
-		content, ok := messages[0].Parts[0].(llms.TextContent)
-		require.True(t, ok)
-
-		// Required sections should be present
-		assert.Contains(t, content.Text, "<re_act>")
-		assert.Contains(t, content.Text, "<available_tools>")
-		assert.Contains(t, content.Text, "<output_format>")
-
-		// Optional sections should not be present when empty
-		assert.NotContains(t, content.Text, "<behavior>")
-		assert.NotContains(t, content.Text, "<critical_rules>")
+		require.Len(t, sections, 3)
+		assert.Equal(t, "re_act", sections[0].Name)
+		assert.Equal(t, "available_tools", sections[1].Name)
+		assert.Equal(t, "output_format", sections[2].Name)
 	})
 }
 
@@ -1160,12 +1154,9 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 		tc := newMockToolChain()
 		term := newMockTermination()
 
-		customBuilder := func(ctx SystemPromptContext) []gent.MessageContent {
-			return []gent.MessageContent{
-				{
-					Role:  llms.ChatMessageTypeSystem,
-					Parts: []gent.ContentPart{llms.TextContent{Text: "Custom system prompt"}},
-				},
+		customBuilder := func(ctx SystemPromptContext) []gent.FormattedSection {
+			return []gent.FormattedSection{
+				{Name: "custom", Content: "Custom system prompt"},
 			}
 		}
 
@@ -1176,55 +1167,15 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 			WithSystemPromptBuilder(customBuilder)
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
-		messages := loop.buildMessages(data, "output", "tools")
+		execCtx := newTestExecCtx(data)
+		messages := loop.buildMessages(execCtx, data, "output", "tools")
 
-		// First message should be our custom system prompt
+		// First message should be system prompt with our custom section
 		require.GreaterOrEqual(t, len(messages), 1)
 		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
 		content, ok := messages[0].Parts[0].(llms.TextContent)
 		require.True(t, ok)
-		assert.Equal(t, "Custom system prompt", content.Text)
-	})
-
-	t.Run("builder can return multiple messages", func(t *testing.T) {
-		model := newMockModel()
-		format := newMockFormat()
-		tc := newMockToolChain()
-		term := newMockTermination()
-
-		multiMessageBuilder := func(ctx SystemPromptContext) []gent.MessageContent {
-			return []gent.MessageContent{
-				{
-					Role:  llms.ChatMessageTypeSystem,
-					Parts: []gent.ContentPart{llms.TextContent{Text: "System 1"}},
-				},
-				{
-					Role:  llms.ChatMessageTypeHuman,
-					Parts: []gent.ContentPart{llms.TextContent{Text: "Example user"}},
-				},
-				{
-					Role:  llms.ChatMessageTypeAI,
-					Parts: []gent.ContentPart{llms.TextContent{Text: "Example response"}},
-				},
-			}
-		}
-
-		loop := NewAgent(model).
-			WithFormat(format).
-			WithToolChain(tc).
-			WithTermination(term).
-			WithSystemPromptBuilder(multiMessageBuilder)
-
-		data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
-		messages := loop.buildMessages(data, "output", "tools")
-
-		// Should have: 3 from builder + 1 task + 1 BEGIN!
-		require.Len(t, messages, 5)
-		assert.Equal(t, llms.ChatMessageTypeSystem, messages[0].Role)
-		assert.Equal(t, llms.ChatMessageTypeHuman, messages[1].Role)
-		assert.Equal(t, llms.ChatMessageTypeAI, messages[2].Role)
-		assert.Equal(t, llms.ChatMessageTypeHuman, messages[3].Role) // task
-		assert.Equal(t, llms.ChatMessageTypeHuman, messages[4].Role) // BEGIN!
+		assert.Contains(t, content.Text, "Custom system prompt")
 	})
 
 	t.Run("builder receives correct context", func(t *testing.T) {
@@ -1232,16 +1183,15 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 		format := newMockFormat()
 		tc := newMockToolChain()
 		term := newMockTermination()
-		mockTime := gent.NewMockTimeProvider(time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+		mockTime := gent.NewMockTimeProvider(
+			time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
+		)
 
 		var capturedCtx SystemPromptContext
-		capturingBuilder := func(ctx SystemPromptContext) []gent.MessageContent {
+		capturingBuilder := func(ctx SystemPromptContext) []gent.FormattedSection {
 			capturedCtx = ctx
-			return []gent.MessageContent{
-				{
-					Role:  llms.ChatMessageTypeSystem,
-					Parts: []gent.ContentPart{llms.TextContent{Text: "test"}},
-				},
+			return []gent.FormattedSection{
+				{Name: "test", Content: "test"},
 			}
 		}
 
@@ -1255,7 +1205,8 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 			WithSystemPromptBuilder(capturingBuilder)
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
-		loop.buildMessages(data, "output prompt", "tools prompt")
+		execCtx := newTestExecCtx(data)
+		loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
 
 		assert.Equal(t, format, capturedCtx.Format)
 		assert.Equal(t, "Be helpful", capturedCtx.BehaviorAndContext)
@@ -1712,5 +1663,432 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 				"forbidden warnings",
 			)
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// BeforeSystemPromptEvent Tests
+// ----------------------------------------------------------------------------
+
+// systemPromptSubscriber implements BeforeSystemPromptSubscriber for testing.
+type systemPromptSubscriber struct {
+	capturedSections [][]gent.FormattedSection
+	onEvent          func(
+		execCtx *gent.ExecutionContext,
+		event *gent.BeforeSystemPromptEvent,
+	)
+}
+
+func (s *systemPromptSubscriber) OnBeforeSystemPrompt(
+	execCtx *gent.ExecutionContext,
+	event *gent.BeforeSystemPromptEvent,
+) {
+	s.capturedSections = append(
+		s.capturedSections,
+		append([]gent.FormattedSection{}, event.Sections...),
+	)
+	if s.onEvent != nil {
+		s.onEvent(execCtx, event)
+	}
+}
+
+func TestAgent_BeforeSystemPromptEvent(t *testing.T) {
+	type input struct {
+		behaviorAndContext string
+		criticalRules      string
+		responseContent    string
+		parsedSections     map[string][]string
+	}
+
+	type mocks struct {
+		onEvent func(
+			execCtx *gent.ExecutionContext,
+			event *gent.BeforeSystemPromptEvent,
+		)
+	}
+
+	type expected struct {
+		systemPromptContains    []string
+		systemPromptNotContains []string
+		capturedSectionNames    []string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		mocks    mocks
+		expected expected
+	}{
+		{
+			name: "subscriber appends a dynamic reminder section",
+			input: input{
+				behaviorAndContext: "You are helpful.",
+				responseContent:   "<answer>done</answer>",
+				parsedSections:    map[string][]string{"answer": {"done"}},
+			},
+			mocks: mocks{
+				onEvent: func(
+					_ *gent.ExecutionContext,
+					event *gent.BeforeSystemPromptEvent,
+				) {
+					event.Sections = append(
+						event.Sections,
+						gent.FormattedSection{
+							Name:    "reminder",
+							Content: "Always cite your sources.",
+						},
+					)
+				},
+			},
+			expected: expected{
+				systemPromptContains: []string{
+					"You are helpful.",
+					"Always cite your sources.",
+					"<reminder>",
+				},
+				capturedSectionNames: []string{
+					"behavior",
+					"re_act",
+					"available_tools",
+					"output_format",
+				},
+			},
+		},
+		{
+			name: "subscriber replaces all sections",
+			input: input{
+				behaviorAndContext: "You are helpful.",
+				criticalRules:     "Never lie.",
+				responseContent:   "<answer>done</answer>",
+				parsedSections:    map[string][]string{"answer": {"done"}},
+			},
+			mocks: mocks{
+				onEvent: func(
+					_ *gent.ExecutionContext,
+					event *gent.BeforeSystemPromptEvent,
+				) {
+					event.Sections = []gent.FormattedSection{
+						{
+							Name:    "custom",
+							Content: "Completely custom prompt.",
+						},
+					}
+				},
+			},
+			expected: expected{
+				systemPromptContains: []string{
+					"Completely custom prompt.",
+					"<custom>",
+				},
+				systemPromptNotContains: []string{
+					"You are helpful.",
+					"Never lie.",
+					"<behavior>",
+					"<re_act>",
+				},
+				capturedSectionNames: []string{
+					"behavior",
+					"re_act",
+					"critical_rules",
+					"available_tools",
+					"output_format",
+				},
+			},
+		},
+		{
+			name: "subscriber removes a section",
+			input: input{
+				behaviorAndContext: "You are helpful.",
+				criticalRules:     "Never lie.",
+				responseContent:   "<answer>done</answer>",
+				parsedSections:    map[string][]string{"answer": {"done"}},
+			},
+			mocks: mocks{
+				onEvent: func(
+					_ *gent.ExecutionContext,
+					event *gent.BeforeSystemPromptEvent,
+				) {
+					// Remove re_act section
+					var filtered []gent.FormattedSection
+					for _, s := range event.Sections {
+						if s.Name != "re_act" {
+							filtered = append(filtered, s)
+						}
+					}
+					event.Sections = filtered
+				},
+			},
+			expected: expected{
+				systemPromptContains: []string{
+					"You are helpful.",
+					"Never lie.",
+				},
+				systemPromptNotContains: []string{
+					"<re_act>",
+				},
+				capturedSectionNames: []string{
+					"behavior",
+					"re_act",
+					"critical_rules",
+					"available_tools",
+					"output_format",
+				},
+			},
+		},
+		{
+			name: "no subscriber does not modify sections",
+			input: input{
+				behaviorAndContext: "You are helpful.",
+				responseContent:   "<answer>done</answer>",
+				parsedSections:    map[string][]string{"answer": {"done"}},
+			},
+			mocks: mocks{
+				onEvent: nil,
+			},
+			expected: expected{
+				systemPromptContains: []string{
+					"You are helpful.",
+					"<behavior>",
+					"<re_act>",
+				},
+				capturedSectionNames: []string{
+					"behavior",
+					"re_act",
+					"available_tools",
+					"output_format",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := &gent.ContentResponse{
+				Choices: []*gent.ContentChoice{
+					{Content: tt.input.responseContent},
+				},
+			}
+			model := newMockModel(response)
+			format := newMockFormat().WithParseResult(tt.input.parsedSections)
+			tc := newMockToolChain()
+			term := newMockTermination()
+
+			agent := NewAgent(model).
+				WithFormat(format).
+				WithToolChain(tc).
+				WithTermination(term).
+				WithBehaviorAndContext(tt.input.behaviorAndContext)
+
+			if tt.input.criticalRules != "" {
+				agent.WithCriticalRules(tt.input.criticalRules)
+			}
+
+			data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", data,
+			)
+			execCtx.SetLimits(nil)
+
+			sub := &systemPromptSubscriber{onEvent: tt.mocks.onEvent}
+			registry := newTestRegistry(sub)
+			execCtx.SetEventPublisher(registry)
+
+			_, err := agent.Next(execCtx)
+			require.NoError(t, err)
+
+			// Verify system prompt content sent to model
+			require.Len(t, model.capturedMessages, 1)
+			systemMsg := model.capturedMessages[0][0]
+			assert.Equal(t, llms.ChatMessageTypeSystem, systemMsg.Role)
+			systemText, ok := systemMsg.Parts[0].(llms.TextContent)
+			require.True(t, ok)
+
+			for _, want := range tt.expected.systemPromptContains {
+				assert.Contains(t, systemText.Text, want,
+					"system prompt should contain %q", want)
+			}
+			for _, notWant := range tt.expected.systemPromptNotContains {
+				assert.NotContains(t, systemText.Text, notWant,
+					"system prompt should not contain %q", notWant)
+			}
+
+			// Verify captured sections (before modification)
+			if tt.mocks.onEvent != nil {
+				require.Len(t, sub.capturedSections, 1)
+				var names []string
+				for _, s := range sub.capturedSections[0] {
+					names = append(names, s.Name)
+				}
+				assert.Equal(t, tt.expected.capturedSectionNames, names)
+			}
+		})
+	}
+}
+
+func TestAgent_BeforeSystemPromptEvent_DynamicPerIteration(t *testing.T) {
+	// Verify that the subscriber is called on each iteration and can inject
+	// different content based on iteration count.
+	responses := []*gent.ContentResponse{
+		// Iteration 1: tool call → continue
+		{Choices: []*gent.ContentChoice{
+			{Content: "<action>tool: search\nargs:\n  q: test</action>"},
+		}},
+		// Iteration 2: answer → terminate
+		{Choices: []*gent.ContentChoice{
+			{Content: "<answer>done</answer>"},
+		}},
+	}
+	model := newMockModel(responses...)
+
+	callCount := 0
+	format := &iterMockFormat{
+		parseResults: []map[string][]string{
+			{"action": {"tool: search\nargs:\n  q: test"}},
+			{"answer": {"done"}},
+		},
+	}
+	tc := newMockToolChain().WithResults(&gent.ToolChainResult{
+		Text: "<observation>\n<search>\nfound\n</search>\n</observation>",
+		Raw: &gent.RawToolChainResult{
+			Calls:   []*gent.ToolCall{{Name: "search", Args: map[string]any{"q": "test"}}},
+			Results: []*gent.RawToolCallResult{{Name: "search", Output: "found"}},
+			Errors:  []error{nil},
+		},
+	})
+	term := newMockTermination()
+
+	agent := NewAgent(model).
+		WithFormat(format).
+		WithToolChain(tc).
+		WithTermination(term).
+		WithBehaviorAndContext("Be helpful.")
+
+	sub := &systemPromptSubscriber{
+		onEvent: func(
+			execCtx *gent.ExecutionContext,
+			event *gent.BeforeSystemPromptEvent,
+		) {
+			callCount++
+			event.Sections = append(
+				event.Sections,
+				gent.FormattedSection{
+					Name: "reminder",
+					Content: fmt.Sprintf(
+						"This is iteration %d.", callCount,
+					),
+				},
+			)
+		},
+	}
+
+	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+	execCtx := gent.NewExecutionContext(
+		context.Background(), "test", data,
+	)
+	execCtx.SetLimits(nil)
+
+	registry := newTestRegistry(sub)
+	execCtx.SetEventPublisher(registry)
+
+	// Iteration 1: tool call
+	result, err := agent.Next(execCtx)
+	require.NoError(t, err)
+	assert.Equal(t, gent.LAContinue, result.Action)
+
+	require.Len(t, model.capturedMessages, 1)
+	sys1, ok := model.capturedMessages[0][0].Parts[0].(llms.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, sys1.Text, "This is iteration 1.")
+
+	// Iteration 2: answer
+	result, err = agent.Next(execCtx)
+	require.NoError(t, err)
+	assert.Equal(t, gent.LATerminate, result.Action)
+
+	require.Len(t, model.capturedMessages, 2)
+	sys2, ok := model.capturedMessages[1][0].Parts[0].(llms.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, sys2.Text, "This is iteration 2.")
+	assert.NotContains(t, sys2.Text, "This is iteration 1.")
+
+	// Subscriber was called twice
+	assert.Len(t, sub.capturedSections, 2)
+}
+
+// iterMockFormat is a mock format that returns different parse results per call.
+type iterMockFormat struct {
+	parseResults []map[string][]string
+	callCount    int
+}
+
+func (m *iterMockFormat) RegisterSection(_ gent.TextSection) gent.TextFormat {
+	return m
+}
+
+func (m *iterMockFormat) DescribeStructure() string {
+	return "mock format structure"
+}
+
+func (m *iterMockFormat) Parse(
+	execCtx *gent.ExecutionContext,
+	_ string,
+) (map[string][]string, error) {
+	idx := m.callCount
+	m.callCount++
+	if execCtx != nil {
+		execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
+	}
+	if idx < len(m.parseResults) {
+		return m.parseResults[idx], nil
+	}
+	return map[string][]string{}, nil
+}
+
+func (m *iterMockFormat) FormatSections(
+	sections []gent.FormattedSection,
+) string {
+	var parts []string
+	for _, section := range sections {
+		parts = append(parts, m.formatSection(section))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (m *iterMockFormat) formatSection(
+	section gent.FormattedSection,
+) string {
+	var inner []string
+	if section.Content != "" {
+		inner = append(inner, section.Content)
+	}
+	if len(section.Children) > 0 {
+		inner = append(inner, m.FormatSections(section.Children))
+	}
+	return "<" + section.Name + ">\n" +
+		strings.Join(inner, "\n") +
+		"\n</" + section.Name + ">"
+}
+
+// newTestRegistry creates a minimal EventPublisher that dispatches to a single
+// subscriber. This avoids importing the events package in the test.
+type testRegistry struct {
+	subscriber any
+}
+
+func newTestRegistry(sub any) *testRegistry {
+	return &testRegistry{subscriber: sub}
+}
+
+func (r *testRegistry) MaxRecursion() int { return 10 }
+
+func (r *testRegistry) Dispatch(
+	execCtx *gent.ExecutionContext,
+	event gent.Event,
+) {
+	switch e := event.(type) {
+	case *gent.BeforeSystemPromptEvent:
+		if sub, ok := r.subscriber.(gent.BeforeSystemPromptSubscriber); ok {
+			sub.OnBeforeSystemPrompt(execCtx, e)
+		}
 	}
 }

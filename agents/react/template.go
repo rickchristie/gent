@@ -2,7 +2,6 @@ package react
 
 import (
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // SystemPromptContext provides data for building system prompts.
@@ -26,10 +25,11 @@ type SystemPromptContext struct {
 	Time gent.TimeProvider
 }
 
-// SystemPromptBuilder builds system prompt messages from the given context.
-// It returns a slice of MessageContent, allowing for multi-message system prompts
-// or few-shot examples if needed.
-type SystemPromptBuilder func(ctx SystemPromptContext) []gent.MessageContent
+// SystemPromptBuilder builds system prompt sections from the given context.
+// It returns a slice of FormattedSection that will be formatted by the TextFormat
+// and wrapped in a system message. Subscribers can modify these sections via
+// BeforeSystemPromptEvent before they are formatted.
+type SystemPromptBuilder func(ctx SystemPromptContext) []gent.FormattedSection
 
 // reactExplanation is the default ReAct pattern explanation text.
 const reactExplanation = `You are an AI assistant that solves problems using the ReAct (Reasoning and Acting) pattern.
@@ -52,8 +52,9 @@ Repeat this cycle until you have enough information to provide a final answer.
 - Be concise but thorough in your reasoning.`
 
 // DefaultSystemPromptBuilder is the default builder for ReAct system prompts.
-// It formats all sections using the TextFormat for consistency.
-func DefaultSystemPromptBuilder(ctx SystemPromptContext) []gent.MessageContent {
+// It returns sections that will be formatted by the TextFormat and published
+// via BeforeSystemPromptEvent before being sent to the model.
+func DefaultSystemPromptBuilder(ctx SystemPromptContext) []gent.FormattedSection {
 	var sections []gent.FormattedSection
 
 	// Behavior and context (if provided)
@@ -94,12 +95,5 @@ func DefaultSystemPromptBuilder(ctx SystemPromptContext) []gent.MessageContent {
 		})
 	}
 
-	systemContent := ctx.Format.FormatSections(sections)
-
-	return []gent.MessageContent{
-		{
-			Role:  llms.ChatMessageTypeSystem,
-			Parts: []gent.ContentPart{llms.TextContent{Text: systemContent}},
-		},
-	}
+	return sections
 }

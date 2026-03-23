@@ -128,6 +128,7 @@ func buildSearchToolPrompt(
 	schemaMap map[string]any,
 	hintType SearchHintType,
 	pinnedTools []any,
+	printOutputSchema bool,
 ) string {
 	hasPinned := len(pinnedTools) > 0
 	var sb strings.Builder
@@ -190,7 +191,7 @@ func buildSearchToolPrompt(
 	)
 
 	// Per-engine search guidance
-	sb.WriteString("  Search guidance:\n")
+	sb.WriteString("  Tool Search:\n")
 	for _, eng := range engines {
 		fmt.Fprintf(
 			&sb,
@@ -213,7 +214,9 @@ func buildSearchToolPrompt(
 	// Pinned tool definitions
 	if hasPinned {
 		sb.WriteString("\n")
-		sb.WriteString(formatToolDefinitions(pinnedTools))
+		sb.WriteString(formatToolDefinitions(
+			pinnedTools, printOutputSchema,
+		))
 	}
 
 	return sb.String()
@@ -247,7 +250,10 @@ func formatToolDedup(name string) string {
 // formatToolDefinitions formats a list of tool definitions
 // (name, description, policy, schema) for inclusion in search
 // results. Uses the same format as JSON.AvailableToolsPrompt().
-func formatToolDefinitions(tools []any) string {
+// If printOutputSchema is true, includes the output schema.
+func formatToolDefinitions(
+	tools []any, printOutputSchema bool,
+) string {
 	var sb strings.Builder
 	for _, tool := range tools {
 		meta, err := GetToolMeta(tool)
@@ -271,6 +277,18 @@ func formatToolDefinitions(tools []any) string {
 				sb.WriteString("  Parameters: ")
 				sb.Write(schemaJSON)
 				sb.WriteString("\n")
+			}
+		}
+		if printOutputSchema {
+			if os := meta.OutputSchema(); os != nil {
+				outJSON, err := json.MarshalIndent(
+					os, "  ", "  ",
+				)
+				if err == nil {
+					sb.WriteString("  Returns: ")
+					sb.Write(outJSON)
+					sb.WriteString("\n")
+				}
 			}
 		}
 	}

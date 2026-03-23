@@ -17,6 +17,11 @@ type Chunk struct {
 	//   Full refunds are processed within 5-7 days...
 	Text string
 
+	// Snippet is the text to show in search results when this chunk matches. If empty,
+	// Text is used as the snippet. This allows embedding-optimized text (e.g., synthetic
+	// queries) to produce human-readable snippets from the actual document content.
+	Snippet string
+
 	// Metadata contains structured information about the chunk's position in the document.
 	// For Markdown documents, the MarkdownChunker populates heading hierarchy:
 	//   {"h1": "Terms of Service", "h2": "Refund Policy"}

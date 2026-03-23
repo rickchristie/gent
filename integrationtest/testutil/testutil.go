@@ -211,17 +211,30 @@ func CreateModel() (gent.StreamingModel, error) {
 
 // CreateToolChain creates the appropriate toolchain based on config. For
 // ToolChainSearch, returns a SearchJSON with hybrid BM25+semantic search.
+// When WrapPTC is enabled, output schema printing is turned on.
 func CreateToolChain(config TestConfig) gent.ToolChain {
 	switch config.ToolChain {
 	case ToolChainJSON:
-		return toolchain.NewJSON()
+		tc := toolchain.NewJSON()
+		if config.WrapPTC {
+			tc.WithOutputSchema(true)
+		}
+		return tc
 	case ToolChainSearch:
-		return toolchain.NewSearchJSON(config.SearchHintType).
+		tc := toolchain.NewSearchJSON(config.SearchHintType).
 			RegisterEngine(
 				toolchain.NewFusedToolSearcher(config.Embedder),
 			)
+		if config.WrapPTC {
+			tc.WithOutputSchema(true)
+		}
+		return tc
 	default:
-		return toolchain.NewYAML()
+		tc := toolchain.NewYAML()
+		if config.WrapPTC {
+			tc.WithOutputSchema(true)
+		}
+		return tc
 	}
 }
 
@@ -296,6 +309,27 @@ func PrintHeader(w io.Writer, title string) {
 // PrintSection prints a section header.
 func PrintSection(w io.Writer, title string) {
 	fmt.Fprintf(w, "--- %s ---\n", title)
+}
+
+// CriticalRules returns the standard critical rules for integration test
+// scenarios. Extra rules are appended after the standard set. When the
+// config uses SearchJSON or PTC, a tool schema discovery rule is added.
+func CriticalRules(
+	config TestConfig, extra ...string,
+) string {
+	rules := `DO NOT HALLUCINATE
+- ALWAYS search and read the relevant policy BEFORE taking any action
+- Every claim in your answer MUST come from tool outputs or user-provided information
+- NEVER invent specific data (IDs, prices, times, availability)
+- If information is missing, say so explicitly`
+	for _, r := range extra {
+		rules += "\n- " + r
+	}
+	if config.ToolChain == ToolChainSearch || config.WrapPTC {
+		rules += "\n- You must have the tool schemas in scratchpad before " +
+			"calling any tool. Use tool_registry_search to get tool schema."
+	}
+	return rules
 }
 
 // ContainsIgnoreCase checks if s contains substr, case-insensitive.

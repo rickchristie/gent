@@ -9,6 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mockTokenCounter approximates ~4 chars per token for unit testing.
+type mockTokenCounter struct{}
+
+func (m *mockTokenCounter) TokenCount(s string) int { return len(s) / 4 }
+
 // ============================================================================
 // PolicyBleveAdapter tests
 // ============================================================================
@@ -52,7 +57,7 @@ Customers may cancel within 24 hours for a full refund.`,
 		SyntheticQueries: []string{"customer wants to cancel", "how to get a refund"},
 	}
 
-	chunks, err := adapter.Chunks(p, nil, 512)
+	chunks, err := adapter.Chunks(p, &mockTokenCounter{}, 512)
 	require.NoError(t, err)
 	require.Len(t, chunks, 3, "heading chunk + content chunk + synthetic queries chunk")
 
@@ -72,11 +77,14 @@ Customers may cancel within 24 hours for a full refund.`,
 	}, chunks[1])
 
 	// Third chunk: synthetic queries with policy ID heading.
+	// Snippet is set to the first content chunk so search results show policy
+	// content, not the synthetic query text.
 	assert.Equal(t, search.Chunk{
 		Text: `# cancellation-refund
 
 customer wants to cancel
 how to get a refund`,
+		Snippet:  chunks[0].Text,
 		Metadata: map[string]string{"h1": "cancellation-refund", "type": "synthetic_queries"},
 	}, chunks[2])
 }
@@ -88,7 +96,7 @@ func TestPolicyChunkAdapter_NoSyntheticQueries(t *testing.T) {
 		FullContent: "A simple policy with no synthetic queries.",
 	}
 
-	chunks, err := adapter.Chunks(p, nil, 512)
+	chunks, err := adapter.Chunks(p, &mockTokenCounter{}, 512)
 	require.NoError(t, err)
 	assert.Len(t, chunks, 1, "no synthetic queries → only content chunk")
 }
@@ -221,4 +229,172 @@ func TestPolicySearchTool_IndexableToolInterface(t *testing.T) {
 	assert.Equal(t, []string{"lookup", "policy"}, tool.Categories())
 	assert.Equal(t, []string{"policy", "guidance"}, tool.Keywords())
 	assert.Equal(t, []string{"find policy", "search rules"}, tool.SyntheticQueries())
+}
+
+// ============================================================================
+// PolicySearchTool snippet-only mode tests
+// ============================================================================
+
+func TestPolicySearchTool_Call_SnippetOnly_SingleResult(t *testing.T) {
+	tool := &PolicySearchTool{
+		name:        "search_policy",
+		snippetOnly: true,
+		index: &mockPolicyIndex{results: []search.SearchResult{
+			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
+		}},
+		policies: map[string]*Policy{
+			"cancel-policy": {
+				Id:          "cancel-policy",
+				FullContent: "Full cancellation policy content here.",
+			},
+		},
+		topK: 3,
+	}
+
+	result, err := tool.Call(
+		context.Background(), PolicySearchInput{Query: "cancel"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, `id: cancel-policy
+Cancel within 24 hours`, result.Text)
+}
+
+func TestPolicySearchTool_Call_SnippetOnly_MultipleResults(t *testing.T) {
+	tool := &PolicySearchTool{
+		name:        "search_policy",
+		snippetOnly: true,
+		index: &mockPolicyIndex{results: []search.SearchResult{
+			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
+			{Id: "refund-policy", Score: 0.7, Snippet: "Refund in 5-7 days"},
+		}},
+		policies: map[string]*Policy{
+			"cancel-policy": {
+				Id:          "cancel-policy",
+				FullContent: "Full cancellation content.",
+			},
+			"refund-policy": {
+				Id:          "refund-policy",
+				FullContent: "Full refund content.",
+			},
+		},
+		topK: 3,
+	}
+
+	result, err := tool.Call(
+		context.Background(), PolicySearchInput{Query: "cancel refund"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, `id: cancel-policy
+Cancel within 24 hours
+
+---
+
+id: refund-policy
+Refund in 5-7 days`, result.Text)
+}
+
+func TestPolicySearchTool_Call_FullContent_StillWorks(t *testing.T) {
+	// Verify that snippetOnly=false (default) still returns full content.
+	tool := &PolicySearchTool{
+		name:        "search_policy",
+		snippetOnly: false,
+		index: &mockPolicyIndex{results: []search.SearchResult{
+			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
+		}},
+		policies: map[string]*Policy{
+			"cancel-policy": {
+				Id:          "cancel-policy",
+				FullContent: "Full cancellation policy content here.",
+			},
+		},
+		topK: 3,
+	}
+
+	result, err := tool.Call(
+		context.Background(), PolicySearchInput{Query: "cancel"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, `# cancel-policy
+
+Full cancellation policy content here.`, result.Text)
+}
+
+// ============================================================================
+// GetPolicyTool tests
+// ============================================================================
+
+func TestGetPolicyTool_Call_Found(t *testing.T) {
+	tool := &GetPolicyTool{
+		name: "get_policy",
+		policies: map[string]*Policy{
+			"cancel-policy": {
+				Id:          "cancel-policy",
+				FullContent: "Full cancellation policy content.",
+			},
+		},
+	}
+
+	result, err := tool.Call(
+		context.Background(), GetPolicyInput{PolicyID: "cancel-policy"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, `# cancel-policy
+
+Full cancellation policy content.`, result.Text)
+}
+
+func TestGetPolicyTool_Call_NotFound(t *testing.T) {
+	tool := &GetPolicyTool{
+		name:     "get_policy",
+		policies: map[string]*Policy{},
+	}
+
+	_, err := tool.Call(
+		context.Background(),
+		GetPolicyInput{PolicyID: "nonexistent"},
+	)
+	assert.Error(t, err)
+	assert.Equal(t, "policy not found: nonexistent", err.Error())
+}
+
+func TestGetPolicyTool_Call_EmptyID(t *testing.T) {
+	tool := &GetPolicyTool{
+		name:     "get_policy",
+		policies: map[string]*Policy{},
+	}
+
+	_, err := tool.Call(
+		context.Background(), GetPolicyInput{PolicyID: ""},
+	)
+	assert.Error(t, err)
+	assert.Equal(t, "policy_id is required", err.Error())
+}
+
+func TestGetPolicyTool_ToolInterface(t *testing.T) {
+	tool := NewGetPolicyTool([]*Policy{
+		{Id: "test", FullContent: "content"},
+	})
+
+	assert.Equal(t, "get_policy", tool.Name())
+	assert.NotEmpty(t, tool.Description())
+	assert.Equal(t, "", tool.Policy())
+	assert.NotNil(t, tool.ParameterSchema())
+}
+
+func TestGetPolicyTool_IndexableToolInterface(t *testing.T) {
+	tool := NewGetPolicyTool([]*Policy{})
+
+	assert.Equal(t, "Policy & Guidance", tool.Domain())
+	assert.Equal(t, []string{"lookup", "policy"}, tool.Categories())
+	assert.NotEmpty(t, tool.Keywords())
+	assert.NotEmpty(t, tool.SyntheticQueries())
+}
+
+func TestGetPolicyTool_WithName(t *testing.T) {
+	tool := NewGetPolicyTool([]*Policy{}).
+		WithName("get_airline_policy").
+		WithDescription("Get airline policy by ID")
+
+	assert.Equal(t, "get_airline_policy", tool.Name())
+	assert.Equal(t, "Get airline policy by ID", tool.Description())
 }

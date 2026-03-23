@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -13,12 +14,13 @@ import (
 
 // ToolMeta holds metadata about a registered tool extracted via reflection.
 type ToolMeta struct {
-	name        string
-	description string
-	policy      string
-	schema      map[string]any
-	tool        any          // The actual tool (Tool[I, O])
-	inputType   reflect.Type // The input type I
+	name         string
+	description  string
+	policy       string
+	schema       map[string]any
+	outputSchema map[string]any
+	tool         any          // The actual tool (Tool[I, O])
+	inputType    reflect.Type // The input type I
 }
 
 // Name returns the tool's name.
@@ -32,6 +34,11 @@ func (m *ToolMeta) Policy() string { return m.policy }
 
 // Schema returns the tool's parameter schema.
 func (m *ToolMeta) Schema() map[string]any { return m.schema }
+
+// OutputSchema returns the tool's output schema, auto-generated from
+// the Call method's return type. May be nil if the output type cannot
+// be introspected.
+func (m *ToolMeta) OutputSchema() map[string]any { return m.outputSchema }
 
 // Tool returns the actual tool.
 func (m *ToolMeta) Tool() any { return m.tool }
@@ -425,12 +432,102 @@ func GetToolMeta(tool any) (*ToolMeta, error) {
 	}
 	inputType := callType.In(1)
 
+	// Extract output schema from Call return type: (*ToolResult[O], error).
+	// ToolResult[O] has a Text field of type O — we generate schema from O.
+	var outputSchema map[string]any
+	if callType.NumOut() >= 1 {
+		resultType := callType.Out(0) // *ToolResult[O]
+		if resultType.Kind() == reflect.Ptr {
+			resultType = resultType.Elem()
+		}
+		// ToolResult has a Text field whose type is O.
+		if textField, ok := resultType.FieldByName("Text"); ok {
+			outputSchema = schemaFromType(textField.Type)
+		}
+	}
+
 	return &ToolMeta{
-		name:        name,
-		description: description,
-		policy:      policy,
-		schema:      schema,
-		tool:        tool,
-		inputType:   inputType,
+		name:         name,
+		description:  description,
+		policy:       policy,
+		schema:       schema,
+		outputSchema: outputSchema,
+		tool:         tool,
+		inputType:    inputType,
 	}, nil
+}
+
+// schemaFromType generates a JSON Schema from a Go reflect.Type.
+// Handles common types: string, numeric, bool, struct (with json tags),
+// slice, pointer. Returns nil for unsupported types.
+func schemaFromType(t reflect.Type) map[string]any {
+	if t == nil {
+		return nil
+	}
+	// Dereference pointers.
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	switch t.Kind() {
+	case reflect.String:
+		return map[string]any{"type": "string"}
+	case reflect.Bool:
+		return map[string]any{"type": "boolean"}
+	case reflect.Int, reflect.Int8, reflect.Int16,
+		reflect.Int32, reflect.Int64:
+		return map[string]any{"type": "integer"}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16,
+		reflect.Uint32, reflect.Uint64:
+		return map[string]any{"type": "integer"}
+	case reflect.Float32, reflect.Float64:
+		return map[string]any{"type": "number"}
+	case reflect.Slice:
+		items := schemaFromType(t.Elem())
+		if items == nil {
+			return map[string]any{"type": "array"}
+		}
+		return map[string]any{"type": "array", "items": items}
+	case reflect.Struct:
+		return schemaFromStruct(t)
+	case reflect.Interface:
+		return nil // can't introspect interface{}
+	default:
+		return nil
+	}
+}
+
+// schemaFromStruct generates a JSON Schema object from a Go struct type.
+// Uses json struct tags for property names. Skips unexported fields and
+// fields with json:"-".
+func schemaFromStruct(t reflect.Type) map[string]any {
+	props := map[string]any{}
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+		name := field.Name
+		if jsonTag != "" {
+			parts := strings.SplitN(jsonTag, ",", 2)
+			if parts[0] != "" {
+				name = parts[0]
+			}
+		}
+		fieldSchema := schemaFromType(field.Type)
+		if fieldSchema != nil {
+			props[name] = fieldSchema
+		}
+	}
+	if len(props) == 0 {
+		return map[string]any{"type": "object"}
+	}
+	return map[string]any{
+		"type":       "object",
+		"properties": props,
+	}
 }

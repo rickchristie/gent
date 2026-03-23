@@ -51,14 +51,7 @@ Always be polite and professional. When rescheduling, make `+
 SkyWings is an international airline. Reply with customer's `+
 			`language.
 `, tp.Today(), tp.Weekday()),
-		CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant policy/guidance ` +
-			`BEFORE taking any action
-- Every claim in your answer MUST come from tool outputs ` +
-			`or user-provided information
-- NEVER invent specific data (IDs, prices, times, ` +
-			`availability)
-- If information is missing, say so explicitly`,
+		CriticalRules: testutil.CriticalRules(config),
 		ThinkingPrompt: "Think step by step about how to " +
 			"help the customer.",
 	})
@@ -112,7 +105,8 @@ func RunRescheduleScenarioSearch(
 	config testutil.TestConfig,
 ) error {
 	config.PinTools = append(
-		config.PinTools, "search_airline_policy",
+		config.PinTools,
+		"search_policy", "get_policy",
 	)
 	fixture := NewAirlineFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
@@ -156,14 +150,7 @@ Always be polite and professional. When rescheduling, `+
 SkyWings is an international airline. Reply with `+
 				`customer's language.
 `, tp.Today(), tp.Weekday()),
-			CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant ` +
-				`policy/guidance BEFORE taking any action
-- Every claim in your answer MUST come from tool ` +
-				`outputs or user-provided information
-- NEVER invent specific data (IDs, prices, times, ` +
-				`availability)
-- If information is missing, say so explicitly`,
+			CriticalRules: testutil.CriticalRules(config),
 			ThinkingPrompt: "Think step by step about " +
 				"how to help the customer.",
 		},
@@ -217,14 +204,7 @@ Always be polite and professional. When rescheduling, make `+
 SkyWings is an international airline. Reply with customer's `+
 			`language.
 `, tp.Today(), tp.Weekday()),
-		CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant policy/guidance ` +
-			`BEFORE taking any action
-- Every claim in your answer MUST come from tool outputs ` +
-			`or user-provided information
-- NEVER invent specific data (IDs, prices, times, ` +
-			`availability)
-- If information is missing, say so explicitly`,
+		CriticalRules: testutil.CriticalRules(config),
 		ThinkingPrompt: "Think step by step about how to " +
 			"help the customer.",
 		MaxIterations: 15,
@@ -241,7 +221,8 @@ func NewAirlineInteractiveChatSearch(
 	config testutil.TestConfig,
 ) (*testutil.InteractiveChat, error) {
 	config.PinTools = append(
-		config.PinTools, "search_airline_policy",
+		config.PinTools,
+		"search_policy", "get_policy",
 	)
 	fixture := NewAirlineFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
@@ -273,14 +254,7 @@ Always be polite and professional. When rescheduling, `+
 SkyWings is an international airline. Reply with `+
 					`customer's language.
 `, tp.Today(), tp.Weekday()),
-			CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant ` +
-				`policy/guidance BEFORE taking any action
-- Every claim in your answer MUST come from tool ` +
-				`outputs or user-provided information
-- NEVER invent specific data (IDs, prices, times, ` +
-				`availability)
-- If information is missing, say so explicitly`,
+			CriticalRules: testutil.CriticalRules(config),
 			ThinkingPrompt: "Think step by step about " +
 				"how to help the customer.",
 			MaxIterations: 20,

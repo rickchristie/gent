@@ -148,8 +148,9 @@ type SendNotificationResult struct {
 // All dates in the mock data are calculated relative to "today" from the TimeProvider,
 // ensuring consistent behavior in LLM integration tests regardless of when they run.
 type AirlineFixture struct {
-	timeProvider gent.TimeProvider
-	policyTool   *policy.PolicySearchTool
+	timeProvider  gent.TimeProvider
+	policySearch  *policy.PolicySearchTool
+	policyGet     *policy.GetPolicyTool
 
 	// Instance data - not shared across fixtures
 	customers map[string]*Customer
@@ -178,16 +179,24 @@ func NewAirlineFixture(
 
 	f.initializeData()
 
-	tool, err := policy.NewPolicySearchTool(
-		context.Background(), embedder, airlinePolicies(),
+	policies := airlinePolicies()
+	searchTool, err := policy.NewPolicySearchTool(
+		context.Background(), embedder, policies,
 	)
 	if err != nil {
-		panic("airline: failed to create PolicySearchTool: " + err.Error())
+		panic("airline: failed to create PolicySearchTool: " +
+			err.Error())
 	}
-	f.policyTool = tool.WithName("search_airline_policy").WithDescription(
-		"Search airline policies by describing what you need " +
-			"(e.g., 'change fee for economy', 'baggage allowance')",
-	)
+	f.policySearch = searchTool.
+		WithName("search_policy").
+		WithDescription(
+			"Search policy by describing what you need " +
+				"(e.g., 'change fee for economy', " +
+				"'baggage allowance')").
+		WithSnippetOnly(true)
+	f.policyGet = policy.NewGetPolicyTool(policies).
+		WithName("get_policy").
+		WithDescription("Get full policy content by ID")
 	return f
 }
 
@@ -738,7 +747,8 @@ func (f *AirlineFixture) RegisterAllTools(tc gent.ToolChain) {
 	tc.RegisterTool(f.GetBookingInfoTool())
 	tc.RegisterTool(f.GetFlightInfoTool())
 	tc.RegisterTool(f.GetFlightSeatsInfoTool())
-	tc.RegisterTool(f.policyTool)
+	tc.RegisterTool(f.policySearch)
+	tc.RegisterTool(f.policyGet)
 	tc.RegisterTool(f.SearchFlightScheduleTool())
 	tc.RegisterTool(f.RescheduleBookingTool())
 	tc.RegisterTool(f.CancelBookingTool())
@@ -807,7 +817,8 @@ func (f *AirlineFixture) RegisterAllToolsSearch(
 		},
 	))
 	// PolicySearchTool implements IndexableTool — register directly.
-	tc.RegisterTool(f.policyTool)
+	tc.RegisterTool(f.policySearch)
+	tc.RegisterTool(f.policyGet)
 	tc.RegisterTool(testutil.NewIndexableToolFunc(
 		f.SearchFlightScheduleTool(),
 		"Flight",

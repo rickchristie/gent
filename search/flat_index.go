@@ -9,9 +9,9 @@ import (
 
 // storedVector is a single embedded chunk with its parent document ID.
 type storedVector struct {
-	docID  string
-	chunk  string    // original chunk text (for Snippet in results)
-	vector []float32 // the embedding
+	docID   string
+	snippet string    // text to show in search results
+	vector  []float32 // the embedding
 }
 
 // FlatIndex provides brute-force vector search using cosine similarity.
@@ -54,17 +54,17 @@ func (f *FlatIndex[Doc]) Search(
 	f.mu.RLock()
 
 	type scored struct {
-		docID string
-		chunk string
-		score float64
+		docID   string
+		snippet string
+		score   float64
 	}
 
 	all := make([]scored, len(f.vectors))
 	for i, sv := range f.vectors {
 		all[i] = scored{
-			docID: sv.docID,
-			chunk: sv.chunk,
-			score: cosineSimilarity(queryVec, sv.vector),
+			docID:   sv.docID,
+			snippet: sv.snippet,
+			score:   cosineSimilarity(queryVec, sv.vector),
 		}
 	}
 
@@ -81,7 +81,9 @@ func (f *FlatIndex[Doc]) Search(
 	// Sort by score descending, return top-K.
 	results := make([]SearchResult, 0, len(best))
 	for _, s := range best {
-		results = append(results, SearchResult{Id: s.docID, Score: s.score, Snippet: s.chunk})
+		results = append(results, SearchResult{
+			Id: s.docID, Score: s.score, Snippet: s.snippet,
+		})
 	}
 	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
 	if topK > 0 && len(results) > topK {
@@ -111,7 +113,13 @@ func (f *FlatIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
 
 	newVectors := make([]storedVector, len(chunks))
 	for i, chunk := range chunks {
-		newVectors[i] = storedVector{docID: id, chunk: chunk.Text, vector: embeddings[i]}
+		snippet := chunk.Text
+		if chunk.Snippet != "" {
+			snippet = chunk.Snippet
+		}
+		newVectors[i] = storedVector{
+			docID: id, snippet: snippet, vector: embeddings[i],
+		}
 	}
 
 	f.mu.Lock()
@@ -148,8 +156,12 @@ func (f *FlatIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
 			return fmt.Errorf("search: embedding failed for %s: %w", id, err)
 		}
 		for i, chunk := range chunks {
+			snippet := chunk.Text
+			if chunk.Snippet != "" {
+				snippet = chunk.Snippet
+			}
 			newVectors = append(newVectors, storedVector{
-				docID: id, chunk: chunk.Text, vector: embeddings[i],
+				docID: id, snippet: snippet, vector: embeddings[i],
 			})
 		}
 	}

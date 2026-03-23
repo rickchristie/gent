@@ -777,6 +777,19 @@ func (ctx *ExecutionContext) PublishAfterIteration(
 	return event
 }
 
+// PublishBeforeSystemPrompt publishes a BeforeSystemPromptEvent.
+// Returns the event so callers can use the (potentially modified) Sections field.
+func (ctx *ExecutionContext) PublishBeforeSystemPrompt(
+	sections []FormattedSection,
+) *BeforeSystemPromptEvent {
+	event := &BeforeSystemPromptEvent{
+		BaseEvent: BaseEvent{EventName: EventNameSystemPromptBefore},
+		Sections:  sections,
+	}
+	ctx.publish(event)
+	return event
+}
+
 // PublishBeforeModelCall publishes a BeforeModelCallEvent.
 // Returns the event so callers can use the (potentially modified) Request field.
 func (ctx *ExecutionContext) PublishBeforeModelCall(

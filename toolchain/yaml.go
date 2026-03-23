@@ -77,11 +77,12 @@ import (
 //	result, err := tc.Execute(execCtx, actionContent, textFormat)
 //	// result.Text contains formatted observation to feed back to the model
 type YAML struct {
-	tools        []any
-	toolMap      map[string]any
-	schemaMap    map[string]*schema.Schema // compiled schemas for validation
-	rawSchemaMap map[string]map[string]any // raw schemas for type-aware parsing
-	sectionName  string
+	tools             []any
+	toolMap           map[string]any
+	schemaMap         map[string]*schema.Schema // compiled schemas
+	rawSchemaMap      map[string]map[string]any // raw schemas
+	sectionName       string
+	printOutputSchema bool
 }
 
 // NewYAML creates a new YAML toolchain with default section name "action".
@@ -98,6 +99,13 @@ func NewYAML() *YAML {
 // WithSectionName sets the section name for this tool chain.
 func (c *YAML) WithSectionName(name string) *YAML {
 	c.sectionName = name
+	return c
+}
+
+// WithOutputSchema enables printing output schemas alongside input
+// schemas in the tool catalog.
+func (c *YAML) WithOutputSchema(enabled bool) *YAML {
+	c.printOutputSchema = enabled
 	return c
 }
 
@@ -149,13 +157,28 @@ func (c *YAML) AvailableToolsPrompt() string {
 			schemaYAML, err := yaml.Marshal(schema)
 			if err == nil {
 				sb.WriteString("  Parameters:\n")
-				// Indent the YAML schema
 				lines := strings.Split(string(schemaYAML), "\n")
 				for _, line := range lines {
 					if line != "" {
 						sb.WriteString("    ")
 						sb.WriteString(line)
 						sb.WriteString("\n")
+					}
+				}
+			}
+		}
+		if c.printOutputSchema {
+			if os := meta.OutputSchema(); os != nil {
+				outYAML, err := yaml.Marshal(os)
+				if err == nil {
+					sb.WriteString("  Returns:\n")
+					lines := strings.Split(string(outYAML), "\n")
+					for _, line := range lines {
+						if line != "" {
+							sb.WriteString("    ")
+							sb.WriteString(line)
+							sb.WriteString("\n")
+						}
 					}
 				}
 			}

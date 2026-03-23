@@ -65,10 +65,11 @@ import (
 //	result, err := tc.Execute(execCtx, actionContent, textFormat)
 //	// result.Text contains formatted observation to feed back to the model
 type JSON struct {
-	tools       []any
-	toolMap     map[string]any
-	schemaMap   map[string]*schema.Schema // compiled schemas for validation
-	sectionName string
+	tools             []any
+	toolMap           map[string]any
+	schemaMap         map[string]*schema.Schema // compiled schemas
+	sectionName       string
+	printOutputSchema bool
 }
 
 // NewJSON creates a new JSON toolchain with default section name "action".
@@ -84,6 +85,14 @@ func NewJSON() *JSON {
 // WithSectionName sets the section name for this tool chain.
 func (c *JSON) WithSectionName(name string) *JSON {
 	c.sectionName = name
+	return c
+}
+
+// WithOutputSchema enables printing output schemas alongside input
+// schemas in the tool catalog. When enabled, each tool's return type
+// is shown under a "Returns:" section.
+func (c *JSON) WithOutputSchema(enabled bool) *JSON {
+	c.printOutputSchema = enabled
 	return c
 }
 
@@ -124,6 +133,16 @@ func (c *JSON) AvailableToolsPrompt() string {
 				sb.WriteString("  Parameters: ")
 				sb.Write(schemaJSON)
 				sb.WriteString("\n")
+			}
+		}
+		if c.printOutputSchema {
+			if os := meta.OutputSchema(); os != nil {
+				outJSON, err := json.MarshalIndent(os, "  ", "  ")
+				if err == nil {
+					sb.WriteString("  Returns: ")
+					sb.Write(outJSON)
+					sb.WriteString("\n")
+				}
 			}
 		}
 	}

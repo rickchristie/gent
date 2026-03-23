@@ -167,6 +167,25 @@ type AfterIterationEvent struct {
 }
 
 // -----------------------------------------------------------------------------
+// System Prompt Events
+// -----------------------------------------------------------------------------
+
+// BeforeSystemPromptEvent is published before the system prompt is built.
+// Subscribers can modify or replace the Sections slice to dynamically alter
+// the system prompt on each iteration.
+//
+// The Sections field is mutable — subscribers can append, remove, or replace
+// entries. The AgentLoop reads back the (potentially modified) Sections after
+// publishing and uses them to build the final system prompt.
+type BeforeSystemPromptEvent struct {
+	BaseEvent
+
+	// Sections contains the system prompt sections that will be formatted.
+	// Subscribers can modify this slice for dynamic prompt injection.
+	Sections []FormattedSection
+}
+
+// -----------------------------------------------------------------------------
 // Model Call Events
 // -----------------------------------------------------------------------------
 

@@ -55,24 +55,26 @@
 //   - WithTermination: Custom termination handler (default: Text)
 //   - WithThinking: Enable thinking section
 //   - WithStreaming: Enable streaming responses
-//   - WithSystemPromptBuilder: Custom function to build system prompt messages
+//   - WithSystemPromptBuilder: Custom function to build system prompt sections
 //   - WithTimeProvider: Custom time provider
 //
 // # System Prompt Builder
 //
 // The system prompt is built using a SystemPromptBuilder function. The default builder
-// (DefaultSystemPromptBuilder) formats all sections using the configured TextFormat for
-// consistency. Sections include: behavior, re_act, critical_rules, available_tools, output_format.
+// (DefaultSystemPromptBuilder) returns sections that are formatted by the TextFormat.
+// Sections include: behavior, re_act, critical_rules, available_tools, output_format.
+//
+// Before formatting, a BeforeSystemPromptEvent is published, allowing subscribers to
+// dynamically modify, append, or replace sections on each iteration.
 //
 // For full control over the system prompt, use WithSystemPromptBuilder to provide a custom
-// function that returns []gent.MessageContent. This allows for multi-message system prompts
-// or few-shot examples.
+// function that returns []gent.FormattedSection.
 //
 // Example:
 //
-//	agent.WithSystemPromptBuilder(func(ctx SystemPromptContext) []gent.MessageContent {
-//	    return []gent.MessageContent{
-//	        {Role: llms.ChatMessageTypeSystem, Parts: []gent.ContentPart{...}},
+//	agent.WithSystemPromptBuilder(func(ctx SystemPromptContext) []gent.FormattedSection {
+//	    return []gent.FormattedSection{
+//	        {Name: "behavior", Content: "You are a helpful assistant."},
 //	    }
 //	})
 package react

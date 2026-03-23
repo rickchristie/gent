@@ -86,10 +86,11 @@ type SearchJSON struct {
 	engineMap map[string]gent.ToolSearcher
 
 	// Config
-	hintType         SearchHintType
-	pinnedToolNames  []string
-	pageSize         int
-	noResultsMessage string
+	hintType          SearchHintType
+	pinnedToolNames   []string
+	pageSize          int
+	noResultsMessage  string
+	printOutputSchema bool
 
 	// Computed by Initialize()
 	initialized          bool
@@ -140,6 +141,15 @@ func (c *SearchJSON) WithNoResultsMessage(
 	msg string,
 ) *SearchJSON {
 	c.noResultsMessage = msg
+	return c
+}
+
+// WithOutputSchema enables printing output schemas alongside
+// input schemas in tool definitions.
+func (c *SearchJSON) WithOutputSchema(
+	enabled bool,
+) *SearchJSON {
+	c.printOutputSchema = enabled
 	return c
 }
 
@@ -303,6 +313,7 @@ func (c *SearchJSON) Initialize() error {
 		c.searchToolSchema,
 		c.hintType,
 		pinnedTools,
+		c.printOutputSchema,
 	)
 
 	c.initialized = true
@@ -628,7 +639,9 @@ func (c *SearchJSON) executeSearch(
 
 	// Format output
 	var output strings.Builder
-	output.WriteString(formatToolDefinitions(newTools))
+	output.WriteString(formatToolDefinitions(
+		newTools, c.printOutputSchema,
+	))
 	for _, name := range dupNames {
 		output.WriteString(formatToolDedup(name))
 	}

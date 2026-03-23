@@ -63,7 +63,8 @@ func TestToolChunkAdapter_Convert(t *testing.T) {
 		syntheticQueries: []string{"check payments", "look up invoices"},
 	}
 
-	chunks, err := adapter.Chunks(tool, nil, 0)
+	tc := search.TokenCounterFunc(func(s string) int { return len(s) / 4 })
+	chunks, err := adapter.Chunks(tool, tc, 512)
 	require.NoError(t, err)
 	assert.Equal(t, []search.Chunk{
 		{

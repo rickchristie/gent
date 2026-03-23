@@ -14,6 +14,12 @@ type TokenCounter interface {
 	TokenCount(text string) int
 }
 
+// TokenCounterFunc is an adapter that lets an ordinary function satisfy the
+// [TokenCounter] interface. Useful in tests to avoid constructing a full embedder.
+type TokenCounterFunc func(text string) int
+
+func (f TokenCounterFunc) TokenCount(text string) int { return f(text) }
+
 // Embedder converts text into dense vector representations.
 //
 // The EmbedQuery and EmbedText distinction exists because some models (notably the e5 family)

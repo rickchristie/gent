@@ -148,7 +148,8 @@ type createCreditRequestInput struct {
 // EcommerceFixture provides a complete e-commerce mock environment.
 type EcommerceFixture struct {
 	timeProvider gent.TimeProvider
-	policyTool   *policy.PolicySearchTool
+	policySearch *policy.PolicySearchTool
+	policyGet    *policy.GetPolicyTool
 
 	customers  map[string]*Customer
 	orderPages map[string]*OrderPage // keyed by cursor
@@ -175,18 +176,23 @@ func NewEcommerceFixture(
 	}
 	f.initializeData()
 
-	tool, err := policy.NewPolicySearchTool(
-		context.Background(), embedder, ecommercePolicies(),
+	policies := ecommercePolicies()
+	searchTool, err := policy.NewPolicySearchTool(
+		context.Background(), embedder, policies,
 	)
 	if err != nil {
 		panic("ecommerce: failed to create PolicySearchTool: " +
 			err.Error())
 	}
-	f.policyTool = tool.WithName("search_guidance_policy").
+	f.policySearch = searchTool.
+		WithName("search_policy").
 		WithDescription(
-			"Search guidance policies by describing what you " +
-				"need (e.g., 'double charge', 'refund process')",
-		)
+			"Search policy by describing what you need " +
+				"(e.g., 'double charge', 'refund process')").
+		WithSnippetOnly(true)
+	f.policyGet = policy.NewGetPolicyTool(policies).
+		WithName("get_policy").
+		WithDescription("Get full policy content by ID")
 	return f
 }
 
@@ -648,7 +654,8 @@ func (f *EcommerceFixture) RegisterAllTools(
 	tc.RegisterTool(f.getOrdersTool())
 	tc.RegisterTool(f.getOrderPaymentsTool())
 	tc.RegisterTool(f.gatewayGetTxDetailTool())
-	tc.RegisterTool(f.policyTool)
+	tc.RegisterTool(f.policySearch)
+	tc.RegisterTool(f.policyGet)
 	tc.RegisterTool(f.gatewayCancelTxTool())
 	tc.RegisterTool(f.processRefundTool())
 	tc.RegisterTool(f.createCaseTool())
@@ -716,7 +723,8 @@ func (f *EcommerceFixture) RegisterAllToolsSearch(
 		},
 	))
 	// PolicySearchTool implements IndexableTool — register directly.
-	tc.RegisterTool(f.policyTool)
+	tc.RegisterTool(f.policySearch)
+	tc.RegisterTool(f.policyGet)
 	tc.RegisterTool(testutil.NewIndexableToolFunc(
 		f.gatewayCancelTxTool(),
 		"Payments",

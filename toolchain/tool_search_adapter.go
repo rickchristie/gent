@@ -149,15 +149,8 @@ func (a *ToolChunkAdapter) Chunks(
 		fmt.Fprintf(&sb, "\n- Example queries: %s", strings.Join(sq, "; "))
 	}
 	text := sb.String()
-	// If no token counter is available (e.g., unit tests without ONNX), fall back to a
-	// character-based approximation (~4 chars per token).
-	tokenCount := func(s string) int { return len(s) / 4 }
-	if tc != nil {
-		tokenCount = tc.TokenCount
+	chunker := &search.MarkdownChunker{
+		ChunkSize: maxTokens, TokenCount: tc.TokenCount,
 	}
-	if maxTokens == 0 {
-		maxTokens = 512
-	}
-	chunker := &search.MarkdownChunker{ChunkSize: maxTokens, TokenCount: tokenCount}
 	return chunker.Chunk(text), nil
 }

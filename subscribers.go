@@ -51,6 +51,13 @@ type AfterIterationSubscriber interface {
 	OnAfterIteration(execCtx *ExecutionContext, event *AfterIterationEvent)
 }
 
+// BeforeSystemPromptSubscriber receives BeforeSystemPromptEvent events.
+// Subscribers can modify or replace event.Sections to dynamically alter
+// the system prompt on each iteration.
+type BeforeSystemPromptSubscriber interface {
+	OnBeforeSystemPrompt(execCtx *ExecutionContext, event *BeforeSystemPromptEvent)
+}
+
 // BeforeModelCallSubscriber receives BeforeModelCallEvent events.
 type BeforeModelCallSubscriber interface {
 	OnBeforeModelCall(execCtx *ExecutionContext, event *BeforeModelCallEvent)

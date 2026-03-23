@@ -63,15 +63,10 @@ Important: Our internal payment records may be `+
 					`out of date. Always verify with the `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
-			CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant ` +
-				`policy/guidance BEFORE taking any action
-- Every claim MUST come from tool outputs or ` +
-				`user-provided information
-- NEVER invent data (IDs, amounts, statuses)
-- If information is missing, say so explicitly
-- Follow the guidance policy steps IN ORDER — ` +
-				`do not skip steps`,
+			CriticalRules: testutil.CriticalRules(config,
+				"Follow the policy steps IN ORDER "+
+					"— do not skip steps",
+			),
 			ThinkingPrompt: "Think step by step about " +
 				"how to investigate and resolve " +
 				"the customer's billing issue.",
@@ -129,7 +124,8 @@ func RunDoubleChargeScenarioSearch(
 	config testutil.TestConfig,
 ) error {
 	config.PinTools = append(
-		config.PinTools, "search_guidance_policy",
+		config.PinTools,
+		"search_policy", "get_policy",
 	)
 	fixture := NewEcommerceFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
@@ -181,15 +177,10 @@ Important: Our internal payment records may be `+
 					`out of date. Always verify with the `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
-			CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant ` +
-				`policy/guidance BEFORE taking any action
-- Every claim MUST come from tool outputs or ` +
-				`user-provided information
-- NEVER invent data (IDs, amounts, statuses)
-- If information is missing, say so explicitly
-- Follow the guidance policy steps IN ORDER — ` +
-				`do not skip steps`,
+			CriticalRules: testutil.CriticalRules(config,
+				"Follow the policy steps IN ORDER "+
+					"— do not skip steps",
+			),
 			ThinkingPrompt: "Think step by step about " +
 				"how to investigate and resolve " +
 				"the customer's billing issue.",
@@ -252,15 +243,10 @@ Important: Our internal payment records may be `+
 					`out of date. Always verify with the `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
-			CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant ` +
-				`policy/guidance BEFORE taking any action
-- Every claim MUST come from tool outputs or ` +
-				`user-provided information
-- NEVER invent data (IDs, amounts, statuses)
-- If information is missing, say so explicitly
-- Follow the guidance policy steps IN ORDER — ` +
-				`do not skip steps`,
+			CriticalRules: testutil.CriticalRules(config,
+				"Follow the policy steps IN ORDER "+
+					"— do not skip steps",
+			),
 			ThinkingPrompt: "Think step by step about " +
 				"how to investigate and resolve " +
 				"the customer's billing issue.",
@@ -279,7 +265,8 @@ func NewEcommerceInteractiveChatSearch(
 	config testutil.TestConfig,
 ) (*testutil.InteractiveChat, error) {
 	config.PinTools = append(
-		config.PinTools, "search_guidance_policy",
+		config.PinTools,
+		"search_policy", "get_policy",
 	)
 	fixture := NewEcommerceFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
@@ -316,15 +303,10 @@ Important: Our internal payment records may be `+
 					`out of date. Always verify with the `+
 					`payment gateway for real-time status.
 `, tp.Today(), tp.Weekday()),
-			CriticalRules: `DO NOT HALLUCINATE
-- ALWAYS search and read the relevant ` +
-				`policy/guidance BEFORE taking any action
-- Every claim MUST come from tool outputs or ` +
-				`user-provided information
-- NEVER invent data (IDs, amounts, statuses)
-- If information is missing, say so explicitly
-- Follow the guidance policy steps IN ORDER — ` +
-				`do not skip steps`,
+			CriticalRules: testutil.CriticalRules(config,
+				"Follow the policy steps IN ORDER "+
+					"— do not skip steps",
+			),
 			ThinkingPrompt: "Think step by step about " +
 				"how to investigate and resolve " +
 				"the customer's billing issue.",

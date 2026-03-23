@@ -225,6 +225,51 @@ func TestYAML_AvailableToolsPrompt(t *testing.T) {
 	}
 }
 
+func TestYAML_AvailableToolsPrompt_OutputSchema(t *testing.T) {
+	type testOutput struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+
+	t.Run("output schema disabled by default", func(t *testing.T) {
+		tc := NewYAML()
+		tc.RegisterTool(gent.NewToolFunc(
+			"get_item", "Get an item",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+			},
+			func(ctx context.Context, in map[string]any) (testOutput, error) {
+				return testOutput{}, nil
+			},
+		))
+		catalog := tc.AvailableToolsPrompt()
+		assert.NotContains(t, catalog, "Returns:")
+	})
+
+	t.Run("output schema enabled shows return type", func(t *testing.T) {
+		tc := NewYAML().WithOutputSchema(true)
+		tc.RegisterTool(gent.NewToolFunc(
+			"get_item", "Get an item",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+			},
+			func(ctx context.Context, in map[string]any) (testOutput, error) {
+				return testOutput{}, nil
+			},
+		))
+		catalog := tc.AvailableToolsPrompt()
+		assert.Contains(t, catalog, "Returns:")
+		assert.Contains(t, catalog, "name")
+		assert.Contains(t, catalog, "count")
+	})
+}
+
 func TestYAML_ParseSection(t *testing.T) {
 	type input struct {
 		content string

@@ -124,6 +124,12 @@ func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
 				sub.OnAfterIteration(execCtx, e)
 			}
 		}
+	case *gent.BeforeSystemPromptEvent:
+		for _, s := range r.subscribers {
+			if sub, ok := s.(gent.BeforeSystemPromptSubscriber); ok {
+				sub.OnBeforeSystemPrompt(execCtx, e)
+			}
+		}
 	case *gent.BeforeModelCallEvent:
 		for _, s := range r.subscribers {
 			if sub, ok := s.(gent.BeforeModelCallSubscriber); ok {

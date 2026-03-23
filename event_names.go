@@ -41,6 +41,9 @@ const (
 	// Limits
 	EventNameLimitExceeded = "gent:limit_exceeded"
 
+	// System prompt
+	EventNameSystemPromptBefore = "gent:system_prompt:before"
+
 	// Compaction
 	EventNameCompaction = "gent:compaction"
 

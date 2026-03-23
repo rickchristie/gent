@@ -192,7 +192,7 @@ func TestFlatIndex_RemoveClearsMemory(t *testing.T) {
 	fullSlice := idx.vectors[:cap(idx.vectors)]
 	for i, sv := range fullSlice {
 		assert.Empty(t, sv.docID, "docID at index %d should be zeroed", i)
-		assert.Empty(t, sv.chunk, "chunk at index %d should be zeroed", i)
+		assert.Empty(t, sv.snippet, "snippet at index %d should be zeroed", i)
 		assert.Nil(t, sv.vector, "vector at index %d should be nil", i)
 	}
 }
