@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/rickchristie/gent"
@@ -233,7 +234,8 @@ func (t *PolicySearchTool) Call(
 		}
 		switch t.resultMode {
 		case SearchResultTitle:
-			fmt.Fprintf(&sb, "id: %s", p.Id)
+			fmt.Fprintf(&sb, "id: %s\ndescription: %s",
+				p.Id, p.Description)
 		case SearchResultSnippet:
 			fmt.Fprintf(&sb, "id: %s\n%s", p.Id, r.Snippet)
 		default:
@@ -242,6 +244,78 @@ func (t *PolicySearchTool) Call(
 	}
 
 	return &gent.ToolResult[string]{Text: sb.String()}, nil
+}
+
+// PolicySuggestion is a suggested policy from [PolicySearchTool.SuggestPolicies].
+type PolicySuggestion struct {
+	Id          string
+	Description string
+}
+
+// SuggestPolicies searches for policies relevant to the given conversation text.
+// It chunks the text with [search.MarkdownChunker], searches for each chunk, merges
+// results by policy ID (keeping the highest score), and returns the top-K suggestions
+// sorted by relevance. Returns nil if no policies match.
+//
+// This is used for pre-populating the system prompt with likely-relevant policy IDs
+// before the agent loop starts, so the agent knows which policies to fetch via
+// [GetPolicyTool].
+func (t *PolicySearchTool) SuggestPolicies(
+	ctx context.Context, text string, topK int,
+) ([]PolicySuggestion, error) {
+	if text == "" {
+		return nil, nil
+	}
+
+	// Chunk the conversation text into search-sized pieces.
+	chunker := &search.MarkdownChunker{
+		ChunkSize:  256,
+		TokenCount: func(s string) int { return len(s) / 4 },
+	}
+	chunks := chunker.Chunk(text)
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+
+	// Search for each chunk and merge results by policy ID.
+	type scored struct {
+		id    string
+		score float64
+	}
+	best := map[string]float64{}
+	for _, chunk := range chunks {
+		results, err := t.index.Search(ctx, chunk.Text, topK)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range results {
+			if r.Score > best[r.Id] {
+				best[r.Id] = r.Score
+			}
+		}
+	}
+
+	// Sort by score descending and take top-K.
+	sorted := make([]scored, 0, len(best))
+	for id, score := range best {
+		sorted = append(sorted, scored{id, score})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].score > sorted[j].score
+	})
+	if topK > 0 && len(sorted) > topK {
+		sorted = sorted[:topK]
+	}
+
+	suggestions := make([]PolicySuggestion, len(sorted))
+	for i, s := range sorted {
+		p := t.policies[s.id]
+		suggestions[i] = PolicySuggestion{
+			Id:          s.id,
+			Description: p.Description,
+		}
+	}
+	return suggestions, nil
 }
 
 // --- gent.IndexableTool implementation (for SearchJSON compatibility) ---

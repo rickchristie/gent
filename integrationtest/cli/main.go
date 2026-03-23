@@ -164,11 +164,28 @@ func run() error {
 			return err
 		}
 
+		// Step 6: Model selection
+		modelOptions := make(
+			[]menuOption, len(testutil.AvailableModels),
+		)
+		for i, m := range testutil.AvailableModels {
+			modelOptions[i] = menuOption{
+				label: m.Label, value: m.Name,
+			}
+		}
+		modelName, err := promptMenu(
+			rl, "LLM Model", modelOptions,
+		)
+		if err != nil {
+			return handleMenuErr(err)
+		}
+
 		// Build config
 		config := buildConfig(tcType, hintType)
 		config.WrapPTC = ptcChoice != "no"
 		config.PTCCodeOnly = ptcChoice == "code_only"
 		config.Compaction = compactionCfg
+		config.ModelName = modelName
 
 		// Create per-run log file
 		ptcSuffix := ""
@@ -533,14 +550,14 @@ func promptSummarization(
 	keepRecent, err := promptInt(rl,
 		"Keep recent (iterations to preserve "+
 			"unsummarized)",
-		3, 0, 50)
+		1, 0, 50)
 	if err != nil {
 		return testutil.CompactionConfig{}, err
 	}
 
 	triggerIter, err := promptInt(rl,
 		"Trigger every N iterations",
-		3, 1, 50)
+		5, 1, 50)
 	if err != nil {
 		return testutil.CompactionConfig{}, err
 	}

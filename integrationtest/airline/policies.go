@@ -9,10 +9,59 @@ import "github.com/rickchristie/gent/policy"
 func airlinePolicies() []*policy.Policy {
 	return []*policy.Policy{
 		// -----------------------------------------------------------------
+		// Greeting and communication guidelines
+		// -----------------------------------------------------------------
+		{
+			Id:          "greeting-communication",
+			Description: "Agent greeting, tone, and communication guidelines",
+			FullContent: `## Greeting and Communication Guidelines
+
+### Opening Greeting
+
+Always greet the customer warmly and introduce yourself:
+"Thank you for contacting SkyWings Airlines. My name is [Agent Name],
+how may I assist you today?"
+
+If the customer has already stated their issue, acknowledge it directly
+instead of asking them to repeat it.
+
+### Tone and Language
+
+- Use a professional but friendly tone at all times
+- Mirror the customer's language (if they write in Spanish, reply in
+  Spanish)
+- Avoid jargon — use "flight change" not "involuntary reroute"
+- Address the customer by name once identified (Mr./Ms. Last Name, or
+  first name if they sign informally)
+
+### Closing
+
+- Summarize what was done and any next steps
+- Ask "Is there anything else I can help you with?"
+- End with "Thank you for choosing SkyWings Airlines. Have a great day!"
+
+### Escalation Language
+
+If you cannot resolve the issue:
+"I understand this is frustrating. Let me connect you with a specialist
+who can help further. Your case reference is [case_id]."`,
+			Keywords: []string{
+				"greeting", "hello", "welcome", "communication",
+				"tone", "language", "closing", "escalation",
+			},
+			SyntheticQueries: []string{
+				"how should I greet the customer",
+				"what tone to use when talking to passengers",
+				"how to close a customer service conversation",
+				"escalation language for unresolved issues",
+			},
+		},
+
 		// Core policies (1-4): content matches fixture.go mock tool behavior
 		// -----------------------------------------------------------------
 		{
-			Id: "flight-change-rebooking",
+			Id:          "flight-change-rebooking",
+			Description: "Change fees, fare difference, same-day changes, and FF waivers",
 			FullContent: `## Flight Change and Rebooking
 
 ### Fee Structure
@@ -70,7 +119,8 @@ Same-day changes are not available for Basic Economy tickets.`,
 			},
 		},
 		{
-			Id: "cancellation-refund",
+			Id:          "cancellation-refund",
+			Description: "Cancellation fees, refund types, and travel credit rules",
 			FullContent: `## Cancellation and Refund Policy
 
 ### Refundable Tickets (Flex Fare)
@@ -116,7 +166,8 @@ is processed automatically within 7 business days.`,
 			},
 		},
 		{
-			Id: "baggage-allowance",
+			Id:          "baggage-allowance",
+			Description: "Carry-on and checked bag limits, fees, and overweight charges",
 			FullContent: `## Baggage Allowance and Fees
 
 ### Carry-On Baggage
@@ -162,7 +213,8 @@ policies. Contact customer service for specific requirements and fees.`,
 			},
 		},
 		{
-			Id: "frequent-flyer-benefits",
+			Id:          "frequent-flyer-benefits",
+			Description: "Bronze, Silver, Gold, and Platinum tier benefits",
 			FullContent: `## Frequent Flyer Program Benefits
 
 ### Bronze Tier (10,000+ miles per year)
@@ -216,7 +268,8 @@ policies. Contact customer service for specific requirements and fees.`,
 		// Additional realistic policies (5-13)
 		// -----------------------------------------------------------------
 		{
-			Id: "delay-compensation",
+			Id:          "delay-compensation",
+			Description: "Delay assistance, rebooking, and DOT refund rules",
 			FullContent: `## Flight Delay and Cancellation Compensation
 
 ### DOT Refund Rules (Effective 2024)
@@ -258,7 +311,8 @@ rebooking as described above.`,
 			},
 		},
 		{
-			Id: "24-hour-cancellation",
+			Id:          "24-hour-cancellation",
+			Description: "DOT-mandated 24-hour risk-free cancellation window",
 			FullContent: `## 24-Hour Risk-Free Cancellation
 
 ### DOT-Mandated 24-Hour Rule
@@ -301,7 +355,8 @@ third party directly for their cancellation policy.`,
 			},
 		},
 		{
-			Id: "involuntary-rebooking",
+			Id:          "involuntary-rebooking",
+			Description: "Denied boarding compensation and rebooking rights",
 			FullContent: `## Involuntary Rebooking and Denied Boarding
 
 ### Oversold Flight Compensation
@@ -344,7 +399,8 @@ not have confirmed seats are not covered.`,
 			},
 		},
 		{
-			Id: "unaccompanied-minor",
+			Id:          "unaccompanied-minor",
+			Description: "Age requirements, service fees, and documentation for minors",
 			FullContent: `## Unaccompanied Minor Policy
 
 ### Age Requirements
@@ -389,7 +445,8 @@ connections, and handoff to the designated guardian at arrival.
 			},
 		},
 		{
-			Id: "pet-travel",
+			Id:          "pet-travel",
+			Description: "In-cabin and cargo pet policies, fees, and breed restrictions",
 			FullContent: `## Pet Travel Policy
 
 ### In-Cabin Pets
@@ -439,7 +496,8 @@ documentation including rabies vaccination records and import permits.`,
 			},
 		},
 		{
-			Id: "eu261-passenger-rights",
+			Id:          "eu261-passenger-rights",
+			Description: "EU261/2004 compensation amounts and delay thresholds",
 			FullContent: `## EU261/2004 Passenger Rights (European Flights)
 
 ### Regulation Overview
@@ -498,7 +556,8 @@ small claims court.`,
 			},
 		},
 		{
-			Id: "apis-travel-documentation",
+			Id:          "apis-travel-documentation",
+			Description: "APIS, ESTA, eTA, and passport requirements",
 			FullContent: `## APIS and Travel Documentation Requirements
 
 ### Advance Passenger Information System (APIS)
@@ -559,7 +618,8 @@ undocumented passengers.`,
 			},
 		},
 		{
-			Id: "wifi-inflight-services",
+			Id:          "wifi-inflight-services",
+			Description: "WiFi plans, pricing, entertainment, and Bluetooth",
 			FullContent: `## In-Flight WiFi and Entertainment Services
 
 ### WiFi Availability
@@ -620,7 +680,8 @@ text-based communication are allowed on all WiFi plans.`,
 		// Saturation policies (14-18): simulate real-world corpus depth
 		// -----------------------------------------------------------------
 		{
-			Id: "seat-selection-upgrades",
+			Id:          "seat-selection-upgrades",
+			Description: "Seat selection fees, upgrade process, and standby upgrades",
 			FullContent: `## Seat Selection and Upgrades
 
 ### Standard Seat Selection
@@ -677,7 +738,8 @@ A co-pay of $75-$200 may apply depending on the original fare class.`,
 			},
 		},
 		{
-			Id: "check-in-procedures",
+			Id:          "check-in-procedures",
+			Description: "Online, mobile, kiosk, and counter check-in cutoff times",
 			FullContent: `## Check-In Procedures
 
 ### Online Check-In
@@ -731,7 +793,8 @@ Passengers must be checked in and at the gate by the following cutoffs:
 			},
 		},
 		{
-			Id: "special-assistance",
+			Id:          "special-assistance",
+			Description: "Wheelchair, medical, and disability accommodations",
 			FullContent: `## Special Assistance and Accessibility
 
 ### Wheelchair and Mobility Assistance
@@ -788,7 +851,8 @@ possible, advance notice ensures the best experience.`,
 			},
 		},
 		{
-			Id: "meal-dietary-requests",
+			Id:          "meal-dietary-requests",
+			Description: "Meal options, special dietary requests, and allergy protocol",
 			FullContent: `## Meal and Dietary Requests
 
 ### Complimentary Meals
@@ -847,7 +911,8 @@ desserts.`,
 			},
 		},
 		{
-			Id: "lost-luggage-claims",
+			Id:          "lost-luggage-claims",
+			Description: "Lost bag reporting, tracking, and compensation claims",
 			FullContent: `## Lost and Delayed Luggage Claims
 
 ### Reporting Lost or Delayed Luggage
@@ -912,7 +977,8 @@ lost. The airline responds within 30 business days.`,
 			},
 		},
 		{
-			Id: "group-bookings",
+			Id:          "group-bookings",
+			Description: "Group rates, deposits, name changes, and cancellation terms",
 			FullContent: `## Group Booking Policy
 
 ### Eligibility

@@ -90,6 +90,8 @@ type TestConfig struct {
 	// Embedder for hybrid BM25+semantic search. Used by both tool search (SearchJSON)
 	// and policy search (PolicySearchTool). Created by DefaultTestConfig.
 	Embedder search.Embedder
+	// ModelName overrides the LLM model. Default: "grok-4-1-fast".
+	ModelName string
 }
 
 // DefaultTestConfig returns a config suitable for go test with JSON toolchain.
@@ -185,28 +187,158 @@ type ConversationMessage struct {
 	Content string
 }
 
-// CreateModel creates an xAI model for testing.
-func CreateModel() (gent.StreamingModel, error) {
-	apiKey := os.Getenv("GENT_TEST_XAI_KEY")
+// DefaultModelName is the default LLM model for integration tests.
+const DefaultModelName = "grok-4-1-fast"
+
+// ModelOption defines an LLM model available for integration tests.
+type ModelOption struct {
+	Label   string // display name in CLI menu
+	Name    string // model ID for API calls
+	EnvKey  string // env var for API key
+	BaseURL string // API base URL (empty = OpenAI default)
+}
+
+// AvailableModels lists all models the CLI can select from.
+var AvailableModels = []ModelOption{
+	{
+		Label: "xAI grok-4-1-fast",
+		Name: "grok-4-1-fast", EnvKey: "GENT_TEST_XAI_KEY",
+		BaseURL: "https://api.x.ai/v1",
+	},
+	{
+		Label: "xAI grok-4.20-0309-non-reasoning",
+		Name:    "grok-4.20-0309-non-reasoning",
+		EnvKey:  "GENT_TEST_XAI_KEY",
+		BaseURL: "https://api.x.ai/v1",
+	},
+	{
+		Label: "OpenAI o3", Name: "o3",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI o4-mini", Name: "o4-mini",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-4.1", Name: "gpt-4.1",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-4.1-mini", Name: "gpt-4.1-mini",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-5", Name: "gpt-5",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-5-mini", Name: "gpt-5-mini",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-5-nano", Name: "gpt-5-nano",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-5.4", Name: "gpt-5.4",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-5.4-mini", Name: "gpt-5.4-mini",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label: "OpenAI gpt-5.4-nano", Name: "gpt-5.4-nano",
+		EnvKey: "GENT_TEST_OPENAI_KEY",
+	},
+	{
+		Label:   "Google gemini-2.5-pro",
+		Name:    "gemini-2.5-pro",
+		EnvKey:  "GENT_TEST_GEMINI_KEY",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+	},
+	{
+		Label:   "Google gemini-2.5-flash",
+		Name:    "gemini-2.5-flash",
+		EnvKey:  "GENT_TEST_GEMINI_KEY",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+	},
+	{
+		Label:   "Google gemini-2.5-flash-lite",
+		Name:    "gemini-2.5-flash-lite",
+		EnvKey:  "GENT_TEST_GEMINI_KEY",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+	},
+	{
+		Label:   "Google gemini-3-pro",
+		Name:    "gemini-3-pro",
+		EnvKey:  "GENT_TEST_GEMINI_KEY",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+	},
+	{
+		Label:   "Google gemini-3-flash",
+		Name:    "gemini-3-flash",
+		EnvKey:  "GENT_TEST_GEMINI_KEY",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+	},
+	{
+		Label:   "Google gemini-3-flash-lite",
+		Name:    "gemini-3-flash-lite",
+		EnvKey:  "GENT_TEST_GEMINI_KEY",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+	},
+}
+
+// CreateModel creates an LLM model for testing. If modelName is
+// empty, uses [DefaultModelName]. Looks up the model in
+// [AvailableModels] to determine the API key env var and base URL.
+func CreateModel(
+	modelName string,
+) (gent.StreamingModel, error) {
+	if modelName == "" {
+		modelName = DefaultModelName
+	}
+
+	// Find model config.
+	var opt ModelOption
+	for _, m := range AvailableModels {
+		if m.Name == modelName {
+			opt = m
+			break
+		}
+	}
+	if opt.Name == "" {
+		// Unknown model — assume xAI.
+		opt = ModelOption{
+			Name: modelName, EnvKey: "GENT_TEST_XAI_KEY",
+			BaseURL: "https://api.x.ai/v1",
+		}
+	}
+
+	apiKey := os.Getenv(opt.EnvKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf(
-			"GENT_TEST_XAI_KEY environment variable not set",
+			"%s environment variable not set", opt.EnvKey,
 		)
 	}
 
-	llm, err := openai.New(
+	opts := []openai.Option{
 		openai.WithToken(apiKey),
-		openai.WithBaseURL("https://api.x.ai/v1"),
-		openai.WithModel("grok-4-1-fast"),
-	)
+		openai.WithModel(modelName),
+	}
+	if opt.BaseURL != "" {
+		opts = append(opts, openai.WithBaseURL(opt.BaseURL))
+	}
+
+	llm, err := openai.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"failed to create xAI LLM: %w", err,
+			"failed to create LLM: %w", err,
 		)
 	}
 
 	return models.NewLCGWrapper(llm).
-		WithModelName("grok-4-1-fast"), nil
+		WithModelName(modelName), nil
 }
 
 // CreateToolChain creates the appropriate toolchain based on config. For
@@ -334,6 +466,56 @@ func CriticalRules(
 	return rules
 }
 
+// PolicySuggestionHook implements BeforeIterationSubscriber to inject
+// policy suggestions into the scratchpad on the first iteration. It
+// chunks the conversation text, searches for relevant policies, and
+// adds an auto_suggestion iteration with the top-5 policy IDs.
+type PolicySuggestionHook struct {
+	suggester func(ctx context.Context, text string) string
+	text      string
+	done      bool
+}
+
+func (h *PolicySuggestionHook) OnBeforeIteration(
+	execCtx *gent.ExecutionContext,
+	event *gent.BeforeIterationEvent,
+) {
+	if h.done {
+		return
+	}
+	h.done = true
+
+	suggestion := h.suggester(execCtx.Context(), h.text)
+	if suggestion == "" {
+		return
+	}
+
+	// Format as XML TextSection.
+	xmlFormat := format.NewXML()
+	content := xmlFormat.FormatSections(
+		[]gent.FormattedSection{
+			{Name: "policy_suggestion", Content: suggestion},
+		},
+	)
+
+	iter := &gent.Iteration{
+		Origin:               gent.IterationSystemInjected,
+		ExpireAfterIteration: 3,
+		Messages: []*gent.MessageContent{
+			{
+				Role: llms.ChatMessageTypeHuman,
+				Parts: []gent.ContentPart{
+					llms.TextContent{Text: content},
+				},
+			},
+		},
+	}
+
+	scratchpad := execCtx.Data().GetScratchPad()
+	scratchpad = append(scratchpad, iter)
+	execCtx.Data().SetScratchPad(scratchpad)
+}
+
 // ContainsIgnoreCase checks if s contains substr, case-insensitive.
 func ContainsIgnoreCase(s, substr string) bool {
 	sLower := make([]byte, len(s))
@@ -383,6 +565,11 @@ type ScenarioConfig struct {
 	SystemPrompt    string
 	CriticalRules   string
 	ThinkingPrompt  string
+	// PolicySuggester generates a policy suggestion section for
+	// the system prompt based on the conversation text. Called
+	// once before the agent loop starts. Returns empty string
+	// if no policies are relevant.
+	PolicySuggester func(ctx context.Context, text string) string
 }
 
 // RunScenario executes a test scenario with the given configuration.
@@ -392,7 +579,7 @@ func RunScenario(
 	testCfg TestConfig,
 	scenario ScenarioConfig,
 ) error {
-	model, err := CreateModel()
+	model, err := CreateModel(testCfg.ModelName)
 	if err != nil {
 		return err
 	}
@@ -435,6 +622,13 @@ func RunScenario(
 	)
 
 	registry := events.NewRegistry()
+
+	if scenario.PolicySuggester != nil {
+		registry.Subscribe(&PolicySuggestionHook{
+			suggester: scenario.PolicySuggester,
+			text:      scenario.CustomerRequest,
+		})
+	}
 
 	var streamWg sync.WaitGroup
 	if testCfg.UseStreaming {
@@ -803,6 +997,11 @@ type ChatConfig struct {
 	MaxIterations  float64
 	RegisterTools  func(tc gent.ToolChain)
 	TimeProvider   gent.TimeProvider
+	// PolicySuggester generates a policy suggestion section based
+	// on conversation history. Called on each SendMessage with
+	// the last 10 messages formatted as text. Returns empty string
+	// if no policies are relevant.
+	PolicySuggester func(ctx context.Context, text string) string
 }
 
 // InteractiveChat holds state for an interactive chat session.
@@ -820,7 +1019,7 @@ func NewInteractiveChat(
 	config TestConfig,
 	chatCfg ChatConfig,
 ) (*InteractiveChat, error) {
-	model, err := CreateModel()
+	model, err := CreateModel(config.ModelName)
 	if err != nil {
 		return nil, err
 	}
@@ -854,6 +1053,19 @@ func (s *InteractiveChat) formatMessageHistory() string {
 	}
 	sb.WriteString("</message_history>\n")
 	sb.WriteString("\nAssist and reply to the customer!")
+	return sb.String()
+}
+
+// recentHistoryText formats the last N messages as text for policy suggestion.
+func (s *InteractiveChat) recentHistoryText(maxMessages int) string {
+	history := s.History
+	if len(history) > maxMessages {
+		history = history[len(history)-maxMessages:]
+	}
+	var sb strings.Builder
+	for _, msg := range history {
+		fmt.Fprintf(&sb, "- %s: %s\n", msg.Role, msg.Content)
+	}
 	return sb.String()
 }
 
@@ -907,6 +1119,13 @@ func (s *InteractiveChat) SendMessage(
 	)
 
 	registry := events.NewRegistry()
+
+	if s.ChatCfg.PolicySuggester != nil {
+		registry.Subscribe(&PolicySuggestionHook{
+			suggester: s.ChatCfg.PolicySuggester,
+			text:      s.recentHistoryText(10),
+		})
+	}
 
 	var streamWg sync.WaitGroup
 	streamingHook := NewStreamingOutputHook(s.Writer)

@@ -6,6 +6,8 @@ func ecommercePolicies() []*Policy {
 	return []*Policy{
 		{
 			Id: "standard-return",
+			Description: "30-day return window, conditions," +
+				" and exceptions",
 			FullContent: `## Standard Return Policy
 
 All items purchased from TechEdge Electronics may be returned within
@@ -56,6 +58,7 @@ Returns may be initiated online or at any TechEdge store location.`,
 		},
 		{
 			Id: "refund-processing",
+			Description: "Refund timeline by payment method",
 			FullContent: `## Refund Processing
 
 Once a returned item has been received and inspected, refunds are
@@ -105,6 +108,8 @@ issued instead.`,
 		},
 		{
 			Id: "extended-warranty",
+			Description: "Coverage tiers, claims process," +
+				" and exclusions",
 			FullContent: `## Extended Warranty — TechEdge Protection Plans
 
 TechEdge offers three tiers of extended warranty coverage that begin
@@ -156,6 +161,8 @@ after the manufacturer warranty expires.
 		},
 		{
 			Id: "price-match",
+			Description: "Eligible competitors, process," +
+				" and exclusions",
 			FullContent: `## Price Match Guarantee
 
 TechEdge will match the current selling price of an identical item
@@ -212,6 +219,8 @@ refund of the difference.`,
 		},
 		{
 			Id: "damaged-defective",
+			Description: "Photo evidence requirements," +
+				" replacement vs refund",
 			FullContent: `## Damaged or Defective Items
 
 If you receive an item that is damaged during shipping or has a
@@ -267,6 +276,8 @@ Do not dispose of damaged packaging until the claim is resolved.`,
 		},
 		{
 			Id: "exchange",
+			Description: "Size/color exchange process and price" +
+				" difference handling",
 			FullContent: `## Exchange Policy
 
 TechEdge allows exchanges within **30 days** of the original
@@ -325,6 +336,8 @@ subject to a partial value adjustment.`,
 		},
 		{
 			Id: "store-credit",
+			Description: "Credit balance rules, no expiration," +
+				" non-transferable",
 			FullContent: `## Store Credit Policy
 
 Store credit is issued as a digital balance on the customer's
@@ -381,6 +394,8 @@ Adjustments are typically resolved within **2 business days**.`,
 		},
 		{
 			Id: "shipping-delivery",
+			Description: "Shipping tiers, tracking, and lost" +
+				" package claims",
 			FullContent: `## Shipping & Delivery
 
 TechEdge ships to all 50 U.S. states, Washington D.C., and APO/FPO
@@ -436,6 +451,8 @@ air to APO/FPO addresses and will default to ground shipping.`,
 		},
 		{
 			Id: "loyalty-program",
+			Description: "Points earning, redemption, and" +
+				" membership tiers",
 			FullContent: `## TechEdge Rewards — Loyalty Program
 
 TechEdge Rewards is a free loyalty program that lets customers earn
@@ -493,6 +510,8 @@ resets annually on the enrollment anniversary date.`,
 		},
 		{
 			Id: "gift-card",
+			Description: "Purchase limits, no expiration," +
+				" and replacement",
 			FullContent: `## Gift Card Policy
 
 TechEdge gift cards are available for purchase online and at all
@@ -561,6 +580,8 @@ details.`,
 
 		{
 			Id: "rma-returns-authorization",
+			Description: "RMA number process for electronics" +
+				" and high-value items",
 			FullContent: `## Return Merchandise Authorization (RMA) Process
 
 ### When RMA is Required
@@ -615,6 +636,8 @@ the order.`,
 		},
 		{
 			Id: "electronics-return-15day",
+			Description: "15-day return window and restocking" +
+				" fees for electronics",
 			FullContent: `## Electronics Return Policy (15-Day Window)
 
 ### Shortened Return Window
@@ -666,6 +689,8 @@ The following electronics cannot be returned once opened:
 		},
 		{
 			Id: "tax-reporting-1099k",
+			Description: "IRS 1099-K reporting thresholds and" +
+				" TIN requirements",
 			FullContent: `## Tax Reporting and Form 1099-K
 
 ### IRS Reporting Requirements

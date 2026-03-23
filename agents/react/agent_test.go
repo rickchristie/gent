@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/format"
 	"github.com/rickchristie/gent/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -560,9 +561,9 @@ func TestAgent_Next_ModelError(t *testing.T) {
 		"expected error to contain 'model failed', got %q", err.Error())
 }
 
-func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
-	// When format parsing fails, the agent should continue with the error fed back
-	// as an observation, allowing the model to recover in the next iteration.
+func TestAgent_Next_ParseError_LogsExpiredIteration(t *testing.T) {
+	// When format parsing fails, the agent logs the broken response as an
+	// expired iteration and adds a system_error reminder that persists.
 	response := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{{Content: "invalid response"}},
 	}
@@ -581,14 +582,107 @@ func TestAgent_Next_ParseError_FeedsBackAsObservation(t *testing.T) {
 	execCtx := newTestExecCtx(data)
 	result, err := loop.Next(execCtx)
 
-	// Should not return error - instead feeds back as observation
 	assert.NoError(t, err)
 	assert.Equal(t, gent.LAContinue, result.Action)
-	assert.Contains(t, result.NextPrompt, "Format parse error")
-	assert.Contains(t, result.NextPrompt, "invalid response")
+	assert.Contains(t, result.NextPrompt, "<system_error>")
 
-	// Scratchpad should have the iteration with error feedback
-	assert.Len(t, data.GetScratchPad(), 1)
+	// Scratchpad: expired iteration + system error iteration
+	require.Len(t, data.GetScratchPad(), 2)
+	assert.Greater(t, data.GetScratchPad()[0].ExpireAfterIteration, 0)
+	assert.Equal(t, 0, data.GetScratchPad()[1].ExpireAfterIteration)
+
+	// Iteration history has both
+	require.Len(t, data.GetIterationHistory(), 2)
+}
+
+func TestAgent_Next_UnclosedTag_ExpiresAndReminder(t *testing.T) {
+	// When the model writes <action>...</action> followed by an unclosed
+	// <answer> tag, the XML parser returns an unclosed tag error.
+	// The agent should:
+	// 1. Create an expired iteration with the raw response
+	// 2. Inject a system_error reminder that persists
+	responseText := `<thinking>
+I will search for the tools I need.
+</thinking>
+<action>
+<direct_call>
+{"tool":"search","args":{"query":"test"}}
+</direct_call>
+</action>
+<answer>
+Here is my answer but I forgot to close the tag.
+`
+	response := &gent.ContentResponse{
+		Choices: []*gent.ContentChoice{{Content: responseText}},
+	}
+	model := newMockModel(response)
+
+	// Use real XML format to get unclosed tag detection
+	xmlFormat := format.NewXML()
+	tc := newMockToolChain()
+	term := newMockTermination()
+
+	loop := NewAgent(model).
+		WithFormat(xmlFormat).
+		WithToolChain(tc).
+		WithTermination(term).
+		WithThinking("Think step by step")
+
+	data := gent.NewBasicLoopData(&gent.Task{Text: "Test"})
+	execCtx := gent.NewExecutionContext(
+		context.Background(), "test", data,
+	)
+	execCtx.SetLimits(nil)
+
+	result, err := loop.Next(execCtx)
+
+	require.NoError(t, err)
+	assert.Equal(t, gent.LAContinue, result.Action)
+
+	// NextPrompt should be the system_error reminder
+	assert.Contains(t, result.NextPrompt, "<system_error>")
+	assert.Contains(t, result.NextPrompt,
+		"You MUST follow the output format")
+
+	// Scratchpad: expired iteration + system_error reminder
+	require.Len(t, data.GetScratchPad(), 2)
+
+	// First iteration is expired (raw response + error)
+	expiredIter := data.GetScratchPad()[0]
+	assert.Greater(t, expiredIter.ExpireAfterIteration, 0,
+		"first iteration should be expired")
+
+	// Verify the expired iteration has the AI response
+	require.GreaterOrEqual(t, len(expiredIter.Messages), 1)
+	aiMsg, ok := expiredIter.Messages[0].Parts[0].(llms.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, aiMsg.Text, "<action>")
+	assert.Contains(t, aiMsg.Text, "<answer>")
+
+	// Verify the expired iteration has the unclosed tag error
+	errorMsg := expiredIter.Messages[len(expiredIter.Messages)-1]
+	errorText, ok := errorMsg.Parts[0].(llms.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, errorText.Text, "unclosed tag")
+	assert.Contains(t, errorText.Text, "<answer>")
+
+	// Second iteration is the system_error reminder (not expired)
+	reminderIter := data.GetScratchPad()[1]
+	assert.Equal(t, 0, reminderIter.ExpireAfterIteration,
+		"system_error reminder should not be expired")
+	assert.Equal(t, gent.IterationSystemInjected, reminderIter.Origin)
+
+	reminderText, ok := reminderIter.Messages[0].Parts[0].(llms.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, reminderText.Text, "<system_error>")
+
+	// Iteration history has both
+	require.Len(t, data.GetIterationHistory(), 2)
+
+	// Stats should track the format parse error
+	stats := execCtx.Stats()
+	assert.Equal(t, int64(1),
+		stats.GetCounter(gent.SCFormatParseErrorTotal))
 }
 
 func TestAgent_Next_ParseError_TracesError(t *testing.T) {
@@ -632,15 +726,21 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 	}
 
 	type expected struct {
-		action                       gent.LoopAction
-		nextPrompt                   string
-		scratchpadLen                int
-		iterationHistoryLen          int
-		scratchpadObservationContent string
+		action              gent.LoopAction
+		nextPrompt          string
+		scratchpadLen       int
+		iterationHistoryLen int
+		// expired is true when the iteration should be
+		// logged but already expired (format parse errors
+		// and unrecognized responses).
+		expired bool
+		// observationContent is the expected error message
+		// in the iteration's second message. Used for both
+		// expired iterations and fed-back observations.
+		observationContent string
 	}
 
 	// Create wrapped errors that simulate real toolchain/termination parse errors.
-	// Real implementations wrap the underlying JSON/YAML error with details.
 	toolchainJSONErr := fmt.Errorf(
 		"%w: invalid character 'n' looking for beginning of value",
 		gent.ErrInvalidJSON,
@@ -657,7 +757,7 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "format parse error feeds back with exact error message",
+			name: "format parse error creates expired iteration and system error",
 			input: input{
 				responseContent: "completely invalid response with no sections",
 			},
@@ -666,30 +766,17 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 			},
 			expected: expected{
 				action: gent.LAContinue,
-				nextPrompt: "<observation>\n" +
-					"Format parse error: no recognized sections found in output\n" +
-					"\n" +
-					"Your response could not be parsed. " +
-					"Please ensure your response follows the expected format.\n" +
-					"\n" +
-					"Your raw response was:\n" +
-					"completely invalid response with no sections\n" +
-					"\n" +
-					"Please try again with proper formatting.\n" +
-					"</observation>",
-				scratchpadLen:       1,
-				iterationHistoryLen: 1,
-				scratchpadObservationContent: "<observation>\n" +
-					"Format parse error: no recognized sections found in output\n" +
-					"\n" +
-					"Your response could not be parsed. " +
-					"Please ensure your response follows the expected format.\n" +
-					"\n" +
-					"Your raw response was:\n" +
-					"completely invalid response with no sections\n" +
-					"\n" +
-					"Please try again with proper formatting.\n" +
-					"</observation>",
+				nextPrompt: "<system_error>\n" +
+					"You MUST follow the output format described in the system prompt. " +
+					"Every response MUST contain properly formatted sections. " +
+					"Do NOT fabricate tool outputs or observations — " +
+					"only use the sections defined in your instructions.\n" +
+					"</system_error>",
+				scratchpadLen:       2,
+				iterationHistoryLen: 2,
+				expired:             true,
+				observationContent: "Format parse error: " +
+					"no recognized sections found in output",
 			},
 		},
 		{
@@ -713,7 +800,8 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 					"</observation>",
 				scratchpadLen:       1,
 				iterationHistoryLen: 1,
-				scratchpadObservationContent: "<observation>\n" +
+				expired:             false,
+				observationContent: "<observation>\n" +
 					"<error>\n" +
 					"Error: invalid JSON in section content: " +
 					"invalid character 'n' looking for beginning of value\n" +
@@ -743,7 +831,8 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 					"</observation>",
 				scratchpadLen:       1,
 				iterationHistoryLen: 1,
-				scratchpadObservationContent: "<observation>\n" +
+				expired:             false,
+				observationContent: "<observation>\n" +
 					"Termination parse error: invalid JSON in section content: " +
 					"unexpected end of JSON input\n" +
 					"Content: {malformed json\n" +
@@ -756,13 +845,13 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup model
 			response := &gent.ContentResponse{
-				Choices: []*gent.ContentChoice{{Content: tt.input.responseContent}},
+				Choices: []*gent.ContentChoice{
+					{Content: tt.input.responseContent},
+				},
 			}
 			model := newMockModel(response)
 
-			// Setup format
 			format := newMockFormat()
 			if tt.mocks.formatParseErr != nil {
 				format = format.WithParseError(tt.mocks.formatParseErr)
@@ -770,76 +859,72 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 				format = format.WithParseResult(tt.mocks.formatParseResult)
 			}
 
-			// Setup toolchain
 			tc := newMockToolChain()
 			if tt.mocks.toolChainErr != nil {
 				tc = tc.WithErrors(tt.mocks.toolChainErr)
 			}
 
-			// Setup termination
 			term := newMockTermination()
 			if tt.mocks.terminationErr != nil {
 				term = term.WithParseError(tt.mocks.terminationErr)
 			}
 
-			// Build agent
 			loop := NewAgent(model).
 				WithFormat(format).
 				WithToolChain(tc).
 				WithTermination(term)
 
-			// Execute
 			data := gent.NewBasicLoopData(&gent.Task{Text: "Test task"})
 			execCtx := newTestExecCtx(data)
 			result, err := loop.Next(execCtx)
 
-			// Assert no error returned (errors are fed back as observations)
 			require.NoError(t, err)
-
-			// Assert action
 			assert.Equal(t, tt.expected.action, result.Action)
-
-			// Assert NextPrompt (full match)
 			assert.Equal(t, tt.expected.nextPrompt, result.NextPrompt)
+			assert.Equal(t,
+				tt.expected.scratchpadLen,
+				len(data.GetScratchPad()),
+			)
+			assert.Equal(t,
+				tt.expected.iterationHistoryLen,
+				len(data.GetIterationHistory()),
+			)
 
-			// Assert scratchpad length
-			assert.Equal(t, tt.expected.scratchpadLen, len(data.GetScratchPad()))
-
-			// Assert iteration history length
-			assert.Equal(t, tt.expected.iterationHistoryLen, len(data.GetIterationHistory()))
-
-			// Verify scratchpad observation content (full match)
 			if tt.expected.scratchpadLen > 0 {
 				scratchpad := data.GetScratchPad()
-				lastIter := scratchpad[len(scratchpad)-1]
-				require.GreaterOrEqual(t, len(lastIter.Messages), 2,
-					"iteration should have at least 2 messages (AI response + observation)")
 
-				// Last message should be the observation (Human role)
-				observationMsg := lastIter.Messages[len(lastIter.Messages)-1]
-				assert.Equal(t, llms.ChatMessageTypeHuman, observationMsg.Role)
+				if tt.expected.expired {
+					// First iteration is the expired one with the error
+					expiredIter := scratchpad[0]
+					assert.Greater(t, expiredIter.ExpireAfterIteration, 0,
+						"expired iteration should have ExpireAfterIteration set")
 
-				// Extract and verify observation text (full match)
-				require.Len(t, observationMsg.Parts, 1)
-				textContent, ok := observationMsg.Parts[0].(llms.TextContent)
-				require.True(t, ok, "observation should be TextContent")
-				assert.Equal(t, tt.expected.scratchpadObservationContent, textContent.Text)
-			}
+					require.GreaterOrEqual(t, len(expiredIter.Messages), 2,
+						"expired iteration should have AI response + error")
+					errorMsg := expiredIter.Messages[len(expiredIter.Messages)-1]
+					require.Len(t, errorMsg.Parts, 1)
+					textContent, ok := errorMsg.Parts[0].(llms.TextContent)
+					require.True(t, ok)
+					assert.Equal(t,
+						tt.expected.observationContent,
+						textContent.Text,
+					)
+				} else {
+					lastIter := scratchpad[len(scratchpad)-1]
+					assert.Equal(t, 0, lastIter.ExpireAfterIteration,
+						"non-expired iteration should not have ExpireAfterIteration")
 
-			// Verify iteration history observation content matches scratchpad
-			if tt.expected.iterationHistoryLen > 0 {
-				history := data.GetIterationHistory()
-				lastIter := history[len(history)-1]
-				require.GreaterOrEqual(t, len(lastIter.Messages), 2,
-					"iteration should have at least 2 messages (AI response + observation)")
-
-				observationMsg := lastIter.Messages[len(lastIter.Messages)-1]
-				assert.Equal(t, llms.ChatMessageTypeHuman, observationMsg.Role)
-
-				require.Len(t, observationMsg.Parts, 1)
-				textContent, ok := observationMsg.Parts[0].(llms.TextContent)
-				require.True(t, ok, "observation should be TextContent")
-				assert.Equal(t, tt.expected.scratchpadObservationContent, textContent.Text)
+					require.GreaterOrEqual(t, len(lastIter.Messages), 2,
+						"iteration should have at least 2 messages")
+					observationMsg := lastIter.Messages[len(lastIter.Messages)-1]
+					require.Len(t, observationMsg.Parts, 1)
+					textContent, ok := observationMsg.Parts[0].(llms.TextContent)
+					require.True(t, ok)
+					assert.Equal(t,
+						tt.expected.observationContent,
+						textContent.Text,
+					)
+				}
 			}
 		})
 	}
@@ -911,7 +996,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 		expected expected
 	}{
 		{
-			name: "action and answer both present - action takes priority",
+			name: "action and answer both present - action takes priority with reminder",
 			input: input{
 				responseContent: `<thinking>I'll reschedule and confirm</thinking>
 <action>
@@ -939,7 +1024,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 				action:           gent.LAContinue,
 				shouldHavePrompt: true,
 				promptContains:   "reschedule_booking",
-				scratchpadLen:    1,
+				scratchpadLen:    2,
 				toolChainCalled:  true,
 				shouldNotBeFinal: true,
 			},
@@ -988,7 +1073,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 			},
 		},
 		{
-			name: "action with tool error and answer - action still takes priority",
+			name: "action with tool error and answer - action still takes priority with reminder",
 			input: input{
 				responseContent: `<action>- tool: failing_tool</action>
 <answer>I completed the task!</answer>`,
@@ -1009,7 +1094,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 				action:           gent.LAContinue,
 				shouldHavePrompt: true,
 				promptContains:   "Error",
-				scratchpadLen:    1,
+				scratchpadLen:    2,
 				toolChainCalled:  true,
 				shouldNotBeFinal: true,
 			},
@@ -2090,5 +2175,291 @@ func (r *testRegistry) Dispatch(
 		if sub, ok := r.subscriber.(gent.BeforeSystemPromptSubscriber); ok {
 			sub.OnBeforeSystemPrompt(execCtx, e)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Iteration Expiry Tests
+// ----------------------------------------------------------------------------
+
+func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
+	type input struct {
+		scratchpad       []*gent.Iteration
+		currentIteration int
+	}
+
+	type expected struct {
+		messageCount    int
+		lastMessageText string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "no expiry includes all iterations",
+			input: input{
+				scratchpad: []*gent.Iteration{
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "response 1"},
+								},
+							},
+							{
+								Role: llms.ChatMessageTypeHuman,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "obs 1"},
+								},
+							},
+						},
+					},
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "response 2"},
+								},
+							},
+							{
+								Role: llms.ChatMessageTypeHuman,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "obs 2"},
+								},
+							},
+						},
+					},
+				},
+				currentIteration: 3,
+			},
+			expected: expected{
+				// system + task + 2*AI + 2*obs + CONTINUE!
+				messageCount:    7,
+				lastMessageText: "CONTINUE!",
+			},
+		},
+		{
+			name: "expired iteration is skipped",
+			input: input{
+				scratchpad: []*gent.Iteration{
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "ephemeral"},
+								},
+							},
+							{
+								Role: llms.ChatMessageTypeHuman,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "ephemeral obs"},
+								},
+							},
+						},
+						ExpireAfterIteration: 2,
+					},
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "permanent"},
+								},
+							},
+							{
+								Role: llms.ChatMessageTypeHuman,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "permanent obs"},
+								},
+							},
+						},
+					},
+				},
+				currentIteration: 3,
+			},
+			expected: expected{
+				// system + task + 1*AI + 1*obs + CONTINUE!
+				messageCount:    5,
+				lastMessageText: "CONTINUE!",
+			},
+		},
+		{
+			name: "not yet expired iteration is included",
+			input: input{
+				scratchpad: []*gent.Iteration{
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "ephemeral"},
+								},
+							},
+						},
+						ExpireAfterIteration: 5,
+					},
+				},
+				currentIteration: 3,
+			},
+			expected: expected{
+				// system + task + 1*AI + CONTINUE!
+				messageCount:    4,
+				lastMessageText: "CONTINUE!",
+			},
+		},
+		{
+			name: "iteration expires exactly at boundary",
+			input: input{
+				scratchpad: []*gent.Iteration{
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "at boundary"},
+								},
+							},
+						},
+						ExpireAfterIteration: 3,
+					},
+				},
+				currentIteration: 3,
+			},
+			expected: expected{
+				// system + task + BEGIN! (expired, no scratchpad)
+				messageCount:    3,
+				lastMessageText: "BEGIN!",
+			},
+		},
+		{
+			name: "all expired shows BEGIN not CONTINUE",
+			input: input{
+				scratchpad: []*gent.Iteration{
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "expired 1"},
+								},
+							},
+						},
+						ExpireAfterIteration: 1,
+					},
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "expired 2"},
+								},
+							},
+						},
+						ExpireAfterIteration: 2,
+					},
+				},
+				currentIteration: 5,
+			},
+			expected: expected{
+				// system + task + BEGIN!
+				messageCount:    3,
+				lastMessageText: "BEGIN!",
+			},
+		},
+		{
+			name: "mixed expired and non-expired",
+			input: input{
+				scratchpad: []*gent.Iteration{
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "keep me"},
+								},
+							},
+						},
+					},
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "expired"},
+								},
+							},
+						},
+						ExpireAfterIteration: 2,
+					},
+					{
+						Messages: []*gent.MessageContent{
+							{
+								Role: llms.ChatMessageTypeAI,
+								Parts: []gent.ContentPart{
+									llms.TextContent{Text: "still alive"},
+								},
+							},
+						},
+						ExpireAfterIteration: 10,
+					},
+				},
+				currentIteration: 3,
+			},
+			expected: expected{
+				// system + task + "keep me" + "still alive" + CONTINUE!
+				messageCount:    5,
+				lastMessageText: "CONTINUE!",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := newMockModel()
+			format := newMockFormat()
+			tc := newMockToolChain()
+			term := newMockTermination()
+
+			loop := NewAgent(model).
+				WithFormat(format).
+				WithToolChain(tc).
+				WithTermination(term)
+
+			data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+			data.SetScratchPad(tt.input.scratchpad)
+
+			execCtx := gent.NewExecutionContext(
+				context.Background(), "test", data,
+			)
+			execCtx.SetLimits(nil)
+			for i := 0; i < tt.input.currentIteration; i++ {
+				execCtx.IncrementIteration()
+			}
+
+			messages := loop.buildMessages(
+				execCtx, data, "output", "tools",
+			)
+
+			assert.Equal(t,
+				tt.expected.messageCount,
+				len(messages),
+				"message count",
+			)
+
+			lastMsg := messages[len(messages)-1]
+			lastText, ok := lastMsg.Parts[0].(llms.TextContent)
+			require.True(t, ok)
+			assert.Equal(t,
+				tt.expected.lastMessageText,
+				lastText.Text,
+				"last message text",
+			)
+		})
 	}
 }

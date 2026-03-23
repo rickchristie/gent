@@ -3,6 +3,7 @@ package ecommerce
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -58,7 +59,6 @@ type GatewayTx struct {
 	Status    string  `json:"status"`
 	CardLast4 string  `json:"card_last4"`
 }
-
 
 // -------------------------------------------------------------------------
 // Tool Result Types
@@ -121,7 +121,6 @@ type getOrderPaymentsInput struct {
 type gatewayGetTxDetailInput struct {
 	TxID string `json:"tx_id"`
 }
-
 
 type gatewayCancelTxInput struct {
 	TxID string `json:"tx_id"`
@@ -196,6 +195,30 @@ func NewEcommerceFixture(
 	return f
 }
 
+// PolicySuggestionPrompt searches policies relevant to the conversation
+// text and returns a formatted prompt section. Returns empty string if
+// no policies match.
+func (f *EcommerceFixture) PolicySuggestionPrompt(
+	ctx context.Context, text string,
+) string {
+	suggestions, err := f.policySearch.SuggestPolicies(
+		ctx, text, 3,
+	)
+	if err != nil || len(suggestions) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Policies that might be relevant:\n")
+	for _, s := range suggestions {
+		fmt.Fprintf(&sb, "- id: %s - %s\n", s.Id, s.Description)
+	}
+	sb.WriteString(
+		"Use get_policy tool for relevant policies. " +
+			"Use search_policy tool to find relevant " +
+			"policy if suggested policies are not relevant.")
+	return sb.String()
+}
+
 // TimeProvider returns the fixture's time provider.
 func (f *EcommerceFixture) TimeProvider() gent.TimeProvider {
 	return f.timeProvider
@@ -238,7 +261,7 @@ func (f *EcommerceFixture) initializeData() {
 			{
 				OrderID: "ORD-1003", CustomerID: "C001",
 				Product: "Mechanical Keyboard",
-				Amount: 149.99, Status: "delivered",
+				Amount:  149.99, Status: "delivered",
 				OrderDate: fmtDate(today.AddDate(0, 0, -2)),
 			},
 		},
@@ -276,19 +299,19 @@ func (f *EcommerceFixture) initializeData() {
 			{
 				OrderID: "ORD-1007", CustomerID: "C001",
 				Product: "Mighty Mouse Pro Wireless Mouse",
-				Amount: 79.99, Status: "delivered",
+				Amount:  79.99, Status: "delivered",
 				OrderDate: fmtDate(today.AddDate(0, 0, -10)),
 			},
 			{
 				OrderID: "ORD-1008", CustomerID: "C001",
 				Product: "Ergonomic Mouse Pad",
-				Amount: 19.99, Status: "delivered",
+				Amount:  19.99, Status: "delivered",
 				OrderDate: fmtDate(today.AddDate(0, 0, -14)),
 			},
 			{
 				OrderID: "ORD-1009", CustomerID: "C001",
 				Product: "Cable Management Kit",
-				Amount: 12.99, Status: "delivered",
+				Amount:  12.99, Status: "delivered",
 				OrderDate: fmtDate(today.AddDate(0, 0, -21)),
 			},
 		},

@@ -9,6 +9,8 @@ func airlinePolicies() []*Policy {
 	return []*Policy{
 		{
 			Id: "flight-change-rebooking",
+			Description: "Change fees, fare difference, same-day changes," +
+				" and FF waivers",
 			FullContent: `## Flight Change and Rebooking
 
 ### Fee Structure
@@ -51,6 +53,8 @@ Same-day standby is free for all fare classes.`,
 		},
 		{
 			Id: "cancellation-refund",
+			Description: "Cancellation fees, refund types, and travel" +
+				" credit rules",
 			FullContent: `## Cancellation and Refund Policy
 
 ### Refundable Tickets (Flex Fare)
@@ -88,6 +92,8 @@ automatically within 7 business days.`,
 		},
 		{
 			Id: "baggage-allowance",
+			Description: "Carry-on and checked bag limits, fees," +
+				" and overweight charges",
 			FullContent: `## Baggage Allowance and Fees
 
 ### Carry-On Baggage
@@ -134,6 +140,8 @@ Contact customer service for specific requirements and fees.`,
 		},
 		{
 			Id: "delay-compensation",
+			Description: "Delay assistance, rebooking, and DOT" +
+				" refund rules",
 			FullContent: `## Flight Delay and Cancellation Compensation
 
 ### DOT Refund Rules (Effective 2024)
@@ -175,6 +183,8 @@ above.`,
 		},
 		{
 			Id: "frequent-flyer-benefits",
+			Description: "Bronze, Silver, Gold, and Platinum tier" +
+				" benefits",
 			FullContent: `## Frequent Flyer Program Benefits
 
 ### Bronze Tier (10,000+ miles per year)
@@ -223,6 +233,8 @@ above.`,
 		},
 		{
 			Id: "24-hour-cancellation",
+			Description: "DOT-mandated 24-hour risk-free cancellation" +
+				" window",
 			FullContent: `## 24-Hour Risk-Free Cancellation
 
 ### DOT-Mandated 24-Hour Rule
@@ -264,6 +276,8 @@ for their cancellation policy.`,
 		},
 		{
 			Id: "same-day-change",
+			Description: "Same-day confirmed change and standby" +
+				" options",
 			FullContent: `## Same-Day Flight Changes
 
 ### Same-Day Confirmed Change
@@ -301,6 +315,8 @@ flight. If a seat becomes available, they are accommodated in the same cabin cla
 		},
 		{
 			Id: "involuntary-rebooking",
+			Description: "Denied boarding compensation and rebooking" +
+				" rights",
 			FullContent: `## Involuntary Rebooking and Denied Boarding
 
 ### Oversold Flight Compensation
@@ -341,6 +357,8 @@ seats are not covered.`,
 		},
 		{
 			Id: "unaccompanied-minor",
+			Description: "Age requirements, service fees, and" +
+				" documentation for minors",
 			FullContent: `## Unaccompanied Minor Policy
 
 ### Age Requirements
@@ -383,6 +401,8 @@ the designated guardian at arrival.
 		},
 		{
 			Id: "pet-travel",
+			Description: "In-cabin and cargo pet policies, fees," +
+				" and breed restrictions",
 			FullContent: `## Pet Travel Policy
 
 ### In-Cabin Pets
@@ -436,6 +456,8 @@ vaccination records and import permits.`,
 
 		{
 			Id: "eu261-passenger-rights",
+			Description: "EU261/2004 compensation amounts and delay" +
+				" thresholds",
 			FullContent: `## EU261/2004 Passenger Rights (European Flights)
 
 ### Regulation Overview
@@ -491,6 +513,8 @@ of the departure country or file in small claims court.`,
 		},
 		{
 			Id: "apis-travel-documentation",
+			Description: "APIS, ESTA, eTA, and passport" +
+				" requirements",
 			FullContent: `## APIS and Travel Documentation Requirements
 
 ### Advance Passenger Information System (APIS)
@@ -547,6 +571,8 @@ fined by destination authorities for transporting undocumented passengers.`,
 		},
 		{
 			Id: "wifi-inflight-services",
+			Description: "WiFi plans, pricing, entertainment," +
+				" and Bluetooth",
 			FullContent: `## In-Flight WiFi and Entertainment Services
 
 ### WiFi Availability

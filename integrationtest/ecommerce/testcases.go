@@ -34,7 +34,8 @@ I just noticed that I was charged twice for a ` +
 				`$79.99. Can you look into this and help ` +
 				`me get the duplicate charge resolved?`,
 			MaxIterations: 20,
-			RegisterTools: fixture.RegisterAllTools,
+			RegisterTools:   fixture.RegisterAllTools,
+			PolicySuggester: fixture.PolicySuggestionPrompt,
 			TimeProvider:  tp,
 			SystemPrompt: fmt.Sprintf(
 				`## Task Description
@@ -147,7 +148,8 @@ I just noticed that I was charged twice for a ` +
 				`this and help me get the duplicate ` +
 				`charge resolved?`,
 			MaxIterations: 25,
-			RegisterTools: fixture.RegisterAllToolsSearch,
+			RegisterTools:   fixture.RegisterAllToolsSearch,
+			PolicySuggester: fixture.PolicySuggestionPrompt,
 			TimeProvider:  tp,
 			SystemPrompt: fmt.Sprintf(
 				`## Task Description
@@ -251,7 +253,8 @@ Important: Our internal payment records may be `+
 				"how to investigate and resolve " +
 				"the customer's billing issue.",
 			MaxIterations: 20,
-			RegisterTools: fixture.RegisterAllTools,
+			RegisterTools:   fixture.RegisterAllTools,
+			PolicySuggester: fixture.PolicySuggestionPrompt,
 			TimeProvider:  tp,
 		},
 	)
@@ -311,7 +314,8 @@ Important: Our internal payment records may be `+
 				"how to investigate and resolve " +
 				"the customer's billing issue.",
 			MaxIterations: 25,
-			RegisterTools: fixture.RegisterAllToolsSearch,
+			RegisterTools:   fixture.RegisterAllToolsSearch,
+			PolicySuggester: fixture.PolicySuggestionPrompt,
 			TimeProvider:  tp,
 		},
 	)

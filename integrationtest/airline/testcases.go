@@ -27,9 +27,10 @@ I have a flight booked for tomorrow (flight AA100 from ` +
 			`JFK to LAX) but my meeting is running late.
 Can you help me reschedule to a later flight on the same ` +
 			`day? I'd prefer an evening flight if possible.`,
-		MaxIterations: 15,
-		RegisterTools: fixture.RegisterAllTools,
-		TimeProvider:  tp,
+		MaxIterations:   15,
+		RegisterTools:   fixture.RegisterAllTools,
+		TimeProvider:    tp,
+		PolicySuggester: fixture.PolicySuggestionPrompt,
 		SystemPrompt: fmt.Sprintf(`## Task Description
 
 You are a helpful airline customer service agent for SkyWings `+
@@ -125,9 +126,10 @@ I have a flight booked for tomorrow (flight AA100 ` +
 Can you help me reschedule to a later flight on ` +
 				`the same day? I'd prefer an evening ` +
 				`flight if possible.`,
-			MaxIterations: 20,
-			RegisterTools: fixture.RegisterAllToolsSearch,
-			TimeProvider:  tp,
+			MaxIterations:   20,
+			RegisterTools:   fixture.RegisterAllToolsSearch,
+			TimeProvider:    tp,
+			PolicySuggester: fixture.PolicySuggestionPrompt,
 			SystemPrompt: fmt.Sprintf(`## Task Description
 
 You are a helpful airline customer service agent `+
@@ -207,9 +209,10 @@ SkyWings is an international airline. Reply with customer's `+
 		CriticalRules: testutil.CriticalRules(config),
 		ThinkingPrompt: "Think step by step about how to " +
 			"help the customer.",
-		MaxIterations: 15,
-		RegisterTools: fixture.RegisterAllTools,
-		TimeProvider:  tp,
+		MaxIterations:   15,
+		RegisterTools:   fixture.RegisterAllTools,
+		TimeProvider:    tp,
+		PolicySuggester: fixture.PolicySuggestionPrompt,
 	})
 }
 
@@ -257,9 +260,10 @@ SkyWings is an international airline. Reply with `+
 			CriticalRules: testutil.CriticalRules(config),
 			ThinkingPrompt: "Think step by step about " +
 				"how to help the customer.",
-			MaxIterations: 20,
-			RegisterTools: fixture.RegisterAllToolsSearch,
-			TimeProvider:  tp,
+			MaxIterations:   20,
+			RegisterTools:   fixture.RegisterAllToolsSearch,
+			TimeProvider:    tp,
+			PolicySuggester: fixture.PolicySuggestionPrompt,
 		},
 	)
 }

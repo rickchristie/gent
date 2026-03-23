@@ -52,15 +52,17 @@ func ValidatorFeedbackObservation(format gent.TextFormat, feedbackSections ...ge
 	return Observation(format, feedback)
 }
 
-// FormatParseErrorObservation builds the expected NextPrompt for format parse errors.
-// This matches the react agent's buildFormatErrorObservation output.
-func FormatParseErrorObservation(format gent.TextFormat, parseErr error, rawResponse string) string {
-	errorContent := "Format parse error: " + parseErr.Error() + "\n\n" +
-		"Your response could not be parsed. Please ensure your response follows the expected format.\n\n" +
-		"Your raw response was:\n" +
-		rawResponse + "\n\n" +
-		"Please try again with proper formatting."
-	return Observation(format, errorContent)
+// FormatParseErrorObservation returns the expected NextPrompt for format parse errors.
+// The ReAct agent logs the broken response as an expired iteration and adds a
+// system_error reminder that persists in the scratchpad.
+func FormatParseErrorObservation(format gent.TextFormat, _ error, _ string) string {
+	return format.FormatSections([]gent.FormattedSection{
+		{Name: "system_error", Content: "You MUST follow the output format " +
+			"described in the system prompt. Every response MUST contain " +
+			"properly formatted sections. Do NOT fabricate tool outputs " +
+			"or observations — only use the sections defined in your " +
+			"instructions."},
+	})
 }
 
 // ToolchainErrorObservation builds the expected NextPrompt for toolchain execution errors.

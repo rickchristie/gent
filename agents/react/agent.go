@@ -221,6 +221,44 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 		// Add to scratchpad for next call
 		scratchpad := data.GetScratchPad()
 		scratchpad = append(scratchpad, iter)
+
+		// Check for violations: action + answer, or extra sections after action
+		_, hasAnswer := parsed[r.termination.Name()]
+		if hasAnswer && len(parsed[r.termination.Name()]) > 0 {
+			reminder := &gent.Iteration{
+				Origin: gent.IterationSystemInjected,
+				Messages: []*gent.MessageContent{{
+					Role: llms.ChatMessageTypeHuman,
+					Parts: []gent.ContentPart{llms.TextContent{
+						Text: r.format.FormatSections([]gent.FormattedSection{{
+							Name: "system_reminder",
+							Content: "ERROR! You can only choose between either " +
+								"Action or Answer in one turn, your Answer " +
+								"will be ignored!",
+						}}),
+					}},
+				}},
+			}
+			data.AddIterationHistory(reminder)
+			scratchpad = append(scratchpad, reminder)
+		} else if r.hasExtraSections(parsed) {
+			reminder := &gent.Iteration{
+				Origin: gent.IterationSystemInjected,
+				Messages: []*gent.MessageContent{{
+					Role: llms.ChatMessageTypeHuman,
+					Parts: []gent.ContentPart{llms.TextContent{
+						Text: r.format.FormatSections([]gent.FormattedSection{{
+							Name: "system_reminder",
+							Content: "ERROR! Any string or characters after " +
+								"action section will be ignored!",
+						}}),
+					}},
+				}},
+			}
+			data.AddIterationHistory(reminder)
+			scratchpad = append(scratchpad, reminder)
+		}
+
 		data.SetScratchPad(scratchpad)
 
 		return &gent.AgentLoopResult{
@@ -310,48 +348,79 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 		}
 	}
 
-	// Handle parse error - feed back to agent as observation to allow recovery
+	// Handle parse error or no recognized sections — the model's response
+	// could not be processed. Two iterations are added:
+	//
+	// 1. Expired iteration: the raw response + error message, logged for
+	//    debugging but never sent back to the model (prevents hallucinated
+	//    content from polluting the scratchpad).
+	//
+	// 2. System error iteration: a stern reminder that the model must follow
+	//    the output format described in the system prompt. This iteration
+	//    persists in the scratchpad so the model sees it on retry.
+	//
+	// Stats are already updated by format.Parse() which publishes
+	// ParseErrorEvent before returning the error. Consecutive error limits
+	// will terminate execution if this keeps happening.
+	var errorMsg string
 	if parseErr != nil {
-		errorContent := fmt.Sprintf(`Format parse error: %v
-
-Your response could not be parsed. Please ensure your response follows the expected format.
-
-Your raw response was:
-%s
-
-Please try again with proper formatting.`, parseErr, responseContent)
-
-		observation := r.format.FormatSections([]gent.FormattedSection{
-			{Name: "observation", Content: errorContent},
-		})
-
-		// Build iteration with parse error feedback
-		iter := r.buildIteration(responseContent, observation)
-		data.AddIterationHistory(iter)
-
-		scratchpad := data.GetScratchPad()
-		scratchpad = append(scratchpad, iter)
-		data.SetScratchPad(scratchpad)
-
-		return &gent.AgentLoopResult{
-			Action:     gent.LAContinue,
-			NextPrompt: observation,
-		}, nil
+		errorMsg = fmt.Sprintf("Format parse error: %v", parseErr)
+	} else {
+		errorMsg = "No recognized action or answer sections in response."
 	}
 
-	// No actions and no valid termination - continue loop with empty observation
-	// This handles edge cases where the model didn't output a properly formatted response
-	iter := r.buildIteration(responseContent, "")
-	data.AddIterationHistory(iter)
+	// 1. Expired iteration with raw response (for debugging only)
+	expiredIter := r.buildIteration(responseContent, errorMsg)
+	expiredIter.ExpireAfterIteration = max(execCtx.Iteration(), 1)
+	data.AddIterationHistory(expiredIter)
+
+	// 2. System error reminder (persists in scratchpad)
+	systemError := r.format.FormatSections([]gent.FormattedSection{
+		{Name: "system_error", Content: "You MUST follow the output format " +
+			"described in the system prompt. Every response MUST contain " +
+			"properly formatted sections. Do NOT fabricate tool outputs " +
+			"or observations — only use the sections defined in your " +
+			"instructions."},
+	})
+	errorIter := &gent.Iteration{
+		Origin: gent.IterationSystemInjected,
+		Messages: []*gent.MessageContent{
+			{
+				Role:  llms.ChatMessageTypeHuman,
+				Parts: []gent.ContentPart{llms.TextContent{Text: systemError}},
+			},
+		},
+	}
+	data.AddIterationHistory(errorIter)
 
 	scratchpad := data.GetScratchPad()
-	scratchpad = append(scratchpad, iter)
+	scratchpad = append(scratchpad, expiredIter)
+	scratchpad = append(scratchpad, errorIter)
 	data.SetScratchPad(scratchpad)
 
 	return &gent.AgentLoopResult{
 		Action:     gent.LAContinue,
-		NextPrompt: "",
+		NextPrompt: systemError,
 	}, nil
+}
+
+// hasExtraSections returns true if the parsed output contains sections beyond
+// the expected action and optional thinking sections. This detects cases where
+// the model appends extra content after the action section.
+func (r *Agent) hasExtraSections(parsed map[string][]string) bool {
+	for name, contents := range parsed {
+		if len(contents) == 0 {
+			continue
+		}
+		if name == r.toolChain.Name() {
+			continue
+		}
+		if r.thinkingSection != nil && name == r.thinkingSection.Name() {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // buildOutputSections constructs the list of output sections.
@@ -412,7 +481,14 @@ func (r *Agent) buildMessages(
 
 	// 3. Scratchpad messages (interleaved AI and human messages)
 	scratchpad := data.GetScratchPad()
+	currentIteration := execCtx.Iteration()
+	includedIterations := 0
 	for _, iter := range scratchpad {
+		if iter.ExpireAfterIteration > 0 &&
+			currentIteration >= iter.ExpireAfterIteration {
+			continue
+		}
+		includedIterations++
 		for _, msg := range iter.Messages {
 			messages = append(messages, llms.MessageContent{
 				Role:  msg.Role,
@@ -423,7 +499,7 @@ func (r *Agent) buildMessages(
 
 	// 4. BEGIN!/CONTINUE! message (role: user)
 	continueText := "BEGIN!"
-	if len(scratchpad) > 0 {
+	if includedIterations > 0 {
 		continueText = "CONTINUE!"
 	}
 	messages = append(messages, llms.MessageContent{

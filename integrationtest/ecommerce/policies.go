@@ -4,11 +4,63 @@ import "github.com/rickchristie/gent/policy"
 
 func ecommercePolicies() []*policy.Policy {
 	return []*policy.Policy{
+		// Greeting and communication guidelines
+		// ---------------------------------------------------------------
+		{
+			Id:          "greeting-communication",
+			Description: "Agent greeting, tone, and communication guidelines",
+			FullContent: `## Greeting and Communication Guidelines
+
+### Opening Greeting
+
+Always greet the customer warmly:
+"Thank you for contacting TechEdge Support. My name is [Agent Name],
+how can I help you today?"
+
+If the customer has already described their issue, acknowledge it
+directly instead of asking them to repeat it.
+
+### Tone and Language
+
+- Be empathetic and solution-oriented
+- Acknowledge the customer's frustration before jumping to solutions:
+  "I understand how frustrating this must be. Let me look into this
+  right away."
+- Use simple language — say "refund" not "credit memo reversal"
+- Address customers by first name unless they use formal titles
+
+### Closing
+
+- Summarize what was done: "Here's a recap of what we did today..."
+- Provide next steps with timelines: "Your refund will appear in
+  5-7 business days"
+- Ask "Is there anything else I can help you with today?"
+- End with "Thank you for shopping with TechEdge!"
+
+### Escalation Language
+
+If you cannot resolve the issue:
+"I want to make sure this gets resolved properly. I'm creating a
+support case for our specialist team. Your case ID is [case_id] and
+you'll receive an update within 24 hours."`,
+			Keywords: []string{
+				"greeting", "hello", "welcome", "communication",
+				"tone", "empathy", "closing", "escalation",
+			},
+			SyntheticQueries: []string{
+				"how should I greet the customer",
+				"what tone to use in customer support",
+				"how to close a support conversation",
+				"what to say when escalating an issue",
+			},
+		},
+
 		// ---------------------------------------------------------------
 		// Scenario-critical policies (must match fixture.go mock tools)
 		// ---------------------------------------------------------------
 		{
-			Id: "double-charge-resolution",
+			Id:          "double-charge-resolution",
+			Description: "Step-by-step procedure for resolving duplicate charges",
 			FullContent: `## Double Charge Resolution Procedure
 
 When a customer reports a double charge, follow these steps in
@@ -62,7 +114,8 @@ business day of the customer's report.`,
 		// Policies from testdata_ecommerce_test.go (verbatim content)
 		// ---------------------------------------------------------------
 		{
-			Id: "standard-return",
+			Id:          "standard-return",
+			Description: "30-day return window, conditions, and exceptions",
 			FullContent: `## Standard Return Policy
 
 All items purchased from TechEdge Electronics may be returned within
@@ -113,7 +166,8 @@ Returns may be initiated online or at any TechEdge store location.`,
 			},
 		},
 		{
-			Id: "refund-processing",
+			Id:          "refund-processing",
+			Description: "Refund timeline by payment method",
 			FullContent: `## Refund Processing
 
 Once a returned item has been received and inspected, refunds are
@@ -163,7 +217,8 @@ issued instead.`,
 			},
 		},
 		{
-			Id: "extended-warranty",
+			Id:          "extended-warranty",
+			Description: "Coverage tiers, claims process, and exclusions",
 			FullContent: `## Extended Warranty — TechEdge Protection Plans
 
 TechEdge offers three tiers of extended warranty coverage that begin
@@ -214,7 +269,8 @@ after the manufacturer warranty expires.
 			},
 		},
 		{
-			Id: "price-match",
+			Id:          "price-match",
+			Description: "Eligible competitors, process, and exclusions",
 			FullContent: `## Price Match Guarantee
 
 TechEdge will match the current selling price of an identical item
@@ -270,7 +326,8 @@ refund of the difference.`,
 			},
 		},
 		{
-			Id: "damaged-defective",
+			Id:          "damaged-defective",
+			Description: "Photo evidence requirements, replacement vs refund",
 			FullContent: `## Damaged or Defective Items
 
 If you receive an item that is damaged during shipping or has a
@@ -325,7 +382,8 @@ Do not dispose of damaged packaging until the claim is resolved.`,
 			},
 		},
 		{
-			Id: "exchange",
+			Id:          "exchange",
+			Description: "Size/color exchange process and price difference handling",
 			FullContent: `## Exchange Policy
 
 TechEdge allows exchanges within **30 days** of the original
@@ -384,7 +442,8 @@ subject to a partial value adjustment.`,
 			},
 		},
 		{
-			Id: "store-credit",
+			Id:          "store-credit",
+			Description: "Credit balance rules, no expiration, non-transferable",
 			FullContent: `## Store Credit Policy
 
 Store credit is issued as a digital balance on the customer's
@@ -440,7 +499,8 @@ Adjustments are typically resolved within **2 business days**.`,
 			},
 		},
 		{
-			Id: "shipping-delivery",
+			Id:          "shipping-delivery",
+			Description: "Shipping tiers, tracking, and lost package claims",
 			FullContent: `## Shipping & Delivery
 
 TechEdge ships to all 50 U.S. states, Washington D.C., and APO/FPO
@@ -495,7 +555,8 @@ air to APO/FPO addresses and will default to ground shipping.`,
 			},
 		},
 		{
-			Id: "loyalty-program",
+			Id:          "loyalty-program",
+			Description: "Points earning, redemption, and membership tiers",
 			FullContent: `## TechEdge Rewards — Loyalty Program
 
 TechEdge Rewards is a free loyalty program that lets customers earn
@@ -552,7 +613,8 @@ resets annually on the enrollment anniversary date.`,
 			},
 		},
 		{
-			Id: "gift-card",
+			Id:          "gift-card",
+			Description: "Purchase limits, no expiration, and replacement",
 			FullContent: `## Gift Card Policy
 
 TechEdge gift cards are available for purchase online and at all
@@ -615,7 +677,8 @@ details.`,
 			},
 		},
 		{
-			Id: "rma-returns-authorization",
+			Id:          "rma-returns-authorization",
+			Description: "RMA number process for electronics and high-value items",
 			FullContent: `## Return Merchandise Authorization (RMA) Process
 
 ### When RMA is Required
@@ -670,7 +733,8 @@ the order.`,
 			},
 		},
 		{
-			Id: "electronics-return-15day",
+			Id:          "electronics-return-15day",
+			Description: "15-day return window and restocking fees for electronics",
 			FullContent: `## Electronics Return Policy (15-Day Window)
 
 ### Shortened Return Window
@@ -722,7 +786,8 @@ The following electronics cannot be returned once opened:
 			},
 		},
 		{
-			Id: "tax-reporting-1099k",
+			Id:          "tax-reporting-1099k",
+			Description: "IRS 1099-K reporting thresholds and TIN requirements",
 			FullContent: `## Tax Reporting and Form 1099-K
 
 ### IRS Reporting Requirements
@@ -779,7 +844,8 @@ Maryland require reporting at $600 regardless of federal thresholds.`,
 		// Additional corpus saturation policies
 		// ---------------------------------------------------------------
 		{
-			Id: "order-cancellation",
+			Id:          "order-cancellation",
+			Description: "Cancellation before and after shipping",
 			FullContent: `## Order Cancellation Policy
 
 ### Before Shipping
@@ -840,7 +906,8 @@ day.
 			},
 		},
 		{
-			Id: "payment-methods",
+			Id:          "payment-methods",
+			Description: "Accepted payments, installments, and security",
 			FullContent: `## Accepted Payment Methods
 
 ### Credit and Debit Cards
@@ -897,7 +964,8 @@ transaction. Store credit is applied first when available.
 			},
 		},
 		{
-			Id: "account-security",
+			Id:          "account-security",
+			Description: "Password policy, 2FA, and suspicious activity",
 			FullContent: `## Account Security Policy
 
 ### Password Requirements
@@ -961,7 +1029,8 @@ verification of the email address on file.`,
 			},
 		},
 		{
-			Id: "international-shipping",
+			Id:          "international-shipping",
+			Description: "Countries served, customs duties, and delivery times",
 			FullContent: `## International Shipping Policy
 
 ### Countries Served

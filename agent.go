@@ -245,6 +245,11 @@ const (
 	// back from evicted history (e.g., via a
 	// retrieval-augmented strategy).
 	IterationRetrievedHistory IterationOrigin = "retrieved_history"
+
+	// IterationSystemInjected means this iteration was injected
+	// by a system hook (e.g., pre-search policy suggestions).
+	// It is not produced by the agent or user.
+	IterationSystemInjected IterationOrigin = "system_injected"
 )
 
 // IterationMetadataKey is a typed key for Iteration metadata.
@@ -294,6 +299,20 @@ type Iteration struct {
 	// Zero value (IterationOriginal) means it was created
 	// normally by the AgentLoop.
 	Origin IterationOrigin
+
+	// ExpireAfterIteration is the executor iteration number
+	// at which this iteration expires. Zero (default) means
+	// no expiry. Since executor iterations are 1-indexed,
+	// zero is unambiguous.
+	//
+	// When set to a positive value, the iteration is
+	// included when execCtx.Iteration() < ExpireAfterIteration
+	// and skipped when execCtx.Iteration() >= ExpireAfterIteration.
+	//
+	// Example: ExpireAfterIteration = 3 means the iteration
+	// is included in iterations 1 and 2, and skipped from
+	// iteration 3 onward.
+	ExpireAfterIteration int
 
 	// Metadata contains optional key-value pairs for this
 	// iteration. The framework defines standard keys (IMK*

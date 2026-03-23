@@ -3,6 +3,7 @@ package airline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -148,9 +149,9 @@ type SendNotificationResult struct {
 // All dates in the mock data are calculated relative to "today" from the TimeProvider,
 // ensuring consistent behavior in LLM integration tests regardless of when they run.
 type AirlineFixture struct {
-	timeProvider  gent.TimeProvider
-	policySearch  *policy.PolicySearchTool
-	policyGet     *policy.GetPolicyTool
+	timeProvider gent.TimeProvider
+	policySearch *policy.PolicySearchTool
+	policyGet    *policy.GetPolicyTool
 
 	// Instance data - not shared across fixtures
 	customers map[string]*Customer
@@ -198,6 +199,30 @@ func NewAirlineFixture(
 		WithName("get_policy").
 		WithDescription("Get full policy content by ID")
 	return f
+}
+
+// PolicySuggestionPrompt searches policies relevant to the conversation
+// text and returns a formatted prompt section. Returns empty string if
+// no policies match.
+func (f *AirlineFixture) PolicySuggestionPrompt(
+	ctx context.Context, text string,
+) string {
+	suggestions, err := f.policySearch.SuggestPolicies(
+		ctx, text, 3,
+	)
+	if err != nil || len(suggestions) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Policies that might be relevant:\n")
+	for _, s := range suggestions {
+		fmt.Fprintf(&sb, "- id: %s - %s\n", s.Id, s.Description)
+	}
+	sb.WriteString(
+		"Use get_policy tool for relevant policies. " +
+			"Use search_policy tool to find relevant " +
+			"policy if suggested policies are not relevant.")
+	return sb.String()
 }
 
 // TimeProvider returns the fixture's time provider.
@@ -252,7 +277,7 @@ func (f *AirlineFixture) initializeData() {
 			FlightNumber:    "AA100",
 			Origin:          "JFK",
 			Destination:     "LAX",
-			DepartureTime:   tomorrow.Add(8 * time.Hour),  // 8:00 AM
+			DepartureTime:   tomorrow.Add(8 * time.Hour), // 8:00 AM
 			ArrivalTime:     tomorrow.Add(11*time.Hour + 30*time.Minute),
 			Aircraft:        "Boeing 777",
 			Status:          "scheduled",
@@ -521,7 +546,6 @@ func (f *AirlineFixture) GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsI
 		},
 	)
 }
-
 
 // SearchFlightScheduleTool returns a tool that searches for available flights.
 func (f *AirlineFixture) SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Flight] {
@@ -890,4 +914,3 @@ func (f *AirlineFixture) DayAfterTomorrowDate() string {
 	dat := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 2)
 	return dat.Format("2006-01-02")
 }
-

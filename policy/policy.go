@@ -56,6 +56,11 @@ type Policy struct {
 	// (exact match gets highest BM25 boost) and displayed in search results.
 	Id string
 
+	// Description is a short one-line summary of what the policy covers. Displayed in
+	// search results when using SearchResultTitle mode. Not indexed for search — purely
+	// for display.
+	Description string
+
 	// FullContent is the policy text in Markdown format. Keep it short and atomic — one topic
 	// per policy, 150-300 words recommended. Use headings for structure. The MarkdownChunker
 	// will split long content at heading boundaries with ancestor context.

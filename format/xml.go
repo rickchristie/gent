@@ -11,6 +11,9 @@ import (
 // ErrAmbiguousTags is returned in strict mode when section tags appear inside other sections.
 var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside another section")
 
+// ErrUnclosedTag is returned when an opening tag has no matching closing tag.
+var ErrUnclosedTag = fmt.Errorf("unclosed tag")
+
 // XML implements [gent.TextFormat] using XML-style tags to delimit sections.
 //
 // XML format is the recommended default for most agents. The clear opening and
@@ -175,7 +178,8 @@ func (f *XML) DescribeStructure() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Format your response using XML-style tags for each section:\n\n")
+	sb.WriteString("Format your response using XML-style tags for each section:\n")
+	sb.WriteString("**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.\n\n")
 
 	for _, section := range f.sections {
 		name := section.Name()
@@ -212,11 +216,13 @@ func (f *XML) doParse(output string) (map[string][]string, error) {
 
 	// For each known section, find matches by pairing closing tags with their nearest
 	// preceding opening tags. This handles cases where LLM writes literal tags in content.
+	var allRanges []sectionRange
 	for lowerName, originalName := range f.knownSections {
-		matches := f.findSectionMatches(output, lowerName)
+		matches, ranges := f.findSectionMatches(output, lowerName)
 		for _, content := range matches {
 			result[originalName] = append(result[originalName], content)
 		}
+		allRanges = append(allRanges, ranges...)
 	}
 
 	// If no known sections, try to find any XML-style tags
@@ -234,6 +240,17 @@ func (f *XML) doParse(output string) (map[string][]string, error) {
 		}
 	}
 
+	// Check for unclosed tags — opening tags that appear outside all matched
+	// sections and have no matching closing tag. This catches cases where the
+	// LLM starts a section (e.g. <answer>) but never closes it. Tags that
+	// appear inside other matched sections (e.g. literal "provide <answer>."
+	// inside <thinking>) are excluded.
+	if unclosed := f.findUnclosedTags(output, allRanges); len(unclosed) > 0 {
+		return result, fmt.Errorf(
+			"%w: %s", ErrUnclosedTag, strings.Join(unclosed, ", "),
+		)
+	}
+
 	if len(result) == 0 {
 		return nil, gent.ErrNoSectionsFound
 	}
@@ -248,11 +265,95 @@ func (f *XML) doParse(output string) (map[string][]string, error) {
 	return result, nil
 }
 
+// sectionRange represents the byte range of a matched section in the output.
+type sectionRange struct {
+	start int // byte offset of opening tag start
+	end   int // byte offset of closing tag end
+}
+
+// findUnclosedTags checks for opening tags of known sections that appear
+// outside all matched section ranges and have no matching closing tag.
+// This avoids false positives from literal tag names inside other sections'
+// content (e.g. "provide <answer>." inside <thinking>).
+func (f *XML) findUnclosedTags(
+	output string, matchedRanges []sectionRange,
+) []string {
+	var unclosed []string
+	for lowerName, originalName := range f.knownSections {
+		openPattern := fmt.Sprintf(`(?i)<%s>`, lowerName)
+		openRe := regexp.MustCompile(openPattern)
+		closePattern := fmt.Sprintf(`(?i)</%s>`, lowerName)
+		closeRe := regexp.MustCompile(closePattern)
+
+		opens := openRe.FindAllStringIndex(output, -1)
+		closes := closeRe.FindAllStringIndex(output, -1)
+
+		// Filter opens to only those outside all matched ranges.
+		var outsideOpens [][]int
+		for _, o := range opens {
+			if !f.insideAnyRange(o[0], matchedRanges) {
+				outsideOpens = append(outsideOpens, o)
+			}
+		}
+
+		// Filter closes to only those outside all matched ranges.
+		var outsideCloses [][]int
+		for _, c := range closes {
+			if !f.insideAnyRange(c[0], matchedRanges) {
+				outsideCloses = append(outsideCloses, c)
+			}
+		}
+
+		// Pair outside opens with outside closes using the same
+		// algorithm as findSectionMatches.
+		usedOpens := make(map[int]bool)
+		for _, closeMatch := range outsideCloses {
+			closeStart := closeMatch[0]
+			var bestOpen []int
+			for _, openMatch := range outsideOpens {
+				if openMatch[1] <= closeStart &&
+					!usedOpens[openMatch[0]] {
+					bestOpen = openMatch
+				}
+			}
+			if bestOpen != nil {
+				usedOpens[bestOpen[0]] = true
+			}
+		}
+
+		unpaired := len(outsideOpens) - len(usedOpens)
+		if unpaired > 0 {
+			unclosed = append(unclosed, fmt.Sprintf(
+				"<%s> (%d unpaired)", originalName, unpaired,
+			))
+		}
+	}
+	return unclosed
+}
+
+// insideAnyRange returns true if the byte position falls inside any
+// matched section range.
+func (f *XML) insideAnyRange(
+	pos int, ranges []sectionRange,
+) bool {
+	for _, r := range ranges {
+		if pos >= r.start && pos < r.end {
+			return true
+		}
+	}
+	return false
+}
+
 // findSectionMatches finds all instances of a section by pairing closing tags with their
 // nearest preceding opening tags. This handles cases where the LLM writes literal tag names
 // in content (e.g., "provide <answer>." inside <thinking>).
-func (f *XML) findSectionMatches(output string, sectionName string) []string {
+// Returns the matched contents and the byte ranges of each matched section (open tag start
+// to close tag end) for use in unclosed tag detection.
+func (f *XML) findSectionMatches(
+	output string, sectionName string,
+) ([]string, []sectionRange) {
 	var results []string
+	var ranges []sectionRange
 
 	// Find all closing tags
 	closePattern := fmt.Sprintf(`(?i)</%s>`, sectionName)
@@ -260,7 +361,7 @@ func (f *XML) findSectionMatches(output string, sectionName string) []string {
 	closeMatches := closeRe.FindAllStringIndex(output, -1)
 
 	if len(closeMatches) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Find all opening tags
@@ -269,7 +370,7 @@ func (f *XML) findSectionMatches(output string, sectionName string) []string {
 	openMatches := openRe.FindAllStringIndex(output, -1)
 
 	if len(openMatches) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// For each closing tag, find the LAST opening tag before it that hasn't been used
@@ -295,10 +396,14 @@ func (f *XML) findSectionMatches(output string, sectionName string) []string {
 			if trimmed != "" {
 				results = append(results, trimmed)
 			}
+			ranges = append(ranges, sectionRange{
+				start: bestOpen[0],
+				end:   closeMatch[1],
+			})
 		}
 	}
 
-	return results
+	return results, ranges
 }
 
 // validateNoAmbiguities checks if any parsed section's content contains another section's tags.

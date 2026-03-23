@@ -329,6 +329,7 @@ func TestPolicySearchTool_Call_TitleOnly_SingleResult(t *testing.T) {
 		policies: map[string]*Policy{
 			"cancel-policy": {
 				Id:          "cancel-policy",
+				Description: "Cancellation terms and refund rules",
 				FullContent: "Full content ignored.",
 			},
 		},
@@ -339,7 +340,8 @@ func TestPolicySearchTool_Call_TitleOnly_SingleResult(t *testing.T) {
 		context.Background(), PolicySearchInput{Query: "cancel"},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "id: cancel-policy", result.Text)
+	assert.Equal(t, `id: cancel-policy
+description: Cancellation terms and refund rules`, result.Text)
 }
 
 func TestPolicySearchTool_Call_TitleOnly_MultipleResults(t *testing.T) {
@@ -353,10 +355,12 @@ func TestPolicySearchTool_Call_TitleOnly_MultipleResults(t *testing.T) {
 		policies: map[string]*Policy{
 			"cancel-policy": {
 				Id:          "cancel-policy",
+				Description: "Cancellation terms",
 				FullContent: "ignored",
 			},
 			"refund-policy": {
 				Id:          "refund-policy",
+				Description: "Refund processing timeline",
 				FullContent: "ignored",
 			},
 		},
@@ -369,10 +373,12 @@ func TestPolicySearchTool_Call_TitleOnly_MultipleResults(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, `id: cancel-policy
+description: Cancellation terms
 
 ---
 
-id: refund-policy`, result.Text)
+id: refund-policy
+description: Refund processing timeline`, result.Text)
 }
 
 // ============================================================================
