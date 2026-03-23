@@ -38,19 +38,35 @@ difference is issued as a travel credit valid for 12 months.
 Gold members receive one complimentary change per booking regardless
 of class. Platinum members have all change fees waived on every booking.
 
-### Same-Day Changes
+### Same-Day Confirmed Change
 
-Same-day confirmed changes are available for $75 (waived for Gold and
-above). Same-day standby is free for all fare classes.`,
+Passengers may change to an earlier or later flight on the same day
+and same route for a $75 fee. Fare difference applies if the new flight
+has a higher fare; no refund if cheaper.
+
+Fee waivers:
+- Gold and Platinum frequent flyer members: fee waived
+- Business and First class passengers: fee waived
+
+### Same-Day Standby
+
+Same-day standby is available at no charge for all passengers. The
+passenger keeps their original confirmed seat and is placed on the
+standby list for the requested flight.
+
+Same-day changes are not available for Basic Economy tickets.`,
 			Keywords: []string{
 				"change", "reschedule", "modify", "rebook", "fee",
-				"same-day", "fare difference",
+				"same-day", "standby", "fare difference",
 			},
 			SyntheticQueries: []string{
 				"customer wants to change their flight",
 				"how much does it cost to reschedule",
 				"rebooking fee for economy class",
 				"can gold members change for free",
+				"change to an earlier flight today",
+				"can I fly standby on a later flight",
+				"same day change fee",
 			},
 		},
 		{
@@ -282,46 +298,6 @@ third party directly for their cancellation policy.`,
 				"cancel within 24 hours of booking",
 				"risk-free cancellation period",
 				"bought ticket yesterday want to cancel",
-			},
-		},
-		{
-			Id: "same-day-change",
-			FullContent: `## Same-Day Flight Changes
-
-### Same-Day Confirmed Change
-
-Passengers may change to an earlier or later flight on the same day
-and same route for a $75 fee. The fare difference applies if the new
-flight has a higher fare. If the new flight is cheaper, no refund of
-the difference is provided.
-
-Fee waivers:
-- Gold and Platinum frequent flyer members: fee waived
-- Business and First class passengers: fee waived
-
-### Same-Day Standby
-
-Same-day standby is available at no charge for all passengers. The
-passenger keeps their original confirmed seat and is placed on the
-standby list for the requested flight. If a seat becomes available,
-they are accommodated in the same cabin class.
-
-### Eligibility
-
-- Both options are available only for flights departing on the same
-  calendar day
-- The origin and destination must be the same as the original booking
-- Not available for Basic Economy tickets
-- Cannot be combined with other promotions or discounts`,
-			Keywords: []string{
-				"same day", "same-day", "standby", "earlier flight",
-				"later flight", "confirmed change",
-			},
-			SyntheticQueries: []string{
-				"change to an earlier flight today",
-				"can I fly standby on a later flight",
-				"same day change fee",
-				"switch to different flight today",
 			},
 		},
 		{
@@ -933,6 +909,59 @@ lost. The airline responds within 30 business days.`,
 				"how to file a lost baggage claim",
 				"compensation for lost or delayed luggage",
 				"tracking delayed checked bag",
+			},
+		},
+		{
+			Id: "group-bookings",
+			FullContent: `## Group Booking Policy
+
+### Eligibility
+
+Group rates are available for parties of 10 or more passengers
+traveling on the same flight and route. All passengers must be booked
+under a single group reservation.
+
+### Pricing and Deposits
+
+- Group fares are quoted upon request and are typically 10-15% below
+  published economy fares
+- A non-refundable deposit of $100 per passenger is required to hold
+  the group reservation
+- Full payment is due 60 days before departure
+- Failure to pay by the deadline results in automatic cancellation and
+  forfeiture of the deposit
+
+### Name Changes
+
+- Passenger names may be added or changed up to 14 days before
+  departure at no charge
+- Name changes within 14 days of departure incur a $25 fee per change
+- The total number of passengers cannot exceed the original group size
+
+### Cancellation
+
+- Cancellations more than 60 days before departure: full deposit
+  refund minus $25 processing fee per passenger
+- Cancellations 30-60 days before departure: 50% deposit refund
+- Cancellations less than 30 days before departure: no refund
+- Individual passengers may be removed from the group without
+  cancelling the entire booking (minimum 10 passengers must remain)
+
+### Seat Assignments
+
+Group bookings receive seat assignments at check-in. Advance seat
+selection is available for an additional $15 per passenger per segment.
+The airline makes best efforts to seat group members together but
+cannot guarantee adjacent seating on full flights.`,
+			Keywords: []string{
+				"group", "group booking", "party", "10 or more",
+				"deposit", "name change", "group rate",
+			},
+			SyntheticQueries: []string{
+				"booking for a group of passengers",
+				"group discount for 15 people traveling together",
+				"how to make a group reservation",
+				"name changes for group bookings",
 			},
 		},
 	}

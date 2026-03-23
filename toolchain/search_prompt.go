@@ -111,6 +111,23 @@ func buildSearchToolSchema(
 // searchToolName is the name of the built-in search tool.
 const searchToolName = "tool_registry_search"
 
+// getSchemaToolName is the name of the built-in get-schema tool.
+// Only available when SearchType is SearchGet.
+const getSchemaToolName = "get_tool_schema"
+
+// SearchType controls how the search tool presents results.
+type SearchType int
+
+const (
+	// Search is the default: search results include full tool definitions
+	// (name, description, policy, parameter schema, output schema).
+	Search SearchType = iota
+	// SearchGet returns only tool name + description in search results.
+	// A separate get_tool_schema tool is provided to fetch the full schema
+	// for a specific tool by name.
+	SearchGet
+)
+
 // buildSearchToolPrompt builds the full prompt for the
 // built-in "Tool Registry Search" tool. It follows the same
 // format as JSON.AvailableToolsPrompt().
@@ -129,6 +146,7 @@ func buildSearchToolPrompt(
 	hintType SearchHintType,
 	pinnedTools []any,
 	printOutputSchema bool,
+	searchType SearchType,
 ) string {
 	hasPinned := len(pinnedTools) > 0
 	var sb strings.Builder
@@ -211,6 +229,34 @@ func buildSearchToolPrompt(
 		sb.WriteString("\n")
 	}
 
+	// get_tool_schema tool (only in SearchGet mode)
+	if searchType == SearchGet {
+		fmt.Fprintf(
+			&sb,
+			"\n- %s: Get the full parameter and output "+
+				"schema for a tool by name.\n",
+			getSchemaToolName,
+		)
+		getSchemaJSON, err := json.MarshalIndent(
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tool_name": map[string]any{
+						"type": "string",
+						"description": "The exact tool " +
+							"name to get schema for",
+					},
+				},
+				"required": []string{"tool_name"},
+			}, "  ", "  ",
+		)
+		if err == nil {
+			sb.WriteString("  Parameters: ")
+			sb.Write(getSchemaJSON)
+			sb.WriteString("\n")
+		}
+	}
+
 	// Pinned tool definitions
 	if hasPinned {
 		sb.WriteString("\n")
@@ -245,6 +291,24 @@ func formatToolDedup(name string) string {
 	return fmt.Sprintf(
 		"- %s: (see definition above)\n", name,
 	)
+}
+
+// formatToolBrief formats tools with only name and description.
+// Used by SearchGet mode where full schemas are fetched separately
+// via get_tool_schema.
+func formatToolBrief(tools []any) string {
+	var sb strings.Builder
+	for _, tool := range tools {
+		meta, err := GetToolMeta(tool)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(
+			&sb, "- %s: %s\n",
+			meta.Name(), meta.Description(),
+		)
+	}
+	return sb.String()
 }
 
 // formatToolDefinitions formats a list of tool definitions

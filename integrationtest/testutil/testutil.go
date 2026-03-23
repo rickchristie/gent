@@ -222,6 +222,7 @@ func CreateToolChain(config TestConfig) gent.ToolChain {
 		return tc
 	case ToolChainSearch:
 		tc := toolchain.NewSearchJSON(config.SearchHintType).
+			WithSearchType(toolchain.SearchGet).
 			RegisterEngine(
 				toolchain.NewFusedToolSearcher(config.Embedder),
 			)
@@ -326,8 +327,9 @@ func CriticalRules(
 		rules += "\n- " + r
 	}
 	if config.ToolChain == ToolChainSearch || config.WrapPTC {
-		rules += "\n- You must have the tool schemas in scratchpad before " +
-			"calling any tool. Use tool_registry_search to get tool schema."
+		rules += "\n- You must have the tool schemas in " +
+			"scratchpad before calling any tool. " +
+			"Use tool_registry_search and get_tool_schema."
 	}
 	return rules
 }

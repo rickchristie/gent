@@ -87,6 +87,7 @@ type SearchJSON struct {
 
 	// Config
 	hintType          SearchHintType
+	searchType        SearchType
 	pinnedToolNames   []string
 	pageSize          int
 	noResultsMessage  string
@@ -150,6 +151,17 @@ func (c *SearchJSON) WithOutputSchema(
 	enabled bool,
 ) *SearchJSON {
 	c.printOutputSchema = enabled
+	return c
+}
+
+// WithSearchType sets the search result mode. Default: [Search].
+// [SearchGet] returns only name + description in search results
+// and provides a separate get_tool_schema tool for fetching
+// full schemas.
+func (c *SearchJSON) WithSearchType(
+	st SearchType,
+) *SearchJSON {
+	c.searchType = st
 	return c
 }
 
@@ -314,6 +326,7 @@ func (c *SearchJSON) Initialize() error {
 		c.hintType,
 		pinnedTools,
 		c.printOutputSchema,
+		c.searchType,
 	)
 
 	c.initialized = true
@@ -455,6 +468,11 @@ func (c *SearchJSON) Execute(
 			c.executeSearch(
 				ctx, execCtx, call, raw, i,
 				&sections, seenTools,
+			)
+		} else if call.Name == getSchemaToolName &&
+			c.searchType == SearchGet {
+			c.executeGetSchema(
+				execCtx, call, raw, i, &sections,
 			)
 		} else {
 			c.executeRegularTool(
@@ -639,9 +657,13 @@ func (c *SearchJSON) executeSearch(
 
 	// Format output
 	var output strings.Builder
-	output.WriteString(formatToolDefinitions(
-		newTools, c.printOutputSchema,
-	))
+	if c.searchType == SearchGet {
+		output.WriteString(formatToolBrief(newTools))
+	} else {
+		output.WriteString(formatToolDefinitions(
+			newTools, c.printOutputSchema,
+		))
+	}
 	for _, name := range dupNames {
 		output.WriteString(formatToolDedup(name))
 	}
@@ -676,6 +698,87 @@ func (c *SearchJSON) executeSearch(
 		)
 		execCtx.PublishAfterToolCall(
 			call.Name, argsToUse,
+			outputStr, duration, nil,
+		)
+	}
+}
+
+// executeGetSchema handles the built-in get_tool_schema tool.
+// Returns the full definition (schema, policy, output schema)
+// for a single tool by name.
+func (c *SearchJSON) executeGetSchema(
+	execCtx *gent.ExecutionContext,
+	call *gent.ToolCall,
+	raw *gent.RawToolChainResult,
+	idx int,
+	sections *[]gent.FormattedSection,
+) {
+	startTime := time.Now()
+	toolName, _ := call.Args["tool_name"].(string)
+
+	if execCtx != nil {
+		execCtx.PublishBeforeToolCall(call.Name, call.Args)
+	}
+
+	if toolName == "" {
+		err := fmt.Errorf("tool_name is required")
+		raw.Errors[idx] = err
+		*sections = append(
+			*sections, gent.FormattedSection{
+				Name:    call.Name,
+				Content: fmt.Sprintf("Error: %v", err),
+			},
+		)
+		if execCtx != nil {
+			execCtx.PublishAfterToolCall(
+				call.Name, call.Args, nil, 0, err,
+			)
+		}
+		return
+	}
+
+	tool, ok := c.toolMap[toolName]
+	if !ok {
+		err := fmt.Errorf("tool not found: %s", toolName)
+		raw.Errors[idx] = err
+		*sections = append(
+			*sections, gent.FormattedSection{
+				Name:    call.Name,
+				Content: fmt.Sprintf("Error: %v", err),
+			},
+		)
+		if execCtx != nil {
+			execCtx.PublishAfterToolCall(
+				call.Name, call.Args, nil, 0, err,
+			)
+		}
+		return
+	}
+
+	duration := time.Since(startTime)
+	outputStr := formatToolDefinitions(
+		[]any{tool}, c.printOutputSchema,
+	)
+
+	raw.Results[idx] = &gent.RawToolCallResult{
+		Name: call.Name, Output: outputStr,
+	}
+	*sections = append(
+		*sections, gent.FormattedSection{
+			Name: call.Name, Content: outputStr,
+		},
+	)
+
+	if execCtx != nil {
+		execCtx.Stats().ResetGauge(
+			gent.SGToolCallsErrorConsecutive,
+		)
+		execCtx.Stats().ResetGauge(
+			gent.SGToolCallsErrorConsecutiveFor +
+				gent.StatKey(call.Name),
+		)
+		execCtx.PublishAfterToolCall(
+			call.Name, call.Args,
 			outputStr, duration, nil,
 		)
 	}
