@@ -62,8 +62,8 @@ func (a *ToolBleveAdapter) Convert(tool gent.IndexableTool) (any, error) {
 
 func (a *ToolBleveAdapter) IDFFields() (string, []search.IDFField) {
 	return "standard", []search.IDFField{
+		{Field: "name_analyzed", Boost: 3.0},
 		{Field: "keywords", Boost: 3.0},
-		{Field: "name_analyzed", Boost: 2.0},
 		{Field: "categories", Boost: 2.0},
 		{Field: "domain", Boost: 1.5},
 		{Field: "synthetic_queries", Boost: 1.5},
@@ -80,10 +80,9 @@ func (a *ToolBleveAdapter) Query(queryText string) (query.Query, error) {
 	keywordsMatch.SetField("keywords")
 	keywordsMatch.SetBoost(3.0)
 
-	fuzzyName := bleve.NewFuzzyQuery(queryText)
-	fuzzyName.SetField("name_analyzed")
-	fuzzyName.SetBoost(2.0)
-	fuzzyName.SetFuzziness(1)
+	nameMatch := bleve.NewMatchQuery(queryText)
+	nameMatch.SetField("name_analyzed")
+	nameMatch.SetBoost(3.0)
 
 	syntheticMatch := bleve.NewMatchQuery(queryText)
 	syntheticMatch.SetField("synthetic_queries")
@@ -102,8 +101,8 @@ func (a *ToolBleveAdapter) Query(queryText string) (query.Query, error) {
 	descMatch.SetBoost(1.0)
 
 	disj := bleve.NewDisjunctionQuery(
-		exactName, keywordsMatch, fuzzyName, categoriesMatch, domainMatch,
-		syntheticMatch, descMatch,
+		exactName, nameMatch, keywordsMatch, categoriesMatch,
+		domainMatch, syntheticMatch, descMatch,
 	)
 	disj.SetMin(1)
 	return disj, nil
