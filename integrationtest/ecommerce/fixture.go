@@ -189,7 +189,7 @@ func NewEcommerceFixture(
 		WithDescription(
 			"Search policy by describing what you need " +
 				"(e.g., 'double charge', 'refund process')").
-		WithSnippetOnly(true)
+		WithResultMode(policy.SearchResultTitle)
 	f.policyGet = policy.NewGetPolicyTool(policies).
 		WithName("get_policy").
 		WithDescription("Get full policy content by ID")

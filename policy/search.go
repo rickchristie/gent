@@ -38,13 +38,25 @@ type PolicySearchInput struct {
 //
 //	tool, err := policy.NewPolicySearchTool(ctx, embedder, policies)
 //	tc.RegisterTool(tool)
+// SearchResultMode controls what PolicySearchTool returns for each match.
+type SearchResultMode int
+
+const (
+	// SearchResultFull returns the full policy content (default).
+	SearchResultFull SearchResultMode = iota
+	// SearchResultSnippet returns policy ID + search snippet.
+	SearchResultSnippet
+	// SearchResultTitle returns only the policy ID.
+	SearchResultTitle
+)
+
 type PolicySearchTool struct {
-	name        string
+	name       string
 	description string
-	index       search.SearchIndex[*Policy]
-	policies    map[string]*Policy
-	topK        int
-	snippetOnly bool
+	index      search.SearchIndex[*Policy]
+	policies   map[string]*Policy
+	topK       int
+	resultMode SearchResultMode
 
 	// IndexableTool metadata for SearchJSON compatibility.
 	keywords         []string
@@ -156,11 +168,13 @@ func (t *PolicySearchTool) WithTopK(topK int) *PolicySearchTool {
 	return t
 }
 
-// WithSnippetOnly controls whether Call returns just policy IDs and search snippets
-// (true) or full policy content (false, the default). When snippet-only is enabled,
-// the agent should use [GetPolicyTool] to fetch the full content of specific policies.
-func (t *PolicySearchTool) WithSnippetOnly(enabled bool) *PolicySearchTool {
-	t.snippetOnly = enabled
+// WithResultMode sets what each search result contains. Default: [SearchResultFull].
+// Use [SearchResultSnippet] for ID + snippet, or [SearchResultTitle] for ID only.
+// When not using full mode, the agent should use [GetPolicyTool] to read full content.
+func (t *PolicySearchTool) WithResultMode(
+	mode SearchResultMode,
+) *PolicySearchTool {
+	t.resultMode = mode
 	return t
 }
 
@@ -217,9 +231,12 @@ func (t *PolicySearchTool) Call(
 		if i > 0 {
 			sb.WriteString("\n\n---\n\n")
 		}
-		if t.snippetOnly {
+		switch t.resultMode {
+		case SearchResultTitle:
+			fmt.Fprintf(&sb, "id: %s", p.Id)
+		case SearchResultSnippet:
 			fmt.Fprintf(&sb, "id: %s\n%s", p.Id, r.Snippet)
-		} else {
+		default:
 			fmt.Fprintf(&sb, "# %s\n\n%s", p.Id, p.FullContent)
 		}
 	}

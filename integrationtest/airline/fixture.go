@@ -193,7 +193,7 @@ func NewAirlineFixture(
 			"Search policy by describing what you need " +
 				"(e.g., 'change fee for economy', " +
 				"'baggage allowance')").
-		WithSnippetOnly(true)
+		WithResultMode(policy.SearchResultTitle)
 	f.policyGet = policy.NewGetPolicyTool(policies).
 		WithName("get_policy").
 		WithDescription("Get full policy content by ID")

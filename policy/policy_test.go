@@ -238,7 +238,7 @@ func TestPolicySearchTool_IndexableToolInterface(t *testing.T) {
 func TestPolicySearchTool_Call_SnippetOnly_SingleResult(t *testing.T) {
 	tool := &PolicySearchTool{
 		name:        "search_policy",
-		snippetOnly: true,
+		resultMode: SearchResultSnippet,
 		index: &mockPolicyIndex{results: []search.SearchResult{
 			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
 		}},
@@ -262,7 +262,7 @@ Cancel within 24 hours`, result.Text)
 func TestPolicySearchTool_Call_SnippetOnly_MultipleResults(t *testing.T) {
 	tool := &PolicySearchTool{
 		name:        "search_policy",
-		snippetOnly: true,
+		resultMode: SearchResultSnippet,
 		index: &mockPolicyIndex{results: []search.SearchResult{
 			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
 			{Id: "refund-policy", Score: 0.7, Snippet: "Refund in 5-7 days"},
@@ -297,7 +297,7 @@ func TestPolicySearchTool_Call_FullContent_StillWorks(t *testing.T) {
 	// Verify that snippetOnly=false (default) still returns full content.
 	tool := &PolicySearchTool{
 		name:        "search_policy",
-		snippetOnly: false,
+		resultMode: SearchResultFull,
 		index: &mockPolicyIndex{results: []search.SearchResult{
 			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
 		}},
@@ -317,6 +317,62 @@ func TestPolicySearchTool_Call_FullContent_StillWorks(t *testing.T) {
 	assert.Equal(t, `# cancel-policy
 
 Full cancellation policy content here.`, result.Text)
+}
+
+func TestPolicySearchTool_Call_TitleOnly_SingleResult(t *testing.T) {
+	tool := &PolicySearchTool{
+		name:       "search_policy",
+		resultMode: SearchResultTitle,
+		index: &mockPolicyIndex{results: []search.SearchResult{
+			{Id: "cancel-policy", Score: 0.9, Snippet: "ignored"},
+		}},
+		policies: map[string]*Policy{
+			"cancel-policy": {
+				Id:          "cancel-policy",
+				FullContent: "Full content ignored.",
+			},
+		},
+		topK: 3,
+	}
+
+	result, err := tool.Call(
+		context.Background(), PolicySearchInput{Query: "cancel"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "id: cancel-policy", result.Text)
+}
+
+func TestPolicySearchTool_Call_TitleOnly_MultipleResults(t *testing.T) {
+	tool := &PolicySearchTool{
+		name:       "search_policy",
+		resultMode: SearchResultTitle,
+		index: &mockPolicyIndex{results: []search.SearchResult{
+			{Id: "cancel-policy", Score: 0.9},
+			{Id: "refund-policy", Score: 0.7},
+		}},
+		policies: map[string]*Policy{
+			"cancel-policy": {
+				Id:          "cancel-policy",
+				FullContent: "ignored",
+			},
+			"refund-policy": {
+				Id:          "refund-policy",
+				FullContent: "ignored",
+			},
+		},
+		topK: 3,
+	}
+
+	result, err := tool.Call(
+		context.Background(),
+		PolicySearchInput{Query: "cancel refund"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, `id: cancel-policy
+
+---
+
+id: refund-policy`, result.Text)
 }
 
 // ============================================================================
