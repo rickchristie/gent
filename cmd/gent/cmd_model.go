@@ -103,7 +103,7 @@ func printConfigs(model *ModelInfo, modelDir string) {
 		fmt.Printf("      TokenizerPath:     %q,\n", filepath.Join(modelDir, "tokenizer.json"))
 		fmt.Printf("      Dimensions:        %d,\n", cfg.Dimensions)
 		fmt.Printf("      Pooling:           %s,\n", poolStr)
-		fmt.Printf("      MaxSequenceLength: %d,\n", cfg.MaxSeqLen)
+		fmt.Printf("      MaxSequenceLength: %d,\n", cfg.Model.MaxTokenChunks)
 		fmt.Printf("      QueryPrefix:       %q,\n", cfg.QueryPrefix)
 		fmt.Printf("      PassagePrefix:     %q,\n", cfg.PassagePrefix)
 		fmt.Printf("      InputNames:        []string{%s},\n", formatStringSlice(cfg.InputNames))

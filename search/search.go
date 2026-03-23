@@ -45,6 +45,17 @@ type SearchResult struct {
 	// Snippet is text that can be shown for context. For FlatIndex: the best-matching chunk
 	// text. For BleveIndex: highlighted fragment, or document ID if highlights aren't configured.
 	Snippet string
+
+	// Metadata contains additional information about the search result. For FusedIndex, the
+	// WeightedLinearFuser populates per-source scores:
+	//   - "bm25_raw": raw BM25 score before normalization
+	//   - "bm25_normalized": BM25 score after normalization
+	//   - "bm25_weighted": BM25 contribution (weight × normalized)
+	//   - "semantic_raw": raw cosine similarity score
+	//   - "semantic_weighted": semantic contribution (weight × raw)
+	//
+	// These enable debugging and analysis of search quality.
+	Metadata map[string]any
 }
 
 // SearchIndex stores documents of type Doc and retrieves them by relevance.

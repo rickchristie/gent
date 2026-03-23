@@ -46,7 +46,7 @@ type IndexableTool interface {
 	SyntheticQueries() []string
 }
 
-// ToolSearchEngine indexes tools and searches them by query.
+// ToolSearcher indexes tools and searches them by query.
 //
 // Search engines are pluggable backends for ToolSearchToolChain.
 // Each engine provides a different search strategy (e.g., BM25
@@ -58,7 +58,7 @@ type IndexableTool interface {
 //     The ToolSearchToolChain handles pagination over results.
 //   - Error messages from Search are surfaced to the LLM, so they
 //     should be descriptive (e.g., "invalid regex: ...").
-type ToolSearchEngine interface {
+type ToolSearcher interface {
 	// Id returns the unique identifier for this engine.
 	// Used as the query_type value in search requests.
 	Id() string

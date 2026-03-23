@@ -58,3 +58,35 @@ type BleveAdapter[Doc any] interface {
 	// in a SearchRequest with the caller's topK — the adapter should not set result size.
 	Query(queryText string) (query.Query, error)
 }
+
+// IDFField describes a text field and its query boost for IDF computation.
+type IDFField struct {
+	Field string
+	Boost float64
+}
+
+// BleveIDFProvider is an optional interface that BleveAdapter implementations can implement
+// to enable theoretical-maximum BM25 normalization.
+//
+// When implemented, BleveIndex computes the theoretical maximum BM25 score for each query:
+//
+//	max_possible = Σ IDF(qᵢ) × (k₁ + 1) × boost
+//
+// where IDF uses Bleve's BM25 formula: ln(1 + (N - df + 0.5) / (df + 0.5)). This maximum
+// is attached to each SearchResult's Metadata as TheoreticalMaxKey, enabling the Fuser to
+// normalize BM25 scores against what's theoretically achievable rather than the observed
+// score range. This prevents noise amplification when all BM25 scores are
+// near-zero — a common problem with semantic queries that lack discriminative terms.
+//
+// The analyzer name must match the analyzer configured in the adapter's Mapping for the
+// listed fields, so that query tokenization matches index tokenization.
+//
+// Only include text fields that are searched via MatchQuery in the adapter's Query method.
+// Exclude keyword fields (exact match) since they use different scoring.
+type BleveIDFProvider interface {
+	IDFFields() (analyzerName string, fields []IDFField)
+}
+
+// TheoreticalMaxKey is the metadata key BleveIndex uses to store the theoretical maximum
+// BM25 score for a query. Used by [theoreticalMaxNormalize] during fusion.
+const TheoreticalMaxKey = "_bm25_theoretical_max"

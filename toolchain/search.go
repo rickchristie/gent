@@ -43,8 +43,8 @@ const (
 //	    toolchain.SearchHintDomainCategories,
 //	).
 //	    WithPageSize(5).
-//	    RegisterEngine(toolchain.NewBM25ToolSearchEngine()).
-//	    RegisterEngine(toolchain.NewRegexToolSearchEngine())
+//	    RegisterEngine(toolchain.NewBM25ToolSearcher()).
+//	    RegisterEngine(toolchain.NewRegexToolSearcher())
 //
 // # Registering Tools
 //
@@ -82,8 +82,8 @@ type SearchJSON struct {
 	indexableTools []gent.IndexableTool
 
 	// Search engines
-	engines   []gent.ToolSearchEngine
-	engineMap map[string]gent.ToolSearchEngine
+	engines   []gent.ToolSearcher
+	engineMap map[string]gent.ToolSearcher
 
 	// Config
 	hintType         SearchHintType
@@ -109,8 +109,8 @@ func NewSearchJSON(
 		tools:       make([]any, 0),
 		toolMap:     make(map[string]any),
 		schemaMap:   make(map[string]*schema.Schema),
-		engines:     make([]gent.ToolSearchEngine, 0),
-		engineMap:   make(map[string]gent.ToolSearchEngine),
+		engines:     make([]gent.ToolSearcher, 0),
+		engineMap:   make(map[string]gent.ToolSearcher),
 		pageSize:    3,
 		noResultsMessage: "No tools found matching " +
 			"your query. Try different keywords or " +
@@ -146,7 +146,7 @@ func (c *SearchJSON) WithNoResultsMessage(
 // RegisterEngine adds a search engine. Call before
 // Initialize().
 func (c *SearchJSON) RegisterEngine(
-	engine gent.ToolSearchEngine,
+	engine gent.ToolSearcher,
 ) *SearchJSON {
 	c.engines = append(c.engines, engine)
 	c.engineMap[engine.Id()] = engine
@@ -791,40 +791,26 @@ func (c *SearchJSON) executeRegularTool(
 			Output: output.Text,
 		}
 
-		jsonData, marshalErr := json.Marshal(output.Text)
+		// Format output. String outputs pass through as-is (no JSON wrapping).
+		outputText, marshalErr := formatToolOutputJSON(output.Text)
 		if marshalErr != nil {
-			*sections = append(
-				*sections, gent.FormattedSection{
-					Name: call.Name,
-					Content: "error: failed to " +
-						"marshal output",
-				},
-			)
+			*sections = append(*sections, gent.FormattedSection{
+				Name:    call.Name,
+				Content: "error: failed to marshal output",
+			})
 		} else {
 			if output.Instructions != "" {
-				*sections = append(
-					*sections,
-					gent.FormattedSection{
-						Name: call.Name,
-						Children: []gent.FormattedSection{
-							{
-								Name:    "result",
-								Content: string(jsonData),
-							},
-							{
-								Name:    "instructions",
-								Content: output.Instructions,
-							},
-						},
+				*sections = append(*sections, gent.FormattedSection{
+					Name: call.Name,
+					Children: []gent.FormattedSection{
+						{Name: "result", Content: outputText},
+						{Name: "instructions", Content: output.Instructions},
 					},
-				)
+				})
 			} else {
-				*sections = append(
-					*sections, gent.FormattedSection{
-						Name:    call.Name,
-						Content: string(jsonData),
-					},
-				)
+				*sections = append(*sections, gent.FormattedSection{
+					Name: call.Name, Content: outputText,
+				})
 			}
 		}
 

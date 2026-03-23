@@ -337,27 +337,28 @@ func (c *JSON) Execute(
 				Output: output.Text,
 			}
 
-			// Format output as JSON
-			jsonData, marshalErr := json.Marshal(output.Text)
+			// Format output. String outputs are passed through as-is (no JSON wrapping)
+			// because they may contain Markdown, prompts, or other structured text that
+			// should not be quoted. Non-string outputs are JSON-marshalled.
+			outputText, marshalErr := formatToolOutputJSON(output.Text)
 			if marshalErr != nil {
 				sections = append(sections, gent.FormattedSection{
 					Name:    call.Name,
 					Content: "error: failed to marshal output",
 				})
 			} else {
-				// If instructions present, create nested sections as children
 				if output.Instructions != "" {
 					sections = append(sections, gent.FormattedSection{
 						Name: call.Name,
 						Children: []gent.FormattedSection{
-							{Name: "result", Content: string(jsonData)},
+							{Name: "result", Content: outputText},
 							{Name: "instructions", Content: output.Instructions},
 						},
 					})
 				} else {
 					sections = append(sections, gent.FormattedSection{
 						Name:    call.Name,
-						Content: string(jsonData),
+						Content: outputText,
 					})
 				}
 			}

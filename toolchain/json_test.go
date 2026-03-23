@@ -2400,7 +2400,7 @@ func TestJSON_Execute_WithInstructions(t *testing.T) {
 				instructions: "",
 			},
 			expected: expected{
-				text: "<test>\n\"search result\"\n</test>",
+				text: "<test>\nsearch result\n</test>",
 			},
 		},
 		{
@@ -2411,7 +2411,7 @@ func TestJSON_Execute_WithInstructions(t *testing.T) {
 				instructions: "Remember to verify customer ID before proceeding.",
 			},
 			expected: expected{
-				text: "<test>\n<result>\n\"customer info\"\n</result>\n" +
+				text: "<test>\n<result>\ncustomer info\n</result>\n" +
 					"<instructions>\nRemember to verify customer ID before proceeding.\n" +
 					"</instructions>\n</test>",
 			},

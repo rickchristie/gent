@@ -78,7 +78,7 @@ func buildDomainSummary(
 // built-in search tool. The query_type enum is populated from
 // registered engine IDs.
 func buildSearchToolSchema(
-	engines []gent.ToolSearchEngine,
+	engines []gent.ToolSearcher,
 ) map[string]any {
 	engineIDs := make([]any, len(engines))
 	for i, eng := range engines {
@@ -124,7 +124,7 @@ const searchToolName = "tool_registry_search"
 // to indicate not all tools are shown.
 func buildSearchToolPrompt(
 	tools []gent.IndexableTool,
-	engines []gent.ToolSearchEngine,
+	engines []gent.ToolSearcher,
 	schemaMap map[string]any,
 	hintType SearchHintType,
 	pinnedTools []any,

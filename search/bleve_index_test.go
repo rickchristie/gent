@@ -139,6 +139,90 @@ func TestBleveIndex_EmptyIndex(t *testing.T) {
 	assert.Empty(t, results)
 }
 
+func TestBleveIndex_KneeTruncation(t *testing.T) {
+	// Query "deploy application" matches all documents on "application" (common term,
+	// low IDF) but only "deployment-guide" on "deploy" (rare term, high IDF). This
+	// creates a score distribution with a sharp drop after the strong match — the
+	// Kneedle algorithm detects this knee and truncates the noise tail.
+	idx, err := NewBleveIndex(&testBleveAdapter{})
+	require.NoError(t, err)
+	defer idx.Close()
+
+	ctx := context.Background()
+	// Strong match: both "deploy" and "application" appear.
+	require.NoError(t, idx.Add(ctx, "deployment-guide",
+		"deploy application to production server using deployment pipeline"))
+	// Weak matches: only share the common term "application".
+	require.NoError(t, idx.Add(ctx, "monitoring",
+		"monitor application performance metrics alerting dashboard"))
+	require.NoError(t, idx.Add(ctx, "security",
+		"secure application authentication authorization access control"))
+	require.NoError(t, idx.Add(ctx, "testing",
+		"test application unit integration end to end coverage"))
+	require.NoError(t, idx.Add(ctx, "logging",
+		"application logging structured log aggregation search"))
+	require.NoError(t, idx.Add(ctx, "config",
+		"application configuration environment variables settings"))
+
+	results, err := idx.Search(ctx, "deploy application", 10)
+	require.NoError(t, err)
+
+	// Without knee truncation, all 6 documents match on "application". With knee
+	// truncation, the strong match (deploy + application) should survive while
+	// weak matches (application only) are removed after the score knee.
+	require.GreaterOrEqual(t, len(results), 1, "must keep at least the strong match")
+	assert.Less(t, len(results), 6, "must truncate some noise results")
+	assert.Equal(t, "deployment-guide", results[0].Id)
+}
+
+func TestBleveIndex_KneeTruncationDisabled(t *testing.T) {
+	// Same corpus as above, but with knee truncation disabled — all matching
+	// results are returned.
+	idx, err := NewBleveIndex(&testBleveAdapter{}, WithKneeTruncation(false))
+	require.NoError(t, err)
+	defer idx.Close()
+
+	ctx := context.Background()
+	require.NoError(t, idx.Add(ctx, "deployment-guide",
+		"deploy application to production server using deployment pipeline"))
+	require.NoError(t, idx.Add(ctx, "monitoring",
+		"monitor application performance metrics alerting dashboard"))
+	require.NoError(t, idx.Add(ctx, "security",
+		"secure application authentication authorization access control"))
+	require.NoError(t, idx.Add(ctx, "testing",
+		"test application unit integration end to end coverage"))
+	require.NoError(t, idx.Add(ctx, "logging",
+		"application logging structured log aggregation search"))
+	require.NoError(t, idx.Add(ctx, "config",
+		"application configuration environment variables settings"))
+
+	results, err := idx.Search(ctx, "deploy application", 10)
+	require.NoError(t, err)
+
+	// Without knee truncation, all documents matching "application" are returned.
+	assert.Equal(t, 6, len(results))
+	assert.Equal(t, "deployment-guide", results[0].Id)
+}
+
+func TestBleveIndex_KneeTruncationKeepsAllWhenNoKnee(t *testing.T) {
+	// When all documents match with similar scores (no clear knee), knee
+	// truncation keeps all results.
+	idx, err := NewBleveIndex(&testBleveAdapter{})
+	require.NoError(t, err)
+	defer idx.Close()
+
+	ctx := context.Background()
+	require.NoError(t, idx.Add(ctx, "a", "search engine optimization guide"))
+	require.NoError(t, idx.Add(ctx, "b", "search engine architecture design"))
+	require.NoError(t, idx.Add(ctx, "c", "search engine ranking algorithm"))
+
+	results, err := idx.Search(ctx, "search engine", 10)
+	require.NoError(t, err)
+
+	// All three documents match equally well on "search engine" — no knee.
+	assert.Len(t, results, 3)
+}
+
 func TestBleveIndex_TopKLimitsResults(t *testing.T) {
 	idx, err := NewBleveIndex(&testBleveAdapter{})
 	require.NoError(t, err)

@@ -137,6 +137,10 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Use testify's `assert` package for assertions.
 - Define `input`, `expected`, etc. as named types inside the test function — never use inline anonymous structs in table-driven tests.
 
+**String Testing**
+- For multi-line string inputs and expected outputs, ALWAYS use backticks (raw string literals) with real line breaks. NEVER use `"" + ""` concatenation or `\n` escapes for multi-line strings.
+- Assert exact string matches. Do NOT use `Contains`, `HasPrefix`, or other partial match shortcuts. If the full expected output is known, assert it exactly.
+
 **Testing Stats & Limits**
 - Whenever we create new stats (`*ExecutionStats`), we need to create tests on:
   - Stat field is incremented correctly.

@@ -1,48 +1,41 @@
 package search
 
-// minMaxNormalize applies per-query min-max normalization to a result set.
-//
-// Rules:
-//   - Zero scores remain zero ("no match at all", not "worst match")
-//   - All zeros → all outputs are zero
-//   - Exactly one non-zero → normalizes to 1.0
-//   - All non-zero scores equal → all normalize to 1.0
-//
-// This is the correct normalization for BM25 scores where 0.0 means "this term didn't appear
-// in the document at all" — a fundamentally different signal from "appeared but scored poorly."
-func minMaxNormalize(results []SearchResult) []SearchResult {
-	var min, max float64
-	var hasNonZero bool
-	for _, r := range results {
-		if r.Score > 0 {
-			if !hasNonZero {
-				min = r.Score
-				max = r.Score
-				hasNonZero = true
-			} else {
-				if r.Score < min {
-					min = r.Score
-				}
-				if r.Score > max {
-					max = r.Score
-				}
-			}
+// normalizeBM25 normalizes BM25 search results to [0, 1]. If results contain a theoretical
+// maximum score (set by BleveIndex when the adapter implements BleveIDFProvider), scores are
+// normalized against that maximum. Otherwise, raw scores pass through unchanged.
+func normalizeBM25(results []SearchResult) []SearchResult {
+	if len(results) > 0 && results[0].Metadata != nil {
+		if maxPossible, ok := results[0].Metadata[TheoreticalMaxKey].(float64); ok {
+			return theoreticalMaxNormalize(results, maxPossible)
 		}
 	}
+	return results
+}
 
-	if !hasNonZero {
+// theoreticalMaxNormalize normalizes BM25 scores against the theoretical maximum score
+// for the query, producing values in [0, 1] where 1.0 represents a hypothetical perfect
+// document.
+//
+// Theoretical-max normalization uses an absolute reference point — so noise stays noise.
+// When all BM25 scores are tiny (common with semantic-style queries), they normalize to
+// tiny values instead of being inflated to 1.0.
+func theoreticalMaxNormalize(
+	results []SearchResult, maxPossible float64,
+) []SearchResult {
+	if maxPossible <= 0 || len(results) == 0 {
 		return results
 	}
 
 	normalized := make([]SearchResult, len(results))
 	for i, r := range results {
-		normalized[i] = SearchResult{Id: r.Id, Snippet: r.Snippet}
-		if r.Score == 0 {
-			normalized[i].Score = 0
-		} else if max == min {
-			normalized[i].Score = 1.0
-		} else {
-			normalized[i].Score = (r.Score - min) / (max - min)
+		normalized[i] = SearchResult{
+			Id: r.Id, Snippet: r.Snippet, Metadata: r.Metadata,
+		}
+		if r.Score > 0 {
+			normalized[i].Score = r.Score / maxPossible
+			if normalized[i].Score > 1.0 {
+				normalized[i].Score = 1.0
+			}
 		}
 	}
 	return normalized

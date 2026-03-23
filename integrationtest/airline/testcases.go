@@ -15,7 +15,7 @@ func RunRescheduleScenario(
 	w io.Writer,
 	config testutil.TestConfig,
 ) error {
-	fixture := NewAirlineFixture(nil)
+	fixture := NewAirlineFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.RunScenario(ctx, w, config, testutil.ScenarioConfig{
@@ -114,7 +114,7 @@ func RunRescheduleScenarioSearch(
 	config.PinTools = append(
 		config.PinTools, "search_airline_policy",
 	)
-	fixture := NewAirlineFixture(nil)
+	fixture := NewAirlineFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.RunScenario(
@@ -191,7 +191,7 @@ func NewAirlineInteractiveChat(
 	w io.Writer,
 	config testutil.TestConfig,
 ) (*testutil.InteractiveChat, error) {
-	fixture := NewAirlineFixture(nil)
+	fixture := NewAirlineFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.NewInteractiveChat(w, config, testutil.ChatConfig{
@@ -243,7 +243,7 @@ func NewAirlineInteractiveChatSearch(
 	config.PinTools = append(
 		config.PinTools, "search_airline_policy",
 	)
-	fixture := NewAirlineFixture(nil)
+	fixture := NewAirlineFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.NewInteractiveChat(

@@ -1,5 +1,9 @@
 {
   "editor.rulers": [100],
+  "go.toolsEnvVars": {
+    "CGO_LDFLAGS": "-L${env:HOME}/.gent/lib",
+    "LD_LIBRARY_PATH": "${env:HOME}/.gent/lib"
+  },
   "go.testEnvFile": "${workspaceFolder}/.env",
   "go.testFlags": ["-v", "-count=1"],
   "go.testTimeout": "15m",

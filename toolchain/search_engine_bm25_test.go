@@ -10,13 +10,13 @@ import (
 )
 
 func TestBM25_Id(t *testing.T) {
-	engine := NewBM25ToolSearchEngine()
+	engine := NewBleveToolSearcher()
 	assert.Equal(t, "bm25", engine.Id())
 }
 
 func TestBM25_SearchGuidance(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		engine := NewBM25ToolSearchEngine()
+		engine := NewBleveToolSearcher()
 		guidance := engine.SearchGuidance()
 		assert.NotEmpty(t, guidance)
 		assert.Contains(
@@ -25,7 +25,7 @@ func TestBM25_SearchGuidance(t *testing.T) {
 	})
 
 	t.Run("custom", func(t *testing.T) {
-		engine := NewBM25ToolSearchEngine().
+		engine := NewBleveToolSearcher().
 			WithSearchGuidance("custom guidance")
 		assert.Equal(
 			t, "custom guidance",
@@ -88,7 +88,7 @@ func TestBM25_IndexAll(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewBM25ToolSearchEngine()
+			engine := NewBleveToolSearcher()
 			err := engine.IndexAll(tt.input.tools)
 
 			if tt.expected.err != nil {
@@ -101,7 +101,7 @@ func TestBM25_IndexAll(t *testing.T) {
 }
 
 func TestBM25_IndexAll_Reindex(t *testing.T) {
-	engine := NewBM25ToolSearchEngine()
+	engine := NewBleveToolSearcher()
 
 	firstTools := []gent.IndexableTool{
 		&mockIndexableTool{
@@ -266,7 +266,7 @@ func TestBM25_Search(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewBM25ToolSearchEngine()
+			engine := NewBleveToolSearcher()
 			err := engine.IndexAll(tools)
 			require.NoError(t, err)
 
@@ -293,12 +293,11 @@ func TestBM25_Search(t *testing.T) {
 	}
 }
 
-func TestBM25_Search_NotInitialized(t *testing.T) {
-	engine := NewBM25ToolSearchEngine()
-	results, err := engine.Search(
-		context.Background(), "test",
-	)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
-	assert.Nil(t, results)
+func TestBM25_Search_BeforeIndexAll(t *testing.T) {
+	// Searching before IndexAll returns empty results (not an error) because
+	// BleveIndex is initialized with an empty index at construction time.
+	engine := NewBleveToolSearcher()
+	results, err := engine.Search(context.Background(), "test")
+	assert.NoError(t, err)
+	assert.Empty(t, results)
 }

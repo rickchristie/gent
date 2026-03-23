@@ -57,24 +57,36 @@ func TestToolChunkAdapter_Convert(t *testing.T) {
 	tool := &testIndexableTool{
 		name:             "get_billing_ledger",
 		description:      "Retrieve billing ledger entries",
+		domain:           "Billing",
+		categories:       []string{"lookup", "billing"},
 		keywords:         []string{"billing", "payment"},
 		syntheticQueries: []string{"check payments", "look up invoices"},
 	}
 
-	chunks, err := adapter.Convert(tool)
+	chunks, err := adapter.Chunks(tool, nil, 0)
 	require.NoError(t, err)
-	assert.Len(t, chunks, 1)
-	assert.Contains(t, chunks[0], "get_billing_ledger: Retrieve billing ledger entries")
-	assert.Contains(t, chunks[0], "Keywords: billing, payment")
-	assert.Contains(t, chunks[0], "Example queries: check payments; look up invoices")
+	assert.Equal(t, []search.Chunk{
+		{
+			Text: `# get_billing_ledger
+
+Retrieve billing ledger entries
+
+- Domain: Billing
+- Categories: lookup, billing
+- Keywords: billing, payment
+- Example queries: check payments; look up invoices`,
+		},
+	}, chunks)
 }
 
-func TestIndexToolSearchEngine_WithBleveIndex(t *testing.T) {
-	bleveIdx, err := search.NewBleveIndex(&ToolBleveAdapter{})
+func TestIndexToolSearcher_WithBleveIndex(t *testing.T) {
+	bleveIdx, err := search.NewBleveIndex(&ToolBleveAdapter{},
+		search.WithTheoreticalMaxConfidenceThreshold(0),
+	)
 	require.NoError(t, err)
 	defer bleveIdx.Close()
 
-	engine := NewIndexToolSearchEngine("bm25", bleveIdx)
+	engine := NewIndexToolSearcher("bm25", bleveIdx)
 
 	tools := []gent.IndexableTool{
 		&testIndexableTool{
@@ -114,12 +126,14 @@ func TestIndexToolSearchEngine_WithBleveIndex(t *testing.T) {
 	assert.Equal(t, "cancel_reservation", results[0])
 }
 
-func TestIndexToolSearchEngine_IndexAllReplacesExisting(t *testing.T) {
-	bleveIdx, err := search.NewBleveIndex(&ToolBleveAdapter{})
+func TestIndexToolSearcher_IndexAllReplacesExisting(t *testing.T) {
+	bleveIdx, err := search.NewBleveIndex(&ToolBleveAdapter{},
+		search.WithTheoreticalMaxConfidenceThreshold(0),
+	)
 	require.NoError(t, err)
 	defer bleveIdx.Close()
 
-	engine := NewIndexToolSearchEngine("bm25", bleveIdx)
+	engine := NewIndexToolSearcher("bm25", bleveIdx)
 
 	oldTools := []gent.IndexableTool{
 		&testIndexableTool{
@@ -151,12 +165,14 @@ func TestIndexToolSearchEngine_IndexAllReplacesExisting(t *testing.T) {
 	assert.Equal(t, "new_tool", results[0])
 }
 
-func TestIndexToolSearchEngine_IdAndGuidance(t *testing.T) {
-	bleveIdx, err := search.NewBleveIndex(&ToolBleveAdapter{})
+func TestIndexToolSearcher_IdAndGuidance(t *testing.T) {
+	bleveIdx, err := search.NewBleveIndex(&ToolBleveAdapter{},
+		search.WithTheoreticalMaxConfidenceThreshold(0),
+	)
 	require.NoError(t, err)
 	defer bleveIdx.Close()
 
-	engine := NewIndexToolSearchEngine("hybrid", bleveIdx).
+	engine := NewIndexToolSearcher("hybrid", bleveIdx).
 		WithSearchGuidance("Custom guidance")
 
 	assert.Equal(t, "hybrid", engine.Id())

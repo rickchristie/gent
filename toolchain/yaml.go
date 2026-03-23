@@ -480,27 +480,26 @@ func (c *YAML) Execute(
 				Output: output.Text,
 			}
 
-			// Format output as YAML
-			yamlData, marshalErr := yaml.Marshal(output.Text)
+			// Format output. String outputs pass through as-is (no YAML wrapping).
+			outputText, marshalErr := formatToolOutputYAML(output.Text)
 			if marshalErr != nil {
 				sections = append(sections, gent.FormattedSection{
 					Name:    call.Name,
 					Content: "error: failed to marshal output",
 				})
 			} else {
-				// If instructions present, create nested sections as children
 				if output.Instructions != "" {
 					sections = append(sections, gent.FormattedSection{
 						Name: call.Name,
 						Children: []gent.FormattedSection{
-							{Name: "result", Content: strings.TrimSpace(string(yamlData))},
+							{Name: "result", Content: outputText},
 							{Name: "instructions", Content: output.Instructions},
 						},
 					})
 				} else {
 					sections = append(sections, gent.FormattedSection{
 						Name:    call.Name,
-						Content: strings.TrimSpace(string(yamlData)),
+						Content: outputText,
 					})
 				}
 			}

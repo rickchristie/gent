@@ -7,7 +7,9 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/integrationtest/testutil"
+	"github.com/rickchristie/gent/policy"
 	"github.com/rickchristie/gent/schema"
+	"github.com/rickchristie/gent/search"
 )
 
 // -----------------------------------------------------------------------------
@@ -58,11 +60,6 @@ type Seat struct {
 	HasExtraLeg bool   `json:"has_extra_legroom"`
 }
 
-type Policy struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-}
-
 // -----------------------------------------------------------------------------
 // Tool Input Types
 // -----------------------------------------------------------------------------
@@ -84,10 +81,6 @@ type GetFlightSeatsInfoInput struct {
 	FlightNumber  string `json:"flight_number"`
 	Class         string `json:"class"`
 	AvailableOnly bool   `json:"available_only"`
-}
-
-type SearchAirlinePolicyInput struct {
-	Keyword string `json:"keyword"`
 }
 
 type SearchFlightScheduleInput struct {
@@ -156,18 +149,21 @@ type SendNotificationResult struct {
 // ensuring consistent behavior in LLM integration tests regardless of when they run.
 type AirlineFixture struct {
 	timeProvider gent.TimeProvider
+	policyTool   *policy.PolicySearchTool
 
 	// Instance data - not shared across fixtures
 	customers map[string]*Customer
 	flights   map[string]*Flight
 	bookings  map[string]*Booking
 	seats     map[string][]Seat
-	policies  []Policy
 }
 
 // NewAirlineFixture creates a new AirlineFixture with dynamic dates.
-// If tp is nil, uses gent.DefaultTimeProvider.
-func NewAirlineFixture(tp gent.TimeProvider) *AirlineFixture {
+// If tp is nil, uses gent.DefaultTimeProvider. The embedder is required for
+// PolicySearchTool (hybrid BM25+semantic policy search).
+func NewAirlineFixture(
+	tp gent.TimeProvider, embedder search.Embedder,
+) *AirlineFixture {
 	if tp == nil {
 		tp = gent.NewDefaultTimeProvider()
 	}
@@ -181,6 +177,17 @@ func NewAirlineFixture(tp gent.TimeProvider) *AirlineFixture {
 	}
 
 	f.initializeData()
+
+	tool, err := policy.NewPolicySearchTool(
+		context.Background(), embedder, airlinePolicies(),
+	)
+	if err != nil {
+		panic("airline: failed to create PolicySearchTool: " + err.Error())
+	}
+	f.policyTool = tool.WithName("search_airline_policy").WithDescription(
+		"Search airline policies by describing what you need " +
+			"(e.g., 'change fee for economy', 'baggage allowance')",
+	)
 	return f
 }
 
@@ -397,42 +404,6 @@ func (f *AirlineFixture) initializeData() {
 		},
 	}
 
-	// Initialize policies (static, not date-dependent)
-	f.policies = []Policy{
-		{
-			Title: "Flight Change and Rescheduling Policy",
-			Content: `Customers may change or reschedule their flights subject to the following:
-- Changes made 24+ hours before departure: $50 change fee for economy, free for business/first class
-- Changes made within 24 hours: $150 change fee for economy, $75 for business, free for first class
-- Gold and Platinum frequent flyers receive one free change per booking
-- Fare difference applies if new flight is more expensive
-- If new flight is cheaper, difference is provided as travel credit`,
-		},
-		{
-			Title: "Cancellation and Refund Policy",
-			Content: `Cancellation terms vary by ticket type:
-- Refundable tickets: Full refund minus $25 processing fee
-- Non-refundable tickets: Travel credit minus $100 fee
-- Within 24 hours of booking: Full refund regardless of ticket type
-- Cancellations due to airline: Full refund plus compensation`,
-		},
-		{
-			Title: "Baggage Policy",
-			Content: `Baggage allowance by class:
-- Economy: 1 carry-on (22x14x9 in), 1 checked bag (50 lbs) - $35 for 2nd bag
-- Business: 2 carry-ons, 2 checked bags (70 lbs each) included
-- First Class: 2 carry-ons, 3 checked bags (70 lbs each) included
-- Overweight bags: $75 per bag over limit`,
-		},
-		{
-			Title: "Frequent Flyer Benefits",
-			Content: `Tier benefits:
-- Bronze: Priority boarding, 10% bonus miles
-- Silver: Priority boarding, lounge access on international, 25% bonus miles
-- Gold: Free seat selection, 1 free change/cancellation, lounge access, 50% bonus miles
-- Platinum: All Gold benefits plus free upgrades when available, 100% bonus miles`,
-		},
-	}
 }
 
 // -----------------------------------------------------------------------------
@@ -542,40 +513,6 @@ func (f *AirlineFixture) GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsI
 	)
 }
 
-// SearchAirlinePolicyTool returns a tool that searches airline policies.
-func (f *AirlineFixture) SearchAirlinePolicyTool() *gent.ToolFunc[SearchAirlinePolicyInput, []Policy] {
-	return gent.NewToolFunc(
-		"search_airline_policy",
-		"Search airline policies by keyword (e.g., 'cancellation', 'baggage', 'change')",
-		schema.Object(map[string]*schema.Property{
-			"keyword": schema.String("Keyword to search for in policy titles and content"),
-		}, "keyword"),
-		func(ctx context.Context, input SearchAirlinePolicyInput) ([]Policy, error) {
-			if input.Keyword == "" {
-				return nil, fmt.Errorf("keyword is required")
-			}
-
-			var results []Policy
-			for _, policy := range f.policies {
-				if testutil.ContainsIgnoreCase(policy.Title, input.Keyword) ||
-					testutil.ContainsIgnoreCase(policy.Content, input.Keyword) {
-					results = append(results, policy)
-				}
-			}
-			if len(results) == 0 {
-				return nil, fmt.Errorf(
-					"no policies found matching: "+
-						"'%s'. Policy search is "+
-						"simple word match "+
-						"(contains), single word "+
-						"search is better",
-					input.Keyword,
-				)
-			}
-			return results, nil
-		},
-	)
-}
 
 // SearchFlightScheduleTool returns a tool that searches for available flights.
 func (f *AirlineFixture) SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Flight] {
@@ -801,7 +738,7 @@ func (f *AirlineFixture) RegisterAllTools(tc gent.ToolChain) {
 	tc.RegisterTool(f.GetBookingInfoTool())
 	tc.RegisterTool(f.GetFlightInfoTool())
 	tc.RegisterTool(f.GetFlightSeatsInfoTool())
-	tc.RegisterTool(f.SearchAirlinePolicyTool())
+	tc.RegisterTool(f.policyTool)
 	tc.RegisterTool(f.SearchFlightScheduleTool())
 	tc.RegisterTool(f.RescheduleBookingTool())
 	tc.RegisterTool(f.CancelBookingTool())
@@ -869,20 +806,8 @@ func (f *AirlineFixture) RegisterAllToolsSearch(
 			"seat availability on flight",
 		},
 	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.SearchAirlinePolicyTool(),
-		"Policy & Guidance",
-		[]string{"lookup", "policy"},
-		[]string{
-			"policy", "rules", "terms",
-			"conditions", "guidelines",
-		},
-		[]string{
-			"what is the cancellation policy",
-			"check change fee rules",
-			"baggage allowance policy",
-		},
-	))
+	// PolicySearchTool implements IndexableTool — register directly.
+	tc.RegisterTool(f.policyTool)
 	tc.RegisterTool(testutil.NewIndexableToolFunc(
 		f.SearchFlightScheduleTool(),
 		"Flight",

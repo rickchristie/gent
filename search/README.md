@@ -69,7 +69,7 @@ cfg := search.EmbedderConfig{
 ### Unit tests (no model or ONNX Runtime needed)
 
 ```bash
-go test ./search/ -run 'TestMinMax|TestWeightedLinear|TestFlatIndex|TestBleveIndex|TestFusedIndex'
+go test ./search/ -run 'TestTheoreticalMax|TestNormalizeBM25|TestWeightedLinear|TestFlatIndex|TestBleveIndex|TestFusedIndex'
 ```
 
 ### Integration tests (real ONNX models)

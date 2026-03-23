@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/rickchristie/gent/common"
 	"github.com/daulet/tokenizers"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -20,7 +21,7 @@ import (
 //
 // The embedder handles the full pipeline: tokenize → pad → ONNX inference → pool →
 // L2 normalize. Prefixes are prepended internally based on whether EmbedQuery or
-// EmbedDocument is called.
+// EmbedText is called.
 type onnxEmbedder struct {
 	tokenizer     *tokenizers.Tokenizer
 	modelData     []byte // kept alive for ONNX session lifetime
@@ -41,50 +42,39 @@ type onnxEmbedder struct {
 var ortInitOnce sync.Once
 var ortInitErr error
 
-// NewOnnxEmbedder creates a new ONNX-based Embedder. Model and tokenizer are loaded from file
-// paths (ModelPath/TokenizerPath) or raw bytes (ModelData/TokenizerData). File paths take
-// precedence over raw bytes. A warm-up inference is run to trigger ONNX Runtime JIT compilation.
-func NewOnnxEmbedder(cfg EmbedderConfig) (Embedder, error) {
-	defaults := DefaultEmbedderConfig()
-	if cfg.Dimensions == 0 {
-		cfg.Dimensions = defaults.Dimensions
+// NewOnnxEmbedder creates a new ONNX-based Embedder from a ModelConfig (model semantics) and
+// OnnxOptions (runtime settings). A warm-up inference is run to trigger ONNX Runtime JIT
+// compilation.
+//
+// Usage:
+//
+//	cfg := common.FindConfig("multilingual-e5-small")
+//	embedder, err := search.NewOnnxEmbedder(*cfg, search.OnnxOptions{
+//	    ModelPath:     "~/.gent/models/multilingual-e5-small/model.onnx",
+//	    TokenizerPath: "~/.gent/models/multilingual-e5-small/tokenizer.json",
+//	})
+func NewOnnxEmbedder(cfg common.ModelConfig, opts OnnxOptions) (Embedder, error) {
+	if opts.NumThreads == 0 {
+		opts.NumThreads = 4
 	}
-	if cfg.NumThreads == 0 {
-		cfg.NumThreads = defaults.NumThreads
-	}
-	if cfg.MaxConcurrency == 0 {
-		cfg.MaxConcurrency = defaults.MaxConcurrency
-	}
-	if cfg.MaxSequenceLength == 0 {
-		cfg.MaxSequenceLength = defaults.MaxSequenceLength
-	}
-	if cfg.QueryPrefix == "" {
-		cfg.QueryPrefix = defaults.QueryPrefix
-	}
-	if cfg.PassagePrefix == "" {
-		cfg.PassagePrefix = defaults.PassagePrefix
-	}
-	if len(cfg.InputNames) == 0 {
-		cfg.InputNames = defaults.InputNames
-	}
-	if cfg.OutputName == "" {
-		cfg.OutputName = defaults.OutputName
+	if opts.MaxConcurrency == 0 {
+		opts.MaxConcurrency = 4
 	}
 
 	// Load model: file path takes precedence over raw bytes.
-	modelData, err := loadData(cfg.ModelPath, cfg.ModelData, "model")
+	modelData, err := loadData(opts.ModelPath, opts.ModelData, "model")
 	if err != nil {
 		return nil, err
 	}
-	tokenizerData, err := loadData(cfg.TokenizerPath, cfg.TokenizerData, "tokenizer")
+	tokenizerData, err := loadData(opts.TokenizerPath, opts.TokenizerData, "tokenizer")
 	if err != nil {
 		return nil, err
 	}
 
 	// Initialize ONNX Runtime environment (once globally).
-	// Resolution order: EmbedderConfig → GENT_ORT_LIB env → ~/.gent/lib/ → error.
+	// Resolution order: OnnxOptions → GENT_ORT_LIB env → ~/.gent/lib/ → error.
 	ortInitOnce.Do(func() {
-		libPath := resolveOnnxLibPath(cfg.OnnxLibraryPath)
+		libPath := resolveOnnxLibPath(opts.OnnxLibraryPath)
 		if libPath != "" {
 			ort.SetSharedLibraryPath(libPath)
 		}
@@ -101,9 +91,10 @@ func NewOnnxEmbedder(cfg EmbedderConfig) (Embedder, error) {
 		return nil, fmt.Errorf("search: tokenizer load failed: %w", err)
 	}
 
-	modelDim := cfg.ModelDimensions
-	if modelDim == 0 {
-		modelDim = cfg.Dimensions
+	modelDim := cfg.HiddenDim()
+	maxSeqLen := cfg.Model.MaxTokenChunks
+	if maxSeqLen == 0 {
+		maxSeqLen = 512
 	}
 
 	e := &onnxEmbedder{
@@ -111,14 +102,14 @@ func NewOnnxEmbedder(cfg EmbedderConfig) (Embedder, error) {
 		modelData:     modelData,
 		queryPrefix:   cfg.QueryPrefix,
 		passagePrefix: cfg.PassagePrefix,
-		maxSeqLen:     cfg.MaxSequenceLength,
+		maxSeqLen:     maxSeqLen,
 		hiddenDim:     cfg.Dimensions,
 		modelDim:      modelDim,
 		pooling:       cfg.Pooling,
 		inputNames:    cfg.InputNames,
 		outputName:    cfg.OutputName,
 		postProcess:   cfg.PostProcess,
-		sem:           make(chan struct{}, cfg.MaxConcurrency),
+		sem:           make(chan struct{}, opts.MaxConcurrency),
 	}
 
 	// Warm-up: run a dummy inference to trigger JIT compilation.
@@ -150,16 +141,16 @@ func (e *onnxEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, 
 	return e.embed(ctx, e.queryPrefix+text)
 }
 
-func (e *onnxEmbedder) EmbedDocument(ctx context.Context, text string) ([]float32, error) {
+func (e *onnxEmbedder) EmbedText(ctx context.Context, text string) ([]float32, error) {
 	return e.embed(ctx, e.passagePrefix+text)
 }
 
-func (e *onnxEmbedder) EmbedDocumentBatch(
+func (e *onnxEmbedder) EmbedTextBatch(
 	ctx context.Context, texts []string,
 ) ([][]float32, error) {
 	results := make([][]float32, len(texts))
 	for i, text := range texts {
-		vec, err := e.EmbedDocument(ctx, text)
+		vec, err := e.EmbedText(ctx, text)
 		if err != nil {
 			return nil, fmt.Errorf("search: batch embed failed at index %d: %w", i, err)
 		}
@@ -168,7 +159,15 @@ func (e *onnxEmbedder) EmbedDocumentBatch(
 	return results, nil
 }
 
-func (e *onnxEmbedder) Dimensions() int { return e.hiddenDim }
+func (e *onnxEmbedder) Dimensions() int  { return e.hiddenDim }
+func (e *onnxEmbedder) MaxTokens() int   { return e.maxSeqLen }
+
+// TokenCount returns the number of tokens the text produces when tokenized. This only runs
+// the tokenizer (~12μs), not ONNX inference (~15-200ms).
+func (e *onnxEmbedder) TokenCount(text string) int {
+	ids, _ := e.tokenizer.Encode(text, true)
+	return len(ids)
+}
 
 func (e *onnxEmbedder) Close() error {
 	if e.tokenizer != nil {

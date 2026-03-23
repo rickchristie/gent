@@ -77,8 +77,8 @@ func newIndexableToolWithSchema(
 	}
 }
 
-// mockToolSearchEngine is a mock search engine for testing.
-type mockToolSearchEngine struct {
+// mockToolSearcher is a mock search engine for testing.
+type mockToolSearcher struct {
 	id          string
 	guidance    string
 	indexErr    error
@@ -86,19 +86,19 @@ type mockToolSearchEngine struct {
 	indexCalled bool
 }
 
-func (e *mockToolSearchEngine) Id() string {
+func (e *mockToolSearcher) Id() string {
 	return e.id
 }
-func (e *mockToolSearchEngine) SearchGuidance() string {
+func (e *mockToolSearcher) SearchGuidance() string {
 	return e.guidance
 }
-func (e *mockToolSearchEngine) IndexAll(
+func (e *mockToolSearcher) IndexAll(
 	_ []gent.IndexableTool,
 ) error {
 	e.indexCalled = true
 	return e.indexErr
 }
-func (e *mockToolSearchEngine) Search(
+func (e *mockToolSearcher) Search(
 	ctx context.Context,
 	query string,
 ) ([]string, error) {
@@ -119,7 +119,7 @@ func newExecCtx() *gent.ExecutionContext {
 // with the given tools and engines.
 func setupSearchJSON(
 	tools []*indexableToolFunc,
-	engines []gent.ToolSearchEngine,
+	engines []gent.ToolSearcher,
 ) *SearchJSON {
 	tc := NewSearchJSON(SearchHintDomainCategories)
 	for _, eng := range engines {
@@ -365,7 +365,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 func TestSearchJSON_Initialize(t *testing.T) {
 	t.Run("success with one engine", func(t *testing.T) {
 		tc := NewSearchJSON(SearchHintDomainCategories)
-		engine := &mockToolSearchEngine{
+		engine := &mockToolSearcher{
 			id:       "mock",
 			guidance: "mock guidance",
 		}
@@ -389,10 +389,10 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	t.Run("success with multiple engines",
 		func(t *testing.T) {
 			tc := NewSearchJSON(SearchHintDomainCategories)
-			eng1 := &mockToolSearchEngine{
+			eng1 := &mockToolSearcher{
 				id: "eng1", guidance: "g1",
 			}
-			eng2 := &mockToolSearchEngine{
+			eng2 := &mockToolSearcher{
 				id: "eng2", guidance: "g2",
 			}
 			tc.RegisterEngine(eng1)
@@ -434,7 +434,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	t.Run("error when engine IndexAll fails",
 		func(t *testing.T) {
 			tc := NewSearchJSON(SearchHintDomainCategories)
-			engine := &mockToolSearchEngine{
+			engine := &mockToolSearcher{
 				id:       "failing",
 				guidance: "g",
 				indexErr: errors.New("index failed"),
@@ -457,7 +457,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 	t.Run("re-initialize updates state", func(t *testing.T) {
 		tc := NewSearchJSON(SearchHintDomainCategories)
-		engine := &mockToolSearchEngine{
+		engine := &mockToolSearcher{
 			id:       "mock",
 			guidance: "guide",
 		}
@@ -486,7 +486,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	t.Run("domain summary with categories and counts",
 		func(t *testing.T) {
 			tc := NewSearchJSON(SearchHintDomainCategories)
-			engine := &mockToolSearchEngine{
+			engine := &mockToolSearcher{
 				id: "mock", guidance: "g",
 			}
 			tc.RegisterEngine(engine)
@@ -561,15 +561,15 @@ func TestSearchJSON_AvailableToolsPrompt(t *testing.T) {
 		),
 	}
 
-	eng1 := &mockToolSearchEngine{
+	eng1 := &mockToolSearcher{
 		id: "bm25", guidance: "natural language",
 	}
-	eng2 := &mockToolSearchEngine{
+	eng2 := &mockToolSearcher{
 		id: "regex", guidance: "regex patterns",
 	}
 
 	tc := setupSearchJSON(
-		tools, []gent.ToolSearchEngine{eng1, eng2},
+		tools, []gent.ToolSearcher{eng1, eng2},
 	)
 	prompt := tc.AvailableToolsPrompt()
 
@@ -658,7 +658,7 @@ func TestSearchJSON_AvailableToolsPrompt_SimpleList(
 		),
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id: "bm25", guidance: "natural language",
 	}
 
@@ -769,7 +769,7 @@ func TestSearchJSON_Pin_DomainCategories(
 		),
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 	}
@@ -885,7 +885,7 @@ func TestSearchJSON_Pin_SimpleList(t *testing.T) {
 		),
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 	}
@@ -952,7 +952,7 @@ func TestSearchJSON_Pin_NoPins(t *testing.T) {
 		return "ok", nil
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 	}
@@ -1010,7 +1010,7 @@ func TestSearchJSON_Pin_NoPins(t *testing.T) {
 }
 
 func TestSearchJSON_Pin_InvalidTool(t *testing.T) {
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 	}
@@ -1045,7 +1045,7 @@ func TestSearchJSON_Pin_MultiplePins(t *testing.T) {
 		return "ok", nil
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 	}
@@ -1102,7 +1102,7 @@ func TestSearchJSON_Pin_ToolStillSearchable(
 		return "ok", nil
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 		searchFn: func(
@@ -1340,7 +1340,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 		),
 	}
 
-	mockEng := &mockToolSearchEngine{
+	mockEng := &mockToolSearcher{
 		id:       "mock",
 		guidance: "mock search",
 		searchFn: func(
@@ -1364,7 +1364,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 	}
 
 	tc := setupSearchJSON(
-		tools, []gent.ToolSearchEngine{mockEng},
+		tools, []gent.ToolSearcher{mockEng},
 	)
 
 	t.Run("search returns results with full definitions",
@@ -1484,7 +1484,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 
 	t.Run("engine returns error surfaced to LLM",
 		func(t *testing.T) {
-			errEng := &mockToolSearchEngine{
+			errEng := &mockToolSearcher{
 				id:       "err_eng",
 				guidance: "err",
 				searchFn: func(
@@ -1556,12 +1556,12 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 					), nil
 				},
 			)
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
 			tc := setupSearchJSON(
 				[]*indexableToolFunc{tool},
-				[]gent.ToolSearchEngine{eng},
+				[]gent.ToolSearcher{eng},
 			)
 
 			content := `{"tool": "greet", ` +
@@ -1580,7 +1580,7 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 	)
 
 	t.Run("unknown tool returns error", func(t *testing.T) {
-		eng := &mockToolSearchEngine{
+		eng := &mockToolSearcher{
 			id: "m", guidance: "g",
 		}
 		tool := newIndexableTool(
@@ -1591,7 +1591,7 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 		)
 		tc := setupSearchJSON(
 			[]*indexableToolFunc{tool},
-			[]gent.ToolSearchEngine{eng},
+			[]gent.ToolSearcher{eng},
 		)
 
 		content := `{"tool": "nonexistent", "args": {}}`
@@ -1626,12 +1626,12 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 				return "ok", nil
 			},
 		)
-		eng := &mockToolSearchEngine{
+		eng := &mockToolSearcher{
 			id: "m", guidance: "g",
 		}
 		tc := setupSearchJSON(
 			[]*indexableToolFunc{tool},
-			[]gent.ToolSearchEngine{eng},
+			[]gent.ToolSearcher{eng},
 		)
 
 		content := `{"tool": "strict_tool", "args": {}}`
@@ -1652,12 +1652,12 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 				return "", errors.New("tool broke")
 			},
 		)
-		eng := &mockToolSearchEngine{
+		eng := &mockToolSearcher{
 			id: "m", guidance: "g",
 		}
 		tc := setupSearchJSON(
 			[]*indexableToolFunc{tool},
-			[]gent.ToolSearchEngine{eng},
+			[]gent.ToolSearcher{eng},
 		)
 
 		content := `{"tool": "failing", "args": {}}`
@@ -1679,7 +1679,7 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 					"D", nil, nil, nil,
 				),
 			}
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
 			tc := NewSearchJSON(SearchHintDomainCategories).RegisterEngine(eng)
@@ -1736,7 +1736,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 		),
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "mock",
 		guidance: "g",
 		searchFn: func(
@@ -1747,7 +1747,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 	}
 
 	tc := setupSearchJSON(
-		tools, []gent.ToolSearchEngine{eng},
+		tools, []gent.ToolSearcher{eng},
 	)
 
 	t.Run("search + regular tool in same array",
@@ -1803,7 +1803,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 
 	t.Run("search call increments tool call stats",
 		func(t *testing.T) {
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id:       "mock",
 				guidance: "g",
 				searchFn: func(
@@ -1817,7 +1817,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 			tc := setupSearchJSON(
 				[]*indexableToolFunc{tool},
-				[]gent.ToolSearchEngine{eng},
+				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
@@ -1847,7 +1847,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 
 	t.Run("regular tool call increments stats",
 		func(t *testing.T) {
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
 			tool := newIndexableTool(
@@ -1855,7 +1855,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 			tc := setupSearchJSON(
 				[]*indexableToolFunc{tool},
-				[]gent.ToolSearchEngine{eng},
+				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
@@ -1882,7 +1882,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 
 	t.Run("search error increments error stats",
 		func(t *testing.T) {
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id:       "mock",
 				guidance: "g",
 				searchFn: func(
@@ -1896,7 +1896,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 			tc := setupSearchJSON(
 				[]*indexableToolFunc{tool},
-				[]gent.ToolSearchEngine{eng},
+				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
@@ -1926,7 +1926,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 	t.Run("successful search resets consecutive gauges",
 		func(t *testing.T) {
 			callCount := 0
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id:       "mock",
 				guidance: "g",
 				searchFn: func(
@@ -1944,7 +1944,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 			tc := setupSearchJSON(
 				[]*indexableToolFunc{tool},
-				[]gent.ToolSearchEngine{eng},
+				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
@@ -1980,7 +1980,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 	t.Run(
 		"successful regular tool resets consecutive gauges",
 		func(t *testing.T) {
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
 			failTool := newIndexableTool(
@@ -1994,7 +1994,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 			tc := setupSearchJSON(
 				[]*indexableToolFunc{failTool, okTool},
-				[]gent.ToolSearchEngine{eng},
+				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
@@ -2051,7 +2051,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 		allNames[i] = fmt.Sprintf("tool_%d", i)
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "mock",
 		guidance: "g",
 		searchFn: func(
@@ -2062,7 +2062,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 	}
 
 	tc := setupSearchJSON(
-		tools, []gent.ToolSearchEngine{eng},
+		tools, []gent.ToolSearcher{eng},
 	)
 
 	t.Run("page 1 shows first 3 tools + pagination info",
@@ -2375,14 +2375,14 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eng := &mockToolSearchEngine{
+			eng := &mockToolSearcher{
 				id:       "mock",
 				guidance: "mock search",
 				searchFn: tt.input.searchFn,
 			}
 
 			tc := setupSearchJSON(
-				tools, []gent.ToolSearchEngine{eng},
+				tools, []gent.ToolSearcher{eng},
 			)
 			tc.WithPageSize(10) // avoid pagination
 
@@ -2472,7 +2472,7 @@ func TestSearchJSON_ConcurrentAccess(t *testing.T) {
 		),
 	}
 
-	eng := &mockToolSearchEngine{
+	eng := &mockToolSearcher{
 		id:       "mock",
 		guidance: "g",
 		searchFn: func(
@@ -2483,7 +2483,7 @@ func TestSearchJSON_ConcurrentAccess(t *testing.T) {
 	}
 
 	tc := setupSearchJSON(
-		tools, []gent.ToolSearchEngine{eng},
+		tools, []gent.ToolSearcher{eng},
 	)
 
 	t.Run("concurrent Execute calls succeed",

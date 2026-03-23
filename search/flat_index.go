@@ -38,9 +38,11 @@ func NewFlatIndex[Doc any](adapter ChunkAdapter[Doc], embedder Embedder) *FlatIn
 	return &FlatIndex[Doc]{adapter: adapter, embedder: embedder}
 }
 
-// Search returns the top-K most semantically similar documents to the query. When a document
-// has multiple chunks, only the best-matching chunk's score and text are returned (max-score
-// dedup per document ID).
+// Search returns the top-K most semantically similar documents to the query. Every stored
+// vector (every chunk of every document) is scored against the query — no document can be
+// missed. When a document has multiple chunks, only the best-matching chunk's score and
+// snippet are returned (max-score dedup per document ID). This means one result per document,
+// with the snippet showing which part of the document matched.
 func (f *FlatIndex[Doc]) Search(
 	ctx context.Context, query string, topK int,
 ) ([]SearchResult, error) {
@@ -92,19 +94,24 @@ func (f *FlatIndex[Doc]) Search(
 // each chunk is embedded, and all resulting vectors are stored. If a document with the same
 // ID already exists, it is replaced.
 func (f *FlatIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
-	chunks, err := f.adapter.Convert(doc)
+	chunks, err := f.adapter.Chunks(doc, f.embedder, f.embedder.MaxTokens())
 	if err != nil {
 		return fmt.Errorf("search: chunk adapter failed: %w", err)
 	}
 
-	embeddings, err := f.embedder.EmbedDocumentBatch(ctx, chunks)
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = c.Text
+	}
+
+	embeddings, err := f.embedder.EmbedTextBatch(ctx, texts)
 	if err != nil {
 		return fmt.Errorf("search: embedding failed: %w", err)
 	}
 
 	newVectors := make([]storedVector, len(chunks))
 	for i, chunk := range chunks {
-		newVectors[i] = storedVector{docID: id, chunk: chunk, vector: embeddings[i]}
+		newVectors[i] = storedVector{docID: id, chunk: chunk.Text, vector: embeddings[i]}
 	}
 
 	f.mu.Lock()
@@ -128,17 +135,21 @@ func (f *FlatIndex[Doc]) Remove(id string) error {
 func (f *FlatIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
 	var newVectors []storedVector
 	for id, doc := range docs {
-		chunks, err := f.adapter.Convert(doc)
+		chunks, err := f.adapter.Chunks(doc, f.embedder, f.embedder.MaxTokens())
 		if err != nil {
 			return fmt.Errorf("search: chunk adapter failed for %s: %w", id, err)
 		}
-		embeddings, err := f.embedder.EmbedDocumentBatch(ctx, chunks)
+		texts := make([]string, len(chunks))
+		for i, c := range chunks {
+			texts[i] = c.Text
+		}
+		embeddings, err := f.embedder.EmbedTextBatch(ctx, texts)
 		if err != nil {
 			return fmt.Errorf("search: embedding failed for %s: %w", id, err)
 		}
 		for i, chunk := range chunks {
 			newVectors = append(newVectors, storedVector{
-				docID: id, chunk: chunk, vector: embeddings[i],
+				docID: id, chunk: chunk.Text, vector: embeddings[i],
 			})
 		}
 	}

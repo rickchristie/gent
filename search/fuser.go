@@ -21,9 +21,11 @@ type Fuser interface {
 //
 //	score = Σ weights[source] * normalize(source_score)
 //
-// Sources listed in NormalizeSources (with value true) have per-query min-max normalization
-// applied (required for BM25's unbounded scores). Sources not listed or set to false pass
-// their scores through unchanged (correct for cosine similarity which is already in [0, 1]).
+// Sources listed in NormalizeSources (with value true) are normalized before fusion. If the
+// source's results carry a theoretical maximum (from BleveIndex with BleveIDFProvider),
+// scores are divided by that maximum. Otherwise, raw scores pass through. Sources not listed
+// or set to false pass their scores through unchanged (correct for cosine similarity which
+// is already in [0, 1]).
 //
 // The snippet for each fused result comes from the source with the highest weighted
 // contribution for that document.
@@ -45,8 +47,8 @@ type WeightedLinearFuser struct {
 	// Weights per source name. Should sum to 1.0 for interpretable output scores.
 	Weights map[string]float64
 
-	// NormalizeSources controls per-source min-max normalization. Set true for sources with
-	// unbounded scores (BM25). Set false for sources with bounded scores (cosine similarity).
+	// NormalizeSources controls per-source normalization. Set true for sources with unbounded
+	// scores (BM25). Set false for sources with bounded scores (cosine similarity).
 	NormalizeSources map[string]bool
 }
 
@@ -57,17 +59,29 @@ func (f *WeightedLinearFuser) Fuse(
 	normalized := make(map[string][]SearchResult, len(results))
 	for name, sourceResults := range results {
 		if f.NormalizeSources[name] {
-			normalized[name] = minMaxNormalize(sourceResults)
+			normalized[name] = normalizeBM25(sourceResults)
 		} else {
 			normalized[name] = sourceResults
 		}
 	}
 
+	// Build raw score lookup for metadata (before normalization).
+	rawScores := map[string]map[string]float64{} // docId → sourceName → rawScore
+	for name, sourceResults := range results {
+		for _, r := range sourceResults {
+			if rawScores[r.Id] == nil {
+				rawScores[r.Id] = map[string]float64{}
+			}
+			rawScores[r.Id][name] = r.Score
+		}
+	}
+
 	// Merge: union of all document IDs, accumulate weighted scores.
 	type mergedEntry struct {
-		score          float64
-		snippet        string
-		bestContrib    float64
+		score       float64
+		snippet     string
+		bestContrib float64
+		metadata    map[string]any
 	}
 	merged := map[string]*mergedEntry{}
 
@@ -76,7 +90,7 @@ func (f *WeightedLinearFuser) Fuse(
 		for _, r := range sourceResults {
 			entry, ok := merged[r.Id]
 			if !ok {
-				entry = &mergedEntry{}
+				entry = &mergedEntry{metadata: map[string]any{}}
 				merged[r.Id] = entry
 			}
 			contribution := weight * r.Score
@@ -85,13 +99,20 @@ func (f *WeightedLinearFuser) Fuse(
 				entry.bestContrib = contribution
 				entry.snippet = r.Snippet
 			}
+			// Store per-source scores for debugging/analysis.
+			raw := rawScores[r.Id][name]
+			entry.metadata[name+"_raw"] = raw
+			entry.metadata[name+"_normalized"] = r.Score
+			entry.metadata[name+"_weighted"] = contribution
 		}
 	}
 
 	// Sort by fused score descending.
 	fused := make([]SearchResult, 0, len(merged))
 	for id, entry := range merged {
-		fused = append(fused, SearchResult{Id: id, Score: entry.score, Snippet: entry.snippet})
+		fused = append(fused, SearchResult{
+			Id: id, Score: entry.score, Snippet: entry.snippet, Metadata: entry.metadata,
+		})
 	}
 	sort.Slice(fused, func(i, j int) bool { return fused[i].Score > fused[j].Score })
 

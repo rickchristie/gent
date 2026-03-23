@@ -17,7 +17,7 @@ func RunDoubleChargeScenario(
 	w io.Writer,
 	config testutil.TestConfig,
 ) error {
-	fixture := NewEcommerceFixture(nil)
+	fixture := NewEcommerceFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.RunScenario(
@@ -131,7 +131,7 @@ func RunDoubleChargeScenarioSearch(
 	config.PinTools = append(
 		config.PinTools, "search_guidance_policy",
 	)
-	fixture := NewEcommerceFixture(nil)
+	fixture := NewEcommerceFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.RunScenario(
@@ -218,7 +218,7 @@ func NewEcommerceInteractiveChat(
 	w io.Writer,
 	config testutil.TestConfig,
 ) (*testutil.InteractiveChat, error) {
-	fixture := NewEcommerceFixture(nil)
+	fixture := NewEcommerceFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.NewInteractiveChat(
@@ -281,7 +281,7 @@ func NewEcommerceInteractiveChatSearch(
 	config.PinTools = append(
 		config.PinTools, "search_guidance_policy",
 	)
-	fixture := NewEcommerceFixture(nil)
+	fixture := NewEcommerceFixture(nil, config.Embedder)
 	tp := fixture.TimeProvider()
 
 	return testutil.NewInteractiveChat(

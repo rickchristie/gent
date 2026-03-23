@@ -445,8 +445,8 @@ func setupJsWrapper() *JsToolChainWrapper {
 		),
 	}
 
-	engines := []gent.ToolSearchEngine{
-		&mockToolSearchEngine{
+	engines := []gent.ToolSearcher{
+		&mockToolSearcher{
 			id:       "keyword",
 			guidance: "Search by keyword",
 			searchFn: func(
@@ -637,7 +637,7 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 			},
 			expected: expected{
 				text: `<lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>`,
 			},
 		},
@@ -651,10 +651,10 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 			},
 			expected: expected{
 				text: `<lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>
 <get_orders>
-"[{\"order_id\":\"O1\"}]"
+[{"order_id":"O1"}]
 </get_orders>`,
 			},
 		},
@@ -665,7 +665,7 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 			},
 			expected: expected{
 				text: `<lookup_customer>
-"{\"id\":\"C002\",\"name\":\"Alice\"}"
+{"id":"C002","name":"Alice"}
 </lookup_customer>`,
 			},
 		},
@@ -3305,7 +3305,7 @@ if (r.error) return;
 			expected: expected{
 				text: `<direct_call>
 <lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>
 </direct_call>
 <code_execution>
@@ -3341,7 +3341,7 @@ console.log("orders: " + r.output.length);
 			expected: expected{
 				text: `<direct_call>
 <lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>
 </direct_call>
 <code_execution>
@@ -3393,7 +3393,7 @@ undefinedVar;
 			expected: expected{
 				text: `<direct_call>
 <lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>
 </direct_call>
 <code_execution>
@@ -3418,7 +3418,7 @@ ReferenceError: undefinedVar is not defined
 			},
 			expected: expected{
 				text: `<lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>`,
 				toolCallCount: 1,
 			},
@@ -3459,7 +3459,7 @@ Code executed successfully.
 			expected: expected{
 				text: `<direct_call>
 <lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>
 </direct_call>
 <code_execution>
@@ -3482,10 +3482,10 @@ console.log("computed: 42");
 			expected: expected{
 				text: `<direct_call>
 <lookup_customer>
-"{\"id\":\"C001\",\"name\":\"Alice\"}"
+{"id":"C001","name":"Alice"}
 </lookup_customer>
 <get_orders>
-"[{\"order_id\":\"O1\"}]"
+[{"order_id":"O1"}]
 </get_orders>
 </direct_call>
 <code_execution>

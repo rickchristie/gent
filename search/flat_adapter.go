@@ -1,34 +1,42 @@
 package search
 
-// ChunkAdapter converts a domain document into one or more text chunks for embedding.
+// ChunkAdapter converts a domain document into one or more [Chunk] values for embedding.
 //
-// Chunking is the caller's responsibility because only the caller knows the semantic boundaries
-// of their data. A tool description is a single chunk. A 10-page policy document might be split
-// into 20 chunks at section boundaries.
+// This is the most critical extension point for retrieval quality. Research shows that
+// "chunking configuration had comparable or greater influence on retrieval quality than
+// embedding model choice" (Vectara, NAACL 2025, 25 configurations × 48 embedding models).
 //
-// Each returned chunk is embedded independently as a separate vector. On search, all chunks for
-// a document are scored, but only the best-matching chunk's score (and text) is returned per
-// document ID.
+// # Token-Aware Chunking
 //
-// For documents that don't need chunking, return a single-element slice.
+// The tokenCounter and maxTokens parameters enable token-aware chunking. tokenCounter returns
+// the exact token count for a text using the model's actual tokenizer (~12μs per call, no
+// neural network inference). maxTokens is the model's absolute maximum sequence length — any
+// chunk exceeding this will be silently truncated during embedding, losing information.
 //
-// # Example for tools (no chunking)
+// # Recommended Default
 //
-//	type ToolChunkAdapter struct{}
+// Use [MarkdownChunker] for all text. It handles both Markdown-formatted and plain text,
+// splits at heading boundaries with ancestor context, and degrades gracefully to
+// paragraph/sentence/word splitting for non-Markdown content.
 //
-//	func (a *ToolChunkAdapter) Convert(tool IndexableTool) ([]string, error) {
-//	    text := fmt.Sprintf("%s: %s\nKeywords: %s",
-//	        tool.Name(), tool.Description(), strings.Join(tool.Keywords(), ", "))
-//	    return []string{text}, nil
+// # Examples
+//
+// Simple adapter for short documents (no chunking needed):
+//
+//	type SimpleAdapter struct{}
+//	func (a *SimpleAdapter) Chunks(doc string, _ TokenCounter, _ int) ([]Chunk, error) {
+//	    return []Chunk{{Text: doc}}, nil
 //	}
 //
-// # Example for policies (chunking at section boundaries)
+// Token-aware adapter using MarkdownChunker:
 //
-//	type PolicyChunkAdapter struct{}
-//
-//	func (a *PolicyChunkAdapter) Convert(policy Policy) ([]string, error) {
-//	    return policy.Sections, nil  // pre-chunked by the caller
+//	type PolicyAdapter struct{}
+//	func (a *PolicyAdapter) Chunks(
+//	    policy Policy, tc TokenCounter, maxTokens int,
+//	) ([]Chunk, error) {
+//	    chunker := &search.MarkdownChunker{ChunkSize: 384, TokenCount: tc.TokenCount}
+//	    return chunker.Chunk(policy.Content), nil
 //	}
 type ChunkAdapter[Doc any] interface {
-	Convert(doc Doc) ([]string, error)
+	Chunks(doc Doc, tokenCounter TokenCounter, maxTokens int) ([]Chunk, error)
 }

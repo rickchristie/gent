@@ -7,7 +7,9 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/integrationtest/testutil"
+	"github.com/rickchristie/gent/policy"
 	"github.com/rickchristie/gent/schema"
+	"github.com/rickchristie/gent/search"
 )
 
 // -------------------------------------------------------------------------
@@ -57,11 +59,6 @@ type GatewayTx struct {
 	CardLast4 string  `json:"card_last4"`
 }
 
-// GuidancePolicy represents a guidance policy document.
-type GuidancePolicy struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-}
 
 // -------------------------------------------------------------------------
 // Tool Result Types
@@ -125,9 +122,6 @@ type gatewayGetTxDetailInput struct {
 	TxID string `json:"tx_id"`
 }
 
-type searchGuidancePolicyInput struct {
-	Keyword string `json:"keyword"`
-}
 
 type gatewayCancelTxInput struct {
 	TxID string `json:"tx_id"`
@@ -154,18 +148,19 @@ type createCreditRequestInput struct {
 // EcommerceFixture provides a complete e-commerce mock environment.
 type EcommerceFixture struct {
 	timeProvider gent.TimeProvider
+	policyTool   *policy.PolicySearchTool
 
 	customers  map[string]*Customer
 	orderPages map[string]*OrderPage // keyed by cursor
 	payments   map[string]*OrderPaymentsResult
 	gatewayTxs map[string]*GatewayTx
-	policies   []GuidancePolicy
 }
 
 // NewEcommerceFixture creates a new EcommerceFixture.
-// If tp is nil, uses gent.DefaultTimeProvider.
+// If tp is nil, uses gent.DefaultTimeProvider. The embedder is required for
+// PolicySearchTool (hybrid BM25+semantic policy search).
 func NewEcommerceFixture(
-	tp gent.TimeProvider,
+	tp gent.TimeProvider, embedder search.Embedder,
 ) *EcommerceFixture {
 	if tp == nil {
 		tp = gent.NewDefaultTimeProvider()
@@ -179,6 +174,19 @@ func NewEcommerceFixture(
 		gatewayTxs:   make(map[string]*GatewayTx),
 	}
 	f.initializeData()
+
+	tool, err := policy.NewPolicySearchTool(
+		context.Background(), embedder, ecommercePolicies(),
+	)
+	if err != nil {
+		panic("ecommerce: failed to create PolicySearchTool: " +
+			err.Error())
+	}
+	f.policyTool = tool.WithName("search_guidance_policy").
+		WithDescription(
+			"Search guidance policies by describing what you " +
+				"need (e.g., 'double charge', 'refund process')",
+		)
 	return f
 }
 
@@ -326,46 +334,6 @@ func (f *EcommerceFixture) initializeData() {
 		Status: "SETTLED", CardLast4: "4242",
 	}
 
-	// Guidance policies
-	f.policies = []GuidancePolicy{
-		{
-			Title: "Double Charge Resolution Procedure",
-			Content: `When a customer reports a double ` +
-				`charge, follow these steps in order:
-Step 1: Verify the duplicate charge by using ` +
-				`gateway_get_tx_detail to check each ` +
-				`transaction's real-time status with ` +
-				`the payment gateway.
-Step 2: If confirmed as duplicate, attempt to ` +
-				`cancel the duplicate transaction ` +
-				`using gateway_cancel_tx.
-Step 3: If cancellation fails (e.g. already ` +
-				`settled), attempt to process a refund ` +
-				`using process_refund.
-Step 4: If refund also fails, create a support ` +
-				`case using create_case and then issue ` +
-				`store credit using ` +
-				`create_credit_request.`,
-		},
-		{
-			Title: "Refund Policy",
-			Content: `Standard refund terms:
-- Refunds are processed within 5-7 business days
-- Original payment method is refunded when possible
-- If original payment method cannot be refunded, ` +
-				`store credit is issued
-- Refund requests must be made within 30 days ` +
-				`of purchase`,
-		},
-		{
-			Title: "Store Credit Policy",
-			Content: `Store credit terms:
-- Credits are available immediately after approval
-- Credits do not expire
-- Credits can be applied to any future purchase
-- Credits are non-transferable`,
-		},
-	}
 }
 
 // -------------------------------------------------------------------------
@@ -504,49 +472,6 @@ func (f *EcommerceFixture) gatewayGetTxDetailTool() *gent.ToolFunc[
 				)
 			}
 			return tx, nil
-		},
-	)
-}
-
-func (f *EcommerceFixture) searchGuidancePolicyTool() *gent.ToolFunc[
-	searchGuidancePolicyInput, []GuidancePolicy,
-] {
-	return gent.NewToolFunc(
-		"search_guidance_policy",
-		"Search internal guidance policies by keyword",
-		schema.Object(map[string]*schema.Property{
-			"keyword": schema.String(
-				"Keyword to search for in policy " +
-					"titles and content",
-			),
-		}, "keyword"),
-		func(
-			ctx context.Context,
-			input searchGuidancePolicyInput,
-		) ([]GuidancePolicy, error) {
-			if input.Keyword == "" {
-				return nil, fmt.Errorf(
-					"keyword is required",
-				)
-			}
-			var results []GuidancePolicy
-			for _, p := range f.policies {
-				if testutil.ContainsIgnoreCase(p.Title, input.Keyword) ||
-					testutil.ContainsIgnoreCase(p.Content, input.Keyword) {
-					results = append(results, p)
-				}
-			}
-			if len(results) == 0 {
-				return nil, fmt.Errorf(
-					"no policies found matching: "+
-						"'%s'. Policy search is "+
-						"simple word match "+
-						"(contains), single word "+
-						"search is better",
-					input.Keyword,
-				)
-			}
-			return results, nil
 		},
 	)
 }
@@ -723,7 +648,7 @@ func (f *EcommerceFixture) RegisterAllTools(
 	tc.RegisterTool(f.getOrdersTool())
 	tc.RegisterTool(f.getOrderPaymentsTool())
 	tc.RegisterTool(f.gatewayGetTxDetailTool())
-	tc.RegisterTool(f.searchGuidancePolicyTool())
+	tc.RegisterTool(f.policyTool)
 	tc.RegisterTool(f.gatewayCancelTxTool())
 	tc.RegisterTool(f.processRefundTool())
 	tc.RegisterTool(f.createCaseTool())
@@ -790,20 +715,8 @@ func (f *EcommerceFixture) RegisterAllToolsSearch(
 			"get gateway transaction details",
 		},
 	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.searchGuidancePolicyTool(),
-		"Policy & Guidance",
-		[]string{"lookup", "policy"},
-		[]string{
-			"policy", "guidance", "procedure",
-			"rules", "refund",
-		},
-		[]string{
-			"find company policy",
-			"search guidance procedures",
-			"look up refund policy",
-		},
-	))
+	// PolicySearchTool implements IndexableTool — register directly.
+	tc.RegisterTool(f.policyTool)
 	tc.RegisterTool(testutil.NewIndexableToolFunc(
 		f.gatewayCancelTxTool(),
 		"Payments",

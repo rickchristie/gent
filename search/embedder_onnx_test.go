@@ -58,7 +58,7 @@ func TestOnnxEmbedder_AllModels(t *testing.T) {
 				ctx := context.Background()
 				qVec, err := embedder.EmbedQuery(ctx, "check outstanding payments")
 				require.NoError(t, err)
-				dVec, err := embedder.EmbedDocument(ctx, "check outstanding payments")
+				dVec, err := embedder.EmbedText(ctx, "check outstanding payments")
 				require.NoError(t, err)
 
 				sim := dotProduct(qVec, dVec)
@@ -70,12 +70,12 @@ func TestOnnxEmbedder_AllModels(t *testing.T) {
 			t.Run("batch_matches_single", func(t *testing.T) {
 				ctx := context.Background()
 				texts := []string{"billing payment", "send notification", "process checkout"}
-				batch, err := embedder.EmbedDocumentBatch(ctx, texts)
+				batch, err := embedder.EmbedTextBatch(ctx, texts)
 				require.NoError(t, err)
 				require.Len(t, batch, 3)
 
 				for i, text := range texts {
-					single, err := embedder.EmbedDocument(ctx, text)
+					single, err := embedder.EmbedText(ctx, text)
 					require.NoError(t, err)
 					sim := dotProduct(batch[i], single)
 					assert.InDelta(t, 1.0, sim, 0.001,
@@ -104,7 +104,7 @@ func TestOnnxEmbedder_AllModels(t *testing.T) {
 			})
 
 			// Cross-lingual test only for multilingual models.
-			model := common.FindModel(cfg.ModelName)
+			model := common.FindModel(cfg.Model.Name)
 			if model != nil && model.Languages == "100+ languages" {
 				t.Run("cross_lingual", func(t *testing.T) {
 					adapter := &testSingleChunkAdapter{}
@@ -142,6 +142,8 @@ func dotProduct(a, b []float32) float64 {
 
 type testSingleChunkAdapter struct{}
 
-func (a *testSingleChunkAdapter) Convert(doc string) ([]string, error) {
-	return []string{doc}, nil
+func (a *testSingleChunkAdapter) Chunks(
+	doc string, _ TokenCounter, _ int,
+) ([]Chunk, error) {
+	return []Chunk{{Text: doc}}, nil
 }

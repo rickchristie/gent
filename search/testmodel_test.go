@@ -32,37 +32,21 @@ func ensureAllTestModels(_ *testing.M) {
 func testEmbedderForConfig(t *testing.T, cfg common.ModelConfig) Embedder {
 	t.Helper()
 
-	model := common.FindModel(cfg.ModelName)
-	if model == nil {
-		t.Skipf("model %q not in registry", cfg.ModelName)
+	if !common.ModelDownloaded(&cfg.Model) {
+		t.Skipf("model files not downloaded for %s", cfg.Model.Name)
 	}
 
-	if !common.ModelDownloaded(model) {
-		t.Skipf("model files not downloaded for %s", model.Name)
-	}
-
-	dir, err := common.ModelDir(model.Name)
+	dir, err := common.ModelDir(cfg.Model.Name)
 	if err != nil {
 		t.Skipf("cannot determine model dir: %v", err)
 	}
 
-	embedderCfg := EmbedderConfig{
-		ModelPath:         filepath.Join(dir, model.ModelFile),
-		TokenizerPath:     filepath.Join(dir, "tokenizer.json"),
-		Dimensions:        cfg.Dimensions,
-		ModelDimensions:   cfg.ModelDimensions,
-		Pooling:           cfg.Pooling,
-		MaxSequenceLength: cfg.MaxSeqLen,
-		QueryPrefix:       cfg.QueryPrefix,
-		PassagePrefix:     cfg.PassagePrefix,
-		InputNames:        cfg.InputNames,
-		OutputName:        cfg.OutputName,
-		PostProcess:       cfg.PostProcess,
-		NumThreads:        2,
-		MaxConcurrency:    2,
-	}
-
-	embedder, err := NewOnnxEmbedder(embedderCfg)
+	embedder, err := NewOnnxEmbedder(cfg, OnnxOptions{
+		ModelPath:      filepath.Join(dir, cfg.Model.ModelFile),
+		TokenizerPath:  filepath.Join(dir, "tokenizer.json"),
+		NumThreads:     2,
+		MaxConcurrency: 2,
+	})
 	if err != nil {
 		t.Skipf("ONNX embedder not available for %s (run gent setup onnx): %v",
 			cfg.ConfigName, err)

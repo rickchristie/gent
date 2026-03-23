@@ -26,11 +26,11 @@ func (m *mockEmbedder) EmbedQuery(_ context.Context, text string) ([]float32, er
 	return []float32{0, 0, 0}, nil
 }
 
-func (m *mockEmbedder) EmbedDocument(_ context.Context, text string) ([]float32, error) {
+func (m *mockEmbedder) EmbedText(_ context.Context, text string) ([]float32, error) {
 	return m.EmbedQuery(context.Background(), text)
 }
 
-func (m *mockEmbedder) EmbedDocumentBatch(
+func (m *mockEmbedder) EmbedTextBatch(
 	_ context.Context, texts []string,
 ) ([][]float32, error) {
 	result := make([][]float32, len(texts))
@@ -41,27 +41,35 @@ func (m *mockEmbedder) EmbedDocumentBatch(
 	return result, nil
 }
 
-func (m *mockEmbedder) Dimensions() int { return 3 }
-func (m *mockEmbedder) Close() error    { return nil }
+func (m *mockEmbedder) TokenCount(text string) int { return len(text) / 4 }
+func (m *mockEmbedder) MaxTokens() int             { return 512 }
+func (m *mockEmbedder) Dimensions() int             { return 3 }
+func (m *mockEmbedder) Close() error                { return nil }
 
 // singleChunkAdapter returns the document string as a single chunk.
 type singleChunkAdapter struct{}
 
-func (a *singleChunkAdapter) Convert(doc string) ([]string, error) { return []string{doc}, nil }
+func (a *singleChunkAdapter) Chunks(
+	doc string, _ TokenCounter, _ int,
+) ([]Chunk, error) {
+	return []Chunk{{Text: doc}}, nil
+}
 
 // multiChunkAdapter splits the document by "|" delimiter.
 type multiChunkAdapter struct{}
 
-func (a *multiChunkAdapter) Convert(doc string) ([]string, error) {
-	var chunks []string
+func (a *multiChunkAdapter) Chunks(
+	doc string, _ TokenCounter, _ int,
+) ([]Chunk, error) {
+	var chunks []Chunk
 	start := 0
 	for i := range doc {
 		if doc[i] == '|' {
-			chunks = append(chunks, doc[start:i])
+			chunks = append(chunks, Chunk{Text: doc[start:i]})
 			start = i + 1
 		}
 	}
-	chunks = append(chunks, doc[start:])
+	chunks = append(chunks, Chunk{Text: doc[start:]})
 	return chunks, nil
 }
 

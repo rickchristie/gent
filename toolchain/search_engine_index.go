@@ -7,7 +7,7 @@ import (
 	"github.com/rickchristie/gent/search"
 )
 
-// IndexToolSearchEngine implements [gent.ToolSearchEngine] by delegating to a
+// IndexToolSearcher implements [gent.ToolSearcher] by delegating to a
 // [search.SearchIndex]. It bridges gent's tool search interface with the generic search
 // package, allowing any SearchIndex implementation (FlatIndex, BleveIndex, FusedIndex) to
 // serve as a tool search backend.
@@ -20,7 +20,7 @@ import (
 //	// Semantic search via FlatIndex
 //	embedder, _ := search.NewOnnxEmbedder(cfg)
 //	flatIdx := search.NewFlatIndex[gent.IndexableTool](&toolchain.ToolChunkAdapter{}, embedder)
-//	engine := toolchain.NewIndexToolSearchEngine("semantic", flatIdx)
+//	engine := toolchain.NewIndexToolSearcher("semantic", flatIdx)
 //
 //	// Hybrid BM25 + semantic via FusedIndex
 //	bleveIdx, _ := search.NewBleveIndex[gent.IndexableTool](&toolchain.ToolBleveAdapter{})
@@ -28,8 +28,8 @@ import (
 //	    map[string]search.SearchIndex[gent.IndexableTool]{"bm25": bleveIdx, "semantic": flatIdx},
 //	    map[string]int{"bm25": 20, "semantic": 20},
 //	)
-//	engine := toolchain.NewIndexToolSearchEngine("hybrid", fusedIdx)
-type IndexToolSearchEngine struct {
+//	engine := toolchain.NewIndexToolSearcher("hybrid", fusedIdx)
+type IndexToolSearcher struct {
 	id             string
 	index          search.SearchIndex[gent.IndexableTool]
 	searchGuidance string
@@ -40,12 +40,12 @@ const defaultIndexSearchGuidance = "Use natural language queries to search for t
 	"Describe what you need in plain language. Examples: \"look up customer billing\", " +
 	"\"send notification to customer\", \"cancel or modify a reservation\""
 
-// NewIndexToolSearchEngine creates a ToolSearchEngine backed by a SearchIndex.
+// NewIndexToolSearcher creates a ToolSearcher backed by a SearchIndex.
 // The id is used as the query_type value in search requests (e.g., "semantic", "hybrid").
-func NewIndexToolSearchEngine(
+func NewIndexToolSearcher(
 	id string, index search.SearchIndex[gent.IndexableTool],
-) *IndexToolSearchEngine {
-	return &IndexToolSearchEngine{
+) *IndexToolSearcher {
+	return &IndexToolSearcher{
 		id:             id,
 		index:          index,
 		searchGuidance: defaultIndexSearchGuidance,
@@ -54,25 +54,25 @@ func NewIndexToolSearchEngine(
 }
 
 // WithSearchGuidance sets custom search guidance text for the LLM.
-func (e *IndexToolSearchEngine) WithSearchGuidance(guidance string) *IndexToolSearchEngine {
+func (e *IndexToolSearcher) WithSearchGuidance(guidance string) *IndexToolSearcher {
 	e.searchGuidance = guidance
 	return e
 }
 
 // WithTopK sets the maximum number of results to retrieve from the underlying index.
 // Default: 100 (high because SearchJSON handles pagination over the full result set).
-func (e *IndexToolSearchEngine) WithTopK(topK int) *IndexToolSearchEngine {
+func (e *IndexToolSearcher) WithTopK(topK int) *IndexToolSearcher {
 	e.topK = topK
 	return e
 }
 
-func (e *IndexToolSearchEngine) Id() string             { return e.id }
-func (e *IndexToolSearchEngine) SearchGuidance() string { return e.searchGuidance }
+func (e *IndexToolSearcher) Id() string             { return e.id }
+func (e *IndexToolSearcher) SearchGuidance() string { return e.searchGuidance }
 
 // IndexAll indexes all tools by calling Swap on the underlying SearchIndex. This atomically
 // replaces the entire index contents, which is correct for the SearchJSON.Initialize() flow
 // where all tools are registered before IndexAll is called.
-func (e *IndexToolSearchEngine) IndexAll(tools []gent.IndexableTool) error {
+func (e *IndexToolSearcher) IndexAll(tools []gent.IndexableTool) error {
 	docs := make(map[string]gent.IndexableTool, len(tools))
 	for _, tool := range tools {
 		docs[tool.Name()] = tool
@@ -81,7 +81,7 @@ func (e *IndexToolSearchEngine) IndexAll(tools []gent.IndexableTool) error {
 }
 
 // Search returns tool names ranked by relevance from the underlying SearchIndex.
-func (e *IndexToolSearchEngine) Search(ctx context.Context, query string) ([]string, error) {
+func (e *IndexToolSearcher) Search(ctx context.Context, query string) ([]string, error) {
 	results, err := e.index.Search(ctx, query, e.topK)
 	if err != nil {
 		return nil, err
@@ -94,4 +94,4 @@ func (e *IndexToolSearchEngine) Search(ctx context.Context, query string) ([]str
 }
 
 // Compile-time check.
-var _ gent.ToolSearchEngine = (*IndexToolSearchEngine)(nil)
+var _ gent.ToolSearcher = (*IndexToolSearcher)(nil)

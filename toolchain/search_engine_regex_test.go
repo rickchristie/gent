@@ -40,13 +40,13 @@ func (t *mockIndexableTool) Call(
 }
 
 func TestRegex_Id(t *testing.T) {
-	engine := NewRegexToolSearchEngine()
+	engine := NewRegexToolSearcher()
 	assert.Equal(t, "regex", engine.Id())
 }
 
 func TestRegex_SearchGuidance(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		engine := NewRegexToolSearchEngine()
+		engine := NewRegexToolSearcher()
 		guidance := engine.SearchGuidance()
 		assert.NotEmpty(t, guidance)
 		assert.Contains(t, guidance, "regex")
@@ -56,7 +56,7 @@ func TestRegex_SearchGuidance(t *testing.T) {
 	})
 
 	t.Run("custom", func(t *testing.T) {
-		engine := NewRegexToolSearchEngine().
+		engine := NewRegexToolSearcher().
 			WithSearchGuidance("custom regex tips")
 		assert.Equal(
 			t, "custom regex tips",
@@ -129,7 +129,7 @@ func TestRegex_IndexAll(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewRegexToolSearchEngine()
+			engine := NewRegexToolSearcher()
 			err := engine.IndexAll(tt.input.tools)
 
 			if tt.expected.err != nil {
@@ -143,7 +143,7 @@ func TestRegex_IndexAll(t *testing.T) {
 }
 
 func TestRegex_IndexAll_Reindex(t *testing.T) {
-	engine := NewRegexToolSearchEngine()
+	engine := NewRegexToolSearcher()
 
 	firstTools := []gent.IndexableTool{
 		&mockIndexableTool{name: "tool_a", domain: "A"},
@@ -331,7 +331,7 @@ func TestRegex_Search(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewRegexToolSearchEngine()
+			engine := NewRegexToolSearcher()
 			err := engine.IndexAll(tools)
 			require.NoError(t, err)
 

@@ -10,17 +10,18 @@ import (
 
 // mockSearchIndex is a configurable mock for testing FusedIndex.
 type mockSearchIndex struct {
-	results    []SearchResult
-	addCalls   int
+	results     []SearchResult
+	addCalls    int
 	removeCalls int
-	swapCalls  int
-	addErr     error
+	swapCalls   int
+	addErr      error
+	searchErr   error
 }
 
 func (m *mockSearchIndex) Search(
 	_ context.Context, _ string, _ int,
 ) ([]SearchResult, error) {
-	return m.results, nil
+	return m.results, m.searchErr
 }
 
 func (m *mockSearchIndex) Add(_ context.Context, _ string, _ string) error {
@@ -64,6 +65,26 @@ func TestFusedIndex_SearchFusesResults(t *testing.T) {
 	// "a" appears in both lists and should rank highest.
 	assert.Equal(t, "a", results[0].Id)
 	assert.Greater(t, results[0].Score, results[1].Score)
+}
+
+func TestFusedIndex_SearchFailsFastOnError(t *testing.T) {
+	idx1 := &mockSearchIndex{searchErr: assert.AnError}
+	idx2 := &mockSearchIndex{results: []SearchResult{
+		{Id: "a", Score: 1.0, Snippet: "ok"},
+	}}
+
+	idx := NewFusedIndex(
+		&WeightedLinearFuser{
+			Weights: map[string]float64{"a": 0.5, "b": 0.5},
+		},
+		map[string]SearchIndex[string]{"a": idx1, "b": idx2},
+		nil,
+	)
+
+	results, err := idx.Search(context.Background(), "query", 5)
+	assert.Error(t, err)
+	assert.Nil(t, results)
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestFusedIndex_AddForwardsToAll(t *testing.T) {

@@ -11,14 +11,18 @@ import (
 	"strings"
 	"sync"
 
+	"path/filepath"
+
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
+	"github.com/rickchristie/gent/common"
 	"github.com/rickchristie/gent/compaction"
 	"github.com/rickchristie/gent/events"
 	"github.com/rickchristie/gent/executor"
-	"github.com/rickchristie/gent/integrationtest/loggers"
 	"github.com/rickchristie/gent/format"
+	"github.com/rickchristie/gent/integrationtest/loggers"
 	"github.com/rickchristie/gent/models"
+	"github.com/rickchristie/gent/search"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
@@ -83,17 +87,49 @@ type TestConfig struct {
 	LogWriter io.Writer
 	// Compaction configures scratchpad context management.
 	Compaction CompactionConfig
+	// Embedder for hybrid BM25+semantic search. Used by both tool search (SearchJSON)
+	// and policy search (PolicySearchTool). Created by DefaultTestConfig.
+	Embedder search.Embedder
 }
 
-// DefaultTestConfig returns a config suitable for go test with JSON
-// toolchain.
+// DefaultTestConfig returns a config suitable for go test with JSON toolchain.
+// Creates an ONNX embedder (multilingual-e5-small) for hybrid search. Panics if
+// the model is not downloaded — run `gent setup onnx` first.
 func DefaultTestConfig() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainJSON,
 		UseStreaming:         false,
 		ShowIterationHistory: true,
 		ShowEvents:           true,
+		Embedder:             createEmbedder(),
 	}
+}
+
+// createEmbedder creates an ONNX embedder using multilingual-e5-small. This is a
+// requirement for all integration tests — both tool search and policy search use
+// hybrid BM25+semantic search.
+func createEmbedder() search.Embedder {
+	cfg := common.ConfigsForModel("multilingual-e5-small")[0]
+	if !common.ModelDownloaded(&cfg.Model) {
+		panic(
+			"integration tests require multilingual-e5-small model. " +
+				"Run: go run ./cmd/gent setup onnx",
+		)
+	}
+	dir, err := common.ModelDir(cfg.Model.Name)
+	if err != nil {
+		panic("failed to get model dir: " + err.Error())
+	}
+	embedder, err := search.NewOnnxEmbedder(cfg, search.OnnxOptions{
+		ModelPath:      filepath.Join(dir, cfg.Model.ModelFile),
+		TokenizerPath:  filepath.Join(dir, "tokenizer.json"),
+		NumThreads:     2,
+		MaxConcurrency: 2,
+	})
+	if err != nil {
+		panic("failed to create ONNX embedder: " + err.Error())
+	}
+	return embedder
 }
 
 // InteractiveConfig returns a config for interactive CLI with streaming
@@ -104,6 +140,7 @@ func InteractiveConfig() TestConfig {
 		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
+		Embedder:             createEmbedder(),
 	}
 }
 
@@ -115,6 +152,7 @@ func InteractiveConfigJSON() TestConfig {
 		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
+		Embedder:             createEmbedder(),
 	}
 }
 
@@ -126,6 +164,7 @@ func InteractiveConfigSearch() TestConfig {
 		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
+		Embedder:             createEmbedder(),
 	}
 }
 
@@ -170,23 +209,16 @@ func CreateModel() (gent.StreamingModel, error) {
 		WithModelName("grok-4-1-fast"), nil
 }
 
-// CreateToolChain creates the appropriate toolchain based
-// on config. For ToolChainSearch, returns a SearchJSON with
-// BM25 and Regex engines — caller must call Initialize()
-// after registering tools.
+// CreateToolChain creates the appropriate toolchain based on config. For
+// ToolChainSearch, returns a SearchJSON with hybrid BM25+semantic search.
 func CreateToolChain(config TestConfig) gent.ToolChain {
 	switch config.ToolChain {
 	case ToolChainJSON:
 		return toolchain.NewJSON()
 	case ToolChainSearch:
-		return toolchain.NewSearchJSON(
-			config.SearchHintType,
-		).
+		return toolchain.NewSearchJSON(config.SearchHintType).
 			RegisterEngine(
-				toolchain.NewBM25ToolSearchEngine(),
-			).
-			RegisterEngine(
-				toolchain.NewRegexToolSearchEngine(),
+				toolchain.NewFusedToolSearcher(config.Embedder),
 			)
 	default:
 		return toolchain.NewYAML()
