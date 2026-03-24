@@ -62,6 +62,22 @@ func (m *mockModel) GenerateContent(
 	return &gent.ContentResponse{Choices: []*gent.ContentChoice{{Content: ""}}}, nil
 }
 
+func (m *mockModel) GenerateContentStream(
+	execCtx *gent.ExecutionContext,
+	streamId string,
+	streamTopicId string,
+	messages []llms.MessageContent,
+	opts ...llms.CallOption,
+) (gent.Stream, error) {
+	resp, err := m.GenerateContent(
+		execCtx, streamId, streamTopicId, messages, opts...,
+	)
+	if err != nil {
+		return gent.NewCompletedStream(nil, err), nil
+	}
+	return gent.NewCompletedStream(resp, nil), nil
+}
+
 // ----------------------------------------------------------------------------
 // Mock ToolChain for testing
 // ----------------------------------------------------------------------------

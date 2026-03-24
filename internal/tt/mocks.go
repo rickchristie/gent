@@ -13,7 +13,8 @@ import (
 // -----------------------------------------------------------------------------
 
 // MockModel is a configurable mock that implements gent.Model.
-// It publishes BeforeModelCall and AfterModelCall events as required by the interface.
+// It publishes BeforeModelCall and AfterModelCall events as required.
+// GenerateContentStream wraps the canned response in a completed stream.
 type MockModel struct {
 	name      string
 	responses []*gent.ContentResponse
@@ -125,6 +126,36 @@ func (m *MockModel) GenerateContent(
 	}
 
 	return resp, err
+}
+
+// GenerateContentStream implements gent.Model by wrapping the canned
+// response in a completed stream. This enables the mock to satisfy
+// the streaming-only Model interface without actual streaming.
+func (m *MockModel) GenerateContentStream(
+	execCtx *gent.ExecutionContext,
+	streamId string,
+	streamTopicId string,
+	messages []llms.MessageContent,
+	opts ...llms.CallOption,
+) (gent.Stream, error) {
+	resp, err := m.GenerateContent(
+		execCtx, streamId, streamTopicId, messages, opts...,
+	)
+	if err != nil {
+		return gent.NewCompletedStream(nil, err), nil
+	}
+
+	// Emit chunk for subscribers (matching real model behavior).
+	if execCtx != nil && resp != nil && len(resp.Choices) > 0 {
+		execCtx.EmitChunk(gent.StreamChunk{
+			Content:          resp.Choices[0].Content,
+			ReasoningContent: resp.Choices[0].ReasoningContent,
+			StreamId:         streamId,
+			StreamTopicId:    streamTopicId,
+		})
+	}
+
+	return gent.NewCompletedStream(resp, nil), nil
 }
 
 // -----------------------------------------------------------------------------

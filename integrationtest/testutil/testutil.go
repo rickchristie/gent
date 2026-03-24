@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -77,8 +78,6 @@ type TestConfig struct {
 	// wrapper, forcing all tool calls through code
 	// execution. Only used when WrapPTC is true.
 	PTCCodeOnly bool
-	// UseStreaming enables streaming mode for LLM calls.
-	UseStreaming bool
 	// ShowIterationHistory prints full iteration history at the end.
 	ShowIterationHistory bool
 	// ShowEvents prints all events at the end.
@@ -100,7 +99,6 @@ type TestConfig struct {
 func DefaultTestConfig() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainJSON,
-		UseStreaming:         false,
 		ShowIterationHistory: true,
 		ShowEvents:           true,
 		Embedder:             createEmbedder(),
@@ -139,7 +137,6 @@ func createEmbedder() search.Embedder {
 func InteractiveConfig() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainYAML,
-		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
 		Embedder:             createEmbedder(),
@@ -151,7 +148,6 @@ func InteractiveConfig() TestConfig {
 func InteractiveConfigJSON() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainJSON,
-		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
 		Embedder:             createEmbedder(),
@@ -163,7 +159,6 @@ func InteractiveConfigJSON() TestConfig {
 func InteractiveConfigSearch() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainSearch,
-		UseStreaming:         true,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
 		Embedder:             createEmbedder(),
@@ -188,7 +183,7 @@ type ConversationMessage struct {
 }
 
 // DefaultModelName is the default LLM model for integration tests.
-const DefaultModelName = "grok-4-1-fast"
+const DefaultModelName = gent.ModelXAIGrok41Fast
 
 // ModelOption defines an LLM model available for integration tests.
 type ModelOption struct {
@@ -198,94 +193,102 @@ type ModelOption struct {
 	BaseURL string // API base URL (empty = OpenAI default)
 }
 
+// API base URLs for model providers.
+const (
+	baseURLXAI    = "https://api.x.ai/v1"
+	baseURLGemini = "https://generativelanguage.googleapis.com/v1beta/openai/"
+)
+
+// Environment variable keys for API authentication.
+const (
+	envKeyXAI    = "GENT_TEST_XAI_KEY"
+	envKeyOpenAI = "GENT_TEST_OPENAI_KEY"
+	envKeyGemini = "GENT_TEST_GEMINI_KEY"
+)
+
 // AvailableModels lists all models the CLI can select from.
 var AvailableModels = []ModelOption{
 	{
-		Label: "xAI grok-4-1-fast",
-		Name: "grok-4-1-fast", EnvKey: "GENT_TEST_XAI_KEY",
-		BaseURL: "https://api.x.ai/v1",
+		Label: "xAI grok-4-1-fast", Name: gent.ModelXAIGrok41Fast,
+		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
 		Label: "xAI grok-4.20-0309-non-reasoning",
-		Name:    "grok-4.20-0309-non-reasoning",
-		EnvKey:  "GENT_TEST_XAI_KEY",
-		BaseURL: "https://api.x.ai/v1",
+		Name: gent.ModelXAIGrok420NonReasoning,
+		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
-		Label: "OpenAI o3", Name: "o3",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI o3", Name: gent.ModelOpenAIO3,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI o4-mini", Name: "o4-mini",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI o4-mini", Name: gent.ModelOpenAIO4Mini,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-4.1", Name: "gpt-4.1",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-4.1", Name: gent.ModelOpenAIGPT41,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-4.1-mini", Name: "gpt-4.1-mini",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-4.1-mini", Name: gent.ModelOpenAIGPT41Mini,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-5", Name: "gpt-5",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-5", Name: gent.ModelOpenAIGPT5,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-5-mini", Name: "gpt-5-mini",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-5-mini", Name: gent.ModelOpenAIGPT5Mini,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-5-nano", Name: "gpt-5-nano",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-5-nano", Name: gent.ModelOpenAIGPT5Nano,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-5.4", Name: "gpt-5.4",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-5.4", Name: gent.ModelOpenAIGPT54,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-5.4-mini", Name: "gpt-5.4-mini",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-5.4-mini", Name: gent.ModelOpenAIGPT54Mini,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI gpt-5.4-nano", Name: "gpt-5.4-nano",
-		EnvKey: "GENT_TEST_OPENAI_KEY",
+		Label: "OpenAI gpt-5.4-nano", Name: gent.ModelOpenAIGPT54Nano,
+		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label:   "Google gemini-2.5-pro",
-		Name:    "gemini-2.5-pro",
-		EnvKey:  "GENT_TEST_GEMINI_KEY",
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		Label: "Google gemini-2.5-pro", Name: gent.ModelGoogleGemini25Pro,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-2.5-flash",
-		Name:    "gemini-2.5-flash",
-		EnvKey:  "GENT_TEST_GEMINI_KEY",
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		Label: "Google gemini-2.5-flash", Name: gent.ModelGoogleGemini25Flash,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
 		Label:   "Google gemini-2.5-flash-lite",
-		Name:    "gemini-2.5-flash-lite",
-		EnvKey:  "GENT_TEST_GEMINI_KEY",
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		Name:    gent.ModelGoogleGemini25FlashLite,
+		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3-pro",
-		Name:    "gemini-3-pro",
-		EnvKey:  "GENT_TEST_GEMINI_KEY",
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		Label:   "Google gemini-3-pro-preview",
+		Name:    gent.ModelGoogleGemini3Pro,
+		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3-flash",
-		Name:    "gemini-3-flash",
-		EnvKey:  "GENT_TEST_GEMINI_KEY",
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		Label:   "Google gemini-3-flash-preview",
+		Name:    gent.ModelGoogleGemini3Flash,
+		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3-flash-lite",
-		Name:    "gemini-3-flash-lite",
-		EnvKey:  "GENT_TEST_GEMINI_KEY",
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		Label:   "Google gemini-3.1-pro-preview",
+		Name:    gent.ModelGoogleGemini31Pro,
+		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
+	},
+	{
+		Label:   "Google gemini-3.1-flash-lite-preview",
+		Name:    gent.ModelGoogleGemini31FlashLite,
+		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
 	},
 }
 
@@ -310,8 +313,8 @@ func CreateModel(
 	if opt.Name == "" {
 		// Unknown model — assume xAI.
 		opt = ModelOption{
-			Name: modelName, EnvKey: "GENT_TEST_XAI_KEY",
-			BaseURL: "https://api.x.ai/v1",
+			Name: modelName, EnvKey: envKeyXAI,
+			BaseURL: baseURLXAI,
 		}
 	}
 
@@ -322,9 +325,14 @@ func CreateModel(
 		)
 	}
 
+	httpClient := &http.Client{
+		Transport: &models.ErrorCaptureTransport{},
+	}
+
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
 		openai.WithModel(modelName),
+		openai.WithHTTPClient(httpClient),
 	}
 	if opt.BaseURL != "" {
 		opts = append(opts, openai.WithBaseURL(opt.BaseURL))
@@ -596,7 +604,6 @@ func RunScenario(
 	loop := react.NewAgent(model).
 		WithToolChain(tc).
 		WithTimeProvider(scenario.TimeProvider).
-		WithStreaming(testCfg.UseStreaming).
 		WithBehaviorAndContext(scenario.SystemPrompt).
 		WithCriticalRules(scenario.CriticalRules).
 		WithThinking(scenario.ThinkingPrompt)
@@ -631,28 +638,23 @@ func RunScenario(
 	}
 
 	var streamWg sync.WaitGroup
-	if testCfg.UseStreaming {
-		streamingHook := NewStreamingOutputHook(w)
-		registry.Subscribe(streamingHook)
+	streamingHook := NewStreamingOutputHook(w)
+	registry.Subscribe(streamingHook)
 
-		chunks, unsubscribe := execCtx.SubscribeToTopic(
-			"llm-response",
-		)
+	chunks, unsubscribe := execCtx.SubscribeToTopic(
+		"llm-response",
+	)
 
-		streamWg.Add(1)
-		go func() {
-			defer streamWg.Done()
-			StreamConsumer(chunks, w, streamingHook)
-		}()
+	streamWg.Add(1)
+	go func() {
+		defer streamWg.Done()
+		StreamConsumer(chunks, w, streamingHook)
+	}()
 
-		defer func() {
-			unsubscribe()
-			streamWg.Wait()
-		}()
-	} else {
-		loggerSubscriber := loggers.NewSubscriberWithWriter(w)
-		registry.Subscribe(loggerSubscriber)
-	}
+	defer func() {
+		unsubscribe()
+		streamWg.Wait()
+	}()
 
 	if testCfg.LogWriter != nil {
 		fileLogger := loggers.NewSubscriberWithWriter(
@@ -1092,7 +1094,6 @@ func (s *InteractiveChat) SendMessage(
 	loop := react.NewAgent(s.Model).
 		WithToolChain(tc).
 		WithTimeProvider(s.ChatCfg.TimeProvider).
-		WithStreaming(s.Config.UseStreaming).
 		WithBehaviorAndContext(s.ChatCfg.SystemPrompt).
 		WithCriticalRules(s.ChatCfg.CriticalRules).
 		WithThinking(s.ChatCfg.ThinkingPrompt)

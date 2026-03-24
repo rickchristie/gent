@@ -6,49 +6,65 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// Model is gent's model interface. It wraps LangChainGo's llms.Model but provides
-// a cleaner interface with normalized token usage information and automatic tracing.
+// Model is gent's model interface. All model calls use streaming — chunks are
+// emitted in real-time as they arrive from the LLM, enabling real-time
+// observation, repetition detection, and early cancellation.
 //
-// When an ExecutionContext is provided, the model will automatically trace the call
-// and emit chunks for streaming subscribers.
+// When an ExecutionContext is provided, the model will automatically trace the
+// call and emit chunks for streaming subscribers.
 //
 // If execCtx is nil, tracing and chunk emission are skipped.
 type Model interface {
-	// GenerateContent generates content from a sequence of messages.
-	// Unlike llms.Model, this returns a GenerationInfo struct with normalized
-	// token counts that work across all providers.
+	// GenerateContentStream generates content with streaming support.
+	// It returns a Stream that provides chunks as they arrive from the model.
 	//
 	// Parameters:
 	//   - execCtx: ExecutionContext for tracing, cancellation, and stream fan-in
-	//   - streamId: Unique identifier for this call (caller-provided)
-	//   - streamTopicId: Topic for grouping related calls (caller-provided)
+	//   - streamId: Unique identifier for this stream (caller-provided)
+	//   - streamTopicId: Topic for grouping related streams (caller-provided)
 	//   - messages: Input messages
 	//   - options: LLM call options
 	//
 	// Cancellation:
 	// The implementation should use execCtx.Context() for HTTP client calls.
-	// This context is cancelled when limits are exceeded or the execution is stopped.
+	// This context is cancelled when limits are exceeded or the execution is
+	// stopped.
 	//
 	// Stream Emission Requirement:
-	// Implementations MUST call execCtx.EmitChunk() with the complete response
-	// content as a single chunk. This ensures subscribers receive content
-	// regardless of whether the underlying model supports streaming.
+	// Implementations MUST call execCtx.EmitChunk() for each chunk as it
+	// arrives from the LLM. This enables real-time observation of responses
+	// across the execution tree.
 	//
-	// The emitted chunk should have:
-	//   - Content: The full response text
+	// Each emitted chunk should have:
+	//   - Content/ReasoningContent: The chunk's content delta
 	//   - StreamId: The provided streamId
 	//   - StreamTopicId: The provided streamTopicId
 	//   - Source: Will be auto-populated by EmitChunk if empty
+	//   - Err: Set if an error occurred (final chunk only)
 	//
-	// The streamId should be unique across concurrent calls. If empty, chunks
-	// are still emitted but cannot be filtered by stream ID.
-	GenerateContent(
+	// The streamId should be unique across concurrent streams. If empty,
+	// chunks are still emitted but cannot be filtered by stream ID.
+	//
+	// Usage:
+	//
+	//	stream, err := model.GenerateContentStream(execCtx, "req-1", "llm", msgs)
+	//	if err != nil {
+	//	    return err
+	//	}
+	//	for chunk := range stream.Chunks() {
+	//	    if chunk.Err != nil {
+	//	        return chunk.Err
+	//	    }
+	//	    fmt.Print(chunk.Content)
+	//	}
+	//	response, err := stream.Response()
+	GenerateContentStream(
 		execCtx *ExecutionContext,
 		streamId string,
 		streamTopicId string,
 		messages []llms.MessageContent,
 		options ...llms.CallOption,
-	) (*ContentResponse, error)
+	) (Stream, error)
 }
 
 // ContentResponse is the response from a GenerateContent call.
@@ -123,61 +139,9 @@ type GenerationInfo struct {
 	Duration time.Duration
 }
 
-// StreamingModel extends Model with streaming capabilities.
-// Models that support token-by-token streaming should implement this interface.
-type StreamingModel interface {
-	Model
-
-	// GenerateContentStream generates content with streaming support.
-	// It returns a Stream that provides chunks as they arrive from the model.
-	//
-	// Parameters:
-	//   - execCtx: ExecutionContext for tracing, cancellation, and stream fan-in
-	//   - streamId: Unique identifier for this stream (caller-provided)
-	//   - streamTopicId: Topic for grouping related streams (caller-provided)
-	//   - messages: Input messages
-	//   - options: LLM call options
-	//
-	// Cancellation:
-	// The implementation should use execCtx.Context() for HTTP client calls.
-	// This context is cancelled when limits are exceeded or the execution is stopped.
-	//
-	// Stream Emission Requirement:
-	// Implementations MUST call execCtx.EmitChunk() for each chunk as it
-	// arrives from the LLM. This enables real-time observation of responses
-	// across the execution tree.
-	//
-	// Each emitted chunk should have:
-	//   - Content/ReasoningContent: The chunk's content delta
-	//   - StreamId: The provided streamId
-	//   - StreamTopicId: The provided streamTopicId
-	//   - Source: Will be auto-populated by EmitChunk if empty
-	//   - Err: Set if an error occurred (final chunk only)
-	//
-	// The streamId should be unique across concurrent streams. If empty, chunks
-	// are still emitted but cannot be filtered by stream ID.
-	//
-	// Usage:
-	//
-	//	stream, err := model.GenerateContentStream(execCtx, "req-123", "llm", msgs)
-	//	if err != nil {
-	//	    return err
-	//	}
-	//	for chunk := range stream.Chunks() {
-	//	    if chunk.Err != nil {
-	//	        return chunk.Err
-	//	    }
-	//	    fmt.Print(chunk.Content)
-	//	}
-	//	response, err := stream.Response()
-	GenerateContentStream(
-		execCtx *ExecutionContext,
-		streamId string,
-		streamTopicId string,
-		messages []llms.MessageContent,
-		options ...llms.CallOption,
-	) (Stream, error)
-}
+// StreamingModel is an alias for [Model] for backward compatibility.
+// Deprecated: Use [Model] directly.
+type StreamingModel = Model
 
 // Stream represents a streaming response from the model.
 // It provides access to content chunks as they arrive and the final response.

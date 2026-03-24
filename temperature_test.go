@@ -14,21 +14,21 @@ type mockNamerModel struct {
 
 func (m *mockNamerModel) ModelName() string { return m.name }
 
-func (m *mockNamerModel) GenerateContent(
+func (m *mockNamerModel) GenerateContentStream(
 	_ *ExecutionContext, _ string, _ string,
 	_ []llms.MessageContent, _ ...llms.CallOption,
-) (*ContentResponse, error) {
-	return nil, nil
+) (Stream, error) {
+	return NewCompletedStream(nil, nil), nil
 }
 
 // mockPlainModel implements Model but not ModelNamer.
 type mockPlainModel struct{}
 
-func (m *mockPlainModel) GenerateContent(
+func (m *mockPlainModel) GenerateContentStream(
 	_ *ExecutionContext, _ string, _ string,
 	_ []llms.MessageContent, _ ...llms.CallOption,
-) (*ContentResponse, error) {
-	return nil, nil
+) (Stream, error) {
+	return NewCompletedStream(nil, nil), nil
 }
 
 func TestDefaultSamplingParams(t *testing.T) {

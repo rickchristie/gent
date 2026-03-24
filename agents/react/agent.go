@@ -36,8 +36,7 @@ type Agent struct {
 	termination         gent.Termination
 	thinkingSection     gent.TextSection
 	timeProvider        gent.TimeProvider
-	useStreaming        bool
-	callOptions         []llms.CallOption
+	callOptions []llms.CallOption
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -124,14 +123,11 @@ func (r *Agent) WithThinkingSection(s gent.TextSection) *Agent {
 	return r
 }
 
-// WithStreaming enables streaming mode for model calls.
-// When enabled and the model implements StreamingModel, responses are streamed
-// token-by-token. This allows ExecutionContext subscribers to receive chunks
-// in real-time via SubscribeAll() or SubscribeToTopic("llm-response").
+// WithStreaming is a no-op retained for backward compatibility.
+// All model calls now use streaming unconditionally.
 //
-// Default: false (uses non-streaming GenerateContent)
-func (r *Agent) WithStreaming(enabled bool) *Agent {
-	r.useStreaming = enabled
+// Deprecated: Streaming is always enabled. This method will be removed.
+func (r *Agent) WithStreaming(_ bool) *Agent {
 	return r
 }
 
@@ -611,7 +607,7 @@ func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 	}
 }
 
-// callModel calls the model, using streaming if enabled and supported.
+// callModel calls the model via streaming and returns the complete response.
 func (r *Agent) callModel(
 	execCtx *gent.ExecutionContext,
 	streamId string,
@@ -621,17 +617,9 @@ func (r *Agent) callModel(
 	opts := r.effectiveCallOptions()
 	r.warnRestrictiveSampling(execCtx, opts)
 
-	// Check if streaming is enabled and model supports it
-	if r.useStreaming {
-		if streamingModel, ok := r.model.(gent.StreamingModel); ok {
-			return r.callModelStreaming(
-				execCtx, streamingModel, streamId, streamTopicId, messages, opts,
-			)
-		}
-	}
-
-	// Fall back to non-streaming
-	return r.model.GenerateContent(execCtx, streamId, streamTopicId, messages, opts...)
+	return r.callModelStreaming(
+		execCtx, streamId, streamTopicId, messages, opts,
+	)
 }
 
 // effectiveCallOptions returns the merged call options: model-appropriate defaults followed
@@ -709,11 +697,11 @@ func (r *Agent) warnRestrictiveSampling(
 
 // callModelStreaming calls the model with streaming and accumulates the response.
 func (r *Agent) callModelStreaming(
-	execCtx *gent.ExecutionContext, model gent.StreamingModel,
+	execCtx *gent.ExecutionContext,
 	streamId string, streamTopicId string,
 	messages []llms.MessageContent, opts []llms.CallOption,
 ) (*gent.ContentResponse, error) {
-	stream, err := model.GenerateContentStream(
+	stream, err := r.model.GenerateContentStream(
 		execCtx, streamId, streamTopicId, messages, opts...,
 	)
 	if err != nil {

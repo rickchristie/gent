@@ -6,10 +6,17 @@ package gent
 // =============================================================================
 
 const (
+	// GPT-5.4 Series (Latest)
+	ModelOpenAIGPT54     = "gpt-5.4"
+	ModelOpenAIGPT54Mini = "gpt-5.4-mini"
+	ModelOpenAIGPT54Nano = "gpt-5.4-nano"
+
 	// GPT-5 Series
-	ModelOpenAIGPT52       = "gpt-5.2"
-	ModelOpenAIGPT52Codex  = "gpt-5.2-codex"
-	ModelOpenAIGPT5Mini    = "gpt-5-mini"
+	ModelOpenAIGPT52      = "gpt-5.2"
+	ModelOpenAIGPT52Codex = "gpt-5.2-codex"
+	ModelOpenAIGPT5       = "gpt-5"
+	ModelOpenAIGPT5Mini   = "gpt-5-mini"
+	ModelOpenAIGPT5Nano   = "gpt-5-nano"
 
 	// GPT-4.1 Series
 	ModelOpenAIGPT41     = "gpt-4.1"
@@ -22,10 +29,10 @@ const (
 	ModelOpenAIGPT4oAudio = "gpt-4o-audio-preview"
 
 	// O-Series (Reasoning Models)
-	ModelOpenAIO3    = "o3"
-	ModelOpenAIO3Pro = "o3-pro"
+	ModelOpenAIO3     = "o3"
+	ModelOpenAIO3Pro  = "o3-pro"
 	ModelOpenAIO4Mini = "o4-mini"
-	ModelOpenAIO1    = "o1"
+	ModelOpenAIO1     = "o1"
 	ModelOpenAIO1Mini = "o1-mini"
 )
 
@@ -56,18 +63,18 @@ const (
 // =============================================================================
 
 const (
-	// Gemini 3 Series (Latest)
-	ModelGoogleGemini3Pro   = "gemini-3-pro"
-	ModelGoogleGemini3Flash = "gemini-3-flash"
+	// Gemini 3.1 Series (Latest)
+	ModelGoogleGemini31Pro       = "gemini-3.1-pro-preview"
+	ModelGoogleGemini31FlashLite = "gemini-3.1-flash-lite-preview"
+
+	// Gemini 3 Series
+	ModelGoogleGemini3Pro   = "gemini-3-pro-preview"
+	ModelGoogleGemini3Flash = "gemini-3-flash-preview"
 
 	// Gemini 2.5 Series
-	ModelGoogleGemini25Pro      = "gemini-2.5-pro"
-	ModelGoogleGemini25Flash    = "gemini-2.5-flash"
+	ModelGoogleGemini25Pro       = "gemini-2.5-pro"
+	ModelGoogleGemini25Flash     = "gemini-2.5-flash"
 	ModelGoogleGemini25FlashLite = "gemini-2.5-flash-lite"
-
-	// Gemini 2.0 Series
-	ModelGoogleGemini20Flash     = "gemini-2.0-flash"
-	ModelGoogleGemini20FlashLite = "gemini-2.0-flash-lite"
 )
 
 // =============================================================================
@@ -76,7 +83,11 @@ const (
 // =============================================================================
 
 const (
-	// Grok 4.1 Series (Latest)
+	// Grok 4.20 Series (Latest)
+	ModelXAIGrok420NonReasoning = "grok-4.20-0309-non-reasoning"
+
+	// Grok 4.1 Series
+	ModelXAIGrok41Fast            = "grok-4-1-fast"
 	ModelXAIGrok41FastReasoning    = "grok-4-1-fast-reasoning"
 	ModelXAIGrok41FastNonReasoning = "grok-4-1-fast-non-reasoning"
 

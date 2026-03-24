@@ -280,6 +280,25 @@ func SimpleStreamingCallback() (llms.CallOption, *streamBuffer) {
 	return callback, stream
 }
 
+// NewCompletedStream creates a Stream that is already complete with the given
+// response. The stream emits a single chunk with the full content then closes.
+// This is used by mock models and non-streaming callers that need to satisfy the
+// [Model] interface without actual streaming.
+func NewCompletedStream(resp *ContentResponse, err error) Stream {
+	s := newStreamBuffer()
+	if resp != nil && len(resp.Choices) > 0 {
+		choice := resp.Choices[0]
+		if choice.Content != "" {
+			s.SendContent(choice.Content)
+		}
+		if choice.ReasoningContent != "" {
+			s.SendReasoning(choice.ReasoningContent)
+		}
+	}
+	s.Complete(resp, err)
+	return s
+}
+
 // StreamWithDuration is a helper to measure streaming duration.
 // It wraps a stream buffer to track start time.
 type StreamWithDuration struct {

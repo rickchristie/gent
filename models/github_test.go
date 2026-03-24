@@ -27,7 +27,7 @@ func TestGitHubCopilotGenerate(t *testing.T) {
 	require.NoError(t, err, "failed to create GitHub Copilot model")
 
 	execCtx := gent.NewExecutionContext(ctx, "gh-test", nil)
-	response, err := model.GenerateContent(
+	stream, err := model.GenerateContentStream(
 		execCtx, "", "",
 		[]llms.MessageContent{
 			llms.TextParts(
@@ -36,7 +36,9 @@ func TestGitHubCopilotGenerate(t *testing.T) {
 			),
 		},
 	)
-	require.NoError(t, err, "GenerateContent failed")
+	require.NoError(t, err, "GenerateContentStream failed")
+	response, err := stream.Response()
+	require.NoError(t, err, "stream response failed")
 
 	responseJSON, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {

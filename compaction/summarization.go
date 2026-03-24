@@ -731,12 +731,18 @@ func (s *SummarizationStrategy) Compact(
 		"compaction-summarization-%d",
 		execCtx.Iteration(),
 	)
-	response, err := s.model.GenerateContent(
+	stream, err := s.model.GenerateContentStream(
 		execCtx,
 		streamID,
 		"compaction",
 		messages,
 	)
+	if err != nil {
+		return fmt.Errorf(
+			"summarization model call: %w", err,
+		)
+	}
+	response, err := stream.Response()
 	if err != nil {
 		return fmt.Errorf(
 			"summarization model call: %w", err,

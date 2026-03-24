@@ -48,64 +48,6 @@ func (m *LCGWrapper) Unwrap() llms.Model {
 	return m.model
 }
 
-// GenerateContent implements gent.Model.GenerateContent.
-// When execCtx is provided, BeforeModelCallEvent and AfterModelCallEvent are published,
-// and a chunk is emitted for streaming subscribers.
-// Token usage is automatically normalized across providers.
-func (m *LCGWrapper) GenerateContent(
-	execCtx *gent.ExecutionContext,
-	streamId string,
-	streamTopicId string,
-	messages []llms.MessageContent,
-	options ...llms.CallOption,
-) (*gent.ContentResponse, error) {
-	// Publish BeforeModelCall event — subscribers may modify event.Request
-	// for ephemeral dynamic context injection.
-	beforeEvent := execCtx.PublishBeforeModelCall(m.modelName, messages)
-
-	// Use event.Request (possibly modified by subscribers)
-	// Type assert back to []llms.MessageContent
-	requestMessages := messages
-	if modifiedRequest, ok := beforeEvent.Request.([]llms.MessageContent); ok {
-		requestMessages = modifiedRequest
-	}
-
-	// Call the underlying model
-	ctx := execCtx.Context()
-	startTime := time.Now()
-	lcgResponse, err := m.model.GenerateContent(ctx, requestMessages, options...)
-	duration := time.Since(startTime)
-
-	// Convert response
-	var response *gent.ContentResponse
-	if lcgResponse != nil {
-		response = convertLCGResponse(lcgResponse, duration)
-	}
-
-	// Publish AfterModelCall event (also updates stats for tokens)
-	execCtx.PublishAfterModelCall(m.modelName, requestMessages, response, duration, err)
-
-	// Emit chunk for streaming subscribers (single chunk with complete content)
-	if response != nil && len(response.Choices) > 0 {
-		execCtx.EmitChunk(gent.StreamChunk{
-			Content:          response.Choices[0].Content,
-			ReasoningContent: response.Choices[0].ReasoningContent,
-			StreamId:         streamId,
-			StreamTopicId:    streamTopicId,
-			Err:              err,
-		})
-	} else if err != nil {
-		// Emit error chunk even if no response
-		execCtx.EmitChunk(gent.StreamChunk{
-			StreamId:      streamId,
-			StreamTopicId: streamTopicId,
-			Err:           err,
-		})
-	}
-
-	return response, err
-}
-
 // convertLCGResponse converts an llms.ContentResponse to gent.ContentResponse with normalized
 // tokens.
 func convertLCGResponse(
@@ -358,6 +300,3 @@ func (m *LCGWrapper) GenerateContentStream(
 
 // Compile-time check that LCGWrapper implements gent.Model.
 var _ gent.Model = (*LCGWrapper)(nil)
-
-// Compile-time check that LCGWrapper implements gent.StreamingModel.
-var _ gent.StreamingModel = (*LCGWrapper)(nil)
