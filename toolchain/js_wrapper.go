@@ -106,6 +106,13 @@ func (w *JsToolChainWrapper) GetToolSchema(
 	return w.wrapped.GetToolSchema(name)
 }
 
+// DeduplicateSummary delegates to the wrapped ToolChain.
+func (w *JsToolChainWrapper) DeduplicateSummary(
+	result *gent.ToolCallResult,
+) string {
+	return w.wrapped.DeduplicateSummary(result)
+}
+
 // RegisterTool delegates to the wrapped ToolChain.
 func (w *JsToolChainWrapper) RegisterTool(
 	tool any,
@@ -327,10 +334,7 @@ func (w *JsToolChainWrapper) executeSingleCode(
 	textFormat gent.TextFormat,
 ) (*gent.ToolChainResult, error) {
 	if code == "" {
-		return &gent.ToolChainResult{
-			Text: "Code executed successfully.",
-			Raw:  &gent.RawToolChainResult{},
-		}, nil
+		return &gent.ToolChainResult{}, nil
 	}
 	return w.executeCode(
 		execCtx, code, textFormat,
@@ -354,10 +358,7 @@ func (w *JsToolChainWrapper) executeDualMode(
 	var codeResult *gent.ToolChainResult
 	var codeErr error
 	if codeContent == "" {
-		codeResult = &gent.ToolChainResult{
-			Text: "Code executed successfully.",
-			Raw:  &gent.RawToolChainResult{},
-		}
+		codeResult = &gent.ToolChainResult{}
 	} else {
 		codeResult, codeErr = w.executeCode(
 			execCtx, codeContent, textFormat,
@@ -377,33 +378,23 @@ func (w *JsToolChainWrapper) executeDualMode(
 
 	// Wrap results in sections
 	var outerSections []gent.FormattedSection
-	if dcResult != nil && dcResult.Text != "" {
+	dcText := collectText(dcResult)
+	if dcText != "" {
 		outerSections = append(
 			outerSections, gent.FormattedSection{
 				Name:    "direct_call",
-				Content: dcResult.Text,
+				Content: dcText,
 			},
 		)
 	}
-	if codeResult != nil && codeResult.Text != "" {
+	codeText := collectText(codeResult)
+	if codeText != "" {
 		outerSections = append(
 			outerSections, gent.FormattedSection{
 				Name:    "code_execution",
-				Content: codeResult.Text,
+				Content: codeText,
 			},
 		)
-	}
-
-	// Merge raw results
-	merged := mergeRaw(dcResult, codeResult)
-
-	// Merge media
-	var media []gent.ContentPart
-	if dcResult != nil {
-		media = append(media, dcResult.Media...)
-	}
-	if codeResult != nil {
-		media = append(media, codeResult.Media...)
 	}
 
 	text := textFormat.FormatSections(outerSections)
@@ -411,32 +402,109 @@ func (w *JsToolChainWrapper) executeDualMode(
 		text = "Code executed successfully."
 	}
 
-	return &gent.ToolChainResult{
-		Text:  text,
-		Raw:   merged,
-		Media: media,
-	}, nil
+	// Collect media before clearing individual results.
+	media := collectMedia(dcResult, codeResult)
+
+	// Merge individual results (for dedup data) and
+	// add a synthetic entry with the combined text.
+	merged := mergeResults(dcResult, codeResult)
+	for _, r := range merged.Results {
+		r.Text = ""
+		r.Media = nil
+	}
+	merged.Results = append(
+		merged.Results,
+		&gent.ToolCallResult{
+			Text:  text,
+			Media: media,
+		},
+	)
+
+	return merged, nil
 }
 
-// mergeRaw combines RawToolChainResults from two results.
-func mergeRaw(
+// mergeResults combines ToolCallResults from two
+// ToolChainResults into a new ToolChainResult.
+func mergeResults(
 	a, b *gent.ToolChainResult,
-) *gent.RawToolChainResult {
-	merged := &gent.RawToolChainResult{}
+) *gent.ToolChainResult {
+	merged := &gent.ToolChainResult{}
 	for _, r := range []*gent.ToolChainResult{a, b} {
-		if r != nil && r.Raw != nil {
-			merged.Calls = append(
-				merged.Calls, r.Raw.Calls...,
-			)
+		if r != nil {
 			merged.Results = append(
-				merged.Results, r.Raw.Results...,
-			)
-			merged.Errors = append(
-				merged.Errors, r.Raw.Errors...,
+				merged.Results, r.Results...,
 			)
 		}
 	}
 	return merged
+}
+
+// collectText joins all non-empty Text fields from the
+// given ToolChainResult's individual results.
+func collectText(
+	r *gent.ToolChainResult,
+) string {
+	if r == nil {
+		return ""
+	}
+	var parts []string
+	for _, result := range r.Results {
+		if result.Text != "" {
+			parts = append(parts, result.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// collectMedia gathers all Media from the given
+// ToolChainResults' individual results.
+func collectMedia(
+	results ...*gent.ToolChainResult,
+) []gent.ContentPart {
+	var media []gent.ContentPart
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		for _, result := range r.Results {
+			media = append(media, result.Media...)
+		}
+	}
+	return media
+}
+
+// buildCodeResult constructs a ToolChainResult from a
+// collector's results and the wrapper's formatted text.
+// Individual results retain their Hash/Input/Output for
+// deduplication but have their Text cleared to avoid
+// duplication with the wrapper's combined text.
+func buildCodeResult(
+	collector *jsruntime.CollectedResults,
+	text string,
+) *gent.ToolChainResult {
+	built := collector.BuildResult()
+
+	// Collect media before clearing individual results.
+	var media []gent.ContentPart
+	for _, r := range built.Results {
+		media = append(media, r.Media...)
+	}
+
+	// Clear Text/Media on individual results to avoid
+	// duplication with the synthetic wrapper entry.
+	for _, r := range built.Results {
+		r.Text = ""
+		r.Media = nil
+	}
+
+	built.Results = append(
+		built.Results,
+		&gent.ToolCallResult{
+			Text:  text,
+			Media: media,
+		},
+	)
+	return built
 }
 
 // executeCode runs JavaScript code via Sobek, routing
@@ -535,13 +603,10 @@ func (w *JsToolChainWrapper) executeCode(
 				Content: err.Error(),
 			},
 		)
-		return &gent.ToolChainResult{
-			Text: textFormat.FormatSections(
-				sections,
-			),
-			Raw:   collector.BuildRaw(),
-			Media: collector.AllMedia,
-		}, nil
+		return buildCodeResult(
+			collector,
+			textFormat.FormatSections(sections),
+		), nil
 	}
 
 	// Success — reset consecutive error gauge
@@ -581,11 +646,10 @@ func (w *JsToolChainWrapper) executeCode(
 		},
 	)
 
-	return &gent.ToolChainResult{
-		Text: textFormat.FormatSections(sections),
-		Raw:  collector.BuildRaw(),
-		Media: collector.AllMedia,
-	}, nil
+	return buildCodeResult(
+		collector,
+		textFormat.FormatSections(sections),
+	), nil
 }
 
 // preValidationError builds the error result when
@@ -618,8 +682,9 @@ func (w *JsToolChainWrapper) preValidationError(
 		},
 	)
 	return &gent.ToolChainResult{
-		Text: errorText,
-		Raw:  &gent.RawToolChainResult{},
+		Results: []*gent.ToolCallResult{
+			{Text: errorText},
+		},
 	}, nil
 }
 
@@ -675,21 +740,21 @@ func writeLogEntry(
 	schemaFn jsruntime.SchemaLookupFn,
 ) {
 	name := ""
-	if entry.Call != nil {
-		name = entry.Call.Name
+	if entry.Result != nil {
+		name = entry.Result.Name
 	}
 	sb.WriteString(prefix)
 	sb.WriteString(" ")
 	sb.WriteString(name)
 
 	// Append args
-	if entry.Call != nil && entry.Call.Args != nil {
+	if entry.Result != nil && entry.Result.Args != nil {
 		sb.WriteString("(")
-		sb.WriteString(formatOutput(entry.Call.Args))
+		sb.WriteString(formatOutput(entry.Result.Args))
 		sb.WriteString(")")
 	}
 
-	if entry.Error != nil {
+	if entry.Result != nil && entry.Result.Error != nil {
 		enhanced := enhanceLogError(
 			entry, schemaFn,
 		)
@@ -698,7 +763,7 @@ func writeLogEntry(
 			sb.WriteString(enhanced)
 		} else {
 			sb.WriteString(" -> error: ")
-			sb.WriteString(entry.Error.Error())
+			sb.WriteString(entry.Result.Error.Error())
 			sb.WriteString("\n")
 		}
 		return
@@ -720,19 +785,19 @@ func enhanceLogError(
 	entry jsruntime.ToolCallEntry,
 	schemaFn jsruntime.SchemaLookupFn,
 ) string {
-	if schemaFn == nil || entry.Call == nil {
+	if schemaFn == nil || entry.Result == nil {
 		return ""
 	}
 	var ve *schema.ValidationError
-	if !errors.As(entry.Error, &ve) {
+	if !errors.As(entry.Result.Error, &ve) {
 		return ""
 	}
-	sch := schemaFn(entry.Call.Name)
+	sch := schemaFn(entry.Result.Name)
 	if sch == nil {
 		return ""
 	}
 	msg := sch.FormatForLLM(
-		entry.Call.Name, entry.Call.Args,
+		entry.Result.Name, entry.Result.Args,
 	)
 	if msg == "" {
 		return ""
@@ -740,7 +805,7 @@ func enhanceLogError(
 	var sb strings.Builder
 	sb.WriteString(msg)
 	jsruntime.WriteExampleCall(
-		&sb, entry.Call.Name, sch,
+		&sb, entry.Result.Name, sch,
 	)
 	return sb.String()
 }

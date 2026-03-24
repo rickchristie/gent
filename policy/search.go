@@ -318,6 +318,16 @@ func (t *PolicySearchTool) SuggestPolicies(
 	return suggestions, nil
 }
 
+// DeduplicateSummary returns an abbreviated observation for deduplicated calls.
+func (t *PolicySearchTool) DeduplicateSummary(
+	input PolicySearchInput, output string,
+) string {
+	return fmt.Sprintf(
+		`Searched policies for: %q. Full results available below.`,
+		input.Query,
+	)
+}
+
 // --- gent.IndexableTool implementation (for SearchJSON compatibility) ---
 
 func (t *PolicySearchTool) Domain() string              { return "Policy & Guidance" }
@@ -365,6 +375,16 @@ func (t *GetPolicyTool) Call(
 	return &gent.ToolResult[string]{
 		Text: fmt.Sprintf("# %s\n\n%s", p.Id, p.FullContent),
 	}, nil
+}
+
+// DeduplicateSummary returns an abbreviated observation for deduplicated calls.
+func (t *GetPolicyTool) DeduplicateSummary(
+	input GetPolicyInput, output string,
+) string {
+	return fmt.Sprintf(
+		`Retrieved policy: %q. Full content available below.`,
+		input.PolicyID,
+	)
 }
 
 // --- gent.IndexableTool implementation ---

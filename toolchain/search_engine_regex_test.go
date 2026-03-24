@@ -39,6 +39,12 @@ func (t *mockIndexableTool) Call(
 	return &gent.ToolResult[string]{Text: "ok"}, nil
 }
 
+func (t *mockIndexableTool) DeduplicateSummary(
+	input map[string]any, output string,
+) string {
+	return ""
+}
+
 func TestRegex_Id(t *testing.T) {
 	engine := NewRegexToolSearcher()
 	assert.Equal(t, "regex", engine.Id())

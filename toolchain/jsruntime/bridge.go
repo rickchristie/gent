@@ -176,22 +176,21 @@ func buildSingleResult(
 		return vm.ToValue(jsResult)
 	}
 
-	if result == nil || result.Raw == nil {
+	if result == nil || len(result.Results) == 0 {
 		jsResult["output"] = nil
 		return vm.ToValue(jsResult)
 	}
 
-	// For a single call, use first result/error
-	raw := result.Raw
-	if len(raw.Errors) > 0 && raw.Errors[0] != nil {
+	// For a single call, use first result
+	first := result.Results[0]
+	if first != nil && first.Error != nil {
 		jsResult["error"] = enhanceSchemaError(
-			vm, raw.Errors[0], toolName,
+			vm, first.Error, toolName,
 			source, schemaFn, req,
 		)
-	} else if len(raw.Results) > 0 &&
-		raw.Results[0] != nil {
+	} else if first != nil {
 		jsResult["output"] = normalizeOutput(
-			raw.Results[0].Output,
+			first.Output,
 		)
 	} else {
 		jsResult["output"] = nil
@@ -223,30 +222,27 @@ func buildParallelResults(
 		return vm.ToValue(results)
 	}
 
-	if result == nil || result.Raw == nil {
+	if result == nil || len(result.Results) == 0 {
 		return vm.ToValue([]any{})
 	}
 
-	raw := result.Raw
-	results := make([]any, len(raw.Calls))
-	for i, call := range raw.Calls {
+	results := make([]any, len(result.Results))
+	for i, r := range result.Results {
 		entry := map[string]any{
-			"name": call.Name,
+			"name": r.Name,
 		}
-		if i < len(raw.Errors) &&
-			raw.Errors[i] != nil {
+		if r.Error != nil {
 			req := map[string]any{}
 			if i < len(reqs) {
 				req = reqs[i]
 			}
 			entry["error"] = enhanceSchemaError(
-				vm, raw.Errors[i], call.Name,
+				vm, r.Error, r.Name,
 				source, schemaFn, req,
 			)
-		} else if i < len(raw.Results) &&
-			raw.Results[i] != nil {
+		} else if r.Output != nil {
 			entry["output"] = normalizeOutput(
-				raw.Results[i].Output,
+				r.Output,
 			)
 		} else {
 			entry["output"] = nil
@@ -432,11 +428,9 @@ func normalizeOutput(output any) any {
 }
 
 // ToolCallEntry represents a single tool call with its
-// result or error.
+// result (which includes Name, Args, Output, and Error).
 type ToolCallEntry struct {
-	Call   *gent.ToolCall
-	Result *gent.RawToolCallResult
-	Error  error
+	Result *gent.ToolCallResult
 }
 
 // ToolCallGroup represents one or more tool calls from a
@@ -452,11 +446,7 @@ type ToolCallGroup struct {
 // all results so the wrapper can build a single
 // ToolChainResult.
 type CollectedResults struct {
-	AllCalls   []*gent.ToolCall
-	AllResults []*gent.RawToolCallResult
-	AllErrors  []error
-	AllMedia   []gent.ContentPart
-	TextParts  []string
+	AllResults []*gent.ToolCallResult
 	Groups     []ToolCallGroup
 }
 
@@ -472,61 +462,42 @@ func (c *CollectedResults) Add(
 	if result == nil {
 		return
 	}
-	if result.Raw != nil {
-		c.AllCalls = append(
-			c.AllCalls, result.Raw.Calls...,
-		)
-		c.AllResults = append(
-			c.AllResults, result.Raw.Results...,
-		)
-		c.AllErrors = append(
-			c.AllErrors, result.Raw.Errors...,
-		)
+	c.AllResults = append(
+		c.AllResults, result.Results...,
+	)
 
-		// Build group for sequential/parallel tracking
-		group := ToolCallGroup{}
-		for i, call := range result.Raw.Calls {
-			entry := ToolCallEntry{Call: call}
-			if i < len(result.Raw.Results) {
-				entry.Result = result.Raw.Results[i]
-			}
-			if i < len(result.Raw.Errors) {
-				entry.Error = result.Raw.Errors[i]
-			}
-			group.Entries = append(
-				group.Entries, entry,
-			)
-		}
-		if len(group.Entries) > 0 {
-			c.Groups = append(c.Groups, group)
-		}
-	}
-	c.AllMedia = append(c.AllMedia, result.Media...)
-	if result.Text != "" {
-		c.TextParts = append(
-			c.TextParts, result.Text,
+	// Build group for sequential/parallel tracking
+	group := ToolCallGroup{}
+	for _, r := range result.Results {
+		group.Entries = append(
+			group.Entries,
+			ToolCallEntry{Result: r},
 		)
+	}
+	if len(group.Entries) > 0 {
+		c.Groups = append(c.Groups, group)
 	}
 }
 
 // HasSchemaErrors returns true if any collected error
 // is a schema.ValidationError.
 func (c *CollectedResults) HasSchemaErrors() bool {
-	for _, err := range c.AllErrors {
+	for _, r := range c.AllResults {
+		if r == nil || r.Error == nil {
+			continue
+		}
 		var valErr *schema.ValidationError
-		if errors.As(err, &valErr) {
+		if errors.As(r.Error, &valErr) {
 			return true
 		}
 	}
 	return false
 }
 
-// BuildRaw returns the merged RawToolChainResult.
-func (c *CollectedResults) BuildRaw() *gent.RawToolChainResult {
-	return &gent.RawToolChainResult{
-		Calls:   c.AllCalls,
+// BuildResult returns the merged ToolChainResult.
+func (c *CollectedResults) BuildResult() *gent.ToolChainResult {
+	return &gent.ToolChainResult{
 		Results: c.AllResults,
-		Errors:  c.AllErrors,
 	}
 }
 

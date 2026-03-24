@@ -344,14 +344,16 @@ func (tc *MockToolChain) Execute(
 		resultErr = toolErr
 	}
 
+	text := "<" + toolName + ">\n" + output +
+		"\n</" + toolName + ">"
 	return &gent.ToolChainResult{
-		Text: "<observation>\n<" + toolName + ">\n" + output + "\n</" + toolName +
-			">\n</observation>",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: toolName, Args: nil}},
-			Results: []*gent.RawToolCallResult{{Name: toolName, Output: output}},
-			Errors:  []error{resultErr},
-		},
+		Results: []*gent.ToolCallResult{{
+			Name:   toolName,
+			Args:   nil,
+			Output: output,
+			Error:  resultErr,
+			Text:   text,
+		}},
 	}, nil
 }
 
@@ -388,8 +390,9 @@ func (tc *MockToolChain) executeCodeExec(
 			},
 		)
 		return &gent.ToolChainResult{
-			Text: errorText,
-			Raw:  &gent.RawToolChainResult{},
+			Results: []*gent.ToolCallResult{{
+				Text: errorText,
+			}},
 		}, nil
 	}
 
@@ -400,16 +403,24 @@ func (tc *MockToolChain) executeCodeExec(
 		)
 	}
 	return &gent.ToolChainResult{
-		Text: "Code executed successfully.",
-		Raw:  &gent.RawToolChainResult{},
+		Results: []*gent.ToolCallResult{{
+			Text: "Code executed successfully.",
+		}},
 	}, nil
+}
+
+// DeduplicateSummary implements gent.ToolChain.
+func (tc *MockToolChain) DeduplicateSummary(
+	result *gent.ToolCallResult,
+) string {
+	return ""
 }
 
 // FormatToolResult returns the tool result text that MockToolChain.Execute generates.
 // This is useful for tests to build expected NextPrompt values.
-// The result format is: <observation>\n<toolname>\noutput\n</toolname>\n</observation>
+// The result format is: <toolname>\noutput\n</toolname>
 func (tc *MockToolChain) FormatToolResult(toolName, output string) string {
-	return "<observation>\n<" + toolName + ">\n" + output + "\n</" + toolName + ">\n</observation>"
+	return "<" + toolName + ">\n" + output + "\n</" + toolName + ">"
 }
 
 // FormatCodeErrorResult returns the code error result text

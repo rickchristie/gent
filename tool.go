@@ -110,6 +110,33 @@ type Tool[I, TextOutput any] interface {
 	//   - Media: Optional images/audio (passed through by ToolChain)
 	//   - Instructions: Optional follow-up guidance for the LLM
 	Call(ctx context.Context, input I) (*ToolResult[TextOutput], error)
+
+	// DeduplicateSummary returns an abbreviated observation text
+	// for this tool call when the same call (same name + args)
+	// appears in an earlier iteration's scratchpad.
+	//
+	// Return a non-empty string to enable deduplication. The
+	// string replaces the full tool output in earlier iterations
+	// to reduce token usage. The most recent occurrence always
+	// keeps its full text.
+	//
+	// Return "" to disable deduplication for this tool. Most
+	// tools should return "" — only stateless tools where the
+	// same input always produces the same output benefit from
+	// deduplication.
+	//
+	// Example for a search tool:
+	//
+	//	func (t *SearchTool) DeduplicateSummary(
+	//	    input SearchInput, output SearchResult,
+	//	) string {
+	//	    return fmt.Sprintf(
+	//	        "Searched for %q. Found %d results. "+
+	//	            "Full results available below.",
+	//	        input.Query, len(output.Items),
+	//	    )
+	//	}
+	DeduplicateSummary(input I, output TextOutput) string
 }
 
 // ToolResult is the result of calling a Tool with typed output.
@@ -174,6 +201,7 @@ type ToolFunc[I, TextOutput any] struct {
 	policy      string
 	schema      map[string]any
 	fn          func(ctx context.Context, input I) (TextOutput, error)
+	dedupFn     func(input I, output TextOutput) string
 }
 
 // NewToolFunc creates a new ToolFunc with typed input and output.
@@ -231,4 +259,25 @@ func (t *ToolFunc[I, TextOutput]) Call(
 		Text:  output,
 		Media: nil,
 	}, nil
+}
+
+// DeduplicateSummary returns an abbreviated observation text
+// for deduplication. Returns "" (no dedup) unless a custom
+// function was set via [ToolFunc.WithDeduplicateSummary].
+func (t *ToolFunc[I, TextOutput]) DeduplicateSummary(
+	input I, output TextOutput,
+) string {
+	if t.dedupFn == nil {
+		return ""
+	}
+	return t.dedupFn(input, output)
+}
+
+// WithDeduplicateSummary sets the deduplication summary
+// function and returns self for chaining.
+func (t *ToolFunc[I, TextOutput]) WithDeduplicateSummary(
+	fn func(input I, output TextOutput) string,
+) *ToolFunc[I, TextOutput] {
+	t.dedupFn = fn
+	return t
 }

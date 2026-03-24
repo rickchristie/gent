@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rickchristie/gent"
+	agentutil "github.com/rickchristie/gent/agents"
 	"github.com/rickchristie/gent/format"
 	"github.com/rickchristie/gent/section"
 	"github.com/rickchristie/gent/termination"
@@ -38,7 +39,7 @@ type Agent struct {
 	thinkingSection     gent.TextSection
 	timeProvider        gent.TimeProvider
 	callOptions            []llms.CallOption
-	repetitionConfig       RepetitionConfig
+	repetitionConfig       agentutil.RepetitionConfig
 	maxResponseChars       int
 	responseTooLongMessage string
 }
@@ -58,9 +59,9 @@ func NewAgent(model gent.Model) *Agent {
 		termination:            termination.NewText("answer"),
 		timeProvider:           gent.NewDefaultTimeProvider(),
 		systemPromptBuilder:    DefaultSystemPromptBuilder,
-		repetitionConfig:       DefaultRepetitionConfig(),
-		maxResponseChars:       DefaultMaxResponseChars,
-		responseTooLongMessage: DefaultResponseTooLongMessage,
+		repetitionConfig:       agentutil.DefaultRepetitionConfig(),
+		maxResponseChars:       agentutil.DefaultMaxResponseChars,
+		responseTooLongMessage: agentutil.DefaultResponseTooLongMessage,
 	}
 }
 
@@ -139,11 +140,11 @@ func (r *Agent) WithStreaming(_ bool) *Agent {
 }
 
 // WithRepetitionConfig sets the streaming repetition detection
-// configuration. See [RepetitionConfig] for available options.
-// Default: [DefaultRepetitionConfig] (enabled, block size 400,
+// configuration. See [agentutil.RepetitionConfig] for available options.
+// Default: [agentutil.DefaultRepetitionConfig] (enabled, block size 400,
 // threshold 3).
 func (r *Agent) WithRepetitionConfig(
-	cfg RepetitionConfig,
+	cfg agentutil.RepetitionConfig,
 ) *Agent {
 	r.repetitionConfig = cfg
 	return r
@@ -152,7 +153,7 @@ func (r *Agent) WithRepetitionConfig(
 // WithMaxResponseChars sets the maximum characters allowed in a single model response.
 // When exceeded, the stream is cancelled and the accumulated content is inspected for
 // repetition. If repetition is detected, the loop recovery path runs. If not, a "too long"
-// reminder is injected instead. Default: [DefaultMaxResponseChars] (16000).
+// reminder is injected instead. Default: [agentutil.DefaultMaxResponseChars] (16000).
 // Set to 0 to disable.
 func (r *Agent) WithMaxResponseChars(n int) *Agent {
 	r.maxResponseChars = n
@@ -160,7 +161,8 @@ func (r *Agent) WithMaxResponseChars(n int) *Agent {
 }
 
 // WithResponseTooLongMessage sets the message injected when a response exceeds
-// MaxResponseChars but is NOT a repetition loop. Default: [DefaultResponseTooLongMessage].
+// MaxResponseChars but is NOT a repetition loop.
+// Default: [agentutil.DefaultResponseTooLongMessage].
 func (r *Agent) WithResponseTooLongMessage(msg string) *Agent {
 	r.responseTooLongMessage = msg
 	return r
@@ -215,7 +217,7 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 
 	// Handle repetition or max-size truncation.
 	if repResult != nil {
-		if errors.Is(repResult.Err, ErrMaxResponseSize) {
+		if errors.Is(repResult.Err, agentutil.ErrMaxResponseSize) {
 			return r.handleResponseTooLong(execCtx, data, response)
 		}
 		return r.handleRepetition(execCtx, data, response, repResult)
@@ -251,10 +253,14 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	actionContents, hasActions := parsed[r.toolChain.Name()]
 	if hasActions && len(actionContents) > 0 {
 		// Execute tool calls (automatically traced via execCtx)
-		observation := r.executeToolCalls(execCtx, actionContents)
+		tcResult, observation := r.executeToolCalls(
+			execCtx, actionContents,
+		)
 
-		// Build iteration and update data
-		iter := r.buildIteration(responseContent, observation)
+		// Build iteration: AI response + observation from tool results
+		iter := r.buildToolCallIteration(
+			responseContent, tcResult,
+		)
 		data.AddIterationHistory(iter)
 
 		// Add to scratchpad for next call
@@ -488,13 +494,13 @@ func (r *Agent) handleResponseTooLong(
 // For RepetitionTerminate, it returns a fatal error.
 func (r *Agent) handleRepetition(
 	execCtx *gent.ExecutionContext, data gent.LoopData,
-	response *gent.ContentResponse, rep *RepetitionResult,
+	response *gent.ContentResponse, rep *agentutil.RepetitionResult,
 ) (*gent.AgentLoopResult, error) {
 	// Update stats.
 	execCtx.Stats().IncrCounter(gent.SCRepetitionLoopTotal, 1)
 	execCtx.Stats().IncrGauge(gent.SGRepetitionLoopConsecutive, 1)
 
-	if r.repetitionConfig.Action == RepetitionTerminate {
+	if r.repetitionConfig.Action == agentutil.RepetitionTerminate {
 		return nil, fmt.Errorf("model call failed: %w", rep.Err)
 	}
 
@@ -624,23 +630,14 @@ func (r *Agent) buildMessages(
 	// 2. Task message (role: user) - text + media parts
 	messages = append(messages, r.buildTaskMessage(data))
 
-	// 3. Scratchpad messages (interleaved AI and human messages)
-	scratchpad := data.GetScratchPad()
-	currentIteration := execCtx.Iteration()
-	includedIterations := 0
-	for _, iter := range scratchpad {
-		if iter.ExpireAfterIteration > 0 &&
-			currentIteration >= iter.ExpireAfterIteration {
-			continue
-		}
-		includedIterations++
-		for _, msg := range iter.Messages {
-			messages = append(messages, llms.MessageContent{
-				Role:  msg.Role,
-				Parts: toLLMParts(msg.Parts),
-			})
-		}
-	}
+	// 3. Scratchpad messages with deduplication
+	scratchpadMsgs, includedIterations := agentutil.ScratchpadToMessages(
+		data.GetScratchPad(),
+		execCtx.Iteration(),
+		r.toolChain,
+		r.format,
+	)
+	messages = append(messages, scratchpadMsgs...)
 
 	// 4. BEGIN!/CONTINUE! message (role: user)
 	continueText := "BEGIN!"
@@ -674,7 +671,7 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) llms.MessageContent {
 	}
 
 	// Add media parts
-	parts = append(parts, toLLMParts(task.Media)...)
+	parts = append(parts, agentutil.ToLLMParts(task.Media)...)
 
 	return llms.MessageContent{
 		Role:  llms.ChatMessageTypeHuman,
@@ -682,51 +679,73 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) llms.MessageContent {
 	}
 }
 
-// toLLMParts converts gent.ContentPart slice to llms.ContentPart slice.
-func toLLMParts(parts []gent.ContentPart) []llms.ContentPart {
-	result := make([]llms.ContentPart, len(parts))
-	for i, p := range parts {
-		result[i] = p
-	}
-	return result
-}
-
-// executeToolCalls executes tool calls from the parsed action contents.
-// The result.Text contains formatted sections from the ToolChain. This method
-// collects all sections and wraps them in a single observation section.
+// executeToolCalls executes tool calls from the parsed
+// action contents. Returns the ToolChainResult (for metadata
+// storage on the iteration) and the formatted observation
+// text (for NextPrompt).
 func (r *Agent) executeToolCalls(
 	execCtx *gent.ExecutionContext,
 	contents []string,
-) string {
-	var allSections []string
+) (*gent.ToolChainResult, string) {
+	var allResults []*gent.ToolCallResult
+	var errorSections []string
 
 	for _, content := range contents {
-		result, err := r.toolChain.Execute(execCtx, content, r.format)
+		result, err := r.toolChain.Execute(
+			execCtx, content, r.format,
+		)
 		if err != nil {
-			// Format error using the text format
-			errorText := r.format.FormatSections([]gent.FormattedSection{
-				{Name: "error", Content: fmt.Sprintf("Error: %v", err)},
-			})
-			allSections = append(allSections, errorText)
+			errorText := r.format.FormatSections(
+				[]gent.FormattedSection{
+					{
+						Name: "error",
+						Content: fmt.Sprintf(
+							"Error: %v", err,
+						),
+					},
+				},
+			)
+			errorSections = append(
+				errorSections, errorText,
+			)
 			continue
 		}
+		allResults = append(
+			allResults, result.Results...,
+		)
+	}
 
-		if result.Text != "" {
-			allSections = append(allSections, result.Text)
+	// Add error sections as synthetic ToolCallResults
+	// so they appear in the observation text.
+	for _, errText := range errorSections {
+		allResults = append(allResults, &gent.ToolCallResult{
+			Name:  "error",
+			Error: fmt.Errorf("tool chain execution error"),
+			Text:  errText,
+		})
+	}
+
+	tcResult := &gent.ToolChainResult{Results: allResults}
+
+	// Build observation text for NextPrompt
+	var sections []string
+	for _, tcr := range allResults {
+		if tcr.Text != "" {
+			sections = append(sections, tcr.Text)
 		}
-
-		// TODO: Handle result.Media for multimodal support
-		// For now, media is not included in the observation text
 	}
-
-	if len(allSections) == 0 {
-		return ""
+	if len(sections) == 0 {
+		return tcResult, ""
 	}
-
-	// Wrap all sections in a single observation
-	return r.format.FormatSections([]gent.FormattedSection{
-		{Name: "observation", Content: strings.Join(allSections, "\n")},
-	})
+	observation := r.format.FormatSections(
+		[]gent.FormattedSection{
+			{
+				Name:    "observation",
+				Content: strings.Join(sections, "\n"),
+			},
+		},
+	)
+	return tcResult, observation
 }
 
 // buildIteration creates an Iteration from response and observation.
@@ -756,12 +775,35 @@ func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 	}
 }
 
+// buildToolCallIteration creates an Iteration from an AI
+// response and a ToolChainResult. The AI response is stored
+// as the first message. The observation (from ToIteration)
+// carries tool chain metadata for deduplication.
+func (r *Agent) buildToolCallIteration(
+	response string,
+	tcResult *gent.ToolChainResult,
+) *gent.Iteration {
+	aiMsg := &gent.MessageContent{
+		Role:  llms.ChatMessageTypeAI,
+		Parts: []gent.ContentPart{
+			llms.TextContent{Text: response},
+		},
+	}
+
+	obsIter := tcResult.ToIteration(r.format)
+	messages := append(
+		[]*gent.MessageContent{aiMsg},
+		obsIter.Messages...,
+	)
+	return &gent.Iteration{Messages: messages}
+}
+
 // callModel calls the model via streaming and returns the complete response.
 // Also returns a non-nil RepetitionResult if a loop was detected.
 func (r *Agent) callModel(
 	execCtx *gent.ExecutionContext, streamId string,
 	streamTopicId string, messages []llms.MessageContent,
-) (*gent.ContentResponse, *RepetitionResult, error) {
+) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
 	opts := r.effectiveCallOptions()
 	r.warnRestrictiveSampling(execCtx, opts)
 	return r.callModelStreaming(execCtx, streamId, streamTopicId, messages, opts)
@@ -856,7 +898,7 @@ func (r *Agent) callModelStreaming(
 	execCtx *gent.ExecutionContext,
 	streamId string, streamTopicId string,
 	messages []llms.MessageContent, opts []llms.CallOption,
-) (*gent.ContentResponse, *RepetitionResult, error) {
+) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
 	stream, err := r.model.GenerateContentStream(
 		execCtx, streamId, streamTopicId, messages, opts...,
 	)
@@ -865,7 +907,7 @@ func (r *Agent) callModelStreaming(
 	}
 
 	acc := gent.NewStreamAccumulator()
-	detector := newRepetitionDetector(r.repetitionConfig)
+	detector := agentutil.NewRepetitionDetector(r.repetitionConfig)
 	totalChars := 0
 
 	for chunk := range stream.Chunks() {
@@ -892,7 +934,7 @@ func (r *Agent) callModelStreaming(
 			if repResult := detector.CheckAccumulated(); repResult != nil {
 				return resp, repResult, nil
 			}
-			return resp, &RepetitionResult{Err: ErrMaxResponseSize}, nil
+			return resp, &agentutil.RepetitionResult{Err: agentutil.ErrMaxResponseSize}, nil
 		}
 	}
 

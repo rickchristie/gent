@@ -141,6 +141,11 @@ goal is to make it easy to write and experiment with custom agent loops.
 - For multi-line string inputs and expected outputs, ALWAYS use backticks (raw string literals) with real line breaks. NEVER use `"" + ""` concatenation or `\n` escapes for multi-line strings.
 - Assert exact string matches. Do NOT use `Contains`, `HasPrefix`, or other partial match shortcuts. If the full expected output is known, assert it exactly.
 
+**Running Tests**
+- Run tests without `-v` and without piping to `grep`. Go test already prints full output for failing packages — no filtering needed.
+- Use 300s timeout to accommodate ONNX embedder index builds in policy/search tests.
+- Example: `go test ./... -count=1 -timeout 300s`
+
 **Testing Stats & Limits**
 - Whenever we create new stats (`*ExecutionStats`), we need to create tests on:
   - Stat field is incremented correctly.

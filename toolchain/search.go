@@ -453,40 +453,37 @@ func (c *SearchJSON) Execute(
 	}
 
 	calls := parsed.([]*gent.ToolCall)
-	raw := &gent.RawToolChainResult{
-		Calls:   calls,
-		Results: make([]*gent.RawToolCallResult, len(calls)),
-		Errors:  make([]error, len(calls)),
+	results := make([]*gent.ToolCallResult, len(calls))
+	for i, call := range calls {
+		results[i] = &gent.ToolCallResult{
+			Name: call.Name,
+			Args: call.Args,
+			Hash: ToolCallResultHash(call.Name, call.Args),
+		}
 	}
 
-	var sections []gent.FormattedSection
-	var allMedia []gent.ContentPart
 	seenTools := make(map[string]bool)
 
 	for i, call := range calls {
 		if call.Name == searchToolName {
 			c.executeSearch(
-				ctx, execCtx, call, raw, i,
-				&sections, seenTools,
+				ctx, execCtx, call, results[i],
+				textFormat, seenTools,
 			)
 		} else if call.Name == getSchemaToolName &&
 			c.searchType == SearchGet {
 			c.executeGetSchema(
-				execCtx, call, raw, i, &sections,
+				execCtx, call, results[i], textFormat,
 			)
 		} else {
 			c.executeRegularTool(
-				ctx, execCtx, call, raw, i,
-				&sections, &allMedia,
+				ctx, execCtx, call, results[i],
+				textFormat,
 			)
 		}
 	}
 
-	return &gent.ToolChainResult{
-		Text:  textFormat.FormatSections(sections),
-		Media: allMedia,
-		Raw:   raw,
-	}, nil
+	return &gent.ToolChainResult{Results: results}, nil
 }
 
 // executeSearch handles the built-in search tool call.
@@ -497,9 +494,8 @@ func (c *SearchJSON) executeSearch(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	call *gent.ToolCall,
-	raw *gent.RawToolChainResult,
-	idx int,
-	sections *[]gent.FormattedSection,
+	result *gent.ToolCallResult,
+	textFormat gent.TextFormat,
 	seenTools map[string]bool,
 ) {
 	// Validate search args
@@ -507,14 +503,10 @@ func (c *SearchJSON) executeSearch(
 		if err := c.compiledSearchSchema.Validate(
 			call.Args,
 		); err != nil {
-			raw.Errors[idx] = err
-			*sections = append(
-				*sections, gent.FormattedSection{
-					Name: call.Name,
-					Content: fmt.Sprintf(
-						"Error: %v", err,
-					),
-				},
+			result.Error = err
+			result.Text = formatSectionText(
+				textFormat, call.Name,
+				fmt.Sprintf("Error: %v", err),
 			)
 			if execCtx != nil {
 				execCtx.PublishAfterToolCall(
@@ -559,12 +551,10 @@ func (c *SearchJSON) executeSearch(
 		err := fmt.Errorf(
 			"unknown query_type %q", queryType,
 		)
-		raw.Errors[idx] = err
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", err),
-			},
+		result.Error = err
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf("Error: %v", err),
 		)
 		duration := time.Since(startTime)
 		if execCtx != nil {
@@ -577,16 +567,14 @@ func (c *SearchJSON) executeSearch(
 	}
 
 	// Execute search
-	results, err := engine.Search(ctx, query)
+	searchResults, err := engine.Search(ctx, query)
 	duration := time.Since(startTime)
 
 	if err != nil {
-		raw.Errors[idx] = err
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", err),
-			},
+		result.Error = err
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf("Error: %v", err),
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
@@ -598,20 +586,15 @@ func (c *SearchJSON) executeSearch(
 	}
 
 	// Paginate results
-	totalResults := len(results)
+	totalResults := len(searchResults)
 	startIdx := (page - 1) * c.pageSize
 	endIdx := startIdx + c.pageSize
 	if startIdx >= totalResults {
 		// Page beyond results
-		raw.Results[idx] = &gent.RawToolCallResult{
-			Name:   call.Name,
-			Output: c.noResultsMessage,
-		}
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: c.noResultsMessage,
-			},
+		result.Output = c.noResultsMessage
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			c.noResultsMessage,
 		)
 		if execCtx != nil {
 			execCtx.Stats().ResetGauge(
@@ -632,7 +615,7 @@ func (c *SearchJSON) executeSearch(
 		endIdx = totalResults
 	}
 
-	pageNames := results[startIdx:endIdx]
+	pageNames := searchResults[startIdx:endIdx]
 
 	// Split matched tools into new (full def) vs duplicate
 	// (abbreviated reference for tools already printed).
@@ -676,15 +659,9 @@ func (c *SearchJSON) executeSearch(
 	)
 
 	outputStr := output.String()
-	raw.Results[idx] = &gent.RawToolCallResult{
-		Name:   call.Name,
-		Output: outputStr,
-	}
-	*sections = append(
-		*sections, gent.FormattedSection{
-			Name:    call.Name,
-			Content: outputStr,
-		},
+	result.Output = outputStr
+	result.Text = formatSectionText(
+		textFormat, call.Name, outputStr,
 	)
 
 	// Reset consecutive error gauges on success
@@ -709,9 +686,8 @@ func (c *SearchJSON) executeSearch(
 func (c *SearchJSON) executeGetSchema(
 	execCtx *gent.ExecutionContext,
 	call *gent.ToolCall,
-	raw *gent.RawToolChainResult,
-	idx int,
-	sections *[]gent.FormattedSection,
+	result *gent.ToolCallResult,
+	textFormat gent.TextFormat,
 ) {
 	startTime := time.Now()
 	toolName, _ := call.Args["tool_name"].(string)
@@ -722,12 +698,10 @@ func (c *SearchJSON) executeGetSchema(
 
 	if toolName == "" {
 		err := fmt.Errorf("tool_name is required")
-		raw.Errors[idx] = err
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", err),
-			},
+		result.Error = err
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf("Error: %v", err),
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
@@ -740,12 +714,10 @@ func (c *SearchJSON) executeGetSchema(
 	tool, ok := c.toolMap[toolName]
 	if !ok {
 		err := fmt.Errorf("tool not found: %s", toolName)
-		raw.Errors[idx] = err
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", err),
-			},
+		result.Error = err
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf("Error: %v", err),
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
@@ -760,13 +732,9 @@ func (c *SearchJSON) executeGetSchema(
 		[]any{tool}, c.printOutputSchema,
 	)
 
-	raw.Results[idx] = &gent.RawToolCallResult{
-		Name: call.Name, Output: outputStr,
-	}
-	*sections = append(
-		*sections, gent.FormattedSection{
-			Name: call.Name, Content: outputStr,
-		},
+	result.Output = outputStr
+	result.Text = formatSectionText(
+		textFormat, call.Name, outputStr,
 	)
 
 	if execCtx != nil {
@@ -790,32 +758,28 @@ func (c *SearchJSON) executeRegularTool(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
 	call *gent.ToolCall,
-	raw *gent.RawToolChainResult,
-	idx int,
-	sections *[]gent.FormattedSection,
-	allMedia *[]gent.ContentPart,
+	result *gent.ToolCallResult,
+	textFormat gent.TextFormat,
 ) {
 	tool, ok := c.toolMap[call.Name]
 	if !ok {
-		raw.Errors[idx] = fmt.Errorf(
+		toolErr := fmt.Errorf(
 			"%w: %s", gent.ErrUnknownTool, call.Name,
 		)
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name: call.Name,
-				Content: fmt.Sprintf(
-					"Error: unknown tool %q. "+
-						"Use the search tool "+
-						"to find available "+
-						"tools.",
-					call.Name,
-				),
-			},
+		result.Error = toolErr
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf(
+				"Error: unknown tool %q. "+
+					"Use the search tool "+
+					"to find available tools.",
+				call.Name,
+			),
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
 				call.Name, call.Args,
-				nil, 0, raw.Errors[idx],
+				nil, 0, toolErr,
 			)
 		}
 		return
@@ -824,14 +788,10 @@ func (c *SearchJSON) executeRegularTool(
 	// Validate args against schema
 	if compiled, has := c.schemaMap[call.Name]; has {
 		if err := compiled.Validate(call.Args); err != nil {
-			raw.Errors[idx] = err
-			*sections = append(
-				*sections, gent.FormattedSection{
-					Name: call.Name,
-					Content: fmt.Sprintf(
-						"Error: %v", err,
-					),
-				},
+			result.Error = err
+			result.Text = formatSectionText(
+				textFormat, call.Name,
+				fmt.Sprintf("Error: %v", err),
 			)
 			if execCtx != nil {
 				execCtx.PublishAfterToolCall(
@@ -848,14 +808,10 @@ func (c *SearchJSON) executeRegularTool(
 		tool, call.Args,
 	)
 	if err != nil {
-		raw.Errors[idx] = err
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name: call.Name,
-				Content: fmt.Sprintf(
-					"Error: %v", err,
-				),
-			},
+		result.Error = err
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf("Error: %v", err),
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
@@ -864,6 +820,7 @@ func (c *SearchJSON) executeRegularTool(
 		}
 		return
 	}
+	result.Input = typedInput
 
 	// Publish BeforeToolCall (may modify args)
 	inputToUse := typedInput
@@ -881,14 +838,10 @@ func (c *SearchJSON) executeRegularTool(
 	duration := time.Since(startTime)
 
 	if err != nil {
-		raw.Errors[idx] = err
-		*sections = append(
-			*sections, gent.FormattedSection{
-				Name: call.Name,
-				Content: fmt.Sprintf(
-					"Error: %v", err,
-				),
-			},
+		result.Error = err
+		result.Text = formatSectionText(
+			textFormat, call.Name,
+			fmt.Sprintf("Error: %v", err),
 		)
 	} else {
 		// Successful tool call
@@ -902,38 +855,38 @@ func (c *SearchJSON) executeRegularTool(
 			)
 		}
 
-		raw.Results[idx] = &gent.RawToolCallResult{
-			Name:   output.Name,
-			Output: output.Text,
-		}
+		result.Output = output.Text
 
-		// Format output. String outputs pass through as-is (no JSON wrapping).
-		outputText, marshalErr := formatToolOutputJSON(output.Text)
+		// Format output. String outputs pass through
+		// as-is (no JSON wrapping).
+		outputText, marshalErr := formatToolOutputJSON(
+			output.Text,
+		)
 		if marshalErr != nil {
-			*sections = append(*sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: "error: failed to marshal output",
-			})
+			result.Text = formatSectionText(
+				textFormat, call.Name,
+				"error: failed to marshal output",
+			)
 		} else {
 			if output.Instructions != "" {
-				*sections = append(*sections, gent.FormattedSection{
-					Name: call.Name,
-					Children: []gent.FormattedSection{
-						{Name: "result", Content: outputText},
-						{Name: "instructions", Content: output.Instructions},
-					},
-				})
+				result.Text = textFormat.FormatSections(
+					[]gent.FormattedSection{{
+						Name: call.Name,
+						Children: []gent.FormattedSection{
+							{Name: "result", Content: outputText},
+							{Name: "instructions", Content: output.Instructions},
+						},
+					}},
+				)
 			} else {
-				*sections = append(*sections, gent.FormattedSection{
-					Name: call.Name, Content: outputText,
-				})
+				result.Text = formatSectionText(
+					textFormat, call.Name, outputText,
+				)
 			}
 		}
 
 		if len(output.Media) > 0 {
-			*allMedia = append(
-				*allMedia, output.Media...,
-			)
+			result.Media = output.Media
 		}
 	}
 
@@ -947,6 +900,85 @@ func (c *SearchJSON) executeRegularTool(
 			outputVal, duration, err,
 		)
 	}
+}
+
+// DeduplicateSummary returns an abbreviated observation text
+// for a tool call whose output duplicates an earlier call.
+//
+// For built-in tools (search_tool_registry, get_tool_schema),
+// it returns a summary directly. For regular tools, it
+// delegates to the tool's DeduplicateSummary via reflection.
+func (c *SearchJSON) DeduplicateSummary(
+	result *gent.ToolCallResult,
+) string {
+	if result.Name == searchToolName {
+		return c.searchDedupSummary(result)
+	}
+	if result.Name == getSchemaToolName {
+		return c.getSchemaDedupSummary(result)
+	}
+	tool, ok := c.toolMap[result.Name]
+	if !ok {
+		return ""
+	}
+	return CallDeduplicateSummaryReflect(
+		tool, result.Input, result.Output,
+	)
+}
+
+// searchDedupSummary generates a dedup summary for the
+// built-in search_tool_registry tool.
+func (c *SearchJSON) searchDedupSummary(
+	result *gent.ToolCallResult,
+) string {
+	query, _ := result.Args["query"].(string)
+	outputStr, _ := result.Output.(string)
+	if outputStr == "" {
+		return ""
+	}
+	// Count tool names in the output by scanning for
+	// "- toolname:" pattern lines.
+	var toolNames []string
+	for _, line := range strings.Split(outputStr, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "- ") {
+			name := strings.TrimPrefix(line, "- ")
+			if idx := strings.Index(name, ":"); idx > 0 {
+				toolNames = append(
+					toolNames, name[:idx],
+				)
+			}
+		}
+	}
+	if len(toolNames) == 0 {
+		return fmt.Sprintf(
+			"Searched for: %q. "+
+				"Full results available below.",
+			query,
+		)
+	}
+	return fmt.Sprintf(
+		"Searched for: %q. Found %d tools: [%s]. "+
+			"Full results available below.",
+		query, len(toolNames),
+		strings.Join(toolNames, ", "),
+	)
+}
+
+// getSchemaDedupSummary generates a dedup summary for
+// the built-in get_tool_schema tool.
+func (c *SearchJSON) getSchemaDedupSummary(
+	result *gent.ToolCallResult,
+) string {
+	toolName, _ := result.Args["tool_name"].(string)
+	if toolName == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Loaded schema for: %s. "+
+			"Full schemas available below.",
+		toolName,
+	)
 }
 
 // GetToolSchema returns the compiled schema for the

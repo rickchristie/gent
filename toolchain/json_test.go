@@ -108,8 +108,8 @@ func TestJSON_RegisterTool(t *testing.T) {
 				assert.ErrorIs(t, err, tt.expected.err)
 			} else {
 				require.NoError(t, err)
-				assert.Len(t, result.Raw.Calls, tt.expected.callCount)
-				assert.Equal(t, tt.expected.callName, result.Raw.Calls[0].Name)
+				assert.Len(t, result.Results, tt.expected.callCount)
+				assert.Equal(t, tt.expected.callName, result.Results[0].Name)
 			}
 		})
 	}
@@ -508,21 +508,21 @@ func TestJSON_Execute(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Len(t, result.Raw.Calls, tt.expected.callCount)
+			assert.Len(t, result.Results, tt.expected.callCount)
 
 			for i, expectedResult := range tt.expected.results {
 				if tt.expected.errors[i] != nil {
-					assert.Error(t, result.Raw.Errors[i])
+					assert.Error(t, result.Results[i].Error)
 					if errors.Is(tt.expected.errors[i], gent.ErrUnknownTool) {
-						assert.ErrorIs(t, result.Raw.Errors[i], gent.ErrUnknownTool)
+						assert.ErrorIs(t, result.Results[i].Error, gent.ErrUnknownTool)
 					} else {
-						assert.Equal(t, tt.expected.errors[i].Error(), result.Raw.Errors[i].Error())
+						assert.Equal(t, tt.expected.errors[i].Error(), result.Results[i].Error.Error())
 					}
 				} else {
-					assert.NoError(t, result.Raw.Errors[i])
-					assert.Equal(t, expectedResult, getOutputString(result.Raw.Results[i].Output))
+					assert.NoError(t, result.Results[i].Error)
+					assert.Equal(t, expectedResult, getOutputString(result.Results[i].Output))
 					if len(tt.expected.resultNames) > i {
-						assert.Equal(t, tt.expected.resultNames[i], result.Raw.Results[i].Name)
+						assert.Equal(t, tt.expected.resultNames[i], result.Results[i].Name)
 					}
 				}
 			}
@@ -729,14 +729,20 @@ func TestJSON_Execute_SchemaValidation(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.expected.noToolError {
-				assert.NoError(t, result.Raw.Errors[0])
-				require.NotNil(t, result.Raw.Results[0])
-				assert.Equal(t, tt.expected.result, getOutputString(result.Raw.Results[0].Output))
+				assert.NoError(t, result.Results[0].Error)
+				require.NotNil(t, result.Results[0])
+				assert.Equal(
+					t, tt.expected.result,
+					getOutputString(result.Results[0].Output),
+				)
 			} else {
-				require.Error(t, result.Raw.Errors[0])
-				assert.Contains(t, result.Raw.Errors[0].Error(), tt.expected.errContains)
+				require.Error(t, result.Results[0].Error)
+				assert.Contains(
+					t, result.Results[0].Error.Error(),
+					tt.expected.errContains,
+				)
 				if tt.expected.resultIsNil {
-					assert.Nil(t, result.Raw.Results[0])
+					assert.Nil(t, result.Results[0].Output)
 				}
 			}
 		})
@@ -806,7 +812,7 @@ func TestJSON_ParseSection_DateAsString(t *testing.T) {
 
 			execResult, err := tc.Execute(nil, tt.input.content, testFormat())
 			require.NoError(t, err)
-			assert.NoError(t, execResult.Raw.Errors[0])
+			assert.NoError(t, execResult.Results[0].Error)
 		})
 	}
 }
@@ -895,7 +901,7 @@ func TestJSON_ParseSection_TimeFormatsAsString(t *testing.T) {
 
 			execResult, err := tc.Execute(nil, content, testFormat())
 			require.NoError(t, err)
-			assert.NoError(t, execResult.Raw.Errors[0])
+			assert.NoError(t, execResult.Results[0].Error)
 		})
 	}
 }
@@ -961,9 +967,9 @@ func TestJSON_Execute_TimeConversion(t *testing.T) {
 
 			result, err := tc.Execute(nil, tt.input.content, testFormat())
 			require.NoError(t, err)
-			require.NoError(t, result.Raw.Errors[0])
+			require.NoError(t, result.Results[0].Error)
 
-			output := getOutputString(result.Raw.Results[0].Output)
+			output := getOutputString(result.Results[0].Output)
 			assert.Equal(t, tt.expected.output, output)
 		})
 	}
@@ -1032,9 +1038,9 @@ func TestJSON_Execute_DurationConversion(t *testing.T) {
 
 			result, err := tc.Execute(nil, content, testFormat())
 			require.NoError(t, err)
-			require.NoError(t, result.Raw.Errors[0])
+			require.NoError(t, result.Results[0].Error)
 
-			output := getOutputString(result.Raw.Results[0].Output)
+			output := getOutputString(result.Results[0].Output)
 			assert.Equal(t, tt.expected.output, output)
 		})
 	}
@@ -1836,8 +1842,8 @@ func TestJSON_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 				"subscriber should have seen original args")
 			assert.Equal(t, tt.expected.toolReceived, receivedArgs,
 				"tool should have received modified args")
-			assert.NoError(t, result.Raw.Errors[0])
-			assert.Equal(t, tt.expected.result, getOutputString(result.Raw.Results[0].Output))
+			assert.NoError(t, result.Results[0].Error)
+			assert.Equal(t, tt.expected.result, getOutputString(result.Results[0].Output))
 		})
 	}
 }
@@ -1912,8 +1918,8 @@ func TestJSON_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 			result, err := tc.Execute(execCtx, tt.input.content, testFormat())
 
 			require.NoError(t, err)
-			assert.NoError(t, result.Raw.Errors[0])
-			assert.NoError(t, result.Raw.Errors[1])
+			assert.NoError(t, result.Results[0].Error)
+			assert.NoError(t, result.Results[1].Error)
 			assert.Equal(t, tt.expected.tool1Received, tool1Received)
 			assert.Equal(t, tt.expected.tool2Received, tool2Received)
 		})
@@ -2057,6 +2063,12 @@ func (t *instructionsTool) Call(
 		Text:         t.result,
 		Instructions: t.instructions,
 	}, nil
+}
+
+func (t *instructionsTool) DeduplicateSummary(
+	input map[string]any, output string,
+) string {
+	return ""
 }
 
 func TestJSON_Execute_TracesToolCallErrors(t *testing.T) {
@@ -2495,7 +2507,7 @@ func TestJSON_Execute_WithInstructions(t *testing.T) {
 			result, err := tc.Execute(nil, tt.input.content, testFormat())
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.expected.text, result.Text)
+			assert.Equal(t, tt.expected.text, collectText(result))
 		})
 	}
 }
@@ -2509,11 +2521,11 @@ func TestJSON_UnknownToolErrorMessage(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.ErrorIs(
-		t, result.Raw.Errors[0],
+		t, result.Results[0].Error,
 		gent.ErrUnknownTool,
 	)
 	assert.Contains(
-		t, result.Text,
+		t, collectText(result),
 		`Error: unknown tool "nonexistent". `+
 			`Review the available tools `+
 			`section for valid tool names.`,

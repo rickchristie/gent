@@ -683,7 +683,7 @@ func TestJsWrapper_Execute_DirectCall(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Equal(
-				t, tc.expected.text, result.Text,
+				t, tc.expected.text, collectText(result),
 			)
 		})
 	}
@@ -884,7 +884,7 @@ console.log("line2");
 			require.NotNil(t, result)
 			assert.Equal(
 				t, tc.expected.text,
-				result.Text,
+				collectText(result),
 			)
 		})
 	}
@@ -1112,8 +1112,8 @@ func TestJsWrapper_Execute_EdgeCases(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.Equal(
-			t, "Code executed successfully.",
-			result.Text,
+			t, "",
+			collectText(result),
 		)
 	})
 
@@ -1140,7 +1140,7 @@ if (r.error) {
 			assert.Equal(
 				t,
 				"<output>\ngot error\n</output>",
-				result.Text,
+				collectText(result),
 			)
 		},
 	)
@@ -1177,7 +1177,7 @@ execution interrupted: cancelled
     ^ cancelled
 
 </output>`,
-				result.Text,
+				collectText(result),
 			)
 		},
 	)
@@ -1199,11 +1199,11 @@ console.log(JSON.stringify(c.output));
 				execCtx, content, tf,
 			)
 			require.NoError(t, err)
-			require.NotNil(t, result.Raw)
-			assert.NotEmpty(t, result.Raw.Calls)
+			require.NotNil(t, result)
+			assert.NotEmpty(t, result.Results)
 			assert.Equal(
 				t, "lookup_customer",
-				result.Raw.Calls[0].Name,
+				result.Results[0].Name,
 			)
 		},
 	)
@@ -1241,7 +1241,7 @@ if (r.error) {
 					"tool error: assert.AnError "+
 					"general error for testing\n"+
 					"</output>",
-				result.Text,
+				collectText(result),
 			)
 		},
 	)
@@ -1268,23 +1268,20 @@ console.log("done");
 </code>`
 	result, err := w.Execute(execCtx, content, tf)
 	require.NoError(t, err)
-	require.NotNil(t, result.Raw)
+	require.NotNil(t, result)
 
-	// Should have 2 tool calls in raw
-	assert.Len(t, result.Raw.Calls, 2)
+	// Should have 2 tool calls + 1 synthetic entry
+	require.True(t, len(result.Results) >= 2)
 	assert.Equal(
 		t, "lookup_customer",
-		result.Raw.Calls[0].Name,
+		result.Results[0].Name,
 	)
 	assert.Equal(
-		t, "get_orders", result.Raw.Calls[1].Name,
+		t, "get_orders", result.Results[1].Name,
 	)
 
-	// Results should be non-nil
-	assert.Len(t, result.Raw.Results, 2)
-
 	// Verify first result contains customer data
-	firstOutput, ok := result.Raw.Results[0].
+	firstOutput, ok := result.Results[0].
 		Output.(string)
 	require.True(t, ok)
 	assert.Equal(
@@ -2007,11 +2004,19 @@ Fix ALL errors above before re-submitting your code.
 
 			assert.Equal(
 				t, tc.expected.text,
-				result.Text,
+				collectText(result),
 			)
 
 			if tc.expected.emptyCalls {
-				assert.Empty(t, result.Raw.Calls)
+				// No actual tool calls — only synthetic
+				// text entries (Name == "").
+				var toolCalls []*gent.ToolCallResult
+				for _, r := range result.Results {
+					if r.Name != "" {
+						toolCalls = append(toolCalls, r)
+					}
+				}
+				assert.Empty(t, toolCalls)
 			}
 
 			assert.Equal(
@@ -2945,7 +2950,7 @@ Example:
 			require.NotNil(t, result)
 			assert.Equal(
 				t, tc.expected.textFn(),
-				result.Text,
+				collectText(result),
 			)
 			assert.Equal(
 				t, tc.expected.codeExec,
@@ -2987,10 +2992,11 @@ console.log(r.error);
 	require.NotNil(t, result)
 
 	// The error propagated from wrapped SearchJSON
-	// should be ErrUnknownTool
-	require.Len(t, result.Raw.Errors, 1)
+	// should be ErrUnknownTool. First result is the
+	// tool call, last is the synthetic text entry.
+	require.True(t, len(result.Results) >= 1)
 	assert.ErrorIs(
-		t, result.Raw.Errors[0],
+		t, result.Results[0].Error,
 		gent.ErrUnknownTool,
 	)
 
@@ -3005,7 +3011,7 @@ console.log(r.error);
 			"<output>\n"+
 			"unknown tool: nonexistent_tool\n"+
 			"</output>",
-		result.Text,
+		collectText(result),
 	)
 }
 
@@ -3260,7 +3266,7 @@ ReferenceError: undefinedVar is not defined
 			require.NotNil(t, result)
 			assert.Equal(
 				t, tc.expected.text,
-				result.Text,
+				collectText(result),
 			)
 		})
 	}
@@ -3461,10 +3467,7 @@ Code executed successfully.
 <lookup_customer>
 {"id":"C001","name":"Alice"}
 </lookup_customer>
-</direct_call>
-<code_execution>
-Code executed successfully.
-</code_execution>`,
+</direct_call>`,
 				toolCallCount: 1,
 			},
 		},
@@ -3514,7 +3517,7 @@ computed: 42
 			if tc.expected.text != "" {
 				assert.Equal(
 					t, tc.expected.text,
-					result.Text,
+					collectText(result),
 				)
 			}
 
@@ -3599,7 +3602,7 @@ func TestJsWrapper_DirectCallDisabled(t *testing.T) {
 			// direct_call ignored, content treated as
 			// code fallback (not valid JS, errors)
 			assert.Contains(
-				t, result.Text, "<output>",
+				t, collectText(result), "<output>",
 			)
 		},
 	)
@@ -3631,7 +3634,7 @@ console.log(r.output.name);
 <output>
 Alice
 </output>`,
-				result.Text,
+				collectText(result),
 			)
 		},
 	)
@@ -3655,7 +3658,7 @@ Alice
 				`<output>
 hello
 </output>`,
-				result.Text,
+				collectText(result),
 			)
 		},
 	)

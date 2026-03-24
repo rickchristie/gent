@@ -46,34 +46,20 @@ func mockToolCallFn(
 			[]byte(content), &arr,
 		); err == nil && len(arr) > 0 {
 			// For parallel calls, merge results
-			merged := &gent.ToolChainResult{
-				Raw: &gent.RawToolChainResult{},
-			}
+			merged := &gent.ToolChainResult{}
 			for _, a := range arr {
 				if e, ok := errs[a.Tool]; ok {
-					merged.Raw.Calls = append(
-						merged.Raw.Calls,
-						&gent.ToolCall{Name: a.Tool},
+					merged.Results = append(
+						merged.Results,
+						&gent.ToolCallResult{
+							Name:  a.Tool,
+							Error: e,
+						},
 					)
-					merged.Raw.Results = append(
-						merged.Raw.Results, nil,
-					)
-					merged.Raw.Errors = append(
-						merged.Raw.Errors, e,
-					)
-				} else if r, ok := results[a.Tool]; ok &&
-					r.Raw != nil {
-					merged.Raw.Calls = append(
-						merged.Raw.Calls,
-						r.Raw.Calls...,
-					)
-					merged.Raw.Results = append(
-						merged.Raw.Results,
-						r.Raw.Results...,
-					)
-					merged.Raw.Errors = append(
-						merged.Raw.Errors,
-						r.Raw.Errors...,
+				} else if r, ok := results[a.Tool]; ok {
+					merged.Results = append(
+						merged.Results,
+						r.Results...,
 					)
 				}
 			}
@@ -130,17 +116,11 @@ func TestToolBridge(t *testing.T) {
 					`console.log(JSON.stringify(r));`,
 				results: map[string]*gent.ToolChainResult{
 					"lookup": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "lookup"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:   "lookup",
+								Output: `{"name":"Alice"}`,
 							},
-							Results: []*gent.RawToolCallResult{
-								{
-									Name:   "lookup",
-									Output: `{"name":"Alice"}`,
-								},
-							},
-							Errors: []error{nil},
 						},
 					},
 				},
@@ -198,25 +178,13 @@ func TestToolBridge(t *testing.T) {
 					`console.log(JSON.stringify(r));`,
 				results: map[string]*gent.ToolChainResult{
 					"a": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "a"},
-							},
-							Results: []*gent.RawToolCallResult{
-								{Name: "a", Output: `"ra"`},
-							},
-							Errors: []error{nil},
+						Results: []*gent.ToolCallResult{
+							{Name: "a", Output: `"ra"`},
 						},
 					},
 					"b": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "b"},
-							},
-							Results: []*gent.RawToolCallResult{
-								{Name: "b", Output: `"rb"`},
-							},
-							Errors: []error{nil},
+						Results: []*gent.ToolCallResult{
+							{Name: "b", Output: `"rb"`},
 						},
 					},
 				},
@@ -308,17 +276,11 @@ func TestToolBridge(t *testing.T) {
 				source: `tool.call({tool: "noargs"});`,
 				results: map[string]*gent.ToolChainResult{
 					"noargs": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "noargs"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:   "noargs",
+								Output: "ok",
 							},
-							Results: []*gent.RawToolCallResult{
-								{
-									Name:   "noargs",
-									Output: "ok",
-								},
-							},
-							Errors: []error{nil},
 						},
 					},
 				},
@@ -347,31 +309,19 @@ func TestToolBridge(t *testing.T) {
 					`console.log(d.output);`,
 				results: map[string]*gent.ToolChainResult{
 					"get_id": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "get_id"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:   "get_id",
+								Output: `"C001"`,
 							},
-							Results: []*gent.RawToolCallResult{
-								{
-									Name:   "get_id",
-									Output: `"C001"`,
-								},
-							},
-							Errors: []error{nil},
 						},
 					},
 					"get_name": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "get_name"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:   "get_name",
+								Output: `"Alice"`,
 							},
-							Results: []*gent.RawToolCallResult{
-								{
-									Name:   "get_name",
-									Output: `"Alice"`,
-								},
-							},
-							Errors: []error{nil},
 						},
 					},
 				},
@@ -889,14 +839,11 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"create_case": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_case"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "create_case",
+								Error: valErr,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErr},
 						},
 					},
 				},
@@ -936,15 +883,10 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"create_case": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_case"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErrNilArgs,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "create_case",
+								Error: valErrNilArgs,
 							},
 						},
 					},
@@ -993,28 +935,18 @@ console.log("err2: " + r2.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"create_case": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_case"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErr,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "create_case",
+								Error: valErr,
 							},
 						},
 					},
 					"lookup_customer": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "lookup_customer"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErrLookup,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "lookup_customer",
+								Error: valErrLookup,
 							},
 						},
 					},
@@ -1083,17 +1015,11 @@ console.log(r.error || "no error");`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"create_case": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_case"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:   "create_case",
+								Output: `{"id":"C001"}`,
 							},
-							Results: []*gent.RawToolCallResult{
-								{
-									Name:   "create_case",
-									Output: `{"id":"C001"}`,
-								},
-							},
-							Errors: []error{nil},
 						},
 					},
 				},
@@ -1124,14 +1050,11 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"unknown_tool": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "unknown_tool"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "unknown_tool",
+								Error: valErr,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErr},
 						},
 					},
 				},
@@ -1156,15 +1079,10 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"fail": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "fail"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								errors.New(
+						Results: []*gent.ToolCallResult{
+							{
+								Name: "fail",
+								Error: errors.New(
 									"tool failed",
 								),
 							},
@@ -1190,14 +1108,11 @@ console.log(r.error);`,
 				schemaFn: nil,
 				results: map[string]*gent.ToolChainResult{
 					"create_case": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_case"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "create_case",
+								Error: valErr,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErr},
 						},
 					},
 				},
@@ -1226,14 +1141,11 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"update_address": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "update_address"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "update_address",
+								Error: valErrAddress,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErrAddress},
 						},
 					},
 				},
@@ -1283,14 +1195,11 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"create_order": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_order"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "create_order",
+								Error: valErrOrder,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErrOrder},
 						},
 					},
 				},
@@ -1344,14 +1253,11 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"update_stock": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "update_stock"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "update_stock",
+								Error: valErrStock,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErrStock},
 						},
 					},
 				},
@@ -1406,14 +1312,11 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"update_geo": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "update_geo"},
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "update_geo",
+								Error: valErrGeo,
 							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{valErrGeo},
 						},
 					},
 				},
@@ -1469,15 +1372,10 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"create_shipment": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "create_shipment"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErrShipment,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "create_shipment",
+								Error: valErrShipment,
 							},
 						},
 					},
@@ -1541,15 +1439,10 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"update_regions": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "update_regions"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErrRegions,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "update_regions",
+								Error: valErrRegions,
 							},
 						},
 					},
@@ -1611,15 +1504,10 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"update_products": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "update_products"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErrProducts,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "update_products",
+								Error: valErrProducts,
 							},
 						},
 					},
@@ -1681,15 +1569,10 @@ console.log(r.error);`,
 				schemaFn: schemaFn,
 				results: map[string]*gent.ToolChainResult{
 					"update_catalog": {
-						Raw: &gent.RawToolChainResult{
-							Calls: []*gent.ToolCall{
-								{Name: "update_catalog"},
-							},
-							Results: []*gent.RawToolCallResult{
-								nil,
-							},
-							Errors: []error{
-								valErrCatalog,
+						Results: []*gent.ToolCallResult{
+							{
+								Name:  "update_catalog",
+								Error: valErrCatalog,
 							},
 						},
 					},
@@ -1956,21 +1839,15 @@ func TestToolBridge_StructOutput(t *testing.T) {
 	callFn := mockToolCallFn(
 		map[string]*gent.ToolChainResult{
 			"create_case": {
-				Raw: &gent.RawToolChainResult{
-					Calls: []*gent.ToolCall{
-						{Name: "create_case"},
-					},
-					Results: []*gent.RawToolCallResult{
-						{
-							Name: "create_case",
-							Output: &caseResult{
-								CaseID:  "CASE-1",
-								OrderID: "ORD-1",
-								Status:  "open",
-							},
+				Results: []*gent.ToolCallResult{
+					{
+						Name: "create_case",
+						Output: &caseResult{
+							CaseID:  "CASE-1",
+							OrderID: "ORD-1",
+							Status:  "open",
 						},
 					},
-					Errors: []error{nil},
 				},
 			},
 		},
@@ -2006,19 +1883,13 @@ func TestCollectedResults(t *testing.T) {
 	c := NewCollectedResults()
 
 	r1 := &gent.ToolChainResult{
-		Text: "result1",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: "t1"}},
-			Results: []*gent.RawToolCallResult{{Name: "t1"}},
-			Errors:  []error{nil},
+		Results: []*gent.ToolCallResult{
+			{Name: "t1", Output: "out1"},
 		},
 	}
 	r2 := &gent.ToolChainResult{
-		Text: "result2",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: "t2"}},
-			Results: []*gent.RawToolCallResult{{Name: "t2"}},
-			Errors:  []error{errors.New("e")},
+		Results: []*gent.ToolCallResult{
+			{Name: "t2", Error: errors.New("e")},
 		},
 	}
 
@@ -2026,15 +1897,10 @@ func TestCollectedResults(t *testing.T) {
 	c.Add(r2)
 	c.Add(nil) // should not panic
 
-	raw := c.BuildRaw()
-	assert.Len(t, raw.Calls, 2)
-	assert.Len(t, raw.Results, 2)
-	assert.Len(t, raw.Errors, 2)
-	assert.Equal(t, "t1", raw.Calls[0].Name)
-	assert.Equal(t, "t2", raw.Calls[1].Name)
-	assert.Equal(
-		t,
-		[]string{"result1", "result2"},
-		c.TextParts,
-	)
+	built := c.BuildResult()
+	assert.Len(t, built.Results, 2)
+	assert.Equal(t, "t1", built.Results[0].Name)
+	assert.Equal(t, "t2", built.Results[1].Name)
+	assert.Equal(t, "out1", built.Results[0].Output)
+	assert.Error(t, built.Results[1].Error)
 }

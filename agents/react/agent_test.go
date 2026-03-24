@@ -141,6 +141,12 @@ func (m *mockToolChain) Execute(
 	return &gent.ToolChainResult{}, nil
 }
 
+func (m *mockToolChain) DeduplicateSummary(
+	result *gent.ToolCallResult,
+) string {
+	return ""
+}
+
 // ----------------------------------------------------------------------------
 // Mock Termination for testing
 // ----------------------------------------------------------------------------
@@ -500,12 +506,12 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 		"action": {"tool: search\nargs:\n  q: test"},
 	})
 	tc := newMockToolChain().WithResults(&gent.ToolChainResult{
-		Text: "<observation>\n<search>\nfound it\n</search>\n</observation>",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: "search", Args: map[string]any{"q": "test"}}},
-			Results: []*gent.RawToolCallResult{{Name: "search", Output: "found it"}},
-			Errors:  []error{nil},
-		},
+		Results: []*gent.ToolCallResult{{
+			Name:   "search",
+			Args:   map[string]any{"q": "test"},
+			Output: "found it",
+			Text:   "<search>\nfound it\n</search>",
+		}},
 	})
 	term := newMockTermination()
 
@@ -534,12 +540,11 @@ func TestAgent_Next_ToolError(t *testing.T) {
 		"action": {"tool: broken"},
 	})
 	tc := newMockToolChain().WithResults(&gent.ToolChainResult{
-		Text: "<observation>\n<broken>\nError: tool failed\n</broken>\n</observation>",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: "broken", Args: nil}},
-			Results: []*gent.RawToolCallResult{nil},
-			Errors:  []error{errors.New("tool failed")},
-		},
+		Results: []*gent.ToolCallResult{{
+			Name:  "broken",
+			Error: errors.New("tool failed"),
+			Text:  "<broken>\nError: tool failed\n</broken>",
+		}},
 	})
 	term := newMockTermination()
 
@@ -958,20 +963,16 @@ func TestAgent_Next_MultipleTools(t *testing.T) {
 	tc := newMockToolChain().
 		WithResults(
 			&gent.ToolChainResult{
-				Text: "<observation>\n<a>\nresult a\n</a>\n</observation>",
-				Raw: &gent.RawToolChainResult{
-					Calls:   []*gent.ToolCall{{Name: "a", Args: nil}},
-					Results: []*gent.RawToolCallResult{{Name: "a", Output: "result a"}},
-					Errors:  []error{nil},
-				},
+				Results: []*gent.ToolCallResult{{
+					Name: "a", Output: "result a",
+					Text: "<a>\nresult a\n</a>",
+				}},
 			},
 			&gent.ToolChainResult{
-				Text: "<observation>\n<b>\nresult b\n</b>\n</observation>",
-				Raw: &gent.RawToolChainResult{
-					Calls:   []*gent.ToolCall{{Name: "b", Args: nil}},
-					Results: []*gent.RawToolCallResult{{Name: "b", Output: "result b"}},
-					Errors:  []error{nil},
-				},
+				Results: []*gent.ToolCallResult{{
+					Name: "b", Output: "result b",
+					Text: "<b>\nresult b\n</b>",
+				}},
 			},
 		)
 	term := newMockTermination()
@@ -1026,14 +1027,14 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 					"answer": {"Your booking has been rescheduled successfully!"},
 				},
 				toolResult: &gent.ToolChainResult{
-					Text: "<observation>\n<reschedule_booking>\nBooking rescheduled\n</reschedule_booking>\n</observation>",
-					Raw: &gent.RawToolChainResult{
-						Calls: []*gent.ToolCall{{Name: "reschedule_booking", Args: map[string]any{
+					Results: []*gent.ToolCallResult{{
+						Name: "reschedule_booking",
+						Args: map[string]any{
 							"booking_id": "BK001",
-						}}},
-						Results: []*gent.RawToolCallResult{{Name: "reschedule_booking", Output: "Booking rescheduled"}},
-						Errors:  []error{nil},
-					},
+						},
+						Output: "Booking rescheduled",
+						Text:   "<reschedule_booking>\nBooking rescheduled\n</reschedule_booking>",
+					}},
 				},
 			},
 			expected: expected{
@@ -1071,12 +1072,12 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 					"action": {"- tool: search\n  args:\n    q: test"},
 				},
 				toolResult: &gent.ToolChainResult{
-					Text: "<observation>\n<search>\nsearch results\n</search>\n</observation>",
-					Raw: &gent.RawToolChainResult{
-						Calls:   []*gent.ToolCall{{Name: "search", Args: map[string]any{"q": "test"}}},
-						Results: []*gent.RawToolCallResult{{Name: "search", Output: "search results"}},
-						Errors:  []error{nil},
-					},
+					Results: []*gent.ToolCallResult{{
+						Name:   "search",
+						Args:   map[string]any{"q": "test"},
+						Output: "search results",
+						Text:   "<search>\nsearch results\n</search>",
+					}},
 				},
 			},
 			expected: expected{
@@ -1098,12 +1099,11 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 					"answer": {"I completed the task!"},
 				},
 				toolResult: &gent.ToolChainResult{
-					Text: "<observation>\n<failing_tool>\nError: tool execution failed\n</failing_tool>\n</observation>",
-					Raw: &gent.RawToolChainResult{
-						Calls:   []*gent.ToolCall{{Name: "failing_tool", Args: nil}},
-						Results: []*gent.RawToolCallResult{nil},
-						Errors:  []error{errors.New("tool execution failed")},
-					},
+					Results: []*gent.ToolCallResult{{
+						Name:  "failing_tool",
+						Error: errors.New("tool execution failed"),
+						Text:  "<failing_tool>\nError: tool execution failed\n</failing_tool>",
+					}},
 				},
 			},
 			expected: expected{
@@ -2051,12 +2051,12 @@ func TestAgent_BeforeSystemPromptEvent_DynamicPerIteration(t *testing.T) {
 		},
 	}
 	tc := newMockToolChain().WithResults(&gent.ToolChainResult{
-		Text: "<observation>\n<search>\nfound\n</search>\n</observation>",
-		Raw: &gent.RawToolChainResult{
-			Calls:   []*gent.ToolCall{{Name: "search", Args: map[string]any{"q": "test"}}},
-			Results: []*gent.RawToolCallResult{{Name: "search", Output: "found"}},
-			Errors:  []error{nil},
-		},
+		Results: []*gent.ToolCallResult{{
+			Name:   "search",
+			Args:   map[string]any{"q": "test"},
+			Output: "found",
+			Text:   "<search>\nfound\n</search>",
+		}},
 	})
 	term := newMockTermination()
 

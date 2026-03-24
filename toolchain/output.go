@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/rickchristie/gent"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,4 +33,14 @@ func formatToolOutputYAML(output any) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+// formatSectionText is a convenience helper that formats a
+// single named section using the given TextFormat.
+func formatSectionText(
+	tf gent.TextFormat, name string, content string,
+) string {
+	return tf.FormatSections([]gent.FormattedSection{
+		{Name: name, Content: content},
+	})
 }

@@ -1,4 +1,4 @@
-package react
+package agents
 
 import (
 	"errors"
@@ -126,7 +126,7 @@ type RepetitionResult struct {
 	RepeatedBlock string
 }
 
-// repetitionDetector monitors streaming text for degenerate loops.
+// RepetitionDetector monitors streaming text for degenerate loops.
 // It uses two complementary strategies:
 //
 //  1. Exact block matching via FNV-1a hash: detects verbatim repetition of paragraph-sized blocks.
@@ -135,7 +135,7 @@ type RepetitionResult struct {
 // Blocks are extracted with 50% overlap (stride = BlockSize/2) to catch repeating units that
 // don't align with fixed block boundaries. A third check enforces a hard max on total response
 // length.
-type repetitionDetector struct {
+type RepetitionDetector struct {
 	cfg RepetitionConfig
 
 	// Accumulated text buffer.
@@ -144,7 +144,7 @@ type repetitionDetector struct {
 	// Position of the next block start (advances by stride, not block size).
 	nextBlockStart int
 
-	// Exact match: FNV hash → repetition count.
+	// Exact match: FNV hash -> repetition count.
 	exactHashes map[uint64]int
 
 	// SimHash: list of fingerprints for near-duplicate comparison.
@@ -152,8 +152,9 @@ type repetitionDetector struct {
 	similarRunCount int
 }
 
-func newRepetitionDetector(cfg RepetitionConfig) *repetitionDetector {
-	return &repetitionDetector{
+// NewRepetitionDetector creates a new RepetitionDetector with the given config.
+func NewRepetitionDetector(cfg RepetitionConfig) *RepetitionDetector {
+	return &RepetitionDetector{
 		cfg:         cfg,
 		exactHashes: make(map[uint64]int),
 	}
@@ -161,7 +162,7 @@ func newRepetitionDetector(cfg RepetitionConfig) *repetitionDetector {
 
 // Feed adds new text to the detector and checks for repetition.
 // Returns a non-nil RepetitionResult if a kill condition is met, nil otherwise.
-func (d *repetitionDetector) Feed(text string) *RepetitionResult {
+func (d *RepetitionDetector) Feed(text string) *RepetitionResult {
 	if !d.cfg.Enabled {
 		return nil
 	}
@@ -191,7 +192,9 @@ func (d *repetitionDetector) Feed(text string) *RepetitionResult {
 		if d.isNearDuplicate(sh) {
 			d.similarRunCount++
 			if d.similarRunCount >= d.cfg.SimilarThreshold {
-				return &RepetitionResult{Err: ErrRepetitionDetected, RepeatedBlock: string(block)}
+				return &RepetitionResult{
+					Err: ErrRepetitionDetected, RepeatedBlock: string(block),
+				}
 			}
 		} else {
 			d.similarRunCount = 0
@@ -207,7 +210,7 @@ func (d *repetitionDetector) Feed(text string) *RepetitionResult {
 // used when MaxResponseChars truncates a response — we check if the truncated content
 // shows signs of looping even if the normal streaming detection hasn't triggered yet.
 // Returns non-nil RepetitionResult if repetition is found, nil if the content looks clean.
-func (d *repetitionDetector) CheckAccumulated() *RepetitionResult {
+func (d *RepetitionDetector) CheckAccumulated() *RepetitionResult {
 	if !d.cfg.Enabled {
 		return nil
 	}
@@ -228,7 +231,7 @@ func (d *repetitionDetector) CheckAccumulated() *RepetitionResult {
 
 // findBlockByHash scans the buffer for a block whose FNV hash matches. Returns empty
 // string if not found (should not happen since the hash came from our own blocks).
-func (d *repetitionDetector) findBlockByHash(target uint64) string {
+func (d *RepetitionDetector) findBlockByHash(target uint64) string {
 	stride := d.cfg.BlockSize / 2
 	if stride < 1 {
 		stride = 1
@@ -244,7 +247,7 @@ func (d *repetitionDetector) findBlockByHash(target uint64) string {
 
 // isNearDuplicate checks if the given SimHash is within
 // MaxHammingDist of any previously seen fingerprint.
-func (d *repetitionDetector) isNearDuplicate(sh uint64) bool {
+func (d *RepetitionDetector) isNearDuplicate(sh uint64) bool {
 	for _, prev := range d.simHashes {
 		if hammingDistance(sh, prev) <= d.cfg.MaxHammingDist {
 			return true

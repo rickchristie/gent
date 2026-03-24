@@ -1175,7 +1175,7 @@ func TestSearchJSON_Pin_ToolStillSearchable(
 	)
 	require.NoError(t, err)
 	assert.Contains(
-		t, result.Text, "pinned_tool",
+		t, collectText(result), "pinned_tool",
 	)
 }
 
@@ -1419,10 +1419,10 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "order_lookup",
+				t, collectText(result), "order_lookup",
 			)
 			assert.Contains(
-				t, result.Text,
+				t, collectText(result),
 				"Look up order details",
 			)
 		},
@@ -1439,22 +1439,22 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			require.NoError(t, err)
 			// Default page size is 3, so page 1 shows 3
 			assert.Contains(
-				t, result.Text, "order_lookup",
+				t, collectText(result), "order_lookup",
 			)
 			assert.Contains(
-				t, result.Text, "send_email",
+				t, collectText(result), "send_email",
 			)
 			assert.Contains(
-				t, result.Text, "check_inventory",
+				t, collectText(result), "check_inventory",
 			)
 			assert.NotContains(
-				t, result.Text, "billing_summary",
+				t, collectText(result), "billing_summary",
 			)
 			assert.Contains(
-				t, result.Text, "page 1 of 2",
+				t, collectText(result), "page 1 of 2",
 			)
 			assert.Contains(
-				t, result.Text, "4 total results",
+				t, collectText(result), "4 total results",
 			)
 		},
 	)
@@ -1469,13 +1469,13 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "billing_summary",
+				t, collectText(result), "billing_summary",
 			)
 			assert.NotContains(
-				t, result.Text, "order_lookup",
+				t, collectText(result), "order_lookup",
 			)
 			assert.Contains(
-				t, result.Text, "page 2 of 2",
+				t, collectText(result), "page 2 of 2",
 			)
 		},
 	)
@@ -1490,7 +1490,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "No tools found",
+				t, collectText(result), "No tools found",
 			)
 		},
 	)
@@ -1505,7 +1505,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "No tools found",
+				t, collectText(result), "No tools found",
 			)
 		},
 	)
@@ -1520,7 +1520,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			// Schema validation should catch this
 			require.NoError(t, err)
-			assert.Contains(t, result.Text, "Error")
+			assert.Contains(t, collectText(result), "Error")
 		},
 	)
 
@@ -1553,7 +1553,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "search service down",
+				t, collectText(result), "search service down",
 			)
 		},
 	)
@@ -1572,10 +1572,10 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "order_lookup",
+				t, collectText(result), "order_lookup",
 			)
 			assert.Contains(
-				t, result.Text, "send_email",
+				t, collectText(result), "send_email",
 			)
 		},
 	)
@@ -1613,10 +1613,10 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "Hello, Alice!",
+				t, collectText(result), "Hello, Alice!",
 			)
 			assert.Equal(
-				t, "greet", result.Raw.Calls[0].Name,
+				t, "greet", result.Results[0].Name,
 			)
 		},
 	)
@@ -1642,10 +1642,10 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.ErrorIs(
-			t, result.Raw.Errors[0], gent.ErrUnknownTool,
+			t, result.Results[0].Error, gent.ErrUnknownTool,
 		)
 		assert.Contains(
-			t, result.Text,
+			t, collectText(result),
 			`Error: unknown tool "nonexistent". `+
 				`Use the search tool to find `+
 				`available tools.`,
@@ -1681,9 +1681,9 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
-		assert.Error(t, result.Raw.Errors[0])
+		assert.Error(t, result.Results[0].Error)
 		assert.Contains(
-			t, result.Text, "Error",
+			t, collectText(result), "Error",
 		)
 	})
 
@@ -1707,8 +1707,8 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
-		assert.Error(t, result.Raw.Errors[0])
-		assert.Contains(t, result.Text, "tool broke")
+		assert.Error(t, result.Results[0].Error)
+		assert.Contains(t, collectText(result), "tool broke")
 	})
 
 	t.Run("tool with instructions creates nested sections",
@@ -1734,10 +1734,10 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "instructions",
+				t, collectText(result), "instructions",
 			)
 			assert.Contains(
-				t, result.Text, "Follow these steps",
+				t, collectText(result), "Follow these steps",
 			)
 		},
 	)
@@ -1803,14 +1803,14 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
-			assert.Len(t, result.Raw.Calls, 2)
+			assert.Len(t, result.Results, 2)
 			// Search result
 			assert.Contains(
-				t, result.Text, "regular_tool",
+				t, collectText(result), "regular_tool",
 			)
 			// Regular tool result
 			assert.Contains(
-				t, result.Text, "regular_result",
+				t, collectText(result), "regular_result",
 			)
 		},
 	)
@@ -1829,7 +1829,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
-			assert.Len(t, result.Raw.Calls, 3)
+			assert.Len(t, result.Results, 3)
 		},
 	)
 }
@@ -2116,12 +2116,12 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
-			assert.Contains(t, result.Text, "tool_0")
-			assert.Contains(t, result.Text, "tool_1")
-			assert.Contains(t, result.Text, "tool_2")
-			assert.NotContains(t, result.Text, "tool_3")
+			assert.Contains(t, collectText(result), "tool_0")
+			assert.Contains(t, collectText(result), "tool_1")
+			assert.Contains(t, collectText(result), "tool_2")
+			assert.NotContains(t, collectText(result), "tool_3")
 			assert.Contains(
-				t, result.Text,
+				t, collectText(result),
 				"Showing page 1 of 3 (7 total results)",
 			)
 		},
@@ -2135,12 +2135,12 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
-		assert.Contains(t, result.Text, "tool_3")
-		assert.Contains(t, result.Text, "tool_4")
-		assert.Contains(t, result.Text, "tool_5")
-		assert.NotContains(t, result.Text, "tool_6")
+		assert.Contains(t, collectText(result), "tool_3")
+		assert.Contains(t, collectText(result), "tool_4")
+		assert.Contains(t, collectText(result), "tool_5")
+		assert.NotContains(t, collectText(result), "tool_6")
 		assert.Contains(
-			t, result.Text,
+			t, collectText(result),
 			"Showing page 2 of 3 (7 total results)",
 		)
 	})
@@ -2154,10 +2154,10 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
-			assert.Contains(t, result.Text, "tool_6")
-			assert.NotContains(t, result.Text, "tool_5")
+			assert.Contains(t, collectText(result), "tool_6")
+			assert.NotContains(t, collectText(result), "tool_5")
 			assert.Contains(
-				t, result.Text,
+				t, collectText(result),
 				"Showing page 3 of 3 (7 total results)",
 			)
 		},
@@ -2171,9 +2171,9 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
-		assert.Contains(t, result.Text, "tool_0")
+		assert.Contains(t, collectText(result), "tool_0")
 		assert.Contains(
-			t, result.Text, "page 1 of 3",
+			t, collectText(result), "page 1 of 3",
 		)
 	})
 
@@ -2187,7 +2187,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Contains(
-				t, result.Text, "No tools found",
+				t, collectText(result), "No tools found",
 			)
 		},
 	)
@@ -2437,7 +2437,7 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 			// Verify full definitions appear
 			for _, name := range tt.expected.fullDefTools {
 				assert.Contains(
-					t, result.Text, name,
+					t, collectText(result), name,
 					"expected tool %q in output",
 					name,
 				)
@@ -2452,7 +2452,7 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 			}
 			for _, name := range tt.expected.dedupTools {
 				assert.Contains(
-					t, result.Text,
+					t, collectText(result),
 					dedupRef(name),
 					"expected dedup ref for %q",
 					name,
@@ -2470,7 +2470,7 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 			for _, name := range tt.expected.dedupTools {
 				desc := descMap[name]
 				count := strings.Count(
-					result.Text, desc,
+					collectText(result), desc,
 				)
 				assert.Equal(
 					t, 1, count,
@@ -2485,7 +2485,7 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 			for _, name := range tt.expected.noDescTools {
 				desc := descMap[name]
 				assert.NotContains(
-					t, result.Text, desc,
+					t, collectText(result), desc,
 					"description for %q should "+
 						"not appear", name,
 				)

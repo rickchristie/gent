@@ -263,34 +263,29 @@ func (c *JSON) Execute(
 	}
 
 	calls := parsed.([]*gent.ToolCall)
-	raw := &gent.RawToolChainResult{
-		Calls:   calls,
-		Results: make([]*gent.RawToolCallResult, len(calls)),
-		Errors:  make([]error, len(calls)),
-	}
-
-	// Collect formatted sections and media
-	var sections []gent.FormattedSection
-	var allMedia []gent.ContentPart
+	results := make([]*gent.ToolCallResult, len(calls))
 
 	for i, call := range calls {
+		results[i] = &gent.ToolCallResult{
+			Name: call.Name,
+			Args: call.Args,
+			Hash: ToolCallResultHash(call.Name, call.Args),
+		}
+
 		tool, ok := c.toolMap[call.Name]
 		if !ok {
-			raw.Errors[i] = fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
-			// Add error as a section
-			sections = append(sections, gent.FormattedSection{
-				Name: call.Name,
-				Content: fmt.Sprintf(
-					"Error: unknown tool %q. "+
-						"Review the available "+
-						"tools section for valid "+
-						"tool names.",
-					call.Name,
-				),
-			})
+			toolErr := fmt.Errorf("%w: %s", gent.ErrUnknownTool, call.Name)
+			results[i].Error = toolErr
+			results[i].Text = formatSectionText(textFormat, call.Name, fmt.Sprintf(
+				"Error: unknown tool %q. "+
+					"Review the available "+
+					"tools section for valid "+
+					"tool names.",
+				call.Name,
+			))
 			// Publish AfterToolCall for the failed call
 			if execCtx != nil {
-				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, raw.Errors[i])
+				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, toolErr)
 			}
 			continue
 		}
@@ -298,15 +293,15 @@ func (c *JSON) Execute(
 		// Validate args against schema before transformation
 		if compiledSchema, hasSchema := c.schemaMap[call.Name]; hasSchema {
 			if validationErr := compiledSchema.Validate(call.Args); validationErr != nil {
-				raw.Errors[i] = validationErr
-				sections = append(sections, gent.FormattedSection{
-					Name:    call.Name,
-					Content: fmt.Sprintf("Error: %v", validationErr),
-				})
-
+				results[i].Error = validationErr
+				results[i].Text = formatSectionText(
+					textFormat, call.Name,
+					fmt.Sprintf("Error: %v", validationErr),
+				)
 				if execCtx != nil {
-					// Publish AfterToolCall with validation error
-					execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, validationErr)
+					execCtx.PublishAfterToolCall(
+						call.Name, call.Args, nil, 0, validationErr,
+					)
 				}
 				continue
 			}
@@ -315,16 +310,19 @@ func (c *JSON) Execute(
 		// Transform raw args to typed input
 		typedInput, transformErr := TransformArgsReflect(tool, call.Args)
 		if transformErr != nil {
-			raw.Errors[i] = transformErr
-			sections = append(sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", transformErr),
-			})
+			results[i].Error = transformErr
+			results[i].Text = formatSectionText(
+				textFormat, call.Name,
+				fmt.Sprintf("Error: %v", transformErr),
+			)
 			if execCtx != nil {
-				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, transformErr)
+				execCtx.PublishAfterToolCall(
+					call.Name, call.Args, nil, 0, transformErr,
+				)
 			}
 			continue
 		}
+		results[i].Input = typedInput
 
 		// Publish BeforeToolCall event (may modify args)
 		inputToUse := typedInput
@@ -338,53 +336,53 @@ func (c *JSON) Execute(
 		duration := time.Since(startTime)
 
 		if err != nil {
-			raw.Errors[i] = err
-			sections = append(sections, gent.FormattedSection{
-				Name:    call.Name,
-				Content: fmt.Sprintf("Error: %v", err),
-			})
+			results[i].Error = err
+			results[i].Text = formatSectionText(
+				textFormat, call.Name,
+				fmt.Sprintf("Error: %v", err),
+			)
 		} else {
 			// Successful tool call - reset consecutive error gauges
 			if execCtx != nil {
 				execCtx.Stats().ResetGauge(gent.SGToolCallsErrorConsecutive)
-				execCtx.Stats().ResetGauge(gent.SGToolCallsErrorConsecutiveFor + gent.StatKey(call.Name))
+				execCtx.Stats().ResetGauge(
+					gent.SGToolCallsErrorConsecutiveFor + gent.StatKey(call.Name),
+				)
 			}
 
-			// Store raw result
-			raw.Results[i] = &gent.RawToolCallResult{
-				Name:   output.Name,
-				Output: output.Text,
-			}
+			results[i].Output = output.Text
 
-			// Format output. String outputs are passed through as-is (no JSON wrapping)
-			// because they may contain Markdown, prompts, or other structured text that
-			// should not be quoted. Non-string outputs are JSON-marshalled.
+			// Format output. String outputs are passed through as-is
+			// (no JSON wrapping) because they may contain Markdown,
+			// prompts, or other structured text that should not be
+			// quoted. Non-string outputs are JSON-marshalled.
 			outputText, marshalErr := formatToolOutputJSON(output.Text)
 			if marshalErr != nil {
-				sections = append(sections, gent.FormattedSection{
-					Name:    call.Name,
-					Content: "error: failed to marshal output",
-				})
+				results[i].Text = formatSectionText(
+					textFormat, call.Name,
+					"error: failed to marshal output",
+				)
 			} else {
 				if output.Instructions != "" {
-					sections = append(sections, gent.FormattedSection{
-						Name: call.Name,
-						Children: []gent.FormattedSection{
-							{Name: "result", Content: outputText},
-							{Name: "instructions", Content: output.Instructions},
-						},
-					})
+					results[i].Text = textFormat.FormatSections(
+						[]gent.FormattedSection{{
+							Name: call.Name,
+							Children: []gent.FormattedSection{
+								{Name: "result", Content: outputText},
+								{Name: "instructions", Content: output.Instructions},
+							},
+						}},
+					)
 				} else {
-					sections = append(sections, gent.FormattedSection{
-						Name:    call.Name,
-						Content: outputText,
-					})
+					results[i].Text = formatSectionText(
+						textFormat, call.Name, outputText,
+					)
 				}
 			}
 
-			// Collect media from tool result
+			// Store media from tool result
 			if len(output.Media) > 0 {
-				allMedia = append(allMedia, output.Media...)
+				results[i].Media = output.Media
 			}
 		}
 
@@ -394,16 +392,27 @@ func (c *JSON) Execute(
 			outputVal = output.Text
 		}
 		if execCtx != nil {
-			execCtx.PublishAfterToolCall(call.Name, inputToUse, outputVal, duration, err)
+			execCtx.PublishAfterToolCall(
+				call.Name, inputToUse, outputVal, duration, err,
+			)
 		}
 	}
 
-	// Build formatted text using TextFormat
-	return &gent.ToolChainResult{
-		Text:  textFormat.FormatSections(sections),
-		Media: allMedia,
-		Raw:   raw,
-	}, nil
+	return &gent.ToolChainResult{Results: results}, nil
+}
+
+// DeduplicateSummary returns an abbreviated observation text
+// for a tool call whose output duplicates an earlier call.
+func (c *JSON) DeduplicateSummary(
+	result *gent.ToolCallResult,
+) string {
+	tool, ok := c.toolMap[result.Name]
+	if !ok {
+		return ""
+	}
+	return CallDeduplicateSummaryReflect(
+		tool, result.Input, result.Output,
+	)
 }
 
 // GetToolSchema returns the compiled schema for the

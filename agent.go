@@ -375,10 +375,57 @@ func GetImportanceScore(iter *Iteration) (float64, bool) {
 	return score, ok
 }
 
-// MessageContent is wrapper around [llms.MessageContent] used in AgentLoop.
+// MessageContentMetadataKey is a typed key for MessageContent
+// metadata. Framework keys use the "gent:" prefix (MMK*
+// constants). Users may define custom keys in their own
+// namespace.
+type MessageContentMetadataKey string
+
+// MMKToolChainResult stores the [*ToolChainResult] on an
+// observation [MessageContent]. Used by ScratchpadToMessages
+// to deduplicate repeated stateless tool calls.
+const MMKToolChainResult MessageContentMetadataKey = "gent:tool_chain_result"
+
+// MessageContent is wrapper around [llms.MessageContent] used
+// in AgentLoop.
 type MessageContent struct {
 	Role  llms.ChatMessageType
 	Parts []ContentPart
+
+	// Metadata contains optional key-value pairs for this
+	// message. The framework defines standard keys (MMK*
+	// constants); users can add custom keys.
+	//
+	// This field is nil by default and lazily initialized on
+	// first write. Always use SetMetadata/GetMetadata helper
+	// methods instead of accessing the map directly to avoid
+	// nil map panics.
+	Metadata map[MessageContentMetadataKey]any
+}
+
+// SetMetadata sets a metadata value, initializing the map
+// if nil.
+func (m *MessageContent) SetMetadata(
+	key MessageContentMetadataKey,
+	value any,
+) {
+	if m.Metadata == nil {
+		m.Metadata = make(map[MessageContentMetadataKey]any)
+	}
+	m.Metadata[key] = value
+}
+
+// GetMetadata returns a metadata value and whether it was
+// present. Returns (nil, false) if Metadata is nil or the
+// key is absent.
+func (m *MessageContent) GetMetadata(
+	key MessageContentMetadataKey,
+) (any, bool) {
+	if m.Metadata == nil {
+		return nil, false
+	}
+	val, ok := m.Metadata[key]
+	return val, ok
 }
 
 // ContentPart is just a wrapper interface around [llms.ContentPart], just in case we want to add

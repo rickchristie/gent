@@ -11,7 +11,7 @@ package executor_test
 //
 // IMPORTANT: Each agent implementation has its own exhaustive limit tests.
 // See: agents/react/agent_executor_limits_test.go
-// See: agents/AGENT_LIMIT_TEST.md for the agent test standards.
+// See: agents/standard-agent-limit-test.md for the agent test standards.
 //
 // WHY SEPARATE TESTS?
 // Agents can have complex execution flows - tool calls, format parsing,
@@ -28,7 +28,7 @@ package executor_test
 //
 // WHEN ADDING A NEW AGENT:
 // 1. Create <agent>_executor_limits_test.go in the agent's package
-// 2. Follow standards in agents/AGENT_LIMIT_TEST.md
+// 2. Follow standards in agents/standard-agent-limit-test.md
 // 3. Test all stats the agent can increment
 //
 // =============================================================================
