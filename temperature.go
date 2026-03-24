@@ -51,6 +51,8 @@ type SamplingParam struct {
 //	│ OpenAI reasoning     │ forbidden    │ forbidden    │
 //	│ (o1/o3/o4/gpt-5)    │              │              │
 //	├──────────────────────┼──────────────┼──────────────┤
+//	│ Claude (all)         │ override 0.2 │ omit         │
+//	├──────────────────────┼──────────────┼──────────────┤
 //	│ Gemini 3+            │ override 1.0 │ omit         │
 //	├──────────────────────┼──────────────┼──────────────┤
 //	│ DeepSeek-R1          │ override 0.6 │ override 0.95│
@@ -89,6 +91,15 @@ func DefaultSamplingParams(model Model) SamplingParams {
 		return SamplingParams{
 			Temperature: SamplingParam{Directive: ParamForbidden},
 			TopP:        SamplingParam{Directive: ParamForbidden},
+		}
+	}
+
+	// Claude — temperature 0.2, top-p omitted. Anthropic requires adjusting
+	// temperature OR top_p, never both; sending both returns HTTP 400.
+	if isClaude(name) {
+		return SamplingParams{
+			Temperature: SamplingParam{Directive: ParamOverride, Value: 0.2},
+			TopP:        SamplingParam{Directive: ParamOmit},
 		}
 	}
 
@@ -150,6 +161,12 @@ func isOpenAIReasoningModel(name string) bool {
 	}
 
 	return false
+}
+
+// isClaude returns true for Anthropic Claude models.
+func isClaude(name string) bool {
+	n := stripPrefix(name, "anthropic/")
+	return strings.HasPrefix(n, "claude-")
 }
 
 // isGemini3Plus returns true for Gemini 3+ models where temperature below 1.0 causes

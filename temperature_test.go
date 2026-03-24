@@ -77,21 +77,21 @@ func TestDefaultSamplingParams(t *testing.T) {
 			},
 		},
 
-		// --- Claude (generic defaults) ---
+		// --- Claude (temperature only, top-p omitted) ---
 		{
-			name:  "claude uses generic defaults",
+			name:  "claude uses temperature only",
 			input: input{model: &mockNamerModel{name: "claude-4-sonnet"}},
 			expected: expected{
 				temperature: expectedParam{directive: ParamOverride, value: 0.2},
-				topP:        expectedParam{directive: ParamOverride, value: 1.0},
+				topP:        expectedParam{directive: ParamOmit, value: 0},
 			},
 		},
 		{
-			name:  "anthropic prefixed claude uses generic defaults",
+			name:  "anthropic prefixed claude uses temperature only",
 			input: input{model: &mockNamerModel{name: "anthropic/claude-4-opus"}},
 			expected: expected{
 				temperature: expectedParam{directive: ParamOverride, value: 0.2},
-				topP:        expectedParam{directive: ParamOverride, value: 1.0},
+				topP:        expectedParam{directive: ParamOmit, value: 0},
 			},
 		},
 
