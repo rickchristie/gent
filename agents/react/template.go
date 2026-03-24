@@ -44,6 +44,7 @@ You will solve problems through a cycle of:
 Repeat this cycle until you have enough information to provide a final answer.
 Each cycle you always have to provide a "thinking" section and ONE OF either an "action" or "answer" section, but not both.
 If you provide both "action" and "answer" section, the "answer" will be rejected.
+You DO NOT write "observation" section yourself, the system will provide "observation" section based on the "action" you write.
 
 ## Important Guidelines
 

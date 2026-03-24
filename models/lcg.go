@@ -222,14 +222,40 @@ func (m *LCGWrapper) GenerateContentStream(
 	// Create stream with duration tracking
 	stream := gent.NewStreamWithDuration()
 
-	// Set up streaming callback using WithStreamingReasoningFunc.
-	// This callback receives both reasoning and content chunks, avoiding duplication
-	// that would occur if we also used WithStreamingFunc.
-	streamingCallback := llms.WithStreamingReasoningFunc(
+	// Set up streaming callbacks.
+	//
+	// We use BOTH WithStreamingFunc and WithStreamingReasoningFunc because
+	// providers handle them differently:
+	//   - OpenAI: routes both reasoning and content through StreamingReasoningFunc
+	//   - Anthropic: routes content through StreamingFunc and reasoning through
+	//     StreamingReasoningFunc separately. Also has a bug (langchaingo v0.1.14)
+	//     where only StreamingFunc is checked for streaming response routing —
+	//     without it, the client tries to JSON-parse SSE data.
+	//
+	// To avoid double-processing content on OpenAI (which calls StreamingFunc
+	// first, then StreamingReasoningFunc with the same content), we track
+	// whether StreamingFunc already handled the content chunk.
+	var streamingFuncHandledContent bool
+
+	streamingContentCallback := llms.WithStreamingFunc(
+		func(_ context.Context, contentChunk []byte) error {
+			if len(contentChunk) > 0 {
+				stream.SendContent(string(contentChunk))
+				execCtx.EmitChunk(gent.StreamChunk{
+					Content:       string(contentChunk),
+					StreamId:      streamId,
+					StreamTopicId: streamTopicId,
+				})
+				streamingFuncHandledContent = true
+			}
+			return nil
+		},
+	)
+
+	streamingReasoningCallback := llms.WithStreamingReasoningFunc(
 		func(_ context.Context, reasoningChunk, contentChunk []byte) error {
 			if len(reasoningChunk) > 0 {
 				stream.SendReasoning(string(reasoningChunk))
-				// Emit reasoning chunk to execCtx subscribers
 				execCtx.EmitChunk(gent.StreamChunk{
 					ReasoningContent: string(reasoningChunk),
 					StreamId:         streamId,
@@ -237,8 +263,11 @@ func (m *LCGWrapper) GenerateContentStream(
 				})
 			}
 			if len(contentChunk) > 0 {
+				if streamingFuncHandledContent {
+					streamingFuncHandledContent = false
+					return nil
+				}
 				stream.SendContent(string(contentChunk))
-				// Emit content chunk to execCtx subscribers
 				execCtx.EmitChunk(gent.StreamChunk{
 					Content:       string(contentChunk),
 					StreamId:      streamId,
@@ -251,11 +280,11 @@ func (m *LCGWrapper) GenerateContentStream(
 
 	// Build options with streaming enabled.
 	// StreamThinking is added before user options so users can override it.
-	// The streaming callback is added last to ensure it takes effect.
-	opts := make([]llms.CallOption, 0, len(options)+2)
+	// The streaming callbacks are added last to ensure they take effect.
+	opts := make([]llms.CallOption, 0, len(options)+3)
 	opts = append(opts, llms.WithStreamThinking(true))
 	opts = append(opts, options...)
-	opts = append(opts, streamingCallback)
+	opts = append(opts, streamingContentCallback, streamingReasoningCallback)
 
 	// Start the model call in a goroutine
 	go func() {

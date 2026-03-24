@@ -19,6 +19,18 @@
       "problemMatcher": ["$go"]
     },
     {
+      "label": "Test: gowt Smoke API Calls",
+      "type": "shell",
+      "command": "set -a && source .env && set +a && export GENT_SMOKE_TEST=1 && gowt -run TestSmokeAllProviders ./models/",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "problemMatcher": ["$go"]
+    },
+    {
       "label": "Test: CLI Streaming",
       "type": "shell",
       "command": "set -a && source ${workspaceFolder}/.env && set +a && go run ./models/clistreamtest",

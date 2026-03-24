@@ -36,7 +36,7 @@ type Agent struct {
 	termination         gent.Termination
 	thinkingSection     gent.TextSection
 	timeProvider        gent.TimeProvider
-	callOptions []llms.CallOption
+	callOptions         []llms.CallOption
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -629,11 +629,11 @@ func (r *Agent) effectiveCallOptions() []llms.CallOption {
 	params := gent.DefaultSamplingParams(r.model)
 
 	var opts []llms.CallOption
-	if params.Temperature.Directive == gent.ParamOverride {
-		opts = append(opts, llms.WithTemperature(params.Temperature.Value))
+	if v, ok := params.Temperature.EffectiveValue(); ok {
+		opts = append(opts, llms.WithTemperature(v))
 	}
-	if params.TopP.Directive == gent.ParamOverride {
-		opts = append(opts, llms.WithTopP(params.TopP.Value))
+	if v, ok := params.TopP.EffectiveValue(); ok {
+		opts = append(opts, llms.WithTopP(v))
 	}
 
 	opts = append(opts, r.callOptions...)
@@ -671,24 +671,34 @@ func (r *Agent) warnRestrictiveSampling(
 		)
 	}
 
-	// Warn if user sets forbidden params.
+	// Warn if user sets forbidden params. Only check user-provided options
+	// (r.callOptions), not the full merged set — the framework itself sends
+	// temperature=1.0 for forbidden models as a langchaingo workaround.
 	params := gent.DefaultSamplingParams(r.model)
-	if params.Temperature.Directive == gent.ParamForbidden && resolved.Temperature > 0 {
+	var userResolved llms.CallOptions
+	for _, opt := range r.callOptions {
+		opt(&userResolved)
+	}
+	if params.Temperature.Directive == gent.ParamForbidden &&
+		userResolved.Temperature > 0 {
 		execCtx.PublishCommonEvent(
 			"gent:sampling_param_forbidden",
 			fmt.Sprintf(
-				"temperature (%.2f) is forbidden for this model and may cause an API error",
-				resolved.Temperature,
+				"temperature (%.2f) is forbidden for this model "+
+					"and may cause an API error",
+				userResolved.Temperature,
 			),
 			nil,
 		)
 	}
-	if params.TopP.Directive == gent.ParamForbidden && resolved.TopP > 0 {
+	if params.TopP.Directive == gent.ParamForbidden &&
+		userResolved.TopP > 0 {
 		execCtx.PublishCommonEvent(
 			"gent:sampling_param_forbidden",
 			fmt.Sprintf(
-				"top-p (%.2f) is forbidden for this model and may cause an API error",
-				resolved.TopP,
+				"top-p (%.2f) is forbidden for this model "+
+					"and may cause an API error",
+				userResolved.TopP,
 			),
 			nil,
 		)

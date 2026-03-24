@@ -1473,8 +1473,10 @@ func TestAgent_SamplingParams_ForbiddenModel(
 	t *testing.T,
 ) {
 	// OpenAI reasoning models have both params forbidden.
-	// The agent should not prepend any sampling defaults,
-	// so only user-provided options appear.
+	// The agent sends temperature=1.0 and top-p=1.0 as a
+	// workaround for langchaingo always serializing the
+	// temperature field (zero-value 0.0 is rejected).
+	// User-provided options override these defaults.
 
 	type input struct {
 		modelName   string
@@ -1492,15 +1494,15 @@ func TestAgent_SamplingParams_ForbiddenModel(
 		expected expected
 	}{
 		{
-			name: "reasoning model sends no " +
-				"sampling defaults",
+			name: "reasoning model sends 1.0 " +
+				"for forbidden params",
 			input: input{
 				modelName:   "openai/o3",
 				callOptions: nil,
 			},
 			expected: expected{
-				temperature: 0,
-				topP:        0,
+				temperature: 1.0,
+				topP:        1.0,
 			},
 		},
 		{
@@ -1514,7 +1516,7 @@ func TestAgent_SamplingParams_ForbiddenModel(
 			},
 			expected: expected{
 				temperature: 0.5,
-				topP:        0,
+				topP:        1.0,
 			},
 		},
 	}

@@ -36,6 +36,25 @@ type SamplingParam struct {
 	Value     float64
 }
 
+// EffectiveValue returns the value to send and whether to send it.
+//
+// For [ParamOverride], returns the configured Value.
+// For [ParamForbidden], returns 1.0 (the API default that reasoning models
+// accept). This works around langchaingo v0.1.14's OpenAI client always
+// serializing the temperature field — without an explicit value, the
+// zero-value 0.0 is sent and rejected by reasoning models.
+// For [ParamOmit], returns (0, false).
+func (p SamplingParam) EffectiveValue() (float64, bool) {
+	switch p.Directive {
+	case ParamOverride:
+		return p.Value, true
+	case ParamForbidden:
+		return 1.0, true
+	default:
+		return 0, false
+	}
+}
+
 // SamplingParams contains model-appropriate default sampling parameters for an LLM call.
 // Each parameter carries a [ParamDirective] indicating whether it should be sent.
 //
@@ -49,7 +68,7 @@ type SamplingParam struct {
 //	│ Model                │ Temperature  │ TopP         │
 //	├──────────────────────┼──────────────┼──────────────┤
 //	│ OpenAI reasoning     │ forbidden    │ forbidden    │
-//	│ (o1/o3/o4/gpt-5)    │              │              │
+//	│ (o1/o3/o4/gpt-5)     │              │              │
 //	├──────────────────────┼──────────────┼──────────────┤
 //	│ Claude (all)         │ override 0.2 │ omit         │
 //	├──────────────────────┼──────────────┼──────────────┤
