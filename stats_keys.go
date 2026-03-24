@@ -324,6 +324,22 @@ const (
 // total compactions across the entire agent tree.
 const SCCompactions StatKey = "gent:compactions"
 
+// Repetition loop detection tracking keys.
+//
+// Updated by the AgentLoop when streaming repetition detection triggers.
+// These are separate from format parse errors — a loop is a distinct failure
+// mode where the model repeats the same reasoning/action.
+//
+// Default limit: 3 consecutive loops (see DefaultLimits in executor).
+const (
+	// Counter: total loops detected across all iterations.
+	SCRepetitionLoopTotal StatKey = "gent:repetition_loop_total"
+
+	// Gauge: consecutive loops without a successful iteration in between.
+	// Reset when the agent successfully executes a tool call or terminates.
+	SGRepetitionLoopConsecutive StatKey = "gent:repetition_loop_consecutive"
+)
+
 // protectedKeys contains keys that cannot be modified by user code
 // via IncrCounter. Protected keys can still be incremented internally
 // by the framework (e.g., the executor increments SCIterations).

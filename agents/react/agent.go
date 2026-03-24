@@ -1,6 +1,7 @@
 package react
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -36,7 +37,10 @@ type Agent struct {
 	termination         gent.Termination
 	thinkingSection     gent.TextSection
 	timeProvider        gent.TimeProvider
-	callOptions         []llms.CallOption
+	callOptions            []llms.CallOption
+	repetitionConfig       RepetitionConfig
+	maxResponseChars       int
+	responseTooLongMessage string
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -48,12 +52,15 @@ type Agent struct {
 //   - SystemPromptBuilder: DefaultSystemPromptBuilder
 func NewAgent(model gent.Model) *Agent {
 	return &Agent{
-		model:               model,
-		format:              format.NewXML(),
-		toolChain:           toolchain.NewYAML(),
-		termination:         termination.NewText("answer"),
-		timeProvider:        gent.NewDefaultTimeProvider(),
-		systemPromptBuilder: DefaultSystemPromptBuilder,
+		model:                  model,
+		format:                 format.NewXML(),
+		toolChain:              toolchain.NewYAML(),
+		termination:            termination.NewText("answer"),
+		timeProvider:           gent.NewDefaultTimeProvider(),
+		systemPromptBuilder:    DefaultSystemPromptBuilder,
+		repetitionConfig:       DefaultRepetitionConfig(),
+		maxResponseChars:       DefaultMaxResponseChars,
+		responseTooLongMessage: DefaultResponseTooLongMessage,
 	}
 }
 
@@ -131,6 +138,34 @@ func (r *Agent) WithStreaming(_ bool) *Agent {
 	return r
 }
 
+// WithRepetitionConfig sets the streaming repetition detection
+// configuration. See [RepetitionConfig] for available options.
+// Default: [DefaultRepetitionConfig] (enabled, block size 400,
+// threshold 3).
+func (r *Agent) WithRepetitionConfig(
+	cfg RepetitionConfig,
+) *Agent {
+	r.repetitionConfig = cfg
+	return r
+}
+
+// WithMaxResponseChars sets the maximum characters allowed in a single model response.
+// When exceeded, the stream is cancelled and the accumulated content is inspected for
+// repetition. If repetition is detected, the loop recovery path runs. If not, a "too long"
+// reminder is injected instead. Default: [DefaultMaxResponseChars] (16000).
+// Set to 0 to disable.
+func (r *Agent) WithMaxResponseChars(n int) *Agent {
+	r.maxResponseChars = n
+	return r
+}
+
+// WithResponseTooLongMessage sets the message injected when a response exceeds
+// MaxResponseChars but is NOT a repetition loop. Default: [DefaultResponseTooLongMessage].
+func (r *Agent) WithResponseTooLongMessage(msg string) *Agent {
+	r.responseTooLongMessage = msg
+	return r
+}
+
 // WithCallOptions sets LLM call options (e.g., temperature, top-p, max tokens) that are
 // forwarded to the model on every GenerateContent call.
 func (r *Agent) WithCallOptions(options ...llms.CallOption) *Agent {
@@ -172,10 +207,18 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	streamId := fmt.Sprintf("iter-%d", execCtx.Iteration())
 	streamTopicId := "llm-response"
 
-	// Call model - use streaming if enabled and model supports it
-	response, err := r.callModel(execCtx, streamId, streamTopicId, messages)
+	// Call model with streaming + repetition detection.
+	response, repResult, err := r.callModel(execCtx, streamId, streamTopicId, messages)
 	if err != nil {
 		return nil, fmt.Errorf("model call failed: %w", err)
+	}
+
+	// Handle repetition or max-size truncation.
+	if repResult != nil {
+		if errors.Is(repResult.Err, ErrMaxResponseSize) {
+			return r.handleResponseTooLong(execCtx, data, response)
+		}
+		return r.handleRepetition(execCtx, data, response, repResult)
 	}
 
 	// Extract response content
@@ -257,6 +300,9 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 
 		data.SetScratchPad(scratchpad)
 
+		// Successful tool execution resets the repetition loop gauge.
+		execCtx.Stats().ResetGauge(gent.SGRepetitionLoopConsecutive)
+
 		return &gent.AgentLoopResult{
 			Action:     gent.LAContinue,
 			NextPrompt: observation,
@@ -280,7 +326,7 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 			result := r.termination.ShouldTerminate(execCtx, content)
 			switch result.Status {
 			case gent.TerminationAnswerAccepted:
-				// Add final iteration to history
+				execCtx.Stats().ResetGauge(gent.SGRepetitionLoopConsecutive)
 				iter := r.buildIteration(responseContent, "")
 				data.AddIterationHistory(iter)
 				return &gent.AgentLoopResult{
@@ -398,6 +444,109 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 		Action:     gent.LAContinue,
 		NextPrompt: systemError,
 	}, nil
+}
+
+// handleResponseTooLong processes a response that exceeded MaxResponseChars but does NOT
+// contain repetition. The truncated response is expired, and a conciseness reminder is
+// injected. No loop stats are incremented.
+func (r *Agent) handleResponseTooLong(
+	execCtx *gent.ExecutionContext, data gent.LoopData,
+	response *gent.ContentResponse,
+) (*gent.AgentLoopResult, error) {
+	responseContent := ""
+	if response != nil && len(response.Choices) > 0 {
+		responseContent = response.Choices[0].Content
+	}
+
+	// Expired iteration with truncated response (debugging only).
+	expiredIter := r.buildIteration(responseContent, "Response exceeded max length")
+	expiredIter.ExpireAfterIteration = max(execCtx.Iteration(), 1)
+	data.AddIterationHistory(expiredIter)
+
+	// Conciseness reminder (persists in scratchpad).
+	reminder := r.format.FormatSections([]gent.FormattedSection{
+		{Name: "system_error", Content: r.responseTooLongMessage},
+	})
+	reminderIter := &gent.Iteration{
+		Origin: gent.IterationSystemInjected,
+		Messages: []*gent.MessageContent{{
+			Role:  llms.ChatMessageTypeHuman,
+			Parts: []gent.ContentPart{llms.TextContent{Text: reminder}},
+		}},
+	}
+	data.AddIterationHistory(reminderIter)
+
+	scratchpad := data.GetScratchPad()
+	scratchpad = append(scratchpad, expiredIter, reminderIter)
+	data.SetScratchPad(scratchpad)
+
+	return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: reminder}, nil
+}
+
+// handleRepetition processes a detected repetition loop. For RepetitionRecover, it
+// increments stats, expires the poisoned response, and injects a recovery reminder.
+// For RepetitionTerminate, it returns a fatal error.
+func (r *Agent) handleRepetition(
+	execCtx *gent.ExecutionContext, data gent.LoopData,
+	response *gent.ContentResponse, rep *RepetitionResult,
+) (*gent.AgentLoopResult, error) {
+	// Update stats.
+	execCtx.Stats().IncrCounter(gent.SCRepetitionLoopTotal, 1)
+	execCtx.Stats().IncrGauge(gent.SGRepetitionLoopConsecutive, 1)
+
+	if r.repetitionConfig.Action == RepetitionTerminate {
+		return nil, fmt.Errorf("model call failed: %w", rep.Err)
+	}
+
+	// Recover: build the reminder message.
+	cfg := r.repetitionConfig
+	filtered := ""
+	if cfg.Filter != nil && rep.RepeatedBlock != "" {
+		filtered = cfg.Filter(rep.RepeatedBlock, cfg.PoisonKeywords)
+	}
+
+	count := execCtx.Stats().GetGauge(gent.SGRepetitionLoopConsecutive)
+	var reminderText string
+	if filtered != "" {
+		reminderText = cfg.RecoverMessage
+		reminderText = strings.Replace(reminderText, "{block}", filtered, 1)
+		reminderText = strings.Replace(
+			reminderText, "{count}",
+			fmt.Sprintf("%d", int(count)), 1,
+		)
+	} else {
+		reminderText = cfg.RecoverPoisonedMessage
+	}
+
+	// Extract raw response content for the expired iteration.
+	responseContent := ""
+	if response != nil && len(response.Choices) > 0 {
+		responseContent = response.Choices[0].Content
+	}
+
+	// 1. Expired iteration with the truncated response (debugging only).
+	expiredIter := r.buildIteration(responseContent, "Repetition loop detected")
+	expiredIter.ExpireAfterIteration = max(execCtx.Iteration(), 1)
+	data.AddIterationHistory(expiredIter)
+
+	// 2. Recovery reminder (persists in scratchpad).
+	reminder := r.format.FormatSections([]gent.FormattedSection{
+		{Name: "system_error", Content: reminderText},
+	})
+	reminderIter := &gent.Iteration{
+		Origin: gent.IterationSystemInjected,
+		Messages: []*gent.MessageContent{{
+			Role:  llms.ChatMessageTypeHuman,
+			Parts: []gent.ContentPart{llms.TextContent{Text: reminder}},
+		}},
+	}
+	data.AddIterationHistory(reminderIter)
+
+	scratchpad := data.GetScratchPad()
+	scratchpad = append(scratchpad, expiredIter, reminderIter)
+	data.SetScratchPad(scratchpad)
+
+	return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: reminder}, nil
 }
 
 // hasExtraSections returns true if the parsed output contains sections beyond
@@ -608,18 +757,14 @@ func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 }
 
 // callModel calls the model via streaming and returns the complete response.
+// Also returns a non-nil RepetitionResult if a loop was detected.
 func (r *Agent) callModel(
-	execCtx *gent.ExecutionContext,
-	streamId string,
-	streamTopicId string,
-	messages []llms.MessageContent,
-) (*gent.ContentResponse, error) {
+	execCtx *gent.ExecutionContext, streamId string,
+	streamTopicId string, messages []llms.MessageContent,
+) (*gent.ContentResponse, *RepetitionResult, error) {
 	opts := r.effectiveCallOptions()
 	r.warnRestrictiveSampling(execCtx, opts)
-
-	return r.callModelStreaming(
-		execCtx, streamId, streamTopicId, messages, opts,
-	)
+	return r.callModelStreaming(execCtx, streamId, streamTopicId, messages, opts)
 }
 
 // effectiveCallOptions returns the merged call options: model-appropriate defaults followed
@@ -705,35 +850,57 @@ func (r *Agent) warnRestrictiveSampling(
 	}
 }
 
-// callModelStreaming calls the model with streaming and accumulates the response.
+// callModelStreaming calls the model with streaming and applies repetition detection.
+// Returns the response plus an optional RepetitionResult if a loop or max-size was hit.
 func (r *Agent) callModelStreaming(
 	execCtx *gent.ExecutionContext,
 	streamId string, streamTopicId string,
 	messages []llms.MessageContent, opts []llms.CallOption,
-) (*gent.ContentResponse, error) {
+) (*gent.ContentResponse, *RepetitionResult, error) {
 	stream, err := r.model.GenerateContentStream(
 		execCtx, streamId, streamTopicId, messages, opts...,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Accumulate chunks into response
 	acc := gent.NewStreamAccumulator()
+	detector := newRepetitionDetector(r.repetitionConfig)
+	totalChars := 0
+
 	for chunk := range stream.Chunks() {
 		if chunk.Err != nil {
-			return nil, chunk.Err
+			return nil, nil, chunk.Err
 		}
 		acc.Add(chunk)
+		totalChars += len(chunk.Content)
+
+		// Real-time repetition detection.
+		if result := detector.Feed(chunk.Content); result != nil {
+			stream.Close()
+			streamResp, _ := stream.Response()
+			return acc.ResponseWithInfo(streamResp), result, nil
+		}
+
+		// Max response size: truncate and inspect for repetition.
+		if r.maxResponseChars > 0 && totalChars > r.maxResponseChars {
+			stream.Close()
+			streamResp, _ := stream.Response()
+			resp := acc.ResponseWithInfo(streamResp)
+
+			// Two-step check: is the truncated content a loop or just too long?
+			if repResult := detector.CheckAccumulated(); repResult != nil {
+				return resp, repResult, nil
+			}
+			return resp, &RepetitionResult{Err: ErrMaxResponseSize}, nil
+		}
 	}
 
-	// Get final response with token info from stream
 	streamResponse, err := stream.Response()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	return acc.ResponseWithInfo(streamResponse), nil
+	return acc.ResponseWithInfo(streamResponse), nil, nil
 }
 
 // Compile-time check that Agent implements gent.AgentLoop.
