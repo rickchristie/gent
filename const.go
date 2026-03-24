@@ -42,19 +42,19 @@ const (
 // =============================================================================
 
 const (
-	// Claude 4.5 Series (Latest)
-	ModelAnthropicClaude45Opus   = "claude-opus-4-5-20251124"
+	// Claude 4.6 Series (Latest)
+	ModelAnthropicClaude46Opus   = "claude-opus-4-6"
+	ModelAnthropicClaude46Sonnet = "claude-sonnet-4-6"
+
+	// Claude 4.5 Series
+	ModelAnthropicClaude45Opus   = "claude-opus-4-5-20251101"
 	ModelAnthropicClaude45Sonnet = "claude-sonnet-4-5-20250929"
 	ModelAnthropicClaude45Haiku  = "claude-haiku-4-5-20251001"
 
-	// Claude 4.x Series
-	ModelAnthropicClaude41Opus = "claude-opus-4-1-20250805"
-	ModelAnthropicClaude4Opus  = "claude-opus-4-20250522"
-	ModelAnthropicClaude4Sonnet = "claude-sonnet-4-20250522"
-
-	// Claude 3.5 Series (Legacy)
-	ModelAnthropicClaude35Sonnet = "claude-3-5-sonnet-20241022"
-	ModelAnthropicClaude35Haiku  = "claude-3-5-haiku-20241022"
+	// Claude 4.x Series (Legacy)
+	ModelAnthropicClaude41Opus  = "claude-opus-4-1-20250805"
+	ModelAnthropicClaude4Opus   = "claude-opus-4-20250514"
+	ModelAnthropicClaude4Sonnet = "claude-sonnet-4-20250514"
 )
 
 // =============================================================================

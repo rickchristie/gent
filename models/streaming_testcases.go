@@ -213,7 +213,7 @@ func createXAIModel(modelName string) (gent.StreamingModel, error) {
 
 // RunStreamingBasic tests basic streaming functionality with a simple prompt.
 func RunStreamingBasic(ctx context.Context, w io.Writer, config StreamOutputConfig) error {
-	model, err := createXAIModel("grok-3-fast")
+	model, err := createXAIModel(gent.ModelXAIGrok41Fast)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func RunStreamingBasic(ctx context.Context, w io.Writer, config StreamOutputConf
 
 // RunStreamingWithReasoning tests streaming with a reasoning model.
 func RunStreamingWithReasoning(ctx context.Context, w io.Writer, config StreamOutputConfig) error {
-	model, err := createXAIModel("grok-4-1-fast-reasoning")
+	model, err := createXAIModel(gent.ModelXAIGrok41FastReasoning)
 	if err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func RunStreamingWithReasoning(ctx context.Context, w io.Writer, config StreamOu
 
 // RunStreamingSlowConsumer tests that streaming works with a slow consumer.
 func RunStreamingSlowConsumer(ctx context.Context, w io.Writer, config StreamOutputConfig) error {
-	model, err := createXAIModel("grok-3-fast")
+	model, err := createXAIModel(gent.ModelXAIGrok41Fast)
 	if err != nil {
 		return err
 	}
@@ -374,7 +374,7 @@ func RunStreamingSlowConsumer(ctx context.Context, w io.Writer, config StreamOut
 
 // RunStreamingNoListener tests stream completion without reading chunks.
 func RunStreamingNoListener(ctx context.Context, w io.Writer, _ StreamOutputConfig) error {
-	model, err := createXAIModel("grok-3-fast")
+	model, err := createXAIModel(gent.ModelXAIGrok41Fast)
 	if err != nil {
 		return err
 	}
@@ -409,7 +409,7 @@ func RunStreamingCancellation(ctx context.Context, w io.Writer, config StreamOut
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	model, err := createXAIModel("grok-3-fast")
+	model, err := createXAIModel(gent.ModelXAIGrok41Fast)
 	if err != nil {
 		return err
 	}
@@ -465,7 +465,7 @@ func RunStreamingCancellation(ctx context.Context, w io.Writer, config StreamOut
 
 // RunStreamingConcurrent tests multiple concurrent streams.
 func RunStreamingConcurrent(ctx context.Context, w io.Writer, _ StreamOutputConfig) error {
-	model, err := createXAIModel("grok-3-fast")
+	model, err := createXAIModel(gent.ModelXAIGrok41Fast)
 	if err != nil {
 		return err
 	}
@@ -541,7 +541,7 @@ func RunStreamingConcurrent(ctx context.Context, w io.Writer, _ StreamOutputConf
 
 // RunStreamingResponseInfo tests response info is correctly populated.
 func RunStreamingResponseInfo(ctx context.Context, w io.Writer, config StreamOutputConfig) error {
-	model, err := createXAIModel("grok-3-fast")
+	model, err := createXAIModel(gent.ModelXAIGrok41Fast)
 	if err != nil {
 		return err
 	}

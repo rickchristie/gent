@@ -26,6 +26,7 @@ import (
 	"github.com/rickchristie/gent/search"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
@@ -201,9 +202,10 @@ const (
 
 // Environment variable keys for API authentication.
 const (
-	envKeyXAI    = "GENT_TEST_XAI_KEY"
-	envKeyOpenAI = "GENT_TEST_OPENAI_KEY"
-	envKeyGemini = "GENT_TEST_GEMINI_KEY"
+	envKeyXAI       = "GENT_TEST_XAI_KEY"
+	envKeyOpenAI    = "GENT_TEST_OPENAI_KEY"
+	envKeyGemini    = "GENT_TEST_GEMINI_KEY"
+	envKeyAnthropic = "GENT_TEST_ANTHROPIC_KEY"
 )
 
 // AvailableModels lists all models the CLI can select from.
@@ -290,6 +292,26 @@ var AvailableModels = []ModelOption{
 		Name:    gent.ModelGoogleGemini31FlashLite,
 		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
 	},
+	{
+		Label: "Anthropic claude-opus-4-6",
+		Name: gent.ModelAnthropicClaude46Opus,
+		EnvKey: envKeyAnthropic,
+	},
+	{
+		Label: "Anthropic claude-sonnet-4-6",
+		Name: gent.ModelAnthropicClaude46Sonnet,
+		EnvKey: envKeyAnthropic,
+	},
+	{
+		Label: "Anthropic claude-sonnet-4-5",
+		Name: gent.ModelAnthropicClaude45Sonnet,
+		EnvKey: envKeyAnthropic,
+	},
+	{
+		Label: "Anthropic claude-haiku-4-5",
+		Name: gent.ModelAnthropicClaude45Haiku,
+		EnvKey: envKeyAnthropic,
+	},
 }
 
 // CreateModel creates an LLM model for testing. If modelName is
@@ -329,6 +351,13 @@ func CreateModel(
 		Transport: &models.ErrorCaptureTransport{},
 	}
 
+	// Anthropic models use a different client.
+	if strings.HasPrefix(modelName, "claude-") {
+		return createAnthropicModel(
+			modelName, apiKey, httpClient,
+		)
+	}
+
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
 		openai.WithModel(modelName),
@@ -342,6 +371,25 @@ func CreateModel(
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to create LLM: %w", err,
+		)
+	}
+
+	return models.NewLCGWrapper(llm).
+		WithModelName(modelName), nil
+}
+
+// createAnthropicModel creates an Anthropic Claude model.
+func createAnthropicModel(
+	modelName, apiKey string, httpClient *http.Client,
+) (gent.StreamingModel, error) {
+	llm, err := anthropic.New(
+		anthropic.WithToken(apiKey),
+		anthropic.WithModel(modelName),
+		anthropic.WithHTTPClient(httpClient),
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to create Anthropic LLM: %w", err,
 		)
 	}
 

@@ -573,10 +573,13 @@ func TestXML_DescribeStructure(t *testing.T) {
 				{name: "answer", guidance: "Write your final answer here."},
 			},
 			expected: expected{
-				output: "Format your response using XML-style tags for each section:\n\n" +
-					"<answer>\n" +
-					"Write your final answer here.\n" +
-					"</answer>\n",
+				output: `Format your response using XML-style tags for each section:
+**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.
+
+<answer>
+Write your final answer here.
+</answer>
+`,
 			},
 		},
 		{
@@ -586,13 +589,16 @@ func TestXML_DescribeStructure(t *testing.T) {
 				{name: "action", guidance: "Call a tool to take action."},
 			},
 			expected: expected{
-				output: "Format your response using XML-style tags for each section:\n\n" +
-					"<thinking>\n" +
-					"Think through the problem.\n" +
-					"</thinking>\n" +
-					"<action>\n" +
-					"Call a tool to take action.\n" +
-					"</action>\n",
+				output: `Format your response using XML-style tags for each section:
+**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.
+
+<thinking>
+Think through the problem.
+</thinking>
+<action>
+Call a tool to take action.
+</action>
+`,
 			},
 		},
 	}
@@ -713,10 +719,13 @@ func TestXML_RegisterSection(t *testing.T) {
 				{name: "answer", guidance: "Write your answer."},
 			},
 			expected: expected{
-				output: "Format your response using XML-style tags for each section:\n\n" +
-					"<answer>\n" +
-					"Write your answer.\n" +
-					"</answer>\n",
+				output: `Format your response using XML-style tags for each section:
+**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.
+
+<answer>
+Write your answer.
+</answer>
+`,
 			},
 		},
 		{
@@ -726,13 +735,16 @@ func TestXML_RegisterSection(t *testing.T) {
 				{name: "action", guidance: "Act here."},
 			},
 			expected: expected{
-				output: "Format your response using XML-style tags for each section:\n\n" +
-					"<thinking>\n" +
-					"Think here.\n" +
-					"</thinking>\n" +
-					"<action>\n" +
-					"Act here.\n" +
-					"</action>\n",
+				output: `Format your response using XML-style tags for each section:
+**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.
+
+<thinking>
+Think here.
+</thinking>
+<action>
+Act here.
+</action>
+`,
 			},
 		},
 		{
@@ -743,10 +755,13 @@ func TestXML_RegisterSection(t *testing.T) {
 				{name: "answer", guidance: "Another guidance."},
 			},
 			expected: expected{
-				output: "Format your response using XML-style tags for each section:\n\n" +
-					"<answer>\n" +
-					"Write your answer.\n" +
-					"</answer>\n",
+				output: `Format your response using XML-style tags for each section:
+**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.
+
+<answer>
+Write your answer.
+</answer>
+`,
 			},
 		},
 		{
@@ -757,10 +772,13 @@ func TestXML_RegisterSection(t *testing.T) {
 				{name: "ANSWER", guidance: "Third guidance."},
 			},
 			expected: expected{
-				output: "Format your response using XML-style tags for each section:\n\n" +
-					"<Answer>\n" +
-					"First guidance.\n" +
-					"</Answer>\n",
+				output: `Format your response using XML-style tags for each section:
+**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.
+
+<Answer>
+First guidance.
+</Answer>
+`,
 			},
 		},
 	}
