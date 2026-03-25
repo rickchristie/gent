@@ -53,9 +53,20 @@ type ModelInfo struct {
 	ModelFile string
 
 	// ModelURL is the download URL for the ONNX model file.
+	//
+	// ONNX source quality varies by tier:
+	//   - Tier 1 (official, multiple quant variants): ST MiniLM, nomic
+	//   - Tier 2 (official, FP32 + one quantized): e5, BGE, GTE, Arctic
+	//   - Tier 3 (community, well-tested INT8): Teradata repos — best source for
+	//     pre-quantized INT8 when official repos lack INT8 variants
 	ModelURL string
 
 	// TokenizerURL is the download URL for the tokenizer.json file.
+	//
+	// The daulet/tokenizers Go library (wrapping HuggingFace's Rust tokenizer crate)
+	// supports all tokenizer types across embedding models: WordPiece (BERT family),
+	// BPE (GPT-2 family), and SentencePiece/Unigram (XLM-RoBERTa family). No known
+	// incompatibilities across 15+ tested models. Benchmarks: ~12.6μs per encode.
 	TokenizerURL string
 
 	// Notes is additional information shown in the model list (e.g., "INT8 from Teradata fork").
@@ -127,14 +138,26 @@ type ModelConfig struct {
 	// models without prefixes.
 	PassagePrefix string
 
-	// InputNames are the ONNX model's input tensor names, in order. Most BERT models use
-	// ["input_ids", "attention_mask", "token_type_ids"]. XLMRoberta-based models (e5-base)
-	// use only ["input_ids", "attention_mask"]. The embedder creates tensors matching these
-	// names — wrong names cause ONNX Runtime errors.
+	// InputNames are the ONNX model's input tensor names, in order. These vary by ONNX
+	// export source — two "flavors" exist in the wild:
+	//
+	//   Sentence-transformers/Teradata export:
+	//     Inputs: input_ids, attention_mask (no token_type_ids)
+	//     Output: token_embeddings [batch, seq, dim]
+	//
+	//   Optimum/standard export:
+	//     Inputs: input_ids, attention_mask, token_type_ids
+	//     Output: last_hidden_state [batch, seq, dim]
+	//
+	// Most BERT models need all three inputs. XLMRoberta-based models (e5-base) only
+	// accept input_ids + attention_mask. When token_type_ids is required but the tokenizer
+	// doesn't produce them (e.g., multilingual-e5-small: BertModel architecture +
+	// XLMRobertaTokenizer), pass zeros.
 	InputNames []string
 
-	// OutputName is the ONNX model's output tensor name. Standard exports use
-	// "last_hidden_state". Sentence-transformers Teradata exports use "token_embeddings".
+	// OutputName is the ONNX model's output tensor name. Optimum exports use
+	// "last_hidden_state". Sentence-transformers/Teradata exports use "token_embeddings".
+	// Both contain [batch, seq, dim] token-level embeddings that need pooling.
 	OutputName string
 
 	// OptimalChunkTokens is the recommended chunk size in tokens for this config. Research

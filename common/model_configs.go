@@ -16,9 +16,16 @@ var ConfigRegistry []ModelConfig
 func init() {
 	ConfigRegistry = []ModelConfig{
 		// --- multilingual-e5-small ---
-		// NOTE: e5-small uses BertModel architecture which expects token_type_ids (pass zeros).
-		// e5-base uses XLMRobertaModel which does not accept token_type_ids. This is why two
-		// models from the same e5 family have different InputNames.
+		// Architecture-tokenizer mismatch: e5-small uses BertModel architecture but
+		// XLMRobertaTokenizer (which doesn't produce token_type_ids). The pre-built ONNX
+		// works with input_ids + attention_mask + token_type_ids (zeros). An Optimum
+		// re-export may incorrectly require or omit token_type_ids (HuggingFace Optimum
+		// issue #1758). e5-base uses XLMRobertaModel which cleanly requires only
+		// input_ids + attention_mask — no ambiguity.
+		//
+		// Model choice rationale: 74.80 nDCG@10 on MIRACL-id (Indonesian retrieval) —
+		// only 1.36 points behind the 5x larger e5-large (76.16). The scaling curve is
+		// remarkably flat for Indonesian, making the small model an outsized value.
 		{
 			Model: model("multilingual-e5-small"), ConfigName: "multilingual-e5-small",
 			Description: "Default. Best quality/size for multilingual.",
@@ -50,6 +57,10 @@ func init() {
 			ModelOverheadMB: 120, BestFor: "Lightweight English", // estimated
 		},
 		// --- all-MiniLM-L6-v2 ---
+		// CAUTION: The tokenizer config says max_length=512 but the model was trained with
+		// 256 tokens. MaxTokenChunks is set to 256 in ModelInfo. Inputs beyond 256 tokens
+		// produce embeddings that diverge from reference. The paraphrase-multilingual-
+		// MiniLM-L12-v2 variant has an even lower limit of 128 tokens.
 		{
 			Model: model("all-MiniLM-L6-v2"), ConfigName: "all-MiniLM-L6-v2",
 			Description: "Most widely used small model. No prefixes needed.",
@@ -82,6 +93,11 @@ func init() {
 			ModelOverheadMB: 385, BestFor: "English retrieval, CLS pooling", // estimated
 		},
 		// --- nomic-embed-text-v1.5 (full 768d) ---
+		// Uses a modified BERT architecture ("nomic-bert") with Rotary Positional Embeddings
+		// (RoPE) and SwiGLU activations. Pre-built ONNX works correctly because RoPE is
+		// baked into the graph. Requires trust_remote_code=True in Python but irrelevant
+		// for ONNX. Always use official pre-built ONNX files — cannot re-export without
+		// custom modeling code. Supports Matryoshka dimensions: 768, 512, 256, 128, 64.
 		{
 			Model: model("nomic-embed-text-v1.5"), ConfigName: "nomic-embed-text-v1.5-768d",
 			Description: "Full 768 dimensions. Best for long documents (8192 seq len).",

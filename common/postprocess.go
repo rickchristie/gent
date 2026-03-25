@@ -6,11 +6,24 @@ import "math"
 // and unit variance. This is required as a post-processing step for nomic-embed-text-v1.5
 // before L2 normalization.
 //
-// Use as PostProcess in EmbedderConfig:
+// # Matryoshka Dimension Reduction Pipeline
 //
-//	cfg := search.EmbedderConfig{
-//	    PostProcess: search.LayerNorm,
-//	}
+// For nomic-embed-text-v1.5 Matryoshka configs, the full post-processing pipeline is:
+//
+//	ONNX inference → 768d embedding → LayerNorm → truncate to target dim → L2 normalize
+//
+// LayerNorm must be applied BEFORE truncation because normalization statistics (mean,
+// variance) are computed over the full 768 dimensions. Truncating first would change the
+// statistics and degrade quality. L2 normalization happens after truncation (handled by
+// the embedder, not PostProcess). This pipeline runs entirely outside the ONNX model.
+//
+// # Usage
+//
+//	// Full 768d (LayerNorm only, no truncation):
+//	PostProcess: func(v []float32) []float32 { return LayerNorm(v) }
+//
+//	// Matryoshka 384d (LayerNorm → truncate):
+//	PostProcess: func(v []float32) []float32 { return LayerNorm(v)[:384] }
 func LayerNorm(v []float32) []float32 {
 	n := len(v)
 	if n == 0 {

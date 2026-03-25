@@ -42,6 +42,16 @@ type OnnxOptions struct {
 	OnnxLibraryPath string
 
 	// NumThreads controls ONNX Runtime intra-op parallelism. Default: 4.
+	//
+	// Tuning guidance: default 4 works well on 2+ vCPU instances. For high-concurrency
+	// scenarios (50+ concurrent embedding requests), set to 1 and let Go's goroutine
+	// scheduler handle concurrency — ONNX Runtime's internal thread pool will compete
+	// with Go's scheduler otherwise.
+	//
+	// NUMA note: on multi-socket servers (e.g., m5.4xlarge), ONNX Runtime may allocate
+	// memory on one NUMA node and schedule threads on another, causing 3x+ latency
+	// penalty. For multi-socket: set GOMP_CPU_AFFINITY or OMP_PLACES env vars, or pin
+	// the process with taskset. Single-socket instances (t3, c6i.xlarge) are unaffected.
 	NumThreads int
 
 	// MaxConcurrency limits concurrent ONNX inference calls via a semaphore. Default: 4.

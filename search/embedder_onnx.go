@@ -19,6 +19,11 @@ import (
 // for tokenization. Works with any BERT-family sentence embedding model exported to ONNX
 // (e5, MiniLM, BGE, Nomic, GTE, etc.).
 //
+// Library choice: we use yalue/onnxruntime_go + daulet/tokenizers instead of the
+// higher-level knights-analytics/hugot because it gives more control over the inference
+// pipeline (custom pooling strategies, PostProcess hooks, per-model input tensor
+// configuration). Both require CGo.
+//
 // The embedder handles the full pipeline: tokenize → pad → ONNX inference → pool →
 // L2 normalize. Prefixes are prepended internally based on whether EmbedQuery or
 // EmbedText is called.
@@ -112,7 +117,9 @@ func NewOnnxEmbedder(cfg common.ModelConfig, opts OnnxOptions) (Embedder, error)
 		sem:           make(chan struct{}, opts.MaxConcurrency),
 	}
 
-	// Warm-up: run a dummy inference to trigger JIT compilation.
+	// Warm-up: run a dummy inference to trigger ONNX Runtime JIT compilation and memory
+	// allocation. The first inference call is 5-10x slower than subsequent calls — this
+	// prevents a latency spike on the first real user request.
 	if _, err = e.embed(context.Background(), "warmup"); err != nil {
 		tk.Close()
 		return nil, fmt.Errorf("search: warm-up inference failed: %w", err)

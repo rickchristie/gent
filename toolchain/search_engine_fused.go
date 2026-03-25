@@ -30,12 +30,15 @@ import (
 //
 // Tool search benefits more from semantic matching than keyword matching because:
 //   - Agents describe tool needs in natural language, not tool registry vocabulary
-//   - Tool names are often abbreviated or domain-specific (get_billing_ledger vs "check payments")
+//   - Tool names are often abbreviated/domain-specific (get_billing_ledger vs "check payments")
 //   - Synthetic queries help but can't cover all phrasings
 //
 // The 0.3/0.7 split gives BM25 enough weight to boost exact-name matches to the top (the 10x
 // BM25 boost on name field produces very high raw scores that dominate even at 30% weight)
 // while letting semantic search carry the ranking for natural language queries.
+//
+// For comparison, policy search would use 0.4/0.6 — policies use formal, findable terms
+// with higher keyword overlap, so BM25 contributes more meaningfully there.
 //
 // # Score Normalization
 //

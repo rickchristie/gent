@@ -37,9 +37,19 @@ type SearchResult struct {
 	Id string
 
 	// Score is the relevance score. Semantics depend on the index type:
-	//   - FlatIndex: cosine similarity in [-1.0, 1.0] (practically [0.0, 1.0])
-	//   - BleveIndex: BM25 score (unbounded, query-dependent)
-	//   - FusedIndex: fused score, depends on Fuser implementation
+	//
+	//   - FlatIndex: cosine similarity in [-1.0, 1.0] (practically [0.0, 1.0]).
+	//     Interpretation: 0.9+ = near-identical meaning, 0.5-0.7 = clearly related,
+	//     0.2-0.35 = noise floor (shared language structure), <0.2 = unrelated.
+	//     Meaningful retrieval results typically have scores > 0.3.
+	//
+	//   - BleveIndex: BM25 score (unbounded, query-dependent). A score of 28.5 from
+	//     one query is not comparable to 3.8 from another — the absolute value is
+	//     meaningless across queries. You cannot threshold on raw BM25 scores. This is
+	//     why BM25 scores must be normalized before fusion with cosine similarity.
+	//
+	//   - FusedIndex: fused score, depends on Fuser implementation. With
+	//     WeightedLinearFuser and weights summing to 1.0, output is in [0, 1].
 	Score float64
 
 	// Snippet is text that can be shown for context. For FlatIndex: the best-matching chunk

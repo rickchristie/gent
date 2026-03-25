@@ -32,10 +32,45 @@ type Fuser interface {
 //
 // # Why weighted linear over RRF (Reciprocal Rank Fusion)
 //
-// RRF uses rank position, not score magnitude. A document that's rank #1 in semantic search
-// (score 0.95) but absent from BM25 gets penalized because RRF treats "missing from one list"
-// the same as "ranked last." Weighted linear correctly handles "found by one method only":
-// 0.7 * 0.95 = 0.665, which can still beat a mediocre dual-match.
+// RRF uses rank position, not score magnitude: score = Σ 1/(k + rank_i) with k=60.
+// This creates a specific failure mode for tool search:
+//
+//   - A doc rank #1 in semantic (score 0.95) but absent from BM25:
+//     1/(60+1) + 0 = 0.0164
+//   - A doc rank #5 in both: 1/(60+5) + 1/(60+5) = 0.0308 — almost double
+//
+// RRF systematically favors "okay in both" over "perfect in one." For tool search this
+// is exactly wrong — the whole point of semantic search is finding tools where keyword
+// matching fails. Weighted linear handles "found by one method only" correctly:
+// 0.7 × 0.95 = 0.665, which can still beat a mediocre dual-match.
+//
+// # Worked Examples
+//
+// Query: "check outstanding payments" (natural language, no exact matches)
+//
+//	Tool                 BM25Raw  Semantic  BM25Norm  Fused(0.3/0.7)
+//	get_payment_history    3.8     0.85      1.00      0.895
+//	get_billing_ledger     0.0     0.89      0.00      0.623
+//	list_invoices          1.2     0.82      0.00      0.574
+//
+// get_billing_ledger has ZERO BM25 match but ranks #2 via semantic. Pure BM25 misses it.
+//
+// Query: "get_billing_ledger" (explicit tool name)
+//
+//	Tool                 BM25Raw  Semantic  BM25Norm  Fused
+//	get_billing_ledger    28.5     0.95      1.00      0.965
+//	get_payment_history    6.1     0.72      0.08      0.528
+//
+// 10x name boost → massive raw BM25 → overwhelmingly first place.
+//
+// Query: "customer wants to leave early" (colloquial agent reasoning)
+//
+//	Tool                 BM25Raw  Semantic  BM25Norm  Fused
+//	early_termination      2.1     0.91      1.00      0.937
+//	cancel_reservation     0.0     0.83      0.00      0.581
+//	process_checkout       0.0     0.78      0.00      0.546
+//
+// Only one tool has any BM25 match ("early"). Semantic finds three relevant tools.
 //
 // # Example: 30% BM25 + 70% semantic
 //

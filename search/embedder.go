@@ -22,10 +22,16 @@ func (f TokenCounterFunc) TokenCount(text string) int { return f(text) }
 
 // Embedder converts text into dense vector representations.
 //
+// Embedding is a lossy one-way compression: a 384-dimensional vector is 1,536 bytes
+// representing potentially thousands of bytes of text. There is no inverse function — you
+// cannot reconstruct text from a vector. This is why FlatIndex stores original chunk text
+// alongside each vector (for Snippet in search results).
+//
 // The EmbedQuery and EmbedText distinction exists because some models (notably the e5 family)
 // require different prefixes for queries vs documents. For e5-small, EmbedQuery prepends
-// "query: " and EmbedText prepends "passage: ". Models that don't need prefixes implement
-// both identically.
+// "query: " and EmbedText prepends "passage: ". Without these prefixes, retrieval quality
+// degrades by 10-20% nDCG@10. Models that don't need prefixes (MiniLM, GTE) implement both
+// identically.
 //
 // Embedder also implements [TokenCounter] so that ChunkAdapters can make token-aware chunking
 // decisions using the same tokenizer that will process the text during embedding.
@@ -35,11 +41,13 @@ type Embedder interface {
 	TokenCounter
 
 	// EmbedQuery produces a vector for a search query. For e5 models, prepends "query: ".
+	// For nomic models, prepends "search_query: ". For BGE models, prepends
+	// "Represent this sentence for searching relevant passages: ".
 	EmbedQuery(ctx context.Context, text string) ([]float32, error)
 
 	// EmbedText produces a vector for a text passage being indexed. For e5 models, prepends
-	// "passage: ". Renamed from EmbedDocument — the embedder doesn't know about documents,
-	// it just embeds text with the passage prefix.
+	// "passage: ". For nomic models, prepends "search_document: ". For BGE models, no
+	// prefix is added (query-only prefix model).
 	EmbedText(ctx context.Context, text string) ([]float32, error)
 
 	// EmbedTextBatch produces vectors for multiple text passages. More efficient than calling

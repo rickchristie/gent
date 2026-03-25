@@ -73,8 +73,12 @@ func (f *FusedIndex[Doc]) Remove(id string) error {
 }
 
 // Swap forwards the atomic replacement to all sub-indices. Fails fast on first error.
-// Note: if the first sub-index succeeds and the second fails, state is inconsistent.
-// Use Swap again with the correct data to recover.
+//
+// Consistency note: if the first sub-index succeeds and the second fails, state is
+// inconsistent (one index has new data, the other has old data). Recovery path: call
+// Swap again with the correct data — Swap replaces the entire index contents, so a
+// successful follow-up Swap restores consistency. Add/Remove have the same partial-
+// failure risk; Swap is the most reliable recovery mechanism.
 func (f *FusedIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
 	for name, index := range f.indexes {
 		if err := index.Swap(ctx, docs); err != nil {

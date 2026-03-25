@@ -20,10 +20,28 @@ type storedVector struct {
 // stored in a flat array. Search scans all vectors and returns deduplicated results (one per
 // document ID, using the best-matching chunk).
 //
-// Performance characteristics (384-dim, single CPU core):
-//   - 1K vectors: < 1ms search
-//   - 10K vectors: ~5ms search
-//   - 100K vectors: ~40ms search
+// # Performance
+//
+// Search latency (384-dim, single CPU core):
+//   - 1K vectors: < 1ms
+//   - 10K vectors: ~5ms
+//   - 100K vectors: ~40ms
+//
+// Embedding latency (single text, CPU): ~15-25ms on t3 (no VNNI), 2-3x faster on c6i
+// (Ice Lake with AVX-512 VNNI for INT8 inference).
+//
+// Cold start re-indexing (~15-20ms per document on t3.small):
+//   - 200 tools: ~4 seconds
+//   - 500 policies: ~10 seconds
+//   - 10K docs: ~3 minutes
+//
+// # Memory Profile
+//
+// Each 384-dim float32 vector is 1,536 bytes. With stored chunk text:
+//   - 200 tools (200 vectors): ~1 MB
+//   - 500 policies (1,500 vectors): ~8 MB
+//   - 10K docs (30K vectors): ~150 MB
+//   - 100K docs (300K vectors): ~1.5 GB
 //
 // Safe for concurrent use via sync.RWMutex.
 type FlatIndex[Doc any] struct {
