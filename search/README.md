@@ -74,7 +74,8 @@ go test ./search/ -run 'TestTheoreticalMax|TestNormalizeBM25|TestWeightedLinear|
 
 ### Integration tests (real ONNX models)
 
-All 11 registered models are auto-downloaded to `.model/` on first test run. Tests skip gracefully if ONNX Runtime is not installed.
+All 11 registered models are auto-downloaded to `.model/` on first test run.
+Tests skip gracefully if ONNX Runtime is not installed.
 
 ```bash
 go test ./search/ -run TestOnnxEmbedder_AllModels -v -timeout 300s
@@ -85,6 +86,13 @@ go test ./search/ -run TestOnnxEmbedder_AllModels -v -timeout 300s
 1. `EmbedderConfig.OnnxLibraryPath` (explicit)
 2. `GENT_ORT_LIB` environment variable (CI/containers)
 3. `~/.gent/lib/` (default, installed by setup tool)
+
+## Downloading models
+
+```bash
+go run ./cmd/gent model list
+go run ./cmd/gent model download multilingual-e5-small
+```
 
 ## Container / CI
 
