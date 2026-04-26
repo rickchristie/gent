@@ -115,6 +115,73 @@ func TestJSON_RegisterTool(t *testing.T) {
 	}
 }
 
+func TestJSON_RegisterTool_PanicsOnInvalidOrDuplicate(t *testing.T) {
+	type input struct {
+		register func(tc *JSON)
+	}
+
+	type expected struct {
+		panics bool
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "nil tool panics",
+			input: input{register: func(tc *JSON) {
+				tc.RegisterTool(nil)
+			}},
+			expected: expected{panics: true},
+		},
+		{
+			name: "invalid tool type panics",
+			input: input{register: func(tc *JSON) {
+				tc.RegisterTool("not a tool")
+			}},
+			expected: expected{panics: true},
+		},
+		{
+			name: "duplicate tool name panics",
+			input: input{register: func(tc *JSON) {
+				tool1 := gent.NewToolFunc(
+					"duplicate", "First", nil,
+					func(ctx context.Context, args map[string]any) (string, error) {
+						return "first", nil
+					},
+				)
+				tool2 := gent.NewToolFunc(
+					"duplicate", "Second", nil,
+					func(ctx context.Context, args map[string]any) (string, error) {
+						return "second", nil
+					},
+				)
+				tc.RegisterTool(tool1)
+				tc.RegisterTool(tool2)
+			}},
+			expected: expected{panics: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+
+			if tt.expected.panics {
+				assert.Panics(t, func() {
+					tt.input.register(tc)
+				})
+			} else {
+				assert.NotPanics(t, func() {
+					tt.input.register(tc)
+				})
+			}
+		})
+	}
+}
+
 func TestJSON_Prompt(t *testing.T) {
 	tc := NewJSON()
 	tool := gent.NewToolFunc(
@@ -214,7 +281,7 @@ func TestJSON_AvailableToolsPrompt_OutputSchema(t *testing.T) {
 		tc.RegisterTool(gent.NewToolFunc(
 			"get_item", "Get an item",
 			map[string]any{
-				"type":       "object",
+				"type": "object",
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"},
 				},
@@ -232,7 +299,7 @@ func TestJSON_AvailableToolsPrompt_OutputSchema(t *testing.T) {
 		tc.RegisterTool(gent.NewToolFunc(
 			"get_item", "Get an item",
 			map[string]any{
-				"type":       "object",
+				"type": "object",
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"},
 				},
@@ -252,7 +319,7 @@ func TestJSON_AvailableToolsPrompt_OutputSchema(t *testing.T) {
 		tc.RegisterTool(gent.NewToolFunc(
 			"echo", "Echo input",
 			map[string]any{
-				"type":       "object",
+				"type": "object",
 				"properties": map[string]any{
 					"text": map[string]any{"type": "string"},
 				},
@@ -1985,7 +2052,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError          bool
 				toolchainErrorTotal  int64
 				toolchainErrorConsec float64
-				}{
+			}{
 				shouldError:          true,
 				toolchainErrorTotal:  1,
 				toolchainErrorConsec: 1,
@@ -1998,7 +2065,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError          bool
 				toolchainErrorTotal  int64
 				toolchainErrorConsec float64
-				}{
+			}{
 				shouldError:          false,
 				toolchainErrorTotal:  0,
 				toolchainErrorConsec: 0,
@@ -2051,9 +2118,9 @@ type instructionsTool struct {
 	instructions string
 }
 
-func (t *instructionsTool) Name() string                   { return t.name }
-func (t *instructionsTool) Description() string            { return t.description }
-func (t *instructionsTool) Policy() string                 { return "" }
+func (t *instructionsTool) Name() string                    { return t.name }
+func (t *instructionsTool) Description() string             { return t.description }
+func (t *instructionsTool) Policy() string                  { return "" }
 func (t *instructionsTool) ParameterSchema() map[string]any { return t.schema }
 func (t *instructionsTool) Call(
 	ctx context.Context,
@@ -2238,6 +2305,12 @@ func TestJSON_Execute_TracesToolCallErrors_UnknownTool(t *testing.T) {
 
 			stats := execCtx.Stats()
 			assert.Equal(t, tt.expected.errorTotal,
+				stats.GetCounter(gent.SCToolCalls),
+				"tool calls mismatch")
+			assert.Equal(t, tt.expected.errorFor,
+				stats.GetCounter(gent.SCToolCallsFor+"nonexistent"),
+				"tool calls for tool mismatch")
+			assert.Equal(t, tt.expected.errorTotal,
 				stats.GetCounter(gent.SCToolCallsErrorTotal),
 				"error total mismatch")
 			assert.Equal(t, tt.expected.errorFor,
@@ -2310,6 +2383,12 @@ func TestJSON_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 
 			stats := execCtx.Stats()
 			assert.Equal(t, tt.expected.errorTotal,
+				stats.GetCounter(gent.SCToolCalls),
+				"tool calls mismatch")
+			assert.Equal(t, tt.expected.errorFor,
+				stats.GetCounter(gent.SCToolCallsFor+"validated_tool"),
+				"tool calls for tool mismatch")
+			assert.Equal(t, tt.expected.errorTotal,
 				stats.GetCounter(gent.SCToolCallsErrorTotal),
 				"error total mismatch")
 			assert.Equal(t, tt.expected.errorFor,
@@ -2318,6 +2397,87 @@ func TestJSON_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 			assert.Equal(t, tt.expected.errorConsecutive,
 				stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 				"error consecutive mismatch")
+		})
+	}
+}
+
+func TestJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
+	type input struct {
+		content  string
+		setup    func(tc *JSON)
+		limitKey gent.StatKey
+	}
+
+	type expected struct {
+		exceededLimit gent.Limit
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "unknown tool trips per-tool call limit",
+			input: input{
+				content:  `{"tool": "nonexistent", "args": {}}`,
+				setup:    func(tc *JSON) {},
+				limitKey: gent.SCToolCallsFor + "nonexistent",
+			},
+			expected: expected{exceededLimit: gent.Limit{
+				Type:     gent.LimitExactKey,
+				Key:      gent.SCToolCallsFor + "nonexistent",
+				MaxValue: 0,
+			}},
+		},
+		{
+			name: "schema validation failure trips per-tool call limit",
+			input: input{
+				content: `{"tool": "validated_tool", "args": {}}`,
+				setup: func(tc *JSON) {
+					tc.RegisterTool(gent.NewToolFunc(
+						"validated_tool",
+						"A tool with required schema",
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"required_field": map[string]any{"type": "string"},
+							},
+							"required": []any{"required_field"},
+						},
+						func(
+							ctx context.Context,
+							args map[string]any,
+						) (string, error) {
+							return "should not reach", nil
+						},
+					))
+				},
+				limitKey: gent.SCToolCallsFor + "validated_tool",
+			},
+			expected: expected{exceededLimit: gent.Limit{
+				Type:     gent.LimitExactKey,
+				Key:      gent.SCToolCallsFor + "validated_tool",
+				MaxValue: 0,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewJSON()
+			tt.input.setup(tc)
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx.SetLimits([]gent.Limit{tt.expected.exceededLimit})
+
+			_, err := tc.Execute(execCtx, tt.input.content, testFormat())
+
+			require.NoError(t, err)
+			require.NotNil(t, execCtx.ExceededLimit())
+			assert.Equal(t, tt.expected.exceededLimit, *execCtx.ExceededLimit())
+			assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.SCToolCalls))
+			assert.Equal(t, int64(1), execCtx.Stats().GetCounter(tt.input.limitKey))
+			assert.Error(t, execCtx.Context().Err())
 		})
 	}
 }

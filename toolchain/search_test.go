@@ -1922,6 +1922,48 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 		},
 	)
 
+	t.Run("unknown regular tool call increments tool call stats",
+		func(t *testing.T) {
+			eng := &mockToolSearcher{
+				id: "m", guidance: "g",
+			}
+			tc := setupSearchJSON(
+				[]*indexableToolFunc{},
+				[]gent.ToolSearcher{eng},
+			)
+
+			execCtx := newExecCtx()
+			content := `{"tool": "missing_tool", "args": {}}`
+			_, err := tc.Execute(
+				execCtx, content, searchTestFormat(),
+			)
+			require.NoError(t, err)
+
+			assert.Equal(
+				t, int64(1),
+				execCtx.Stats().GetCounter(gent.SCToolCalls),
+			)
+			assert.Equal(
+				t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCToolCallsFor+"missing_tool",
+				),
+			)
+			assert.Equal(
+				t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCToolCallsErrorTotal,
+				),
+			)
+			assert.Equal(
+				t, int64(1),
+				execCtx.Stats().GetCounter(
+					gent.SCToolCallsErrorFor+"missing_tool",
+				),
+			)
+		},
+	)
+
 	t.Run("search error increments error stats",
 		func(t *testing.T) {
 			eng := &mockToolSearcher{
@@ -2067,6 +2109,81 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 		},
 	)
+}
+
+func TestSearchJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
+	type input struct {
+		content  string
+		setup    func() *SearchJSON
+		limitKey gent.StatKey
+	}
+
+	type expected struct {
+		exceededLimit gent.Limit
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "unknown regular tool trips per-tool call limit",
+			input: input{
+				content: `{"tool": "missing_tool", "args": {}}`,
+				setup: func() *SearchJSON {
+					return setupSearchJSON(
+						[]*indexableToolFunc{},
+						[]gent.ToolSearcher{&mockToolSearcher{id: "mock", guidance: "g"}},
+					)
+				},
+				limitKey: gent.SCToolCallsFor + "missing_tool",
+			},
+			expected: expected{exceededLimit: gent.Limit{
+				Type:     gent.LimitExactKey,
+				Key:      gent.SCToolCallsFor + "missing_tool",
+				MaxValue: 0,
+			}},
+		},
+		{
+			name: "search schema validation failure trips search tool limit",
+			input: input{
+				content: `{
+  "tool": "tool_registry_search",
+  "args": {"query": "x", "query_type": "missing_engine"}
+}`,
+				setup: func() *SearchJSON {
+					return setupSearchJSON(
+						[]*indexableToolFunc{},
+						[]gent.ToolSearcher{&mockToolSearcher{id: "mock", guidance: "g"}},
+					)
+				},
+				limitKey: gent.SCToolCallsFor + searchToolName,
+			},
+			expected: expected{exceededLimit: gent.Limit{
+				Type:     gent.LimitExactKey,
+				Key:      gent.SCToolCallsFor + searchToolName,
+				MaxValue: 0,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := tt.input.setup()
+			execCtx := newExecCtx()
+			execCtx.SetLimits([]gent.Limit{tt.expected.exceededLimit})
+
+			_, err := tc.Execute(execCtx, tt.input.content, searchTestFormat())
+
+			require.NoError(t, err)
+			require.NotNil(t, execCtx.ExceededLimit())
+			assert.Equal(t, tt.expected.exceededLimit, *execCtx.ExceededLimit())
+			assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.SCToolCalls))
+			assert.Equal(t, int64(1), execCtx.Stats().GetCounter(tt.input.limitKey))
+			assert.Error(t, execCtx.Context().Err())
+		})
+	}
 }
 
 // -------------------------------------------------------
@@ -2296,7 +2413,7 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 				fullDefTools: []string{
 					"tool_a", "tool_b", "tool_c",
 				},
-				dedupTools: []string{"tool_b"},
+				dedupTools:  []string{"tool_b"},
 				noDescTools: []string{},
 			},
 		},
@@ -2405,10 +2522,10 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 					"tool_a", "tool_b", "tool_c",
 				},
 				dedupTools: []string{
-					"tool_b",  // deduped in q2
-					"tool_a",  // deduped in q3
-					"tool_b",  // deduped in q3
-					"tool_c",  // deduped in q3
+					"tool_b", // deduped in q2
+					"tool_a", // deduped in q3
+					"tool_b", // deduped in q3
+					"tool_c", // deduped in q3
 				},
 				noDescTools: []string{},
 			},

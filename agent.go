@@ -1,6 +1,8 @@
 package gent
 
 import (
+	"sync"
+
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -129,13 +131,13 @@ type LoopData interface {
 
 // BasicLoopData is the default implementation of [LoopData].
 //
-// It provides basic storage for task, iteration history, and scratchpad. This is used by
-// the built-in agent loops (e.g., agents/react) and can be used directly or embedded in
-// custom structs for additional data.
+// It provides concurrency-safe storage for task, iteration history, and scratchpad. This is
+// used by the built-in agent loops (e.g., agents/react) and can be used directly or embedded
+// in custom structs for additional data.
 //
 // # Direct Usage
 //
-//	data := gent.NewLoopData(task)
+//	data := gent.NewBasicLoopData(task)
 //	execCtx := gent.NewExecutionContext(ctx, "my-agent", data)
 //
 // # Embedding for Custom Data
@@ -150,7 +152,7 @@ type LoopData interface {
 //
 //	func NewMyLoopData(task *gent.Task, sessionID string) *MyLoopData {
 //	    return &MyLoopData{
-//	        BasicLoopData: *gent.NewLoopData(task),
+//	        BasicLoopData: *gent.NewBasicLoopData(task),
 //	        SessionID:     sessionID,
 //	        UserContext:   make(map[string]any),
 //	    }
@@ -158,6 +160,8 @@ type LoopData interface {
 //
 // The embedded struct automatically satisfies [LoopData] and works with all agent loops.
 type BasicLoopData struct {
+	mu sync.RWMutex
+
 	task             *Task
 	iterationHistory []*Iteration
 	scratchpad       []*Iteration
@@ -175,45 +179,62 @@ func NewBasicLoopData(task *Task) *BasicLoopData {
 
 // GetTask returns the original input provided by the user.
 func (d *BasicLoopData) GetTask() *Task {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.task
 }
 
 // GetIterationHistory returns all Iteration recorded, including compacted ones.
 func (d *BasicLoopData) GetIterationHistory() []*Iteration {
-	return d.iterationHistory
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return append([]*Iteration(nil), d.iterationHistory...)
 }
 
 // AddIterationHistory adds a new Iteration to the full history.
 // Publishes a CommonDiffEvent if ExecutionContext is set.
 func (d *BasicLoopData) AddIterationHistory(iter *Iteration) {
-	before := d.iterationHistory
+	d.mu.Lock()
+	before := append([]*Iteration(nil), d.iterationHistory...)
 	d.iterationHistory = append(d.iterationHistory, iter)
-	if d.execCtx != nil {
-		d.execCtx.PublishIterationHistoryChange(before, d.iterationHistory)
+	after := append([]*Iteration(nil), d.iterationHistory...)
+	execCtx := d.execCtx
+	d.mu.Unlock()
+	if execCtx != nil {
+		execCtx.PublishIterationHistoryChange(before, after)
 	}
 }
 
 // GetScratchPad returns all Iteration that will be used in next iteration.
 func (d *BasicLoopData) GetScratchPad() []*Iteration {
-	return d.scratchpad
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return append([]*Iteration(nil), d.scratchpad...)
 }
 
 // SetScratchPad sets the iterations to be used in next iteration.
 // Sets the SGScratchpadLength gauge and publishes a CommonDiffEvent
 // if ExecutionContext is set.
 func (d *BasicLoopData) SetScratchPad(iterations []*Iteration) {
-	before := d.scratchpad
-	d.scratchpad = iterations
-	if d.execCtx != nil {
-		d.execCtx.Stats().SetGauge(
-			SGScratchpadLength, float64(len(iterations)),
+	next := append([]*Iteration(nil), iterations...)
+	d.mu.Lock()
+	before := append([]*Iteration(nil), d.scratchpad...)
+	d.scratchpad = next
+	after := append([]*Iteration(nil), d.scratchpad...)
+	execCtx := d.execCtx
+	d.mu.Unlock()
+	if execCtx != nil {
+		execCtx.Stats().SetGauge(
+			SGScratchpadLength, float64(len(after)),
 		)
-		d.execCtx.PublishScratchPadChange(before, iterations)
+		execCtx.PublishScratchPadChange(before, after)
 	}
 }
 
 // SetExecutionContext sets the ExecutionContext for automatic event publishing.
 func (d *BasicLoopData) SetExecutionContext(ctx *ExecutionContext) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.execCtx = ctx
 }
 

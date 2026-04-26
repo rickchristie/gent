@@ -206,21 +206,30 @@ func (m *LCGWrapper) GenerateContentStream(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (gent.Stream, error) {
-	// Publish BeforeModelCall event — subscribers may modify event.Request
-	// for ephemeral dynamic context injection.
-	beforeEvent := execCtx.PublishBeforeModelCall(m.modelName, messages)
-
-	// Use event.Request (possibly modified by subscribers)
-	// Type assert back to []llms.MessageContent
 	requestMessages := messages
-	if modifiedRequest, ok := beforeEvent.Request.([]llms.MessageContent); ok {
-		requestMessages = modifiedRequest
+	callIteration := 0
+	sourcePath := ""
+	baseCtx := context.Background()
+
+	if execCtx != nil {
+		// Publish BeforeModelCall event — subscribers may modify event.Request
+		// for ephemeral dynamic context injection.
+		beforeEvent := execCtx.PublishBeforeModelCall(m.modelName, messages)
+
+		// Use event.Request (possibly modified by subscribers)
+		// Type assert back to []llms.MessageContent
+		if modifiedRequest, ok := beforeEvent.Request.([]llms.MessageContent); ok {
+			requestMessages = modifiedRequest
+		}
+		callIteration = beforeEvent.Iteration
+		sourcePath = execCtx.BuildSourcePath()
+		baseCtx = execCtx.Context()
 	}
 
-	ctx := execCtx.Context()
+	ctx, cancel := context.WithCancel(baseCtx)
 
 	// Create stream with duration tracking
-	stream := gent.NewStreamWithDuration()
+	stream := gent.NewStreamWithDurationWithClose(cancel)
 
 	// Set up streaming callbacks.
 	//
@@ -240,12 +249,17 @@ func (m *LCGWrapper) GenerateContentStream(
 	streamingContentCallback := llms.WithStreamingFunc(
 		func(_ context.Context, contentChunk []byte) error {
 			if len(contentChunk) > 0 {
-				stream.SendContent(string(contentChunk))
-				execCtx.EmitChunk(gent.StreamChunk{
+				chunk := gent.StreamChunk{
 					Content:       string(contentChunk),
 					StreamId:      streamId,
 					StreamTopicId: streamTopicId,
-				})
+					Source:        sourcePath,
+				}
+				if stream.SendContent(chunk.Content) {
+					if execCtx != nil {
+						execCtx.EmitChunk(chunk)
+					}
+				}
 				streamingFuncHandledContent = true
 			}
 			return nil
@@ -255,24 +269,34 @@ func (m *LCGWrapper) GenerateContentStream(
 	streamingReasoningCallback := llms.WithStreamingReasoningFunc(
 		func(_ context.Context, reasoningChunk, contentChunk []byte) error {
 			if len(reasoningChunk) > 0 {
-				stream.SendReasoning(string(reasoningChunk))
-				execCtx.EmitChunk(gent.StreamChunk{
+				chunk := gent.StreamChunk{
 					ReasoningContent: string(reasoningChunk),
 					StreamId:         streamId,
 					StreamTopicId:    streamTopicId,
-				})
+					Source:           sourcePath,
+				}
+				if stream.SendReasoning(chunk.ReasoningContent) {
+					if execCtx != nil {
+						execCtx.EmitChunk(chunk)
+					}
+				}
 			}
 			if len(contentChunk) > 0 {
 				if streamingFuncHandledContent {
 					streamingFuncHandledContent = false
 					return nil
 				}
-				stream.SendContent(string(contentChunk))
-				execCtx.EmitChunk(gent.StreamChunk{
+				chunk := gent.StreamChunk{
 					Content:       string(contentChunk),
 					StreamId:      streamId,
 					StreamTopicId: streamTopicId,
-				})
+					Source:        sourcePath,
+				}
+				if stream.SendContent(chunk.Content) {
+					if execCtx != nil {
+						execCtx.EmitChunk(chunk)
+					}
+				}
 			}
 			return nil
 		},
@@ -309,19 +333,24 @@ func (m *LCGWrapper) GenerateContentStream(
 		}
 
 		// Publish AfterModelCall event (also updates stats for tokens)
-		execCtx.PublishAfterModelCall(m.modelName, requestMessages, response, duration, err)
-
-		// Emit error chunk if error occurred
-		if err != nil {
-			execCtx.EmitChunk(gent.StreamChunk{
-				StreamId:      streamId,
-				StreamTopicId: streamTopicId,
-				Err:           err,
-			})
+		if execCtx != nil {
+			execCtx.PublishAfterModelCallForIteration(
+				callIteration, m.modelName, requestMessages, response, duration, err,
+			)
 		}
 
 		// Complete the stream
-		stream.Complete(response, err)
+		completed := stream.TryComplete(response, err)
+
+		// Emit error chunk if error occurred before the consumer closed the stream.
+		if err != nil && completed && execCtx != nil {
+			execCtx.EmitChunk(gent.StreamChunk{
+				StreamId:      streamId,
+				StreamTopicId: streamTopicId,
+				Source:        sourcePath,
+				Err:           err,
+			})
+		}
 	}()
 
 	return stream, nil

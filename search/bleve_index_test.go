@@ -2,6 +2,8 @@ package search
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/blevesearch/bleve/v2"
@@ -35,6 +37,14 @@ func (a *testBleveAdapter) Query(queryText string) (query.Query, error) {
 	q := bleve.NewMatchQuery(queryText)
 	q.SetField("content")
 	return q, nil
+}
+
+type testBleveIDFAdapter struct {
+	testBleveAdapter
+}
+
+func (a *testBleveIDFAdapter) IDFFields() (string, []IDFField) {
+	return "standard", []IDFField{{Field: "content", Boost: 1}}
 }
 
 func TestBleveIndex_SearchReturnsMatches(t *testing.T) {
@@ -127,6 +137,89 @@ func TestBleveIndex_Swap(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "new", results[0].Id)
+}
+
+func TestBleveIndex_SearchConcurrentSwapWithTheoreticalMax(t *testing.T) {
+	idx, err := NewBleveIndex(
+		&testBleveIDFAdapter{},
+		WithKneeTruncation(false),
+		WithTheoreticalMaxConfidenceThreshold(0),
+	)
+	require.NoError(t, err)
+	defer idx.Close()
+
+	ctx := context.Background()
+	require.NoError(t, idx.Swap(ctx, bleveSwapDocs(0)))
+
+	const searchers = 8
+	const searchesPerWorker = 100
+	const swaps = 100
+
+	start := make(chan struct{})
+	errCh := make(chan error, searchers+1)
+	var wg sync.WaitGroup
+
+	for worker := 0; worker < searchers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < searchesPerWorker; i++ {
+				results, err := idx.Search(ctx, "alpha beta", 5)
+				if err != nil {
+					errCh <- fmt.Errorf("search failed: %w", err)
+					return
+				}
+				if len(results) == 0 {
+					errCh <- fmt.Errorf("search returned no results")
+					return
+				}
+				for _, result := range results {
+					maxScore, ok := result.Metadata[TheoreticalMaxKey].(float64)
+					if !ok || maxScore <= 0 {
+						errCh <- fmt.Errorf(
+							"missing theoretical max metadata for result %q: %#v",
+							result.Id,
+							result.Metadata,
+						)
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 1; i <= swaps; i++ {
+			if err := idx.Swap(ctx, bleveSwapDocs(i)); err != nil {
+				errCh <- fmt.Errorf("swap failed: %w", err)
+				return
+			}
+		}
+	}()
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+}
+
+func bleveSwapDocs(generation int) map[string]string {
+	docs := make(map[string]string, 6)
+	for i := 0; i < 6; i++ {
+		docs[fmt.Sprintf("doc-%d-%d", generation, i)] = fmt.Sprintf(
+			"alpha beta generation %d document %d searchable content",
+			generation,
+			i,
+		)
+	}
+	return docs
 }
 
 func TestBleveIndex_EmptyIndex(t *testing.T) {

@@ -146,19 +146,17 @@ func (b *BleveIndex[Doc]) Search(
 	req := bleve.NewSearchRequestOptions(q, topK, 0, false)
 	req.Highlight = bleve.NewHighlight()
 
+	var theoreticalMax float64
 	b.mu.RLock()
 	bleveResults, err := b.index.Search(req)
+	if err == nil && b.config.theoreticalMaxNormalization {
+		if provider, ok := b.adapter.(BleveIDFProvider); ok {
+			theoreticalMax = b.computeTheoreticalMaxLocked(ctx, queryText, provider)
+		}
+	}
 	b.mu.RUnlock()
 	if err != nil {
 		return nil, fmt.Errorf("search: bleve search failed: %w", err)
-	}
-
-	// Compute theoretical max if enabled and the adapter supports it.
-	var theoreticalMax float64
-	if b.config.theoreticalMaxNormalization {
-		if provider, ok := b.adapter.(BleveIDFProvider); ok {
-			theoreticalMax = b.computeTheoreticalMax(ctx, queryText, provider)
-		}
 	}
 
 	results := make([]SearchResult, 0, len(bleveResults.Hits))
@@ -261,7 +259,9 @@ const (
 // Terms with zero doc frequency in ALL fields are excluded (they can't contribute
 // to any document's actual score). Returns 0 if the analyzer produces no terms
 // or all terms are absent from the index.
-func (b *BleveIndex[Doc]) computeTheoreticalMax(
+// computeTheoreticalMaxLocked reads Bleve internals; callers must hold b.mu.RLock so Swap
+// cannot replace and close the index while the reader is being opened.
+func (b *BleveIndex[Doc]) computeTheoreticalMaxLocked(
 	ctx context.Context, queryText string, provider BleveIDFProvider,
 ) float64 {
 	analyzerName, fields := provider.IDFFields()

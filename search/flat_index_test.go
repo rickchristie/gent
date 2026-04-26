@@ -43,8 +43,38 @@ func (m *mockEmbedder) EmbedTextBatch(
 
 func (m *mockEmbedder) TokenCount(text string) int { return len(text) / 4 }
 func (m *mockEmbedder) MaxTokens() int             { return 512 }
-func (m *mockEmbedder) Dimensions() int             { return 3 }
-func (m *mockEmbedder) Close() error                { return nil }
+func (m *mockEmbedder) Dimensions() int            { return 3 }
+func (m *mockEmbedder) Close() error               { return nil }
+
+type shapeTestEmbedder struct {
+	*mockEmbedder
+	batch      [][]float32
+	query      []float32
+	dimensions int
+}
+
+func newShapeTestEmbedder(
+	batch [][]float32, query []float32, dimensions int,
+) *shapeTestEmbedder {
+	return &shapeTestEmbedder{
+		mockEmbedder: newMockEmbedder(nil),
+		batch:        batch,
+		query:        query,
+		dimensions:   dimensions,
+	}
+}
+
+func (m *shapeTestEmbedder) EmbedQuery(_ context.Context, _ string) ([]float32, error) {
+	return m.query, nil
+}
+
+func (m *shapeTestEmbedder) EmbedTextBatch(
+	_ context.Context, _ []string,
+) ([][]float32, error) {
+	return m.batch, nil
+}
+
+func (m *shapeTestEmbedder) Dimensions() int { return m.dimensions }
 
 // singleChunkAdapter returns the document string as a single chunk.
 type singleChunkAdapter struct{}
@@ -90,10 +120,10 @@ func l2norm(v []float32) []float32 {
 func TestFlatIndex_SearchReturnsBestMatch(t *testing.T) {
 	// Three documents: "billing" is closest to query "payments".
 	embedder := newMockEmbedder(map[string][]float32{
-		"payments":    l2norm([]float32{1, 0, 0}),
-		"billing":     l2norm([]float32{0.95, 0.05, 0}),
+		"payments":     l2norm([]float32{1, 0, 0}),
+		"billing":      l2norm([]float32{0.95, 0.05, 0}),
 		"notification": l2norm([]float32{0, 1, 0}),
-		"checkout":    l2norm([]float32{0, 0, 1}),
+		"checkout":     l2norm([]float32{0, 0, 1}),
 	})
 
 	idx := NewFlatIndex(&singleChunkAdapter{}, embedder)
@@ -114,9 +144,9 @@ func TestFlatIndex_MultiChunkDedup(t *testing.T) {
 	// Document with 3 chunks. Only one result should appear per doc ID, using best chunk.
 	embedder := newMockEmbedder(map[string][]float32{
 		"query":  l2norm([]float32{1, 0, 0}),
-		"chunk1": l2norm([]float32{0.1, 0.9, 0}),  // low similarity
+		"chunk1": l2norm([]float32{0.1, 0.9, 0}),   // low similarity
 		"chunk2": l2norm([]float32{0.95, 0.05, 0}), // high similarity
-		"chunk3": l2norm([]float32{0, 0, 1}),        // no similarity
+		"chunk3": l2norm([]float32{0, 0, 1}),       // no similarity
 	})
 
 	idx := NewFlatIndex(&multiChunkAdapter{}, embedder)
@@ -150,6 +180,61 @@ func TestFlatIndex_AddReplacesExisting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "new", results[0].Snippet) // should be the new content
+}
+
+func TestFlatIndex_AddValidatesEmbeddingBatchShape(t *testing.T) {
+	type input struct {
+		adapter    ChunkAdapter[string]
+		doc        string
+		embeddings [][]float32
+		dimensions int
+	}
+
+	type expected struct {
+		err string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "batch length mismatch returns error",
+			input: input{
+				adapter:    &multiChunkAdapter{},
+				doc:        "a|b",
+				embeddings: [][]float32{{1, 0, 0}},
+				dimensions: 3,
+			},
+			expected: expected{
+				err: "search: embedding shape invalid: got 1 embeddings for 2 chunks",
+			},
+		},
+		{
+			name: "embedding dimension mismatch returns error",
+			input: input{
+				adapter:    &singleChunkAdapter{},
+				doc:        "a",
+				embeddings: [][]float32{{1, 0}},
+				dimensions: 3,
+			},
+			expected: expected{
+				err: "search: embedding shape invalid: chunk 0 has dimension 2, want 3",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			embedder := newShapeTestEmbedder(tt.input.embeddings, nil, tt.input.dimensions)
+			idx := NewFlatIndex(tt.input.adapter, embedder)
+
+			err := idx.Add(context.Background(), "doc", tt.input.doc)
+
+			assert.EqualError(t, err, tt.expected.err)
+		})
+	}
 }
 
 func TestFlatIndex_Remove(t *testing.T) {
@@ -218,6 +303,70 @@ func TestFlatIndex_Swap(t *testing.T) {
 	assert.Equal(t, "new-doc", results[0].Id)
 }
 
+func TestFlatIndex_SwapValidatesEmbeddingBatchShape(t *testing.T) {
+	embedder := newShapeTestEmbedder([][]float32{{1, 0}}, nil, 3)
+	idx := NewFlatIndex(&singleChunkAdapter{}, embedder)
+
+	err := idx.Swap(context.Background(), map[string]string{"doc": "a"})
+
+	assert.EqualError(
+		t, err,
+		"search: embedding shape invalid for doc: chunk 0 has dimension 2, want 3",
+	)
+}
+
+func TestFlatIndex_SearchValidatesEmbeddingShape(t *testing.T) {
+	type input struct {
+		setup func(t *testing.T) *FlatIndex[string]
+	}
+
+	type expected struct {
+		err string
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "query dimension mismatch returns error",
+			input: input{setup: func(t *testing.T) *FlatIndex[string] {
+				embedder := newShapeTestEmbedder(nil, []float32{1, 0}, 3)
+				return NewFlatIndex(&singleChunkAdapter{}, embedder)
+			}},
+			expected: expected{
+				err: "search: query embedding shape invalid: query has dimension 2, want 3",
+			},
+		},
+		{
+			name: "stored vector dimension mismatch returns error",
+			input: input{setup: func(t *testing.T) *FlatIndex[string] {
+				embedder := newShapeTestEmbedder([][]float32{{1, 0}}, nil, 2)
+				idx := NewFlatIndex(&singleChunkAdapter{}, embedder)
+				require.NoError(t, idx.Add(context.Background(), "doc", "a"))
+				embedder.query = []float32{1, 0, 0}
+				embedder.dimensions = 3
+				return idx
+			}},
+			expected: expected{
+				err: "search: stored vector for \"doc\" invalid: " +
+					"dimension mismatch: got 3 and 2",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := tt.input.setup(t)
+
+			_, err := idx.Search(context.Background(), "query", 5)
+
+			assert.EqualError(t, err, tt.expected.err)
+		})
+	}
+}
+
 func TestFlatIndex_EmptyIndex(t *testing.T) {
 	embedder := newMockEmbedder(map[string][]float32{
 		"query": l2norm([]float32{1, 0, 0}),
@@ -266,31 +415,51 @@ func TestCosineSimilarity(t *testing.T) {
 		expected expected
 	}{
 		{
-			name:     "identical normalized vectors score 1.0",
-			input:    input{a: l2norm([]float32{1, 0, 0}), b: l2norm([]float32{1, 0, 0})},
+			name: "identical normalized vectors score 1.0",
+			input: input{
+				a: l2norm([]float32{1, 0, 0}),
+				b: l2norm([]float32{1, 0, 0}),
+			},
 			expected: expected{score: 1.0},
 		},
 		{
-			name:     "orthogonal vectors score 0.0",
-			input:    input{a: l2norm([]float32{1, 0, 0}), b: l2norm([]float32{0, 1, 0})},
+			name: "orthogonal vectors score 0.0",
+			input: input{
+				a: l2norm([]float32{1, 0, 0}),
+				b: l2norm([]float32{0, 1, 0}),
+			},
 			expected: expected{score: 0.0},
 		},
 		{
-			name:     "opposite vectors score -1.0",
-			input:    input{a: l2norm([]float32{1, 0, 0}), b: l2norm([]float32{-1, 0, 0})},
+			name: "opposite vectors score -1.0",
+			input: input{
+				a: l2norm([]float32{1, 0, 0}),
+				b: l2norm([]float32{-1, 0, 0}),
+			},
 			expected: expected{score: -1.0},
 		},
 		{
-			name:  "similar vectors score high",
-			input: input{a: l2norm([]float32{1, 0.1, 0}), b: l2norm([]float32{1, 0, 0})},
+			name: "similar vectors score high",
+			input: input{
+				a: l2norm([]float32{1, 0.1, 0}),
+				b: l2norm([]float32{1, 0, 0}),
+			},
 			expected: expected{score: 0.995}, // close to 1.0
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			score := cosineSimilarity(tc.input.a, tc.input.b)
+			score, err := cosineSimilarity(tc.input.a, tc.input.b)
+			require.NoError(t, err)
 			assert.InDelta(t, tc.expected.score, score, 0.01)
 		})
 	}
+}
+
+func TestCosineSimilarity_DimensionMismatch(t *testing.T) {
+	score, err := cosineSimilarity([]float32{1, 0}, []float32{1})
+
+	assert.Equal(t, 0.0, score)
+	assert.EqualError(t, err, "dimension mismatch: got 2 and 1")
 }

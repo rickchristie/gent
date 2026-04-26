@@ -722,6 +722,26 @@ func TestJsWrapper_Execute_DirectCall_Stats(t *testing.T) {
 	)
 }
 
+func TestJsWrapper_Execute_NilExecutionContext(t *testing.T) {
+	w := setupJsWrapper()
+	tf := jsTestFormat()
+	content := `<code>
+var c = tool.call({tool: "lookup_customer", args: {id: "C001"}});
+console.log(c.output.name);
+</code>`
+
+	result, err := w.Execute(nil, content, tf)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, `<tool_call_log>
+[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
+</tool_call_log>
+<output>
+Alice
+</output>`, collectText(result))
+}
+
 // -------------------------------------------------------
 // D. Execute — code execution
 // -------------------------------------------------------
@@ -3382,7 +3402,7 @@ console.log("found: " + r.output.name);
 			},
 			expected: expected{
 				codeExec:      1,
-				toolCallCount: 1,
+				toolCallCount: 2,
 			},
 		},
 		{

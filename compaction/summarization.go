@@ -742,7 +742,17 @@ func (s *SummarizationStrategy) Compact(
 			"summarization model call: %w", err,
 		)
 	}
+	// Summarization only needs the final response, but model streams still need a consumer.
+	// Draining concurrently prevents response-only compaction from retaining chunk queues or
+	// blocking model implementations whose streaming callbacks wait for chunk consumption.
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for range stream.Chunks() {
+		}
+	}()
 	response, err := stream.Response()
+	<-drainDone
 	if err != nil {
 		return fmt.Errorf(
 			"summarization model call: %w", err,

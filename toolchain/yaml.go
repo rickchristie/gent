@@ -43,12 +43,12 @@ import (
 //
 // Multiple parallel tool calls (use YAML array):
 //
-//	- tool: search
-//	  args:
-//	    query: weather
-//	- tool: calendar
-//	  args:
-//	    date: today
+//   - tool: search
+//     args:
+//     query: weather
+//   - tool: calendar
+//     args:
+//     date: today
 //
 // # Schema-Aware Parsing
 //
@@ -359,11 +359,14 @@ func (c *YAML) decodeValueNode(node *yaml.Node, expectedType string) any {
 
 // RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
 // The tool's schema is compiled for validation when arguments are provided.
+// Panics when the tool is nil, invalid, or duplicates an existing tool name.
 func (c *YAML) RegisterTool(tool any) gent.ToolChain {
 	meta, err := GetToolMeta(tool)
 	if err != nil {
-		// Invalid tool, silently ignore (could log in the future)
-		return c
+		panic(fmt.Sprintf("YAML.RegisterTool: invalid tool type: %v", err))
+	}
+	if _, exists := c.toolMap[meta.Name()]; exists {
+		panic(fmt.Sprintf("YAML.RegisterTool: duplicate tool name %q", meta.Name()))
 	}
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
@@ -430,10 +433,7 @@ func (c *YAML) Execute(
 					"tool names.",
 				call.Name,
 			))
-			// Publish AfterToolCall for the failed call
-			if execCtx != nil {
-				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, toolErr)
-			}
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr)
 			continue
 		}
 
@@ -445,11 +445,7 @@ func (c *YAML) Execute(
 					textFormat, call.Name,
 					fmt.Sprintf("Error: %v", validationErr),
 				)
-				if execCtx != nil {
-					execCtx.PublishAfterToolCall(
-						call.Name, call.Args, nil, 0, validationErr,
-					)
-				}
+				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr)
 				continue
 			}
 		}
@@ -462,11 +458,7 @@ func (c *YAML) Execute(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", transformErr),
 			)
-			if execCtx != nil {
-				execCtx.PublishAfterToolCall(
-					call.Name, call.Args, nil, 0, transformErr,
-				)
-			}
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr)
 			continue
 		}
 		results[i].Input = typedInput
@@ -569,4 +561,3 @@ func (c *YAML) GetToolSchema(
 
 // Compile-time check that YAML implements gent.ToolChain.
 var _ gent.ToolChain = (*YAML)(nil)
-

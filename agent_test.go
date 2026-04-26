@@ -67,7 +67,12 @@ func TestBasicLoopData_IterationHistory(t *testing.T) {
 
 	iter := &Iteration{
 		Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeAI, Parts: []ContentPart{llms.TextContent{Text: "test"}}},
+			{
+				Role: llms.ChatMessageTypeAI,
+				Parts: []ContentPart{
+					llms.TextContent{Text: "test"},
+				},
+			},
 		},
 	}
 	data.AddIterationHistory(iter)
@@ -84,13 +89,56 @@ func TestBasicLoopData_ScratchPad(t *testing.T) {
 
 	iter := &Iteration{
 		Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeAI, Parts: []ContentPart{llms.TextContent{Text: "test"}}},
+			{
+				Role: llms.ChatMessageTypeAI,
+				Parts: []ContentPart{
+					llms.TextContent{Text: "test"},
+				},
+			},
 		},
 	}
 	data.SetScratchPad([]*Iteration{iter})
 
 	scratchpad := data.GetScratchPad()
 	assert.Len(t, scratchpad, 1)
+}
+
+func TestBasicLoopData_ReturnsSliceCopies(t *testing.T) {
+	data := NewBasicLoopData(nil)
+	iter1 := &Iteration{
+		Messages: []*MessageContent{
+			{
+				Role: llms.ChatMessageTypeAI,
+				Parts: []ContentPart{
+					llms.TextContent{Text: "one"},
+				},
+			},
+		},
+	}
+	iter2 := &Iteration{
+		Messages: []*MessageContent{
+			{
+				Role: llms.ChatMessageTypeAI,
+				Parts: []ContentPart{
+					llms.TextContent{Text: "two"},
+				},
+			},
+		},
+	}
+
+	data.AddIterationHistory(iter1)
+	history := data.GetIterationHistory()
+	history[0] = iter2
+	assert.Same(t, iter1, data.GetIterationHistory()[0])
+
+	inputScratchpad := []*Iteration{iter1}
+	data.SetScratchPad(inputScratchpad)
+	inputScratchpad[0] = iter2
+	assert.Same(t, iter1, data.GetScratchPad()[0])
+
+	scratchpad := data.GetScratchPad()
+	scratchpad[0] = iter2
+	assert.Same(t, iter1, data.GetScratchPad()[0])
 }
 
 // -----------------------------------------------------------------------------

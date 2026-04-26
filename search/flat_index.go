@@ -68,6 +68,11 @@ func (f *FlatIndex[Doc]) Search(
 	if err != nil {
 		return nil, fmt.Errorf("search: query embedding failed: %w", err)
 	}
+	if err := validateEmbeddingVector(
+		"query", queryVec, f.embedder.Dimensions(),
+	); err != nil {
+		return nil, fmt.Errorf("search: query embedding shape invalid: %w", err)
+	}
 
 	f.mu.RLock()
 
@@ -79,10 +84,17 @@ func (f *FlatIndex[Doc]) Search(
 
 	all := make([]scored, len(f.vectors))
 	for i, sv := range f.vectors {
+		score, err := cosineSimilarity(queryVec, sv.vector)
+		if err != nil {
+			f.mu.RUnlock()
+			return nil, fmt.Errorf(
+				"search: stored vector for %q invalid: %w", sv.docID, err,
+			)
+		}
 		all[i] = scored{
 			docID:   sv.docID,
 			snippet: sv.snippet,
-			score:   cosineSimilarity(queryVec, sv.vector),
+			score:   score,
 		}
 	}
 
@@ -127,6 +139,11 @@ func (f *FlatIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
 	embeddings, err := f.embedder.EmbedTextBatch(ctx, texts)
 	if err != nil {
 		return fmt.Errorf("search: embedding failed: %w", err)
+	}
+	if err := validateEmbeddingBatch(
+		embeddings, len(chunks), f.embedder.Dimensions(),
+	); err != nil {
+		return fmt.Errorf("search: embedding shape invalid: %w", err)
 	}
 
 	newVectors := make([]storedVector, len(chunks))
@@ -173,6 +190,11 @@ func (f *FlatIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
 		if err != nil {
 			return fmt.Errorf("search: embedding failed for %s: %w", id, err)
 		}
+		if err := validateEmbeddingBatch(
+			embeddings, len(chunks), f.embedder.Dimensions(),
+		); err != nil {
+			return fmt.Errorf("search: embedding shape invalid for %s: %w", id, err)
+		}
 		for i, chunk := range chunks {
 			snippet := chunk.Text
 			if chunk.Snippet != "" {
@@ -207,14 +229,47 @@ func (f *FlatIndex[Doc]) removeLocked(id string) {
 	f.vectors = f.vectors[:n]
 }
 
+func validateEmbeddingBatch(embeddings [][]float32, chunkCount int, wantDim int) error {
+	if len(embeddings) != chunkCount {
+		return fmt.Errorf(
+			"got %d embeddings for %d chunks", len(embeddings), chunkCount,
+		)
+	}
+	for i, embedding := range embeddings {
+		if err := validateEmbeddingVector(
+			fmt.Sprintf("chunk %d", i), embedding, wantDim,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEmbeddingVector(label string, vector []float32, wantDim int) error {
+	if wantDim <= 0 {
+		return fmt.Errorf("embedder dimensions must be positive, got %d", wantDim)
+	}
+	if len(vector) != wantDim {
+		return fmt.Errorf(
+			"%s has dimension %d, want %d", label, len(vector), wantDim,
+		)
+	}
+	return nil
+}
+
 // cosineSimilarity computes cosine similarity between two L2-normalized vectors.
 // When vectors are L2-normalized, cosine similarity equals the dot product.
-func cosineSimilarity(a, b []float32) float64 {
+func cosineSimilarity(a, b []float32) (float64, error) {
+	if len(a) != len(b) {
+		return 0, fmt.Errorf(
+			"dimension mismatch: got %d and %d", len(a), len(b),
+		)
+	}
 	var dot float32
 	for i := range a {
 		dot += a[i] * b[i]
 	}
-	return float64(dot)
+	return float64(dot), nil
 }
 
 // Compile-time check.

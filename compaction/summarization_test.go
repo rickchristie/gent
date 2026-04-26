@@ -4,12 +4,73 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/internal/tt"
 	"github.com/stretchr/testify/assert"
 	"github.com/tmc/langchaingo/llms"
 )
+
+type drainRequiredSummaryModel struct{}
+
+func (m *drainRequiredSummaryModel) GenerateContentStream(
+	_ *gent.ExecutionContext,
+	_, _ string,
+	_ []llms.MessageContent,
+	_ ...llms.CallOption,
+) (gent.Stream, error) {
+	stream := &drainRequiredSummaryStream{
+		chunks:       make(chan gent.StreamChunk),
+		responseDone: make(chan struct{}),
+	}
+	go func() {
+		stream.chunks <- gent.StreamChunk{Content: "drained"}
+		stream.chunks <- gent.StreamChunk{Content: " summary"}
+		close(stream.chunks)
+		close(stream.responseDone)
+	}()
+	return stream, nil
+}
+
+type drainRequiredSummaryStream struct {
+	chunks       chan gent.StreamChunk
+	responseDone chan struct{}
+}
+
+func (s *drainRequiredSummaryStream) Chunks() <-chan gent.StreamChunk {
+	return s.chunks
+}
+
+func (s *drainRequiredSummaryStream) Response() (*gent.ContentResponse, error) {
+	<-s.responseDone
+	return &gent.ContentResponse{
+		Choices: []*gent.ContentChoice{{Content: "drained summary"}},
+		Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
+	}, nil
+}
+
+func (s *drainRequiredSummaryStream) Close() {}
+
+func TestSummarization_CompactDrainsModelStream(t *testing.T) {
+	data := gent.NewBasicLoopData(nil)
+	data.SetScratchPad([]*gent.Iteration{makeIter("data")})
+	execCtx := gent.NewExecutionContext(context.Background(), "test", data)
+	execCtx.SetLimits(nil)
+	strategy := NewSummarization(&drainRequiredSummaryModel{}, tt.NewMockFormat())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- strategy.Compact(execCtx)
+	}()
+
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("expected summarization stream chunks to be drained")
+	}
+}
 
 func TestSummarization_Compact(t *testing.T) {
 	type input struct {
@@ -124,10 +185,10 @@ func TestSummarization_Compact(t *testing.T) {
 				modelResponse: "Summary of steps 1-3",
 			},
 			expected: expected{
-				scratchpadLen:    1,
-				syntheticCount:   1,
-				keptOriginals:    0,
-				pinnedCount:      0,
+				scratchpadLen:  1,
+				syntheticCount: 1,
+				keptOriginals:  0,
+				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
 					"\nSummary of steps 1-3" +
 					"\n</prior_work_summary>\n",
@@ -149,10 +210,10 @@ func TestSummarization_Compact(t *testing.T) {
 				modelResponse: "Summary of old 1-2",
 			},
 			expected: expected{
-				scratchpadLen:    3,
-				syntheticCount:   1,
-				keptOriginals:    2,
-				pinnedCount:      0,
+				scratchpadLen:  3,
+				syntheticCount: 1,
+				keptOriginals:  2,
+				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
 					"\nSummary of old 1-2" +
 					"\n</prior_work_summary>\n",
@@ -173,10 +234,10 @@ func TestSummarization_Compact(t *testing.T) {
 				modelResponse: "Updated summary",
 			},
 			expected: expected{
-				scratchpadLen:    1,
-				syntheticCount:   1,
-				keptOriginals:    0,
-				pinnedCount:      0,
+				scratchpadLen:  1,
+				syntheticCount: 1,
+				keptOriginals:  0,
+				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
 					"\nUpdated summary" +
 					"\n</prior_work_summary>\n",
@@ -197,10 +258,10 @@ func TestSummarization_Compact(t *testing.T) {
 			},
 			expected: expected{
 				// synthetic + pinned + 1 recent
-				scratchpadLen:    3,
-				syntheticCount:   1,
-				keptOriginals:    1,
-				pinnedCount:      1,
+				scratchpadLen:  3,
+				syntheticCount: 1,
+				keptOriginals:  1,
+				pinnedCount:    1,
 				summaryContains: "<prior_work_summary>" +
 					"\nSummary of old" +
 					"\n</prior_work_summary>\n",
@@ -222,10 +283,10 @@ func TestSummarization_Compact(t *testing.T) {
 			},
 			expected: expected{
 				// synthetic + 2 pinned
-				scratchpadLen:    3,
-				syntheticCount:   1,
-				keptOriginals:    0,
-				pinnedCount:      2,
+				scratchpadLen:  3,
+				syntheticCount: 1,
+				keptOriginals:  0,
+				pinnedCount:    2,
 				summaryContains: "<prior_work_summary>" +
 					"\nSummary of a and b" +
 					"\n</prior_work_summary>\n",
@@ -245,10 +306,10 @@ func TestSummarization_Compact(t *testing.T) {
 				modelResponse: "Summary with text only",
 			},
 			expected: expected{
-				scratchpadLen:    1,
-				syntheticCount:   1,
-				keptOriginals:    0,
-				pinnedCount:      0,
+				scratchpadLen:  1,
+				syntheticCount: 1,
+				keptOriginals:  0,
+				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
 					"\nSummary with text only" +
 					"\n</prior_work_summary>\n",
@@ -286,10 +347,10 @@ func TestSummarization_Compact(t *testing.T) {
 				modelResponse: "Custom summarized",
 			},
 			expected: expected{
-				scratchpadLen:    1,
-				syntheticCount:   1,
-				keptOriginals:    0,
-				pinnedCount:      0,
+				scratchpadLen:  1,
+				syntheticCount: 1,
+				keptOriginals:  0,
+				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
 					"\nCustom summarized" +
 					"\n</prior_work_summary>\n",
@@ -455,11 +516,11 @@ func TestSummarization_PromptContent(t *testing.T) {
 	}
 
 	type expected struct {
-		messageCount      int
-		systemContains    []string
-		userContains      []string
-		userNotContains   []string
-		pinnedInResult    []*gent.Iteration
+		messageCount    int
+		systemContains  []string
+		userContains    []string
+		userNotContains []string
+		pinnedInResult  []*gent.Iteration
 	}
 
 	mockFmt := tt.NewMockFormat()

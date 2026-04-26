@@ -508,12 +508,7 @@ func (c *SearchJSON) executeSearch(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", err),
 			)
-			if execCtx != nil {
-				execCtx.PublishAfterToolCall(
-					call.Name, call.Args,
-					nil, 0, err,
-				)
-			}
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, err)
 			return
 		}
 	}
@@ -776,12 +771,7 @@ func (c *SearchJSON) executeRegularTool(
 				call.Name,
 			),
 		)
-		if execCtx != nil {
-			execCtx.PublishAfterToolCall(
-				call.Name, call.Args,
-				nil, 0, toolErr,
-			)
-		}
+		publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr)
 		return
 	}
 
@@ -793,12 +783,7 @@ func (c *SearchJSON) executeRegularTool(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", err),
 			)
-			if execCtx != nil {
-				execCtx.PublishAfterToolCall(
-					call.Name, call.Args,
-					nil, 0, err,
-				)
-			}
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, err)
 			return
 		}
 	}
@@ -813,11 +798,7 @@ func (c *SearchJSON) executeRegularTool(
 			textFormat, call.Name,
 			fmt.Sprintf("Error: %v", err),
 		)
-		if execCtx != nil {
-			execCtx.PublishAfterToolCall(
-				call.Name, call.Args, nil, 0, err,
-			)
-		}
+		publishFailedToolAttempt(execCtx, call.Name, call.Args, err)
 		return
 	}
 	result.Input = typedInput
@@ -993,4 +974,3 @@ func (c *SearchJSON) GetToolSchema(
 
 // Compile-time check that SearchJSON implements ToolChain.
 var _ gent.ToolChain = (*SearchJSON)(nil)
-

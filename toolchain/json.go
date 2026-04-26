@@ -213,11 +213,14 @@ func (c *JSON) doParse(content string) ([]*gent.ToolCall, error) {
 
 // RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
 // The tool's schema is compiled for validation when arguments are provided.
+// Panics when the tool is nil, invalid, or duplicates an existing tool name.
 func (c *JSON) RegisterTool(tool any) gent.ToolChain {
 	meta, err := GetToolMeta(tool)
 	if err != nil {
-		// Invalid tool, silently ignore (could log in the future)
-		return c
+		panic(fmt.Sprintf("JSON.RegisterTool: invalid tool type: %v", err))
+	}
+	if _, exists := c.toolMap[meta.Name()]; exists {
+		panic(fmt.Sprintf("JSON.RegisterTool: duplicate tool name %q", meta.Name()))
 	}
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
@@ -283,10 +286,7 @@ func (c *JSON) Execute(
 					"tool names.",
 				call.Name,
 			))
-			// Publish AfterToolCall for the failed call
-			if execCtx != nil {
-				execCtx.PublishAfterToolCall(call.Name, call.Args, nil, 0, toolErr)
-			}
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr)
 			continue
 		}
 
@@ -298,11 +298,7 @@ func (c *JSON) Execute(
 					textFormat, call.Name,
 					fmt.Sprintf("Error: %v", validationErr),
 				)
-				if execCtx != nil {
-					execCtx.PublishAfterToolCall(
-						call.Name, call.Args, nil, 0, validationErr,
-					)
-				}
+				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr)
 				continue
 			}
 		}
@@ -315,11 +311,7 @@ func (c *JSON) Execute(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", transformErr),
 			)
-			if execCtx != nil {
-				execCtx.PublishAfterToolCall(
-					call.Name, call.Args, nil, 0, transformErr,
-				)
-			}
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr)
 			continue
 		}
 		results[i].Input = typedInput
@@ -425,4 +417,3 @@ func (c *JSON) GetToolSchema(
 
 // Compile-time check that JSON implements gent.ToolChain.
 var _ gent.ToolChain = (*JSON)(nil)
-

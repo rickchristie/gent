@@ -586,8 +586,8 @@ func (r *recursiveRegistry) MaxRecursion() int {
 
 func TestPublish_PanicsOnRecursionLimitExceeded(t *testing.T) {
 	type input struct {
-		maxRecursion   int
-		subscriberMax  int // how many times subscriber will try to recurse
+		maxRecursion  int
+		subscriberMax int // how many times subscriber will try to recurse
 	}
 
 	type expected struct {
@@ -673,14 +673,130 @@ func TestPublish_PanicsOnRecursionLimitExceeded(t *testing.T) {
 	}
 }
 
+type panicOncePublisher struct {
+	maxRecursion int
+	calls        int
+}
+
+func (p *panicOncePublisher) Dispatch(_ *ExecutionContext, _ Event) {
+	p.calls++
+	if p.calls == 1 {
+		panic("subscriber panic")
+	}
+}
+
+func (p *panicOncePublisher) MaxRecursion() int {
+	return p.maxRecursion
+}
+
+func TestPublish_RecursionDepthDecrementsAfterPanic(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "test", nil)
+	publisher := &panicOncePublisher{maxRecursion: 1}
+	execCtx.SetEventPublisher(publisher)
+
+	assert.Panics(t, func() {
+		execCtx.PublishCommonEvent("test:first", "first", nil)
+	})
+	assert.NotPanics(t, func() {
+		execCtx.PublishCommonEvent("test:second", "second", nil)
+	})
+	assert.Equal(t, 2, publisher.calls)
+}
+
+type blockingPublisher struct {
+	maxRecursion int
+	entered      chan struct{}
+	release      chan struct{}
+}
+
+func (p *blockingPublisher) Dispatch(_ *ExecutionContext, event Event) {
+	if _, ok := event.(*CommonEvent); !ok {
+		return
+	}
+	p.entered <- struct{}{}
+	<-p.release
+}
+
+func (p *blockingPublisher) MaxRecursion() int {
+	return p.maxRecursion
+}
+
+func TestPublish_ConcurrentPublishesDoNotShareRecursionDepth(t *testing.T) {
+	type input struct {
+		publishers   int
+		maxRecursion int
+	}
+
+	type expected struct {
+		panics int
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "overlapping publishes at recursion limit one",
+			input: input{
+				publishers:   12,
+				maxRecursion: 1,
+			},
+			expected: expected{panics: 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execCtx := NewExecutionContext(context.Background(), "test", nil)
+			publisher := &blockingPublisher{
+				maxRecursion: tt.input.maxRecursion,
+				entered:      make(chan struct{}, tt.input.publishers),
+				release:      make(chan struct{}),
+			}
+			execCtx.SetEventPublisher(publisher)
+
+			panicCh := make(chan any, tt.input.publishers)
+			done := make(chan struct{}, tt.input.publishers)
+			for i := 0; i < tt.input.publishers; i++ {
+				go func() {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							panicCh <- recovered
+						}
+						done <- struct{}{}
+					}()
+					execCtx.PublishCommonEvent("test:concurrent", "concurrent", nil)
+				}()
+			}
+
+			for i := 0; i < tt.input.publishers; i++ {
+				select {
+				case <-publisher.entered:
+				case recovered := <-panicCh:
+					t.Fatalf("publish panicked: %v", recovered)
+				case <-time.After(time.Second):
+					t.Fatal("expected all concurrent publishes to enter dispatch")
+				}
+			}
+			close(publisher.release)
+			for i := 0; i < tt.input.publishers; i++ {
+				<-done
+			}
+
+			assert.Len(t, panicCh, tt.expected.panics)
+		})
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Concurrency Tests
 // -----------------------------------------------------------------------------
 
 func TestPublish_ConcurrentSafety(t *testing.T) {
 	type input struct {
-		goroutines     int
-		eventsPerGo    int
+		goroutines  int
+		eventsPerGo int
 	}
 
 	type expected struct {

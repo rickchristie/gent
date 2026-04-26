@@ -44,3 +44,19 @@ func formatSectionText(
 		{Name: name, Content: content},
 	})
 }
+
+// publishFailedToolAttempt records a parsed tool call that failed before the tool's Call
+// method could run. These attempts still count for tool-call limits because the model chose
+// to spend a tool-call turn, even if the name or arguments were invalid.
+func publishFailedToolAttempt(
+	execCtx *gent.ExecutionContext,
+	toolName string,
+	args any,
+	err error,
+) {
+	if execCtx == nil {
+		return
+	}
+	beforeEvent := execCtx.PublishBeforeToolCall(toolName, args)
+	execCtx.PublishAfterToolCall(toolName, beforeEvent.Args, nil, 0, err)
+}

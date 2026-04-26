@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,8 +74,10 @@ type EventPublisher interface {
 //
 // # Thread Safety
 //
-// All methods are safe for concurrent use. Multiple goroutines can publish events,
-// update stats, and access data concurrently.
+// All ExecutionContext methods are safe for concurrent use. Multiple goroutines can publish
+// events and update stats concurrently. Data() returns the configured LoopData; BasicLoopData
+// is safe for concurrent use, and custom LoopData implementations must provide their own
+// synchronization if they are accessed concurrently.
 type ExecutionContext struct {
 	mu sync.RWMutex
 
@@ -119,7 +123,7 @@ type ExecutionContext struct {
 
 	// Event publisher for dispatching events to subscribers (set by Executor)
 	eventPublisher EventPublisher
-	eventDepth     int // tracks recursion depth for event publishing
+	eventDepth     map[uint64]int // tracks recursion depth per publishing goroutine
 
 	// Streaming support
 	streamHub *streamHub
@@ -450,24 +454,46 @@ func (ctx *ExecutionContext) updateContextState(fn func()) {
 // publish is the internal implementation for all event publishing.
 // It records the event, updates stats, checks limits, and dispatches to subscribers.
 func (ctx *ExecutionContext) publish(event Event) {
+	ctx.publishWithEventIteration(event, nil)
+}
+
+// publishWithEventIteration publishes an event and optionally pins AfterModelCallEvent to the
+// iteration where its asynchronous model call started.
+func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *int) {
 	var publisher EventPublisher
+	var goroutineID uint64
+	var depthTracked bool
 
 	ctx.updateContextState(func() {
-		// Check recursion depth
-		if ctx.eventPublisher != nil && ctx.eventDepth >= ctx.eventPublisher.MaxRecursion() {
-			panic(fmt.Sprintf("event recursion depth exceeded maximum (%d)",
-				ctx.eventPublisher.MaxRecursion()))
+		publisher = ctx.eventPublisher
+		if publisher != nil {
+			goroutineID = currentGoroutineID()
+			if ctx.eventDepth == nil {
+				ctx.eventDepth = make(map[uint64]int)
+			}
+			if ctx.eventDepth[goroutineID] >= publisher.MaxRecursion() {
+				panic(fmt.Sprintf("event recursion depth exceeded maximum (%d)",
+					publisher.MaxRecursion()))
+			}
+			ctx.eventDepth[goroutineID]++
+			depthTracked = true
 		}
-		ctx.eventDepth++
 
 		// Populate base event fields
 		ctx.populateBaseEvent(event)
+		if iteration != nil {
+			if e, ok := event.(*AfterModelCallEvent); ok {
+				e.Iteration = *iteration
+			}
+		}
 
 		// Append to event log
 		ctx.events = append(ctx.events, event)
 
-		publisher = ctx.eventPublisher
 	})
+	if depthTracked {
+		defer ctx.releaseEventDepth(goroutineID)
+	}
 
 	// Update stats based on event type (outside lock because incrCounterDirect calls checkLimits)
 	ctx.updateStatsForEvent(event)
@@ -477,9 +503,40 @@ func (ctx *ExecutionContext) publish(event Event) {
 		publisher.Dispatch(ctx, event)
 	}
 
+}
+
+func (ctx *ExecutionContext) releaseEventDepth(goroutineID uint64) {
 	ctx.updateContextState(func() {
-		ctx.eventDepth--
+		depth := ctx.eventDepth[goroutineID]
+		if depth <= 1 {
+			delete(ctx.eventDepth, goroutineID)
+			return
+		}
+		ctx.eventDepth[goroutineID] = depth - 1
 	})
+}
+
+func currentGoroutineID() uint64 {
+	// Go does not expose goroutine-local storage. Recursion protection needs to follow the
+	// synchronous subscriber call stack, so we key depth by the current goroutine instead of a
+	// process-wide counter that would turn concurrent publishes into false recursion.
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	line := string(buf[:n])
+	const prefix = "goroutine "
+	if !strings.HasPrefix(line, prefix) {
+		return 0
+	}
+	line = strings.TrimPrefix(line, prefix)
+	end := strings.IndexByte(line, ' ')
+	if end < 0 {
+		return 0
+	}
+	id, err := strconv.ParseUint(line[:end], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // Publish records a custom event, updates stats, checks limits, and dispatches to subscribers.
@@ -615,36 +672,39 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 			)
 		}
 
-		// Per-iteration gauge tracking (local-only, reset each
-		// iteration)
-		ctx.stats.incrGaugeInternal(
-			SGInputTokensLastIteration,
-			float64(e.InputTokens),
-		)
-		ctx.stats.incrGaugeInternal(
-			SGOutputTokensLastIteration,
-			float64(e.OutputTokens),
-		)
-		ctx.stats.incrGaugeInternal(
-			SGTotalTokensLastIteration,
-			float64(totalTokens),
-		)
-		if e.Model != "" {
+		// Per-iteration gauges describe the active iteration. Late model completions
+		// from a closed stream keep their original event iteration and must not update
+		// gauges that may have already been reset for a newer iteration.
+		if e.Iteration == ctx.Iteration() {
 			ctx.stats.incrGaugeInternal(
-				SGInputTokensLastIterationFor+
-					StatKey(e.Model),
+				SGInputTokensLastIteration,
 				float64(e.InputTokens),
 			)
 			ctx.stats.incrGaugeInternal(
-				SGOutputTokensLastIterationFor+
-					StatKey(e.Model),
+				SGOutputTokensLastIteration,
 				float64(e.OutputTokens),
 			)
 			ctx.stats.incrGaugeInternal(
-				SGTotalTokensLastIterationFor+
-					StatKey(e.Model),
+				SGTotalTokensLastIteration,
 				float64(totalTokens),
 			)
+			if e.Model != "" {
+				ctx.stats.incrGaugeInternal(
+					SGInputTokensLastIterationFor+
+						StatKey(e.Model),
+					float64(e.InputTokens),
+				)
+				ctx.stats.incrGaugeInternal(
+					SGOutputTokensLastIterationFor+
+						StatKey(e.Model),
+					float64(e.OutputTokens),
+				)
+				ctx.stats.incrGaugeInternal(
+					SGTotalTokensLastIterationFor+
+						StatKey(e.Model),
+					float64(totalTokens),
+				)
+			}
 		}
 
 	case *AfterToolCallEvent:
@@ -814,6 +874,34 @@ func (ctx *ExecutionContext) PublishAfterModelCall(
 	duration time.Duration,
 	err error,
 ) *AfterModelCallEvent {
+	event := newAfterModelCallEvent(model, request, response, duration, err)
+	ctx.publish(event)
+	return event
+}
+
+// PublishAfterModelCallForIteration publishes an AfterModelCallEvent for the iteration where
+// the model call started. Use this for asynchronous model calls that may complete after the
+// execution context has advanced to a later iteration.
+func (ctx *ExecutionContext) PublishAfterModelCallForIteration(
+	iteration int,
+	model string,
+	request any,
+	response *ContentResponse,
+	duration time.Duration,
+	err error,
+) *AfterModelCallEvent {
+	event := newAfterModelCallEvent(model, request, response, duration, err)
+	ctx.publishWithEventIteration(event, &iteration)
+	return event
+}
+
+func newAfterModelCallEvent(
+	model string,
+	request any,
+	response *ContentResponse,
+	duration time.Duration,
+	err error,
+) *AfterModelCallEvent {
 	event := &AfterModelCallEvent{
 		BaseEvent: BaseEvent{EventName: EventNameModelCallAfter},
 		Model:     model,
@@ -826,7 +914,6 @@ func (ctx *ExecutionContext) PublishAfterModelCall(
 		event.InputTokens = response.Info.InputTokens
 		event.OutputTokens = response.Info.OutputTokens
 	}
-	ctx.publish(event)
 	return event
 }
 
@@ -1290,7 +1377,7 @@ func (ctx *ExecutionContext) SubscribeAll() (<-chan StreamChunk, UnsubscribeFunc
 func (ctx *ExecutionContext) SubscribeToStream(streamId string) (<-chan StreamChunk, UnsubscribeFunc) {
 	return ctx.streamHub.subscribeToStream(streamId)
 }
- 
+
 // SubscribeToTopic returns a channel receiving chunks for a specific topicId,
 // plus an unsubscribe function.
 //

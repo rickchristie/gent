@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,12 +26,12 @@ import (
 // All existing stats, events, schema validation, and
 // limits work unchanged for tool calls made from code.
 type JsToolChainWrapper struct {
-	wrapped             gent.ToolChain
-	codeTimeout         time.Duration
-	codeGuidance        string
-	directCallGuidance  string
-	directCallDisabled  bool
-	innerFormat         gent.TextFormat
+	wrapped            gent.ToolChain
+	codeTimeout        time.Duration
+	codeGuidance       string
+	directCallGuidance string
+	directCallDisabled bool
+	innerFormat        gent.TextFormat
 }
 
 // NewJsToolChainWrapper creates a wrapper around the
@@ -568,8 +569,11 @@ func (w *JsToolChainWrapper) executeCode(
 		rt, callFn, code, schemaFn,
 	)
 
-	// Execute the code
-	ctx := execCtx.Context()
+	// Execute the code. Nil execCtx is supported for parity with JSON/YAML toolchains.
+	ctx := context.Background()
+	if execCtx != nil {
+		ctx = execCtx.Context()
+	}
 	result, err := rt.Execute(ctx, code)
 
 	if err != nil {

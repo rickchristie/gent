@@ -127,6 +127,73 @@ args: {}`,
 	}
 }
 
+func TestYAML_RegisterTool_PanicsOnInvalidOrDuplicate(t *testing.T) {
+	type input struct {
+		register func(tc *YAML)
+	}
+
+	type expected struct {
+		panics bool
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "nil tool panics",
+			input: input{register: func(tc *YAML) {
+				tc.RegisterTool(nil)
+			}},
+			expected: expected{panics: true},
+		},
+		{
+			name: "invalid tool type panics",
+			input: input{register: func(tc *YAML) {
+				tc.RegisterTool("not a tool")
+			}},
+			expected: expected{panics: true},
+		},
+		{
+			name: "duplicate tool name panics",
+			input: input{register: func(tc *YAML) {
+				tool1 := gent.NewToolFunc(
+					"duplicate", "First", nil,
+					func(ctx context.Context, args map[string]any) (string, error) {
+						return "first", nil
+					},
+				)
+				tool2 := gent.NewToolFunc(
+					"duplicate", "Second", nil,
+					func(ctx context.Context, args map[string]any) (string, error) {
+						return "second", nil
+					},
+				)
+				tc.RegisterTool(tool1)
+				tc.RegisterTool(tool2)
+			}},
+			expected: expected{panics: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+
+			if tt.expected.panics {
+				assert.Panics(t, func() {
+					tt.input.register(tc)
+				})
+			} else {
+				assert.NotPanics(t, func() {
+					tt.input.register(tc)
+				})
+			}
+		})
+	}
+}
+
 func TestYAML_Prompt(t *testing.T) {
 	tc := NewYAML()
 	tool := gent.NewToolFunc(
@@ -236,7 +303,7 @@ func TestYAML_AvailableToolsPrompt_OutputSchema(t *testing.T) {
 		tc.RegisterTool(gent.NewToolFunc(
 			"get_item", "Get an item",
 			map[string]any{
-				"type":       "object",
+				"type": "object",
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"},
 				},
@@ -254,7 +321,7 @@ func TestYAML_AvailableToolsPrompt_OutputSchema(t *testing.T) {
 		tc.RegisterTool(gent.NewToolFunc(
 			"get_item", "Get an item",
 			map[string]any{
-				"type":       "object",
+				"type": "object",
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"},
 				},
@@ -583,10 +650,10 @@ func TestYAML_Execute_SchemaValidation(t *testing.T) {
 	}
 
 	type expected struct {
-		result       string
-		errContains  string
-		resultIsNil  bool
-		noToolError  bool
+		result      string
+		errContains string
+		resultIsNil bool
+		noToolError bool
 	}
 
 	tests := []struct {
@@ -2052,7 +2119,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 				shouldError          bool
 				toolchainErrorTotal  int64
 				toolchainErrorConsec float64
-				}{
+			}{
 				shouldError:          true,
 				toolchainErrorTotal:  1,
 				toolchainErrorConsec: 1,
@@ -2065,7 +2132,7 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 				shouldError          bool
 				toolchainErrorTotal  int64
 				toolchainErrorConsec float64
-				}{
+			}{
 				shouldError:          false,
 				toolchainErrorTotal:  0,
 				toolchainErrorConsec: 0,
@@ -2118,9 +2185,9 @@ type yamlInstructionsTool struct {
 	instructions string
 }
 
-func (t *yamlInstructionsTool) Name() string                   { return t.name }
-func (t *yamlInstructionsTool) Description() string            { return t.description }
-func (t *yamlInstructionsTool) Policy() string                 { return "" }
+func (t *yamlInstructionsTool) Name() string                    { return t.name }
+func (t *yamlInstructionsTool) Description() string             { return t.description }
+func (t *yamlInstructionsTool) Policy() string                  { return "" }
 func (t *yamlInstructionsTool) ParameterSchema() map[string]any { return t.schema }
 func (t *yamlInstructionsTool) Call(
 	ctx context.Context,
@@ -2220,6 +2287,12 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 
 		stats := execCtx.Stats()
 		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCalls),
+			"tool calls mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsFor+"failing_tool"),
+			"tool calls for tool mismatch")
+		assert.Equal(t, int64(1),
 			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"error total mismatch")
 		assert.Equal(t, int64(1),
@@ -2258,6 +2331,12 @@ func TestYAML_Execute_TracesToolCallErrors(t *testing.T) {
 		require.NoError(t, err)
 
 		stats := execCtx.Stats()
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCalls),
+			"tool calls mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsFor+"test_tool"),
+			"tool calls for tool mismatch")
 		assert.Equal(t, int64(1),
 			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"after first call: error total mismatch")
@@ -2331,6 +2410,12 @@ func TestYAML_Execute_TracesToolCallErrors_UnknownTool(t *testing.T) {
 
 		stats := execCtx.Stats()
 		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCalls),
+			"tool calls mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsFor+"nonexistent"),
+			"tool calls for tool mismatch")
+		assert.Equal(t, int64(1),
 			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"error total mismatch")
 		assert.Equal(t, int64(1),
@@ -2369,6 +2454,12 @@ func TestYAML_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 
 		stats := execCtx.Stats()
 		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCalls),
+			"tool calls mismatch")
+		assert.Equal(t, int64(1),
+			stats.GetCounter(gent.SCToolCallsFor+"validated_tool"),
+			"tool calls for tool mismatch")
+		assert.Equal(t, int64(1),
 			stats.GetCounter(gent.SCToolCallsErrorTotal),
 			"error total mismatch")
 		assert.Equal(t, int64(1),
@@ -2378,6 +2469,89 @@ func TestYAML_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 			stats.GetGauge(gent.SGToolCallsErrorConsecutive),
 			"error consecutive mismatch")
 	})
+}
+
+func TestYAML_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
+	type input struct {
+		content  string
+		setup    func(tc *YAML)
+		limitKey gent.StatKey
+	}
+
+	type expected struct {
+		exceededLimit gent.Limit
+	}
+
+	tests := []struct {
+		name     string
+		input    input
+		expected expected
+	}{
+		{
+			name: "unknown tool trips per-tool call limit",
+			input: input{
+				content: `tool: nonexistent
+args: {}`,
+				setup:    func(tc *YAML) {},
+				limitKey: gent.SCToolCallsFor + "nonexistent",
+			},
+			expected: expected{exceededLimit: gent.Limit{
+				Type:     gent.LimitExactKey,
+				Key:      gent.SCToolCallsFor + "nonexistent",
+				MaxValue: 0,
+			}},
+		},
+		{
+			name: "schema validation failure trips per-tool call limit",
+			input: input{
+				content: `tool: validated_tool
+args: {}`,
+				setup: func(tc *YAML) {
+					tc.RegisterTool(gent.NewToolFunc(
+						"validated_tool",
+						"A tool with required schema",
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"required_field": map[string]any{"type": "string"},
+							},
+							"required": []any{"required_field"},
+						},
+						func(
+							ctx context.Context,
+							args map[string]any,
+						) (string, error) {
+							return "should not reach", nil
+						},
+					))
+				},
+				limitKey: gent.SCToolCallsFor + "validated_tool",
+			},
+			expected: expected{exceededLimit: gent.Limit{
+				Type:     gent.LimitExactKey,
+				Key:      gent.SCToolCallsFor + "validated_tool",
+				MaxValue: 0,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewYAML()
+			tt.input.setup(tc)
+			execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+			execCtx.SetLimits([]gent.Limit{tt.expected.exceededLimit})
+
+			_, err := tc.Execute(execCtx, tt.input.content, yamlTestFormat())
+
+			require.NoError(t, err)
+			require.NotNil(t, execCtx.ExceededLimit())
+			assert.Equal(t, tt.expected.exceededLimit, *execCtx.ExceededLimit())
+			assert.Equal(t, int64(1), execCtx.Stats().GetCounter(gent.SCToolCalls))
+			assert.Equal(t, int64(1), execCtx.Stats().GetCounter(tt.input.limitKey))
+			assert.Error(t, execCtx.Context().Err())
+		})
+	}
 }
 
 func TestYAML_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {

@@ -13,11 +13,13 @@ import (
 //   - There is no listener on the channel
 //   - The listener is processing chunks slowly
 //
-// Internally it uses a slice-based queue protected by a mutex.
-// A background goroutine drains the queue to the output channel.
+// Internally it uses a slice-based queue protected by a mutex. The drain goroutine starts
+// lazily when Chunks is called, so callers that only need Response don't leak a blocked
+// sender goroutine.
 type streamBuffer struct {
 	// Output channel for consumers
-	chunks chan StreamChunk
+	chunks    chan StreamChunk
+	drainOnce sync.Once
 
 	// Internal queue protected by mutex
 	mu    sync.Mutex
@@ -26,6 +28,7 @@ type streamBuffer struct {
 
 	// State tracking
 	closed   bool
+	onClose  func()
 	closeErr error
 
 	// Final response (populated when complete)
@@ -42,15 +45,19 @@ type streamBuffer struct {
 // newStreamBuffer creates a new streaming buffer.
 // The returned stream is ready to receive chunks via Send().
 func newStreamBuffer() *streamBuffer {
+	return newStreamBufferWithClose(nil)
+}
+
+// newStreamBufferWithClose creates a new streaming buffer with a hook that runs when the
+// consumer closes the stream before it completes.
+func newStreamBufferWithClose(onClose func()) *streamBuffer {
 	s := &streamBuffer{
 		chunks:       make(chan StreamChunk, 1), // Small buffer for efficiency
 		queue:        make([]StreamChunk, 0, 64),
+		onClose:      onClose,
 		responseDone: make(chan struct{}),
 	}
 	s.cond = sync.NewCond(&s.mu)
-
-	// Start the drain goroutine
-	go s.drainLoop()
 
 	return s
 }
@@ -97,12 +104,12 @@ func (s *streamBuffer) dequeue() (StreamChunk, bool) {
 
 // Send adds a chunk to the stream. This method NEVER blocks.
 // It's safe to call from any goroutine.
-func (s *streamBuffer) Send(chunk StreamChunk) {
+func (s *streamBuffer) Send(chunk StreamChunk) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return // Silently ignore sends after close
+		return false // Silently ignore sends after close
 	}
 
 	// Accumulate content for final response
@@ -116,34 +123,42 @@ func (s *streamBuffer) Send(chunk StreamChunk) {
 	// Add to queue and signal
 	s.queue = append(s.queue, chunk)
 	s.cond.Signal()
+	return true
 }
 
 // SendContent is a convenience method to send a content-only chunk.
-func (s *streamBuffer) SendContent(content string) {
-	s.Send(StreamChunk{Content: content})
+func (s *streamBuffer) SendContent(content string) bool {
+	return s.Send(StreamChunk{Content: content})
 }
 
 // SendReasoning is a convenience method to send a reasoning-only chunk.
-func (s *streamBuffer) SendReasoning(reasoning string) {
-	s.Send(StreamChunk{ReasoningContent: reasoning})
+func (s *streamBuffer) SendReasoning(reasoning string) bool {
+	return s.Send(StreamChunk{ReasoningContent: reasoning})
 }
 
 // SendError sends an error chunk. This does NOT close the stream.
-func (s *streamBuffer) SendError(err error) {
-	s.Send(StreamChunk{Err: err})
+func (s *streamBuffer) SendError(err error) bool {
+	return s.Send(StreamChunk{Err: err})
 }
 
 // Complete marks the stream as complete with the final response.
 // This closes the stream and makes Response() return.
 func (s *streamBuffer) Complete(response *ContentResponse, err error) {
+	s.TryComplete(response, err)
+}
+
+// TryComplete marks the stream as complete and reports whether it completed the stream.
+// It returns false when the stream was already closed by the consumer.
+func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 	s.mu.Lock()
 
 	if s.closed {
 		s.mu.Unlock()
-		return
+		return false
 	}
 
 	s.closed = true
+	s.onClose = nil
 	s.closeErr = err
 
 	// If we have an error, add it as a final chunk
@@ -160,6 +175,7 @@ func (s *streamBuffer) Complete(response *ContentResponse, err error) {
 	s.responseErr = err
 	close(s.responseDone)
 	s.responseMu.Unlock()
+	return true
 }
 
 // CompleteWithGenerationInfo completes the stream using accumulated content
@@ -188,6 +204,11 @@ func (s *streamBuffer) CompleteWithGenerationInfo(info *GenerationInfo, err erro
 
 // Chunks implements Stream.Chunks.
 func (s *streamBuffer) Chunks() <-chan StreamChunk {
+	// Start draining lazily so Response-only callers don't leave a goroutine blocked on
+	// the output channel. Chunks are still queued and replayed if Chunks is called later.
+	s.drainOnce.Do(func() {
+		go s.drainLoop()
+	})
 	return s.chunks
 }
 
@@ -208,8 +229,14 @@ func (s *streamBuffer) Close() {
 		return
 	}
 	s.closed = true
+	onClose := s.onClose
+	s.onClose = nil
 	s.cond.Signal()
 	s.mu.Unlock()
+
+	if onClose != nil {
+		onClose()
+	}
 
 	// Also signal response done if not already done
 	s.responseMu.Lock()
@@ -308,8 +335,14 @@ type StreamWithDuration struct {
 
 // NewStreamWithDuration creates a stream buffer that tracks duration.
 func NewStreamWithDuration() *StreamWithDuration {
+	return NewStreamWithDurationWithClose(nil)
+}
+
+// NewStreamWithDurationWithClose creates a stream buffer that tracks duration and calls
+// onClose when the consumer closes the stream before it completes.
+func NewStreamWithDurationWithClose(onClose func()) *StreamWithDuration {
 	return &StreamWithDuration{
-		streamBuffer: newStreamBuffer(),
+		streamBuffer: newStreamBufferWithClose(onClose),
 		startTime:    time.Now(),
 	}
 }
