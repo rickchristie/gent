@@ -18,9 +18,11 @@ const (
 //
 // # How Limits Work
 //
-// Limits are checked automatically whenever stats are updated. When
-// any limit is exceeded, the ExecutionContext is cancelled and
-// execution terminates with [TerminationLimitExceeded].
+// Limits are checked automatically whenever stats are updated. Exact iteration limits
+// ([SCIterations] and [SCIterations.Self]) are the exception: the executor checks them
+// after each completed iteration with >= semantics so MaxValue is the maximum number of
+// loop iterations that may run. When any limit is exceeded, the ExecutionContext is
+// cancelled and execution terminates with [TerminationLimitExceeded].
 //
 // # Exact Key Limits
 //
@@ -69,9 +71,9 @@ type Limit struct {
 	// For prefix: use the prefix (e.g., SCToolCallsFor)
 	Key StatKey
 
-	// MaxValue is the threshold. Execution terminates when the
-	// value exceeds this.
-	// The comparison is: currentValue > MaxValue (not >=).
+	// MaxValue is the threshold. For most limits, execution terminates when currentValue >
+	// MaxValue (not >=). For exact iteration limits ([SCIterations] and [SCIterations.Self]),
+	// execution terminates after the completed iteration where currentValue >= MaxValue.
 	// For counters, the int64 value is compared as float64.
 	MaxValue float64
 }

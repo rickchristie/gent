@@ -174,15 +174,14 @@ func (m *mockAgentLoop) GetCalls() int {
 // -----------------------------------------------------------------------------
 
 func TestLimits_IterationLimit_Exceeded(t *testing.T) {
-	// Note: Limits use > comparison, so if MaxValue=5, then 6 iterations run
-	// before the limit is exceeded (because 6 > 5). The loop detects the exceeded
-	// limit at the start of iteration N+1 when iteration counter exceeds MaxValue.
+	// Iteration limits are executor-owned hard caps: MaxValue=5 allows exactly 5
+	// loop iterations, then terminates after AfterIteration before iteration 6 starts.
 	type input struct {
 		maxIterations float64
 	}
 
 	type expected struct {
-		calls         int // MaxValue + 1 because limit triggers when counter > MaxValue
+		calls         int
 		terminate     gent.TerminationReason
 		exceededLimit gent.Limit
 		events        []gent.Event
@@ -194,10 +193,10 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 		expected expected
 	}{
 		{
-			name:  "limit at 5 iterations terminates after 6",
+			name:  "limit at 5 iterations terminates after 5",
 			input: input{maxIterations: 5},
 			expected: expected{
-				calls:     6,
+				calls:     5,
 				terminate: gent.TerminationLimitExceeded,
 				exceededLimit: gent.Limit{
 					Type:     gent.LimitExactKey,
@@ -216,20 +215,18 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 					tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 5),
 					tt.AfterIter(0, 5, tt.ContinueWithPrompt(mockObservation)),
-					tt.BeforeIter(0, 6),
-					tt.LimitExceeded(0, 6,
+					tt.LimitExceeded(0, 5,
 						tt.ExactLimit(gent.SCIterations, 5),
-						6, gent.SCIterations),
-					tt.AfterIter(0, 6, tt.ContinueWithPrompt(mockObservation)),
-					tt.AfterExec(0, 6, gent.TerminationLimitExceeded),
+						5, gent.SCIterations),
+					tt.AfterExec(0, 5, gent.TerminationLimitExceeded),
 				},
 			},
 		},
 		{
-			name:  "limit at 1 iteration terminates after 2",
+			name:  "limit at 1 iteration terminates after 1",
 			input: input{maxIterations: 1},
 			expected: expected{
-				calls:     2,
+				calls:     1,
 				terminate: gent.TerminationLimitExceeded,
 				exceededLimit: gent.Limit{
 					Type:     gent.LimitExactKey,
@@ -240,20 +237,18 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1, tt.ContinueWithPrompt(mockObservation)),
-					tt.BeforeIter(0, 2),
-					tt.LimitExceeded(0, 2,
+					tt.LimitExceeded(0, 1,
 						tt.ExactLimit(gent.SCIterations, 1),
-						2, gent.SCIterations),
-					tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
-					tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
+						1, gent.SCIterations),
+					tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
 				},
 			},
 		},
 		{
-			name:  "limit at 10 iterations terminates after 11",
+			name:  "limit at 10 iterations terminates after 10",
 			input: input{maxIterations: 10},
 			expected: expected{
-				calls:     11,
+				calls:     10,
 				terminate: gent.TerminationLimitExceeded,
 				exceededLimit: gent.Limit{
 					Type:     gent.LimitExactKey,
@@ -282,12 +277,10 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 					tt.AfterIter(0, 9, tt.ContinueWithPrompt(mockObservation)),
 					tt.BeforeIter(0, 10),
 					tt.AfterIter(0, 10, tt.ContinueWithPrompt(mockObservation)),
-					tt.BeforeIter(0, 11),
-					tt.LimitExceeded(0, 11,
+					tt.LimitExceeded(0, 10,
 						tt.ExactLimit(gent.SCIterations, 10),
-						11, gent.SCIterations),
-					tt.AfterIter(0, 11, tt.ContinueWithPrompt(mockObservation)),
-					tt.AfterExec(0, 11, gent.TerminationLimitExceeded),
+						10, gent.SCIterations),
+					tt.AfterExec(0, 10, gent.TerminationLimitExceeded),
 				},
 			},
 		},
@@ -357,9 +350,9 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 			},
 		},
 		{
-			name: "terminate at exactly limit value does not exceed",
+			name: "terminate before limit value does not exceed",
 			input: input{
-				maxIterations: 5,
+				maxIterations: 6,
 				terminateAt:   5,
 			},
 			expected: expected{
@@ -1771,10 +1764,8 @@ func TestLimits_LimitExceededEvent_PublishedOnIterationLimit(t *testing.T) {
 		tt.AfterIter(0, 2, tt.ContinueWithPrompt(mockObservation)),
 		tt.BeforeIter(0, 3),
 		tt.AfterIter(0, 3, tt.ContinueWithPrompt(mockObservation)),
-		tt.BeforeIter(0, 4),
-		tt.LimitExceeded(0, 4, tt.ExactLimit(gent.SCIterations, 3), 4, gent.SCIterations),
-		tt.AfterIter(0, 4, tt.ContinueWithPrompt(mockObservation)),
-		tt.AfterExec(0, 4, gent.TerminationLimitExceeded),
+		tt.LimitExceeded(0, 3, tt.ExactLimit(gent.SCIterations, 3), 3, gent.SCIterations),
+		tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 }

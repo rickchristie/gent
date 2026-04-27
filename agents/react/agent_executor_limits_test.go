@@ -229,7 +229,7 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 	})
 
 	t.Run("stops when iteration limit exceeded at first iteration", func(t *testing.T) {
-		// Limit of 0 means iteration 1 (value 1 > 0) immediately exceeds
+		// Limit of 0 means iteration 1 completes, then the executor stops before iteration 2.
 		model := tt.NewMockModel().
 			AddResponse("<action>tool: test</action>", 100, 50).
 			AddResponse("<answer>done</answer>", 100, 50)
@@ -253,17 +253,16 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
 
-		// Assert full event sequence - limit exceeded at BeforeIter for iteration 1
+		// Assert full event sequence - iteration limits are checked after AfterIter.
 		expectedEvents := []gent.Event{
 			tt.BeforeExec(0, 0),
 			tt.BeforeIter(0, 1),
-			tt.LimitExceeded(0, 1, limit, 1, gent.SCIterations),
-			// Agent continues despite cancelled context (mock doesn't check)
 			tt.BeforeModelCall(0, 1, "test-model"),
 			tt.AfterModelCall(0, 1, "test-model", 100, 50),
 			tt.BeforeToolCall(0, 1, "test", nil),
 			tt.AfterToolCall(0, 1, "test", nil, "tool executed", nil),
 			tt.AfterIter(0, 1, tt.ContinueWithPrompt(toolObs)),
+			tt.LimitExceeded(0, 1, limit, 1, gent.SCIterations),
 			tt.AfterExec(0, 1, gent.TerminationLimitExceeded),
 		}
 		tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
@@ -292,7 +291,7 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 
 		assert.Equal(t, gent.TerminationLimitExceeded, execCtx.TerminationReason())
 		assert.Equal(t, limit, *execCtx.ExceededLimit())
-		assert.Equal(t, 3, execCtx.Iteration()) // Attempted 3rd but stopped
+		assert.Equal(t, 2, execCtx.Iteration())
 
 		// Build expected NextPrompt for tool execution
 		toolObs := tt.ToolObservation(format, toolChain, "test", "tool executed")
@@ -315,17 +314,9 @@ func TestExecutorLimits_Iterations(t *testing.T) {
 			tt.BeforeToolCall(0, 2, "test", nil),
 			tt.AfterToolCall(0, 2, "test", nil, "tool executed", nil),
 			tt.AfterIter(0, 2, tt.ContinueWithPrompt(toolObs)),
-			// Iteration 3: limit exceeded during BeforeIter stats update
-			tt.BeforeIter(0, 3),
-			tt.LimitExceeded(0, 3, limit, 3, gent.SCIterations),
-			// Agent continues despite cancelled context (mock doesn't check)
-			tt.BeforeModelCall(0, 3, "test-model"),
-			tt.AfterModelCall(0, 3, "test-model", 100, 50),
-			tt.BeforeToolCall(0, 3, "test", nil),
-			tt.AfterToolCall(0, 3, "test", nil, "tool executed", nil),
-			tt.AfterIter(0, 3, tt.ContinueWithPrompt(toolObs)),
+			tt.LimitExceeded(0, 2, limit, 2, gent.SCIterations),
 			// Execution ends with limit exceeded
-			tt.AfterExec(0, 3, gent.TerminationLimitExceeded),
+			tt.AfterExec(0, 2, gent.TerminationLimitExceeded),
 		}
 		actualEvents := tt.CollectLifecycleEvents(execCtx)
 		tt.AssertEventsEqual(t, expectedEvents, actualEvents)
@@ -3298,11 +3289,11 @@ func TestExecutorLimits_ConsecutiveReset_TerminationParseError(t *testing.T) {
 		// Since successful termination parsing ends execution, we use a validator to reject
 		// the answer and continue the loop. This tests: fail, fail, success+reject, fail, done
 		model := tt.NewMockModel().
-			AddResponse("<answer>bad1</answer>", 100, 50).       // parse error
-			AddResponse("<answer>bad2</answer>", 100, 50).       // parse error (consecutive=2)
-			AddResponse("<answer>rejected</answer>", 100, 50).   // parse OK, validator rejects
-			AddResponse("<answer>bad3</answer>", 100, 50).       // parse error (consecutive=1)
-			AddResponse("<answer>accepted</answer>", 100, 50)    // parse OK, validator accepts
+			AddResponse("<answer>bad1</answer>", 100, 50).     // parse error
+			AddResponse("<answer>bad2</answer>", 100, 50).     // parse error (consecutive=2)
+			AddResponse("<answer>rejected</answer>", 100, 50). // parse OK, validator rejects
+			AddResponse("<answer>bad3</answer>", 100, 50).     // parse error (consecutive=1)
+			AddResponse("<answer>accepted</answer>", 100, 50)  // parse OK, validator accepts
 
 		format := tt.NewMockFormat().
 			AddParseResult(map[string][]string{"answer": {"bad1"}}).

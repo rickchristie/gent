@@ -131,24 +131,7 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 
 	// Main execution loop
 	for {
-		// Check context cancellation (handles both user cancel and limit exceeded)
-		goCtx := execCtx.Context()
-		if goCtx.Err() != nil {
-			if execCtx.ExceededLimit() != nil {
-				execCtx.SetTermination(
-					gent.TerminationLimitExceeded,
-					nil,
-					fmt.Errorf("limit exceeded: %s > %v",
-						execCtx.ExceededLimit().Key,
-						execCtx.ExceededLimit().MaxValue),
-				)
-			} else {
-				execCtx.SetTermination(
-					gent.TerminationContextCanceled,
-					nil,
-					goCtx.Err(),
-				)
-			}
+		if terminateIfCanceled(execCtx) {
 			return
 		}
 
@@ -185,6 +168,10 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 				&gent.AgentLoopResult{Action: gent.LATerminate},
 				iterDuration,
 			)
+			execCtx.EnforceIterationLimit()
+			if terminateIfCanceled(execCtx) {
+				return
+			}
 			if execCtx.ExceededLimit() != nil {
 				execCtx.SetTermination(
 					gent.TerminationLimitExceeded,
@@ -206,6 +193,10 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 
 		// Publish AfterIterationEvent
 		execCtx.PublishAfterIteration(loopResult, iterDuration)
+		execCtx.EnforceIterationLimit()
+		if terminateIfCanceled(execCtx) {
+			return
+		}
 
 		// Check for termination
 		if loopResult.Action == gent.LATerminate {
@@ -216,6 +207,32 @@ func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
 		// Continue - the AgentLoop is responsible for updating data with NextPrompt
 		// The exact mechanism depends on the LoopData implementation
 	}
+}
+
+func terminateIfCanceled(execCtx *gent.ExecutionContext) bool {
+	goCtx := execCtx.Context()
+	if goCtx.Err() == nil {
+		return false
+	}
+	if execCtx.ExceededLimit() != nil {
+		limit := execCtx.ExceededLimit()
+		op := ">"
+		if limit.Key == gent.SCIterations || limit.Key == gent.SCIterations.Self() {
+			op = ">="
+		}
+		execCtx.SetTermination(
+			gent.TerminationLimitExceeded,
+			nil,
+			fmt.Errorf("limit exceeded: %s %s %v", limit.Key, op, limit.MaxValue),
+		)
+		return true
+	}
+	execCtx.SetTermination(
+		gent.TerminationContextCanceled,
+		nil,
+		goCtx.Err(),
+	)
+	return true
 }
 
 // compactIfNeeded checks the compaction trigger and runs the

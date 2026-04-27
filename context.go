@@ -206,8 +206,10 @@ func (ctx *ExecutionContext) Context() context.Context {
 // SetLimits configures the limits for this execution.
 // Replaces any previously set limits, including defaults.
 //
-// Limits are evaluated on every stat update. When a limit is exceeded,
-// the context is cancelled and ExceededLimit() returns the exceeded limit.
+// Limits are evaluated on every stat update, except exact iteration limits
+// ([SCIterations] and [SCIterations.Self]) which the executor evaluates after each completed
+// iteration so MaxValue means the maximum number of loop iterations that may run. When a limit
+// is exceeded, the context is cancelled and ExceededLimit() returns the exceeded limit.
 //
 // Must be called before execution starts.
 func (ctx *ExecutionContext) SetLimits(limits []Limit) {
@@ -330,6 +332,71 @@ func (ctx *ExecutionContext) checkLimits() {
 	ctx.cancel(fmt.Errorf("limit exceeded: %s > %v", info.limit.Key, info.limit.MaxValue))
 }
 
+// EnforceIterationLimit checks exact iteration limits using executor semantics.
+//
+// Iteration limits are a hard cap on completed loop iterations, so they use >= after
+// AfterIteration instead of the generic stat limit's > comparison on stat update. The check
+// walks up the context tree so aggregate SCIterations limits on a parent still observe child
+// iterations as they propagate.
+func (ctx *ExecutionContext) EnforceIterationLimit() bool {
+	if ctx == nil {
+		return false
+	}
+	if ctx.enforceLocalIterationLimit() {
+		return true
+	}
+
+	ctx.mu.RLock()
+	parent := ctx.parent
+	ctx.mu.RUnlock()
+	if parent == nil {
+		return false
+	}
+	return parent.EnforceIterationLimit()
+}
+
+func (ctx *ExecutionContext) enforceLocalIterationLimit() bool {
+	var info *limitExceededInfo
+
+	ctx.updateContextState(func() {
+		if ctx.exceededLimit != nil {
+			return
+		}
+		info = ctx.evaluateIterationLimitsLocked()
+		if info == nil {
+			return
+		}
+		ctx.exceededLimit = info.limit
+	})
+
+	if info == nil {
+		return false
+	}
+	ctx.PublishLimitExceeded(*info.limit, info.currentValue, info.matchedKey)
+	ctx.cancel(fmt.Errorf(
+		"limit exceeded: %s >= %v", info.limit.Key, info.limit.MaxValue,
+	))
+	return true
+}
+
+func (ctx *ExecutionContext) evaluateIterationLimitsLocked() *limitExceededInfo {
+	for i := range ctx.limits {
+		limit := &ctx.limits[i]
+		if !isIterationLimitKey(limit.Key) || limit.Type != LimitExactKey {
+			continue
+		}
+		val := ctx.stats.GetCounter(limit.Key)
+		if float64(val) >= limit.MaxValue {
+			return &limitExceededInfo{
+				limit:        limit,
+				currentValue: float64(val),
+				matchedKey:   limit.Key,
+			}
+		}
+	}
+	return nil
+}
+
 // evaluateLimitsLocked evaluates all limits against current stats.
 // Returns info about the first exceeded limit, or nil if all limits are within bounds.
 // Must be called with lock held.
@@ -362,6 +429,9 @@ func (ctx *ExecutionContext) checkLimitLocked(limit *Limit) *limitExceededInfo {
 func (ctx *ExecutionContext) checkExactKeyLimit(
 	limit *Limit,
 ) *limitExceededInfo {
+	if isIterationLimitKey(limit.Key) {
+		return nil
+	}
 	// Check counters first
 	if val := ctx.stats.GetCounter(limit.Key); val > 0 {
 		if float64(val) > limit.MaxValue {
@@ -383,6 +453,10 @@ func (ctx *ExecutionContext) checkExactKeyLimit(
 		}
 	}
 	return nil
+}
+
+func isIterationLimitKey(key StatKey) bool {
+	return key == SCIterations || key == SCIterations.Self()
 }
 
 // checkPrefixLimit checks if any key with the given prefix exceeds
