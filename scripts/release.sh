@@ -97,6 +97,17 @@ cd "$REPO_ROOT"
 
 MODULE_PATH="$(awk '$1 == "module" {print $2; exit}' go.mod)"
 [[ -n "$MODULE_PATH" ]] || fail 'could not read module path from go.mod'
+CLI_PATH="$MODULE_PATH/cmd/gent"
+
+verify_cli_build() {
+	local tmp_bin
+	tmp_bin="$(mktemp -d)"
+	(
+		trap 'rm -rf "$tmp_bin"' EXIT
+		GOBIN="$tmp_bin" go install ./cmd/gent
+		"$tmp_bin/gent" model list >/dev/null
+	)
+}
 
 if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
 	fail "tag $VERSION already exists locally"
@@ -178,6 +189,7 @@ printf '========================================\n'
 printf '  gent Release Script\n'
 printf '========================================\n\n'
 printf 'Module:        %s\n' "$MODULE_PATH"
+printf 'CLI package:   %s\n' "$CLI_PATH"
 printf 'Version:       %s\n' "$VERSION"
 printf 'New tag:       %s\n' "$VERSION"
 printf 'Previous tag:  %s\n' "$PREV_TAG_LABEL"
@@ -198,6 +210,7 @@ if [[ "$RUN_TESTS" -eq 1 ]]; then
 	printf '  Verification\n'
 	printf '========================================\n\n'
 	go test ./... -count=1 -timeout 300s
+	verify_cli_build
 	printf '\n'
 else
 	warn 'skipping tests by request'
@@ -209,8 +222,12 @@ if [[ "$EXECUTE" -eq 0 ]]; then
   Commands to create and push release
 ========================================
 
-# Step 1: Verify tests:
+# Step 1: Verify tests and CLI build:
 go test ./... -count=1 -timeout 300s
+CLI_GOBIN="\$(mktemp -d)"
+GOBIN="\$CLI_GOBIN" go install ./cmd/gent
+"\$CLI_GOBIN/gent" model list >/dev/null
+rm -rf "\$CLI_GOBIN"
 
 # Step 2: Create the annotated tag:
 git tag -a "$VERSION" -m "\$(cat <<'TAG_MESSAGE'
@@ -224,8 +241,16 @@ git push "$REMOTE" "$VERSION"
 # Step 4: Trigger Go proxy to index the new version:
 GOPROXY=https://proxy.golang.org go list -m "$MODULE_PATH@$VERSION"
 
-# After indexing, users can depend on:
+# Step 5: Verify users can install the CLI from the released tag:
+CLI_GOBIN="\$(mktemp -d)"
+GOBIN="\$CLI_GOBIN" go install "$CLI_PATH@$VERSION"
+"\$CLI_GOBIN/gent" model list >/dev/null
+rm -rf "\$CLI_GOBIN"
+
+# After indexing, users can depend on the library:
 # go get $MODULE_PATH@$VERSION
+# And install the CLI:
+# go install $CLI_PATH@$VERSION
 EOF
 	exit 0
 fi
@@ -242,4 +267,13 @@ if ! GOPROXY=https://proxy.golang.org go list -m "$MODULE_PATH@$VERSION"; then
 	warn "GOPROXY=https://proxy.golang.org go list -m $MODULE_PATH@$VERSION"
 fi
 
+CLI_GOBIN="$(mktemp -d)"
+(
+	trap 'rm -rf "$CLI_GOBIN"' EXIT
+	GOBIN="$CLI_GOBIN" go install "$CLI_PATH@$VERSION"
+	"$CLI_GOBIN/gent" model list >/dev/null
+)
+
 printf '\nRelease %s published.\n' "$VERSION"
+printf 'Library: go get %s@%s\n' "$MODULE_PATH" "$VERSION"
+printf 'CLI:     go install %s@%s\n' "$CLI_PATH" "$VERSION"

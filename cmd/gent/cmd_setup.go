@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,12 +107,16 @@ func runSetup() {
 		fmt.Println("After setting the environment variables:")
 	}
 
-	fmt.Println("  go build ./...")
-	fmt.Println("  go test ./...")
-	fmt.Println()
-	fmt.Println("Next step: download an embedding model:")
-	fmt.Println("  gent model list")
-	fmt.Println("  gent model download multilingual-e5-small-int8")
+	printSetupNextSteps(os.Stdout)
+}
+
+func printSetupNextSteps(w io.Writer) {
+	fmt.Fprintln(w, "  go build ./...")
+	fmt.Fprintln(w, "  go test ./...")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Next step: download an embedding model:")
+	fmt.Fprintln(w, "  gent model list")
+	fmt.Fprintln(w, "  gent model download multilingual-e5-small")
 }
 
 func printManualEnvInstructions(envLines []string) {

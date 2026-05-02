@@ -140,7 +140,7 @@ func loadData(path string, data []byte, label string) ([]byte, error) {
 	if len(data) > 0 {
 		return data, nil
 	}
-	return nil, fmt.Errorf("search: no %s provided; set %sPath or %sData in EmbedderConfig",
+	return nil, fmt.Errorf("search: no %s provided; set %sPath or %sData in OnnxOptions",
 		label, label, label)
 }
 
@@ -352,7 +352,7 @@ func l2Normalize(v []float32) []float32 {
 
 // resolveOnnxLibPath determines the ONNX Runtime shared library path using a deterministic
 // resolution order:
-//  1. Explicit configPath (from EmbedderConfig.OnnxLibraryPath)
+//  1. Explicit configPath (from OnnxOptions.OnnxLibraryPath)
 //  2. GENT_ORT_LIB environment variable (for CI/containers)
 //  3. ~/.gent/lib/ (default install location from setup tool)
 //  4. Empty string (let ONNX Runtime try its default, which will likely fail)

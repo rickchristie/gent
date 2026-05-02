@@ -7,7 +7,7 @@
 // Commands:
 //
 //	setup onnx    Install native libraries (libtokenizers, libonnxruntime)
-//	model list    List available embedding models
+//	model list    List downloadable embedding model files and runtime configs
 //	model download <name>  Download an embedding model
 package main
 
@@ -62,6 +62,6 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  setup onnx              Install native libraries (libtokenizers, libonnxruntime)")
-	fmt.Println("  model list              List available embedding models")
+	fmt.Println("  model list              List downloadable model files and runtime configs")
 	fmt.Println("  model download <name>   Download an embedding model")
 }

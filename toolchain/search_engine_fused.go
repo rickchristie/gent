@@ -50,7 +50,8 @@ import (
 //
 // # Usage
 //
-//	embedder, _ := search.NewOnnxEmbedder(search.EmbedderConfig{...})
+//	cfg := common.FindConfig("multilingual-e5-small")
+//	embedder, _ := search.NewOnnxEmbedder(*cfg, search.OnnxOptions{...})
 //	searcher := toolchain.NewFusedToolSearcher(embedder)
 //
 //	tc := toolchain.NewSearchJSON(toolchain.SearchHintDomainCategories).

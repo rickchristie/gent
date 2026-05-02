@@ -114,7 +114,7 @@ func createEmbedder() search.Embedder {
 	if !common.ModelDownloaded(&cfg.Model) {
 		panic(
 			"integration tests require multilingual-e5-small model. " +
-				"Run: go run ./cmd/gent setup onnx",
+				"Run: gent setup onnx && gent model download multilingual-e5-small",
 		)
 	}
 	dir, err := common.ModelDir(cfg.Model.Name)

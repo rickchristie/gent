@@ -18,7 +18,8 @@ import (
 // # Usage
 //
 //	// Semantic search via FlatIndex
-//	embedder, _ := search.NewOnnxEmbedder(cfg)
+//	cfg := common.FindConfig("multilingual-e5-small")
+//	embedder, _ := search.NewOnnxEmbedder(*cfg, search.OnnxOptions{...})
 //	flatIdx := search.NewFlatIndex[gent.IndexableTool](&toolchain.ToolChunkAdapter{}, embedder)
 //	engine := toolchain.NewIndexToolSearcher("semantic", flatIdx)
 //

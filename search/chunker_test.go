@@ -448,7 +448,7 @@ Pengembalian dana untuk pembatalan yang memenuhi syarat akan diproses dalam wakt
 
 func TestMarkdownChunker_CodeBlocks(t *testing.T) {
 	markdown := "# Setup\n\n## Install\n\nRun this command:\n\n" +
-		"```bash\ngo run ./cmd/gent setup onnx\n```\n\n" +
+		"```bash\ngent setup onnx\n```\n\n" +
 		"## Configure\n\nEdit your config file."
 
 	chunker := &MarkdownChunker{ChunkSize: 256, TokenCount: wordCount}
@@ -459,7 +459,7 @@ func TestMarkdownChunker_CodeBlocks(t *testing.T) {
 		},
 		{
 			Text: "h1: Setup\n## Install\n\nRun this command:\n\n" +
-				"```bash\ngo run ./cmd/gent setup onnx\n```",
+				"```bash\ngent setup onnx\n```",
 			Metadata: map[string]string{"h1": "Setup"},
 		},
 		{

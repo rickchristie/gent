@@ -1,106 +1,137 @@
 # Search Package
 
-Generic search infrastructure: semantic vector search (ONNX), BM25 full-text search (Bleve), and hybrid fused search.
+Generic search infrastructure for semantic vector search with ONNX, BM25 full-text search with
+Bleve, and hybrid fused search.
 
 ## Setup
 
-<!-- TODO: Replace "go run ./cmd/gent" with "gent" once published as a standalone tool -->
-
-### 1. Install native libraries
+### 1. Install the CLI
 
 ```bash
-go run ./cmd/gent setup onnx
+go install github.com/rickchristie/gent/cmd/gent@v0.1.0
+printf '\nexport PATH="%s:$PATH"\n' "$(go env GOPATH)/bin" >> ~/.bashrc
+source ~/.bashrc
+```
+
+`go install` writes `gent` to `$(go env GOPATH)/bin`. Add that directory to your shell profile
+once so future terminals can run `gent`. Use `~/.zshrc` instead of `~/.bashrc` if you use zsh.
+
+### 2. Install native CPU libraries
+
+```bash
+gent setup onnx
 source ~/.bashrc  # or ~/.zshrc, then restart terminal
 ```
 
-### 2. Download an embedding model
+`gent setup onnx` installs `libtokenizers` and ONNX Runtime to `~/.gent/lib/`. When you accept
+the profile update prompt, it appends these ONNX library paths to `~/.bashrc`:
 
 ```bash
-go run ./cmd/gent model list
-go run ./cmd/gent model download multilingual-e5-small
+export CGO_LDFLAGS="-L$HOME/.gent/lib"
+export LD_LIBRARY_PATH="$HOME/.gent/lib:$LD_LIBRARY_PATH"
 ```
 
-After setup, build and test with no flags:
+If you decline the prompt, add those lines manually, then run `source ~/.bashrc` or restart your
+terminal. Use `~/.zshrc` instead of `~/.bashrc` if you use zsh.
+
+### 3. Download an embedding model
 
 ```bash
-go build ./...
-go test ./...
+gent model list
+gent model download multilingual-e5-small
 ```
+
+`gent model list` shows 10 downloadable physical model files and 11 runtime configurations. One
+downloaded model may have multiple configurations, for example full-size and Matryoshka-truncated
+variants.
 
 ## Usage
 
 ```go
-embedder, err := search.NewOnnxEmbedder(search.EmbedderConfig{
-    ModelPath:     "~/.gent/models/multilingual-e5-small/model_qint8_avx512_vnni.onnx",
-    TokenizerPath: "~/.gent/models/multilingual-e5-small/tokenizer.json",
-    Dimensions:    384,
-    Pooling:       search.PoolingMean,
-    QueryPrefix:   "query: ",
-    PassagePrefix: "passage: ",
-})
-defer embedder.Close()
+package main
+
+import (
+    "fmt"
+    "path/filepath"
+
+    "github.com/rickchristie/gent/common"
+    "github.com/rickchristie/gent/search"
+)
+
+func newEmbedder() (search.Embedder, error) {
+    cfg := common.FindConfig("multilingual-e5-small")
+    if cfg == nil {
+        return nil, fmt.Errorf("unknown embedding config: %s", "multilingual-e5-small")
+    }
+
+    dir, err := common.ModelDir(cfg.Model.Name)
+    if err != nil {
+        return nil, err
+    }
+
+    return search.NewOnnxEmbedder(*cfg, search.OnnxOptions{
+        ModelPath:      filepath.Join(dir, cfg.Model.ModelFile),
+        TokenizerPath:  filepath.Join(dir, "tokenizer.json"),
+        NumThreads:     4,
+        MaxConcurrency: 4,
+    })
+}
 ```
 
-The `gent model download` command prints the exact config to copy-paste.
+The `gent model download <model-name>` command prints the exact `common.FindConfig` and
+`search.OnnxOptions` snippet for the downloaded model.
 
-### Post-processing hook
+### Post-processing Hook
 
-Some models need custom post-processing between pooling and L2 normalization. Use the `PostProcess` field:
+Some models need custom post-processing between pooling and L2 normalization. This is configured
+on `common.ModelConfig`, not `search.OnnxOptions`. Built-in configs already set the right
+post-processing for registered models such as `nomic-embed-text-v1.5`.
 
 ```go
-// nomic-embed-text-v1.5 needs layer normalization
-cfg := search.EmbedderConfig{
-    // ...
-    PostProcess: search.LayerNorm,
+base := common.FindConfig("nomic-embed-text-v1.5-768d")
+if base == nil {
+    return nil, fmt.Errorf("unknown embedding config")
 }
 
-// Custom: layer norm + Matryoshka truncation to 256 dims
-cfg := search.EmbedderConfig{
-    // ...
-    PostProcess: func(v []float32) []float32 {
-        v = search.LayerNorm(v)
-        return v[:256]
-    },
+cfg := *base
+cfg.PostProcess = func(v []float32) []float32 {
+    v = common.LayerNorm(v)
+    return v[:256]
 }
 ```
 
 ## Running Tests
 
-### Unit tests (no model or ONNX Runtime needed)
+### Unit Tests
+
+Unit tests do not require downloaded models or ONNX Runtime.
 
 ```bash
-go test ./search/ -run 'TestTheoreticalMax|TestNormalizeBM25|TestWeightedLinear|TestFlatIndex|TestBleveIndex|TestFusedIndex'
+go test ./search \
+  -run 'Test(TheoreticalMax|NormalizeBM25|WeightedLinear|FlatIndex|BleveIndex|FusedIndex)' \
+  -count=1
 ```
 
-### Integration tests (real ONNX models)
+### Integration Tests
 
-All 11 registered models are auto-downloaded to `.model/` on first test run.
-Tests skip gracefully if ONNX Runtime is not installed.
+Integration tests use real ONNX models. Test setup downloads all 10 registered physical models to
+`~/.gent/models/` on first run. Tests skip gracefully if ONNX Runtime is not installed.
 
 ```bash
-go test ./search/ -run TestOnnxEmbedder_AllModels -v -timeout 300s
+go test ./search -run TestOnnxEmbedder_AllModels -count=1 -timeout 300s
 ```
 
-### ONNX Runtime resolution order
+### ONNX Runtime Resolution Order
 
-1. `EmbedderConfig.OnnxLibraryPath` (explicit)
-2. `GENT_ORT_LIB` environment variable (CI/containers)
-3. `~/.gent/lib/` (default, installed by setup tool)
-
-## Downloading models
-
-```bash
-go run ./cmd/gent model list
-go run ./cmd/gent model download multilingual-e5-small
-```
+1. `search.OnnxOptions.OnnxLibraryPath`.
+2. `GENT_ORT_LIB` environment variable for CI or containers.
+3. `~/.gent/lib/`, the default location installed by `gent setup onnx`.
+4. ONNX Runtime default library resolution.
 
 ## Container / CI
 
-```dockerfile
-RUN go run ./cmd/gent setup onnx && source ~/.bashrc
-```
-
-Or copy pre-built libraries directly:
+The setup command is interactive. For CI and containers, prefer installing native libraries into a
+known location and setting `GENT_ORT_LIB` explicitly.
 
 ```dockerfile
 COPY libtokenizers.a libonnxruntime.so.1.24.4 /usr/local/lib/
