@@ -1,5 +1,5 @@
 <critical_behavior>
-# Critical Behavior
+## Critical Behavior
 - **ALWAYS write all outputs of test, bash commands to /tmp file** when running test, scripts that you need the result for.
   You can then run head/tail or search on the result file. This avoids re-running the script again whenever there are issues.
 - **ALWAYS fully finish your tasks** when executing anything. Never stop to ask "would you like to continue?" or anything similar.
@@ -16,6 +16,11 @@
 - **NEVER delete valid comments**, contextual comments are important for maintainability.
   Comments contains business context, the "why" - if still correct, removing them will cause **loss of context**.
   Only remove comments if they are no longer valid.
+- **ALWAYS use simple, intent-revealing names and comments**, e.g. use `shouldOrderInsertTimeline` instead of `orderQualifiesForLifecycleTimeline`.
+  Prefer concise, immediately understood, simple names that describe a concrete action, decision, noun, business purpose.
+  Avoid abstract, thesaurus-style, Java-like word salad. Applies to variables, functions, methods, tests, and comments.
+- **ALWAYS prioritize readability, maintainability, simplicity, elegance** of your code.
+  Aim for low-cyclomatic complexity in your code, exit early whenever you can, it's okay to repeat lines if we reduce cyclomatic complexity or prevent interleaving conditionals.
 </critical_behavior>
 
 <codebase_architecture>

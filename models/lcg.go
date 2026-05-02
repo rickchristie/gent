@@ -312,6 +312,8 @@ func (m *LCGWrapper) GenerateContentStream(
 
 	// Start the model call in a goroutine
 	go func() {
+		defer cancel()
+
 		lcgResponse, err := m.model.GenerateContent(ctx, requestMessages, opts...)
 		duration := stream.Duration()
 

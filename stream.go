@@ -18,8 +18,11 @@ import (
 // sender goroutine.
 type streamBuffer struct {
 	// Output channel for consumers
-	chunks    chan StreamChunk
-	drainOnce sync.Once
+	chunks          chan StreamChunk
+	drainOnce       sync.Once
+	drainCancel     chan struct{}
+	drainCancelOnce sync.Once
+	drainDone       chan struct{}
 
 	// Internal queue protected by mutex
 	mu    sync.Mutex
@@ -52,9 +55,12 @@ func newStreamBuffer() *streamBuffer {
 // consumer closes the stream before it completes.
 func newStreamBufferWithClose(onClose func()) *streamBuffer {
 	s := &streamBuffer{
-		chunks:       make(chan StreamChunk, 1), // Small buffer for efficiency
-		queue:        make([]StreamChunk, 0, 64),
-		onClose:      onClose,
+		chunks:      make(chan StreamChunk, 1), // Small buffer for efficiency
+		drainCancel: make(chan struct{}),
+		drainDone:   make(chan struct{}),
+		queue:       make([]StreamChunk, 0, 64),
+		onClose:     onClose,
+
 		responseDone: make(chan struct{}),
 	}
 	s.cond = sync.NewCond(&s.mu)
@@ -63,18 +69,44 @@ func newStreamBufferWithClose(onClose func()) *streamBuffer {
 }
 
 // drainLoop continuously moves chunks from the internal queue to the output channel.
-// It runs until the stream is closed and all queued chunks are drained.
+// It runs until the stream is complete and all queued chunks are drained, or until the
+// consumer closes the stream and queued chunks should be discarded.
 func (s *streamBuffer) drainLoop() {
+	defer close(s.drainDone)
+	defer close(s.chunks)
+
 	for {
 		chunk, ok := s.dequeue()
 		if !ok {
 			// Queue is empty and stream is closed
-			close(s.chunks)
 			return
 		}
 
-		// Send to output channel (may block here, which is fine)
-		s.chunks <- chunk
+		if !s.sendDrainedChunk(chunk) {
+			return
+		}
+	}
+}
+
+func (s *streamBuffer) sendDrainedChunk(chunk StreamChunk) bool {
+	select {
+	case <-s.drainCancel:
+		return false
+	default:
+	}
+
+	select {
+	case s.chunks <- chunk:
+		return true
+	default:
+	}
+
+	// Close must be able to stop this goroutine while the consumer is no longer reading.
+	select {
+	case <-s.drainCancel:
+		return false
+	case s.chunks <- chunk:
+		return true
 	}
 }
 
@@ -166,15 +198,15 @@ func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 		s.queue = append(s.queue, StreamChunk{Err: err})
 	}
 
-	s.cond.Signal()
-	s.mu.Unlock()
-
 	// Set the final response
 	s.responseMu.Lock()
 	s.response = response
 	s.responseErr = err
 	close(s.responseDone)
 	s.responseMu.Unlock()
+
+	s.cond.Signal()
+	s.mu.Unlock()
 	return true
 }
 
@@ -224,18 +256,20 @@ func (s *streamBuffer) Response() (*ContentResponse, error) {
 // Close implements Stream.Close.
 func (s *streamBuffer) Close() {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
+	wasClosed := s.closed
 	s.closed = true
+	s.queue = nil
+	s.closeDrain()
 	onClose := s.onClose
 	s.onClose = nil
 	s.cond.Signal()
 	s.mu.Unlock()
 
-	if onClose != nil {
+	if !wasClosed && onClose != nil {
 		onClose()
+	}
+	if wasClosed {
+		return
 	}
 
 	// Also signal response done if not already done
@@ -247,6 +281,12 @@ func (s *streamBuffer) Close() {
 		close(s.responseDone)
 	}
 	s.responseMu.Unlock()
+}
+
+func (s *streamBuffer) closeDrain() {
+	s.drainCancelOnce.Do(func() {
+		close(s.drainCancel)
+	})
 }
 
 // AccumulatedContent returns the content accumulated so far.

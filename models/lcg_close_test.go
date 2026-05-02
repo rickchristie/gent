@@ -110,6 +110,42 @@ func TestLCGWrapperGenerateContentStream_CloseCancelsModelContext(t *testing.T) 
 	}
 }
 
+func TestLCGWrapperGenerateContentStream_NormalCompletionCancelsModelContext(t *testing.T) {
+	model := newCloseTestModel()
+	wrapper := NewLCGWrapper(model).WithModelName("normal-completion-test")
+	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+
+	stream, err := wrapper.GenerateContentStream(
+		execCtx,
+		"stream",
+		"topic",
+		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+	)
+	require.NoError(t, err)
+
+	callCtx := receiveCallContext(t, model.started)
+	assert.NoError(t, callCtx.Err())
+
+	close(model.release)
+	response, err := stream.Response()
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Len(t, response.Choices, 1)
+	assert.Equal(t, "done", response.Choices[0].Content)
+
+	select {
+	case err := <-model.done:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("expected model call to complete")
+	}
+
+	require.Eventually(t, func() bool {
+		return callCtx.Err() != nil
+	}, time.Second, 10*time.Millisecond)
+	assert.ErrorIs(t, callCtx.Err(), context.Canceled)
+}
+
 func TestLCGWrapperGenerateContentStream_NilExecutionContextSkipsTracing(t *testing.T) {
 	model := newCloseTestModel()
 	wrapper := NewLCGWrapper(model).WithModelName("nil-context-test")
