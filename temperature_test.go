@@ -116,7 +116,7 @@ func TestDefaultSamplingParams(t *testing.T) {
 		// --- Grok (generic defaults) ---
 		{
 			name:  "grok uses generic defaults",
-			input: input{model: &mockNamerModel{name: "grok-4-1-fast"}},
+			input: input{model: &mockNamerModel{name: ModelXAIGrok43}},
 			expected: expected{
 				temperature: expectedParam{directive: ParamOverride, value: 0.2},
 				topP:        expectedParam{directive: ParamOverride, value: 1.0},

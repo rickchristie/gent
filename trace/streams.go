@@ -32,7 +32,7 @@ func (s *Sequencer) ObserveStreams(execCtx *gent.ExecutionContext) gent.Unsubscr
 		s.mu.Unlock()
 		return func() {}
 	}
-	chunks, unsubscribe := execCtx.SubscribeAll()
+	chunks, unsubscribe := execCtx.SubscribeAllDraining()
 	done := make(chan struct{})
 	s.streamObservers[contextId] = &streamObserver{
 		execCtx:     execCtx,

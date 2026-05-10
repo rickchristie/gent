@@ -164,10 +164,7 @@ func TestStreamHub_Unsubscribe(t *testing.T) {
 
 	select {
 	case _, ok := <-ch:
-		if ok {
-			for range ch {
-			}
-		}
+		assert.False(t, ok, "unsubscribe should discard queued chunks")
 	case <-time.After(time.Second):
 		t.Error("channel did not close after unsubscribe")
 	}
@@ -176,6 +173,21 @@ func TestStreamHub_Unsubscribe(t *testing.T) {
 	unsub()
 
 	hub.close()
+}
+
+func TestStreamHub_DrainingUnsubscribeKeepsQueuedChunks(t *testing.T) {
+	hub := newStreamHub()
+
+	ch, unsub := hub.subscribeAllDraining()
+	hub.emit(StreamChunk{Content: "first"})
+	hub.emit(StreamChunk{Content: "second"})
+	unsub()
+
+	var contents []string
+	for chunk := range ch {
+		contents = append(contents, chunk.Content)
+	}
+	assert.Equal(t, []string{"first", "second"}, contents)
 }
 
 func TestStreamHub_MultipleSubscribers(t *testing.T) {

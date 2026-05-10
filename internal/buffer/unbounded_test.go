@@ -128,6 +128,32 @@ func TestUnbounded_SendAfterClose(t *testing.T) {
 	assert.Equal(t, []int{1}, received)
 }
 
+func TestUnbounded_DiscardDropsQueuedItemsAndCloses(t *testing.T) {
+	buf := NewUnbounded[int]()
+	buf.Send(1)
+	buf.Send(2)
+	buf.Send(3)
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		buf.Discard()
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("discard should not wait for a consumer to drain queued items")
+	}
+
+	select {
+	case _, ok := <-buf.Receive():
+		assert.False(t, ok, "expected discard to close without stale items")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for discarded buffer to close")
+	}
+}
+
 func TestUnbounded_DoubleClose(t *testing.T) {
 	buf := NewUnbounded[int]()
 	buf.Close()

@@ -81,16 +81,16 @@ func TestSmokeAllProviders(t *testing.T) {
 	tests := []testCase{
 		// ---- xAI Grok ----
 		{
-			name:    "xai/" + gent.ModelXAIGrok41Fast,
+			name:    "xai/" + gent.ModelXAIGrok43,
 			envKey:  "GENT_TEST_XAI_KEY",
-			modelID: gent.ModelXAIGrok41Fast,
-			setup:   openAICompat(gent.ModelXAIGrok41Fast, baseURLXAI),
+			modelID: gent.ModelXAIGrok43,
+			setup:   openAICompat(gent.ModelXAIGrok43, baseURLXAI),
 		},
 		{
-			name:    "xai/" + gent.ModelXAIGrok41FastReasoning,
+			name:    "xai/" + gent.ModelXAIGrok420Reasoning,
 			envKey:  "GENT_TEST_XAI_KEY",
-			modelID: gent.ModelXAIGrok41FastReasoning,
-			setup:   openAICompat(gent.ModelXAIGrok41FastReasoning, baseURLXAI),
+			modelID: gent.ModelXAIGrok420Reasoning,
+			setup:   openAICompat(gent.ModelXAIGrok420Reasoning, baseURLXAI),
 		},
 
 		// ---- OpenAI ----

@@ -6,7 +6,10 @@ package gent
 // =============================================================================
 
 const (
-	// GPT-5.4 Series (Latest)
+	// GPT-5.5 Series (Latest)
+	ModelOpenAIGPT55 = "gpt-5.5"
+
+	// GPT-5.4 Series
 	ModelOpenAIGPT54     = "gpt-5.4"
 	ModelOpenAIGPT54Mini = "gpt-5.4-mini"
 	ModelOpenAIGPT54Nano = "gpt-5.4-nano"
@@ -83,11 +86,18 @@ const (
 // =============================================================================
 
 const (
-	// Grok 4.20 Series (Latest)
-	ModelXAIGrok420NonReasoning = "grok-4.20-0309-non-reasoning"
+	// Grok 4.3 Series (Latest)
+	ModelXAIGrok43       = "grok-4.3"
+	ModelXAIGrok43Latest = "grok-4.3-latest"
+	ModelXAIGrokLatest   = "grok-latest"
 
-	// Grok 4.1 Series
-	ModelXAIGrok41Fast            = "grok-4-1-fast"
+	// Grok 4.20 Series
+	ModelXAIGrok420Reasoning    = "grok-4.20-0309-reasoning"
+	ModelXAIGrok420NonReasoning = "grok-4.20-0309-non-reasoning"
+	ModelXAIGrok420MultiAgent   = "grok-4.20-multi-agent-0309"
+
+	// Grok 4.1 Series (retiring May 15, 2026)
+	ModelXAIGrok41Fast             = "grok-4-1-fast"
 	ModelXAIGrok41FastReasoning    = "grok-4-1-fast-reasoning"
 	ModelXAIGrok41FastNonReasoning = "grok-4-1-fast-non-reasoning"
 
@@ -101,9 +111,9 @@ const (
 	ModelXAIGrok3Mini = "grok-3-mini"
 
 	// Specialized Models
-	ModelXAIGrokCodeFast1  = "grok-code-fast-1"
-	ModelXAIGrok2Vision    = "grok-2-vision-1212"
-	ModelXAIGrok2Image     = "grok-2-image-1212"
+	ModelXAIGrokCodeFast1 = "grok-code-fast-1"
+	ModelXAIGrok2Vision   = "grok-2-vision-1212"
+	ModelXAIGrok2Image    = "grok-2-image-1212"
 )
 
 // =============================================================================
@@ -113,9 +123,9 @@ const (
 
 const (
 	// Large Models
-	ModelMistralLarge3      = "mistral-large-latest"
-	ModelMistralMedium3     = "mistral-medium-latest"
-	ModelMistralSmall       = "mistral-small-latest"
+	ModelMistralLarge3  = "mistral-large-latest"
+	ModelMistralMedium3 = "mistral-medium-latest"
+	ModelMistralSmall   = "mistral-small-latest"
 
 	// Multimodal
 	ModelMistralPixtralLarge = "pixtral-large-latest"
@@ -130,8 +140,8 @@ const (
 	ModelMistralDevstral  = "devstral-latest"
 
 	// Edge Models
-	ModelMistralMinistral3B  = "ministral-3b-latest"
-	ModelMistralMinistral8B  = "ministral-8b-latest"
+	ModelMistralMinistral3B = "ministral-3b-latest"
+	ModelMistralMinistral8B = "ministral-8b-latest"
 )
 
 // =============================================================================

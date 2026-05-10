@@ -360,6 +360,16 @@ func (s *liveSubscriber) close() {
 	})
 }
 
+func (s *liveSubscriber) discard() {
+	s.closeOnce.Do(func() {
+		if s.unbounded != nil {
+			s.unbounded.Discard()
+			return
+		}
+		close(s.bounded)
+	})
+}
+
 func eventNumber(event *Event) uint64 {
 	if event == nil {
 		return 0

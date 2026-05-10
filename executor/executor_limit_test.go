@@ -1410,6 +1410,39 @@ func TestLimits_DefaultLimits_CanBeOverridden(t *testing.T) {
 	assert.Equal(t, float64(42), limits[0].MaxValue)
 }
 
+func TestLimits_SetLimitsCopiesInputSlice(t *testing.T) {
+	inputLimits := []gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.StatKey("custom:limit"), MaxValue: 42},
+	}
+	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+	execCtx.SetLimits(inputLimits)
+
+	inputLimits[0] = gent.Limit{
+		Type: gent.LimitExactKey, Key: gent.StatKey("mutated:limit"), MaxValue: 99,
+	}
+
+	assert.Equal(t, []gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.StatKey("custom:limit"), MaxValue: 42},
+	}, execCtx.Limits())
+}
+
+func TestLimits_SpawnChildCopiesInheritedLimits(t *testing.T) {
+	inputLimits := []gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.StatKey("custom:limit"), MaxValue: 42},
+	}
+	parent := gent.NewExecutionContext(context.Background(), "parent", nil)
+	parent.SetLimits(inputLimits)
+	child := parent.SpawnChild("child", nil)
+
+	inputLimits[0] = gent.Limit{
+		Type: gent.LimitExactKey, Key: gent.StatKey("mutated:limit"), MaxValue: 99,
+	}
+
+	assert.Equal(t, []gent.Limit{
+		{Type: gent.LimitExactKey, Key: gent.StatKey("custom:limit"), MaxValue: 42},
+	}, child.Limits())
+}
+
 // -----------------------------------------------------------------------------
 // Gauge-Specific Tests
 // -----------------------------------------------------------------------------

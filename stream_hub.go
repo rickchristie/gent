@@ -45,6 +45,16 @@ func newStreamHub() *streamHub {
 // subscribeAll creates a subscription that receives all chunks.
 // Returns a channel and an unsubscribe function.
 func (h *streamHub) subscribeAll() (<-chan StreamChunk, UnsubscribeFunc) {
+	return h.subscribeAllWithMode(true)
+}
+
+func (h *streamHub) subscribeAllDraining() (<-chan StreamChunk, UnsubscribeFunc) {
+	return h.subscribeAllWithMode(false)
+}
+
+func (h *streamHub) subscribeAllWithMode(
+	discardOnUnsubscribe bool,
+) (<-chan StreamChunk, UnsubscribeFunc) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -63,18 +73,18 @@ func (h *streamHub) subscribeAll() (<-chan StreamChunk, UnsubscribeFunc) {
 	h.allSubscribers = append(h.allSubscribers, sub)
 
 	unsubscribe := func() {
-		h.unsubscribeAll(sub)
+		h.unsubscribeAll(sub, discardOnUnsubscribe)
 	}
 
 	return sub.buffer.Receive(), unsubscribe
 }
 
 // unsubscribeAll removes a subscription from allSubscribers.
-func (h *streamHub) unsubscribeAll(sub *streamSubscription) {
+func (h *streamHub) unsubscribeAll(sub *streamSubscription, discard bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	sub.buffer.Close()
+	closeSubscriptionBuffer(sub, discard)
 
 	for i, s := range h.allSubscribers {
 		if s.id == sub.id {
@@ -108,18 +118,22 @@ func (h *streamHub) subscribeToStream(streamId string) (<-chan StreamChunk, Unsu
 	h.byStreamId[streamId] = append(h.byStreamId[streamId], sub)
 
 	unsubscribe := func() {
-		h.unsubscribeFromStream(streamId, sub)
+		h.unsubscribeFromStream(streamId, sub, true)
 	}
 
 	return sub.buffer.Receive(), unsubscribe
 }
 
 // unsubscribeFromStream removes a subscription from byStreamId.
-func (h *streamHub) unsubscribeFromStream(streamId string, sub *streamSubscription) {
+func (h *streamHub) unsubscribeFromStream(
+	streamId string,
+	sub *streamSubscription,
+	discard bool,
+) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	sub.buffer.Close()
+	closeSubscriptionBuffer(sub, discard)
 
 	subs := h.byStreamId[streamId]
 	for i, s := range subs {
@@ -157,18 +171,22 @@ func (h *streamHub) subscribeToTopic(topicId string) (<-chan StreamChunk, Unsubs
 	h.byTopicId[topicId] = append(h.byTopicId[topicId], sub)
 
 	unsubscribe := func() {
-		h.unsubscribeFromTopic(topicId, sub)
+		h.unsubscribeFromTopic(topicId, sub, true)
 	}
 
 	return sub.buffer.Receive(), unsubscribe
 }
 
 // unsubscribeFromTopic removes a subscription from byTopicId.
-func (h *streamHub) unsubscribeFromTopic(topicId string, sub *streamSubscription) {
+func (h *streamHub) unsubscribeFromTopic(
+	topicId string,
+	sub *streamSubscription,
+	discard bool,
+) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	sub.buffer.Close()
+	closeSubscriptionBuffer(sub, discard)
 
 	subs := h.byTopicId[topicId]
 	for i, s := range subs {
@@ -180,6 +198,14 @@ func (h *streamHub) unsubscribeFromTopic(topicId string, sub *streamSubscription
 			return
 		}
 	}
+}
+
+func closeSubscriptionBuffer(sub *streamSubscription, discard bool) {
+	if discard {
+		sub.buffer.Discard()
+		return
+	}
+	sub.buffer.Close()
 }
 
 // emit sends a chunk to all relevant subscribers.

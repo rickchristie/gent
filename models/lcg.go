@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -23,6 +24,54 @@ type LCGWrapper struct {
 	model     llms.Model
 	modelName string // Optional model name for events
 	provider  string // Optional provider name for trace/debug events
+}
+
+type callbackContentDeduper struct {
+	mu        sync.Mutex
+	streaming map[string]int
+	reasoning map[string]int
+}
+
+func newCallbackContentDeduper() *callbackContentDeduper {
+	return &callbackContentDeduper{
+		streaming: make(map[string]int),
+		reasoning: make(map[string]int),
+	}
+}
+
+func (d *callbackContentDeduper) shouldEmitStreaming(content string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if decrementContentCount(d.reasoning, content) {
+		return false
+	}
+	d.streaming[content]++
+	return true
+}
+
+func (d *callbackContentDeduper) shouldEmitReasoning(content string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if decrementContentCount(d.streaming, content) {
+		return false
+	}
+	d.reasoning[content]++
+	return true
+}
+
+func decrementContentCount(counts map[string]int, content string) bool {
+	count := counts[content]
+	if count == 0 {
+		return false
+	}
+	if count == 1 {
+		delete(counts, content)
+		return true
+	}
+	counts[content] = count - 1
+	return true
 }
 
 // NewLCGWrapper creates a new LCGWrapper wrapping the given llms.Model.
@@ -282,16 +331,20 @@ func (m *LCGWrapper) GenerateContentStream(
 	//     where only StreamingFunc is checked for streaming response routing —
 	//     without it, the client tries to JSON-parse SSE data.
 	//
-	// To avoid double-processing content on OpenAI (which calls StreamingFunc
-	// first, then StreamingReasoningFunc with the same content), we track
-	// whether StreamingFunc already handled the content chunk.
-	var streamingFuncHandledContent bool
+	// LangChainGo can deliver the same content chunk through both callbacks. We emit
+	// whichever callback arrives first and pair off the later duplicate from the other
+	// callback. Counts preserve legitimate repeated same-text chunks from one callback.
+	contentDeduper := newCallbackContentDeduper()
 
 	streamingContentCallback := llms.WithStreamingFunc(
 		func(_ context.Context, contentChunk []byte) error {
 			if len(contentChunk) > 0 {
+				content := string(contentChunk)
+				if !contentDeduper.shouldEmitStreaming(content) {
+					return nil
+				}
 				chunk := gent.StreamChunk{
-					Content:         string(contentChunk),
+					Content:         content,
 					Source:          sourcePath,
 					Iteration:       callIteration,
 					Depth:           callDepth,
@@ -306,7 +359,6 @@ func (m *LCGWrapper) GenerateContentStream(
 						execCtx.EmitChunk(chunk)
 					}
 				}
-				streamingFuncHandledContent = true
 			}
 			return nil
 		},
@@ -333,12 +385,12 @@ func (m *LCGWrapper) GenerateContentStream(
 				}
 			}
 			if len(contentChunk) > 0 {
-				if streamingFuncHandledContent {
-					streamingFuncHandledContent = false
+				content := string(contentChunk)
+				if !contentDeduper.shouldEmitReasoning(content) {
 					return nil
 				}
 				chunk := gent.StreamChunk{
-					Content:         string(contentChunk),
+					Content:         content,
 					Source:          sourcePath,
 					Iteration:       callIteration,
 					Depth:           callDepth,

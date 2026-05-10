@@ -70,7 +70,7 @@ func (s *Sequencer) SubscribeWithConfig(cfg SubscribeConfig) (<-chan *Event, gen
 		delete(s.liveSubscribers, id)
 		s.mu.Unlock()
 		if removed != nil {
-			removed.close()
+			removed.discard()
 		}
 	}
 	return sub.receive(), unsubscribe

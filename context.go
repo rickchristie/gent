@@ -246,15 +246,25 @@ func (ctx *ExecutionContext) Context() context.Context {
 func (ctx *ExecutionContext) SetLimits(limits []Limit) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
-	ctx.limits = limits
+	ctx.limits = cloneLimits(limits)
 }
 
 // Limits returns the configured limits.
 func (ctx *ExecutionContext) Limits() []Limit {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
-	result := make([]Limit, len(ctx.limits))
-	copy(result, ctx.limits)
+	return cloneLimits(ctx.limits)
+}
+
+// cloneLimits gives each context ownership of the slice backing array. Limit checks run from
+// stats updates, so sharing caller-owned or parent-owned slices would let outside mutations race
+// with concurrent execution.
+func cloneLimits(limits []Limit) []Limit {
+	if limits == nil {
+		return nil
+	}
+	result := make([]Limit, len(limits))
+	copy(result, limits)
 	return result
 }
 
@@ -568,6 +578,7 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 	var publisher EventPublisher
 	var goroutineID uint64
 	var depthTracked bool
+	eventSlot := -1
 	source := ctx.BuildSourcePath()
 
 	ctx.updateContextState(func() {
@@ -593,8 +604,11 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 			}
 		}
 
-		// Append to event log
-		ctx.events = append(ctx.events, event)
+		// Reserve a hidden slot before stats/dispatch so final event ordering remains the publish
+		// order. The slot is filled only after subscribers finish mutating before-events, keeping
+		// Events() from exposing in-flight mutable event pointers to concurrent readers.
+		eventSlot = len(ctx.events)
+		ctx.events = append(ctx.events, nil)
 
 	})
 	if depthTracked {
@@ -609,6 +623,19 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 		publisher.Dispatch(ctx, event)
 	}
 
+	ctx.storePublishedEvent(eventSlot, event)
+}
+
+func (ctx *ExecutionContext) storePublishedEvent(slot int, event Event) {
+	if slot < 0 {
+		return
+	}
+	ctx.updateContextState(func() {
+		if slot >= len(ctx.events) {
+			return
+		}
+		ctx.events[slot] = cloneEventForLog(event)
+	})
 }
 
 func (ctx *ExecutionContext) releaseEventDepth(goroutineID uint64) {
@@ -878,9 +905,112 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 func (ctx *ExecutionContext) Events() []Event {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
-	result := make([]Event, len(ctx.events))
-	copy(result, ctx.events)
+	result := make([]Event, 0, len(ctx.events))
+	for _, event := range ctx.events {
+		// A nil entry is a publish currently being dispatched to subscribers. Before-event
+		// subscribers can mutate event fields, so the event only becomes visible after the
+		// final stable copy is stored.
+		if event == nil {
+			continue
+		}
+		result = append(result, event)
+	}
 	return result
+}
+
+func cloneEventForLog(event Event) Event {
+	switch e := event.(type) {
+	case *BeforeExecutionEvent:
+		clone := *e
+		return &clone
+	case *AfterExecutionEvent:
+		clone := *e
+		return &clone
+	case *BeforeIterationEvent:
+		clone := *e
+		return &clone
+	case *AfterIterationEvent:
+		clone := *e
+		if e.Result != nil {
+			result := *e.Result
+			result.Result = cloneContentParts(e.Result.Result)
+			clone.Result = &result
+		}
+		return &clone
+	case *BeforeSystemPromptEvent:
+		clone := *e
+		clone.Sections = cloneFormattedSections(e.Sections)
+		return &clone
+	case *BeforeModelCallEvent:
+		clone := *e
+		clone.Request = cloneModelCallRequest(e.Request)
+		return &clone
+	case *AfterModelCallEvent:
+		clone := *e
+		clone.Request = cloneModelCallRequest(e.Request)
+		return &clone
+	case *BeforeToolCallEvent:
+		clone := *e
+		return &clone
+	case *AfterToolCallEvent:
+		clone := *e
+		return &clone
+	case *ParseErrorEvent:
+		clone := *e
+		return &clone
+	case *ValidatorCalledEvent:
+		clone := *e
+		return &clone
+	case *ValidatorResultEvent:
+		clone := *e
+		clone.Feedback = cloneFormattedSections(e.Feedback)
+		return &clone
+	case *ErrorEvent:
+		clone := *e
+		return &clone
+	case *CommonEvent:
+		clone := *e
+		return &clone
+	case *CommonDiffEvent:
+		clone := *e
+		return &clone
+	case *LimitExceededEvent:
+		clone := *e
+		return &clone
+	case *CompactionEvent:
+		clone := *e
+		return &clone
+	default:
+		return event
+	}
+}
+
+func cloneModelCallRequest(request ModelCallRequest) ModelCallRequest {
+	clone := request
+	clone.Messages = append(request.Messages[:0:0], request.Messages...)
+	for i := range clone.Messages {
+		clone.Messages[i].Parts = append(clone.Messages[i].Parts[:0:0], clone.Messages[i].Parts...)
+	}
+	clone.OptionCaptureNotes = append(request.OptionCaptureNotes[:0:0], request.OptionCaptureNotes...)
+	return clone
+}
+
+func cloneFormattedSections(sections []FormattedSection) []FormattedSection {
+	if sections == nil {
+		return nil
+	}
+	clone := append(sections[:0:0], sections...)
+	for i := range clone {
+		clone[i].Children = cloneFormattedSections(clone[i].Children)
+	}
+	return clone
+}
+
+func cloneContentParts(parts []ContentPart) []ContentPart {
+	if parts == nil {
+		return nil
+	}
+	return append(parts[:0:0], parts...)
 }
 
 type modelCallEventOptions struct {
@@ -1411,7 +1541,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	child := &ExecutionContext{
 		goCtx:           childGoCtx,
 		cancel:          childCancel,
-		limits:          ctx.limits, // Inherit parent limits
+		limits:          cloneLimits(ctx.limits), // Children own their limit slice.
 		name:            name,
 		contextId:       childContextId,
 		parentContextId: parentContextId,
@@ -1588,8 +1718,8 @@ func (ctx *ExecutionContext) Duration() time.Duration {
 // and all descendant contexts, plus an unsubscribe function.
 //
 // The channel closes when either:
-//   - The unsubscribe function is called
-//   - The ExecutionContext terminates (CloseStreams is called)
+//   - The unsubscribe function is called, discarding any queued chunks for this subscriber
+//   - The ExecutionContext terminates (CloseStreams is called), after queued chunks drain
 //
 // IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
 // emitters never block. The subscriber is responsible for consuming chunks in a
@@ -1599,20 +1729,30 @@ func (ctx *ExecutionContext) SubscribeAll() (<-chan StreamChunk, UnsubscribeFunc
 	return ctx.streamHub.subscribeAll()
 }
 
+// SubscribeAllDraining returns a channel receiving all chunks from this context and all
+// descendant contexts. Unlike SubscribeAll, its unsubscribe function drains already queued chunks
+// before the channel closes. Use this only for internal observers that keep consuming until the
+// channel closes; normal callers should use SubscribeAll so unsubscribe can abandon stale chunks.
+func (ctx *ExecutionContext) SubscribeAllDraining() (<-chan StreamChunk, UnsubscribeFunc) {
+	return ctx.streamHub.subscribeAllDraining()
+}
+
 // SubscribeToStream returns a channel receiving chunks for a specific streamId,
 // plus an unsubscribe function.
 //
 // Returns (nil, nil) if streamId is empty.
 //
 // The channel closes when either:
-//   - The unsubscribe function is called
-//   - The ExecutionContext terminates (CloseStreams is called)
+//   - The unsubscribe function is called, discarding any queued chunks for this subscriber
+//   - The ExecutionContext terminates (CloseStreams is called), after queued chunks drain
 //
 // IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
 // emitters never block. The subscriber is responsible for consuming chunks in a
 // timely manner. If the subscriber cannot keep up, memory usage will grow
 // unboundedly. Consider unsubscribing if the subscriber falls too far behind.
-func (ctx *ExecutionContext) SubscribeToStream(streamId string) (<-chan StreamChunk, UnsubscribeFunc) {
+func (ctx *ExecutionContext) SubscribeToStream(
+	streamId string,
+) (<-chan StreamChunk, UnsubscribeFunc) {
 	return ctx.streamHub.subscribeToStream(streamId)
 }
 
@@ -1623,14 +1763,16 @@ func (ctx *ExecutionContext) SubscribeToStream(streamId string) (<-chan StreamCh
 // Returns (nil, nil) if topicId is empty.
 //
 // The channel closes when either:
-//   - The unsubscribe function is called
-//   - The ExecutionContext terminates (CloseStreams is called)
+//   - The unsubscribe function is called, discarding any queued chunks for this subscriber
+//   - The ExecutionContext terminates (CloseStreams is called), after queued chunks drain
 //
 // IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
 // emitters never block. The subscriber is responsible for consuming chunks in a
 // timely manner. If the subscriber cannot keep up, memory usage will grow
 // unboundedly. Consider unsubscribing if the subscriber falls too far behind.
-func (ctx *ExecutionContext) SubscribeToTopic(topicId string) (<-chan StreamChunk, UnsubscribeFunc) {
+func (ctx *ExecutionContext) SubscribeToTopic(
+	topicId string,
+) (<-chan StreamChunk, UnsubscribeFunc) {
 	return ctx.streamHub.subscribeToTopic(topicId)
 }
 

@@ -25,7 +25,7 @@ func TestHelloGrok(t *testing.T) {
 	llm, err := openai.New(
 		openai.WithToken(apiKey),
 		openai.WithBaseURL("https://api.x.ai/v1"),
-		openai.WithModel("grok-4-1-fast-reasoning"),
+		openai.WithModel(gent.ModelXAIGrok43),
 	)
 	require.NoError(t, err, "failed to create xAI LLM")
 

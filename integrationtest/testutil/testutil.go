@@ -87,7 +87,7 @@ type TestConfig struct {
 	// Embedder for hybrid BM25+semantic search. Used by both tool search (SearchJSON)
 	// and policy search (PolicySearchTool). Created by DefaultTestConfig.
 	Embedder search.Embedder
-	// ModelName overrides the LLM model. Default: "grok-4-1-fast".
+	// ModelName overrides the LLM model. Default: "grok-4.3".
 	ModelName string
 }
 
@@ -181,7 +181,7 @@ type ConversationMessage struct {
 }
 
 // DefaultModelName is the default LLM model for integration tests.
-const DefaultModelName = gent.ModelXAIGrok41Fast
+const DefaultModelName = gent.ModelXAIGrok43
 
 // ModelOption defines an LLM model available for integration tests.
 type ModelOption struct {
@@ -208,12 +208,22 @@ const (
 // AvailableModels lists all models the CLI can select from.
 var AvailableModels = []ModelOption{
 	{
-		Label: "xAI grok-4-1-fast", Name: gent.ModelXAIGrok41Fast,
+		Label: "xAI grok-4.3", Name: gent.ModelXAIGrok43,
+		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
+	},
+	{
+		Label:  "xAI grok-4.20-0309-reasoning",
+		Name:   gent.ModelXAIGrok420Reasoning,
 		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
 		Label:  "xAI grok-4.20-0309-non-reasoning",
 		Name:   gent.ModelXAIGrok420NonReasoning,
+		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
+	},
+	{
+		Label:  "xAI grok-4.20-multi-agent-0309",
+		Name:   gent.ModelXAIGrok420MultiAgent,
 		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
@@ -242,6 +252,10 @@ var AvailableModels = []ModelOption{
 	},
 	{
 		Label: "OpenAI gpt-5-nano", Name: gent.ModelOpenAIGPT5Nano,
+		EnvKey: envKeyOpenAI,
+	},
+	{
+		Label: "OpenAI gpt-5.5", Name: gent.ModelOpenAIGPT55,
 		EnvKey: envKeyOpenAI,
 	},
 	{

@@ -552,6 +552,101 @@ func TestEvents_ReturnsCopy(t *testing.T) {
 	assert.NotNil(t, events2[0])
 }
 
+type blockingModelRequestPublisher struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingModelRequestPublisher) Dispatch(_ *ExecutionContext, event Event) {
+	beforeModel, ok := event.(*BeforeModelCallEvent)
+	if !ok {
+		return
+	}
+	beforeModel.Request.Messages = append(
+		beforeModel.Request.Messages,
+		llms.TextParts(llms.ChatMessageTypeSystem, "injected"),
+	)
+	close(p.entered)
+	<-p.release
+}
+
+func (p *blockingModelRequestPublisher) MaxRecursion() int { return 10 }
+
+func TestEvents_HidesMutableEventUntilDispatchCompletes(t *testing.T) {
+	execCtx := NewExecutionContext(context.Background(), "test", nil)
+	publisher := &blockingModelRequestPublisher{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	execCtx.SetEventPublisher(publisher)
+	published := make(chan *BeforeModelCallEvent, 1)
+
+	go func() {
+		published <- execCtx.PublishBeforeModelCall("gpt", ModelCallRequest{
+			Messages: []llms.MessageContent{
+				llms.TextParts(llms.ChatMessageTypeHuman, "original"),
+			},
+		})
+	}()
+
+	receiveSignal(t, publisher.entered)
+	assert.Empty(t, execCtx.Events())
+	close(publisher.release)
+	publishedEvent := receiveBeforeModelCallEvent(t, published)
+
+	loggedEvents := execCtx.Events()
+	if assert.Len(t, loggedEvents, 1) {
+		loggedEvent, ok := loggedEvents[0].(*BeforeModelCallEvent)
+		if assert.True(t, ok) {
+			assert.Equal(t, []string{"original", "injected"}, modelRequestTexts(loggedEvent.Request))
+		}
+	}
+
+	publishedEvent.Request.Messages = append(
+		publishedEvent.Request.Messages,
+		llms.TextParts(llms.ChatMessageTypeSystem, "caller mutation"),
+	)
+	loggedEvent := execCtx.Events()[0].(*BeforeModelCallEvent)
+	assert.Equal(t, []string{"original", "injected"}, modelRequestTexts(loggedEvent.Request))
+}
+
+func receiveSignal(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected signal")
+	}
+}
+
+func receiveBeforeModelCallEvent(
+	t *testing.T,
+	ch <-chan *BeforeModelCallEvent,
+) *BeforeModelCallEvent {
+	t.Helper()
+	select {
+	case event := <-ch:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("expected before model call event")
+		return nil
+	}
+}
+
+func modelRequestTexts(request ModelCallRequest) []string {
+	texts := make([]string, 0)
+	for _, message := range request.Messages {
+		for _, part := range message.Parts {
+			text, ok := part.(llms.TextContent)
+			if !ok {
+				continue
+			}
+			texts = append(texts, text.Text)
+		}
+	}
+	return texts
+}
+
 // -----------------------------------------------------------------------------
 // Recursion Limit Tests
 // -----------------------------------------------------------------------------
@@ -562,7 +657,10 @@ type recursiveSubscriber struct {
 	maxCalls  int
 }
 
-func (s *recursiveSubscriber) OnBeforeIteration(execCtx *ExecutionContext, _ *BeforeIterationEvent) {
+func (s *recursiveSubscriber) OnBeforeIteration(
+	execCtx *ExecutionContext,
+	_ *BeforeIterationEvent,
+) {
 	s.callCount++
 	if s.callCount < s.maxCalls {
 		// Publish another event, causing recursion

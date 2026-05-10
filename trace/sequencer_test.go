@@ -461,6 +461,22 @@ func TestSequencer_BoundedSubscriptionOverflow(t *testing.T) {
 	}, expected{received: []uint64{first.EventNumber}, overflow: overflow})
 }
 
+func TestSequencer_UnsubscribeDiscardsQueuedLiveEvents(t *testing.T) {
+	seq := NewSequencer("run", Config{})
+	eventsCh, unsubscribe := seq.Subscribe()
+	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
+	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
+
+	unsubscribe()
+
+	select {
+	case _, ok := <-eventsCh:
+		assert.False(t, ok, "unsubscribe should close without stale live events")
+	case <-time.After(time.Second):
+		t.Fatal("expected live subscription to close")
+	}
+}
+
 func TestSequencer_CloseDrainsObservedStreamChunks(t *testing.T) {
 	enteredRedactor := make(chan struct{})
 	releaseRedactor := make(chan struct{})
