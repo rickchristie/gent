@@ -102,6 +102,9 @@ type Event interface {
 //   - Timestamp: Current time
 //   - Iteration: Current iteration number (1-indexed, 0 if before first iteration)
 //   - Depth: Current nesting depth (0 for root context)
+//   - Source: Hierarchical display path for the publishing context
+//   - ContextId: Opaque identity for the publishing context
+//   - ParentContextId: Opaque identity for the parent context, if any
 type BaseEvent struct {
 	// EventName identifies this event type.
 	// Framework events use "gent:" prefix (e.g., "gent:iteration:before").
@@ -118,6 +121,17 @@ type BaseEvent struct {
 	// Depth is the nesting depth when this event occurred.
 	// 0 for root context, 1 for first-level child, etc.
 	Depth int
+
+	// Source is the hierarchical execution path that published this event.
+	// It is display-only; use ContextId for correlation keys.
+	Source string
+
+	// ContextId is the opaque identity of the context that published this event.
+	ContextId string
+
+	// ParentContextId is the opaque identity of the parent context.
+	// Empty for root contexts.
+	ParentContextId string
 }
 
 func (BaseEvent) event() {}
@@ -190,19 +204,29 @@ type BeforeSystemPromptEvent struct {
 // -----------------------------------------------------------------------------
 
 // BeforeModelCallEvent is published before each model API call.
-// Subscribers can modify Request for ephemeral context injection.
-// The Request field is mutable - subscribers can append messages that will be
-// sent to the model but won't be persisted in the conversation history.
+// Subscribers can modify Request.Messages for ephemeral context injection.
+// Appended messages are sent to the model but are not persisted in conversation history.
 type BeforeModelCallEvent struct {
 	BaseEvent
 
 	// Model is the model identifier being called.
 	Model string
 
-	// Request contains the messages to be sent to the model.
-	// This is typically []llms.MessageContent but typed as any to avoid import.
-	// Subscribers can modify this slice for ephemeral context injection.
-	Request any
+	// Provider is the optional model provider identifier, such as "openai" or "anthropic".
+	Provider string
+
+	// Request contains the messages and captured call options to be sent to the model.
+	// Subscribers can modify Request.Messages for ephemeral context injection.
+	Request ModelCallRequest
+
+	// ModelCallId identifies this model call across before, stream, and after events.
+	ModelCallId string
+
+	// StreamId uniquely identifies the stream for this model call when available.
+	StreamId string
+
+	// StreamTopicId groups related model streams. It is not unique.
+	StreamTopicId string
 }
 
 // AfterModelCallEvent is published after each model API call completes.
@@ -213,8 +237,11 @@ type AfterModelCallEvent struct {
 	// Model is the model identifier that was called.
 	Model string
 
-	// Request contains the messages that were sent (after any modifications).
-	Request any
+	// Provider is the optional model provider identifier, such as "openai" or "anthropic".
+	Provider string
+
+	// Request contains the messages and call options that were sent after subscriber changes.
+	Request ModelCallRequest
 
 	// Response is the full response from the model.
 	Response *ContentResponse
@@ -230,6 +257,15 @@ type AfterModelCallEvent struct {
 
 	// Error is any error that occurred (nil if successful).
 	Error error
+
+	// ModelCallId identifies this model call across before, stream, and after events.
+	ModelCallId string
+
+	// StreamId uniquely identifies the stream for this model call when available.
+	StreamId string
+
+	// StreamTopicId groups related model streams. It is not unique.
+	StreamTopicId string
 }
 
 // -----------------------------------------------------------------------------
@@ -248,6 +284,9 @@ type BeforeToolCallEvent struct {
 	// Args contains the arguments for the tool.
 	// Subscribers can modify this for interception/transformation.
 	Args any
+
+	// ToolCallId identifies this tool call across before and after events.
+	ToolCallId string
 }
 
 // AfterToolCallEvent is published after each tool execution completes.
@@ -269,6 +308,9 @@ type AfterToolCallEvent struct {
 
 	// Error is any error that occurred (nil if successful).
 	Error error
+
+	// ToolCallId identifies this tool call across before and after events.
+	ToolCallId string
 }
 
 // -----------------------------------------------------------------------------

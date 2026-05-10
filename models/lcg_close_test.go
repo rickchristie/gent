@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/events"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
@@ -13,6 +14,7 @@ import (
 
 type closeTestModel struct {
 	started            chan context.Context
+	messages           chan []llms.MessageContent
 	release            chan struct{}
 	done               chan error
 	waitForCancel      bool
@@ -22,9 +24,10 @@ type closeTestModel struct {
 
 func newCloseTestModel() *closeTestModel {
 	return &closeTestModel{
-		started: make(chan context.Context, 1),
-		release: make(chan struct{}),
-		done:    make(chan error, 1),
+		started:  make(chan context.Context, 1),
+		messages: make(chan []llms.MessageContent, 1),
+		release:  make(chan struct{}),
+		done:     make(chan error, 1),
 	}
 }
 
@@ -37,6 +40,7 @@ func (m *closeTestModel) GenerateContent(
 	for _, opt := range options {
 		opt(&opts)
 	}
+	m.messages <- messages
 
 	if opts.StreamingFunc != nil {
 		if err := opts.StreamingFunc(ctx, []byte("first")); err != nil {
@@ -75,6 +79,81 @@ func (m *closeTestModel) Call(
 	options ...llms.CallOption,
 ) (string, error) {
 	return "", nil
+}
+
+type modelRequestInjectionSubscriber struct {
+	afterRequest chan gent.ModelCallRequest
+}
+
+type requestMessageSummary struct {
+	role llms.ChatMessageType
+	text string
+}
+
+func (s *modelRequestInjectionSubscriber) OnBeforeModelCall(
+	_ *gent.ExecutionContext,
+	event *gent.BeforeModelCallEvent,
+) {
+	event.Request.Messages = append(event.Request.Messages, llms.TextParts(
+		llms.ChatMessageTypeSystem,
+		"injected context",
+	))
+}
+
+func (s *modelRequestInjectionSubscriber) OnAfterModelCall(
+	_ *gent.ExecutionContext,
+	event *gent.AfterModelCallEvent,
+) {
+	s.afterRequest <- event.Request
+}
+
+func TestLCGWrapperGenerateContentStream_BeforeModelCallUsesTypedRequestInjection(t *testing.T) {
+	type expected struct {
+		messages    []requestMessageSummary
+		temperature float64
+	}
+
+	model := newCloseTestModel()
+	wrapper := NewLCGWrapper(model).WithModelName("typed-request-test")
+	subscriber := &modelRequestInjectionSubscriber{
+		afterRequest: make(chan gent.ModelCallRequest, 1),
+	}
+	registry := events.NewRegistry().Subscribe(subscriber)
+	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
+	execCtx.SetEventPublisher(registry)
+
+	stream, err := wrapper.GenerateContentStream(
+		execCtx,
+		"stream",
+		"topic",
+		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+		llms.WithTemperature(0.2),
+	)
+	require.NoError(t, err)
+	receiveCallContext(t, model.started)
+	modelMessages := receiveCallMessages(t, model.messages)
+
+	close(model.release)
+	response, err := stream.Response()
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	afterRequest := receiveModelCallRequest(t, subscriber.afterRequest)
+
+	assert.Equal(t, expected{
+		messages: []requestMessageSummary{
+			{role: llms.ChatMessageTypeHuman, text: "hello"},
+			{role: llms.ChatMessageTypeSystem, text: "injected context"},
+		},
+		temperature: 0.2,
+	}, expected{
+		messages:    summarizeRequestMessages(modelMessages),
+		temperature: afterRequest.Options.Temperature,
+	})
+	assert.Equal(
+		t,
+		summarizeRequestMessages(modelMessages),
+		summarizeRequestMessages(afterRequest.Messages),
+	)
 }
 
 func TestLCGWrapperGenerateContentStream_CloseCancelsModelContext(t *testing.T) {
@@ -191,6 +270,7 @@ func TestLCGWrapperGenerateContentStream_LateCompletionKeepsCallIteration(t *tes
 	chunks, unsubscribe := execCtx.SubscribeToStream("stream")
 	defer unsubscribe()
 
+	expectedChunkEarliestTs := time.Now()
 	stream, err := wrapper.GenerateContentStream(
 		execCtx,
 		"stream",
@@ -203,9 +283,17 @@ func TestLCGWrapperGenerateContentStream_LateCompletionKeepsCallIteration(t *tes
 	streamChunk := receiveStreamChunk(t, stream.Chunks())
 	assert.Equal(t, gent.StreamChunk{Content: "first"}, streamChunk)
 	emittedChunk := receiveStreamChunk(t, chunks)
+	beforeEvents := beforeModelCallEvents(execCtx)
+	require.Len(t, beforeEvents, 1)
+	assert.GreaterOrEqual(t, emittedChunk.Timestamp.UnixNano(), expectedChunkEarliestTs.UnixNano())
 	assert.Equal(t, gent.StreamChunk{
 		Content:       "first",
+		Timestamp:     emittedChunk.Timestamp,
+		Iteration:     1,
+		Depth:         0,
 		Source:        "test/1",
+		ContextId:     execCtx.ContextId(),
+		ModelCallId:   beforeEvents[0].ModelCallId,
 		StreamId:      "stream",
 		StreamTopicId: "topic",
 	}, emittedChunk)
@@ -247,6 +335,45 @@ func receiveCallContext(t *testing.T, ch <-chan context.Context) context.Context
 	}
 }
 
+func receiveCallMessages(t *testing.T, ch <-chan []llms.MessageContent) []llms.MessageContent {
+	t.Helper()
+	select {
+	case messages := <-ch:
+		return messages
+	case <-time.After(time.Second):
+		t.Fatal("expected model call messages")
+		return nil
+	}
+}
+
+func receiveModelCallRequest(
+	t *testing.T,
+	ch <-chan gent.ModelCallRequest,
+) gent.ModelCallRequest {
+	t.Helper()
+	select {
+	case request := <-ch:
+		return request
+	case <-time.After(time.Second):
+		t.Fatal("expected after model call request")
+		return gent.ModelCallRequest{}
+	}
+}
+
+func summarizeRequestMessages(messages []llms.MessageContent) []requestMessageSummary {
+	result := make([]requestMessageSummary, 0)
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			text, ok := part.(llms.TextContent)
+			if !ok {
+				continue
+			}
+			result = append(result, requestMessageSummary{role: message.Role, text: text.Text})
+		}
+	}
+	return result
+}
+
 func receiveStreamChunk(t *testing.T, ch <-chan gent.StreamChunk) gent.StreamChunk {
 	t.Helper()
 	select {
@@ -256,6 +383,17 @@ func receiveStreamChunk(t *testing.T, ch <-chan gent.StreamChunk) gent.StreamChu
 		t.Fatal("expected stream chunk")
 		return gent.StreamChunk{}
 	}
+}
+
+func beforeModelCallEvents(execCtx *gent.ExecutionContext) []*gent.BeforeModelCallEvent {
+	events := execCtx.Events()
+	result := make([]*gent.BeforeModelCallEvent, 0)
+	for _, event := range events {
+		if beforeEvent, ok := event.(*gent.BeforeModelCallEvent); ok {
+			result = append(result, beforeEvent)
+		}
+	}
+	return result
 }
 
 func afterModelCallEvents(execCtx *gent.ExecutionContext) []*gent.AfterModelCallEvent {

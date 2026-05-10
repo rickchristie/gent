@@ -58,5 +58,9 @@ func publishFailedToolAttempt(
 		return
 	}
 	beforeEvent := execCtx.PublishBeforeToolCall(toolName, args)
-	execCtx.PublishAfterToolCall(toolName, beforeEvent.Args, nil, 0, err)
+	execCtx.PublishAfterToolCall(
+		toolName, beforeEvent.Args, nil, 0, err,
+		gent.WithToolCallId(beforeEvent.ToolCallId),
+		gent.WithToolCallSource(beforeEvent.Source),
+	)
 }

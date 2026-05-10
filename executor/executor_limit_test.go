@@ -63,8 +63,10 @@ func simulateModelCall(
 	model string,
 	inputTokens, outputTokens int,
 ) error {
+	request := gent.ModelCallRequest{}
+
 	// Publish BeforeModelCall first (like real model calls do)
-	execCtx.PublishBeforeModelCall(model, nil)
+	execCtx.PublishBeforeModelCall(model, request)
 
 	// Check if context is already canceled (limit exceeded during BeforeModelCall or earlier)
 	select {
@@ -82,7 +84,7 @@ func simulateModelCall(
 			OutputTokens: outputTokens,
 		},
 	}
-	execCtx.PublishAfterModelCall(model, nil, response, 0, nil)
+	execCtx.PublishAfterModelCall(model, request, response, 0, nil)
 	return nil
 }
 

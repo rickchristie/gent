@@ -22,6 +22,7 @@ import (
 type LCGWrapper struct {
 	model     llms.Model
 	modelName string // Optional model name for events
+	provider  string // Optional provider name for trace/debug events
 }
 
 // NewLCGWrapper creates a new LCGWrapper wrapping the given llms.Model.
@@ -38,9 +39,21 @@ func (m *LCGWrapper) WithModelName(name string) *LCGWrapper {
 	return m
 }
 
+// WithProvider sets the provider name used in events.
+// Returns the model for chaining.
+func (m *LCGWrapper) WithProvider(provider string) *LCGWrapper {
+	m.provider = provider
+	return m
+}
+
 // ModelName returns the model name. Implements [gent.ModelNamer].
 func (m *LCGWrapper) ModelName() string {
 	return m.modelName
+}
+
+// Provider returns the provider name used in events.
+func (m *LCGWrapper) Provider() string {
+	return m.provider
 }
 
 // Unwrap returns the underlying llms.Model.
@@ -192,6 +205,17 @@ func getIntFromMap(m map[string]any, key string) int {
 	}
 }
 
+func resolveCallOptions(options []llms.CallOption) llms.CallOptions {
+	var resolved llms.CallOptions
+	llms.WithStreamThinking(true)(&resolved)
+	for _, option := range options {
+		if option != nil {
+			option(&resolved)
+		}
+	}
+	return resolved
+}
+
 // GenerateContentStream implements gent.StreamingModel.GenerateContentStream.
 // It provides streaming token-by-token generation with support for reasoning/thinking content.
 //
@@ -206,23 +230,40 @@ func (m *LCGWrapper) GenerateContentStream(
 	messages []llms.MessageContent,
 	options ...llms.CallOption,
 ) (gent.Stream, error) {
-	requestMessages := messages
+	request := gent.ModelCallRequest{
+		Messages:              messages,
+		Options:               resolveCallOptions(options),
+		OptionCaptureComplete: false,
+		OptionCaptureNotes: []string{
+			"LangChainGo may hide provider-specific client options outside llms.CallOptions",
+		},
+	}
 	callIteration := 0
 	sourcePath := ""
+	modelCallId := ""
+	contextId := ""
+	parentContextId := ""
+	callDepth := 0
 	baseCtx := context.Background()
 
 	if execCtx != nil {
 		// Publish BeforeModelCall event — subscribers may modify event.Request
 		// for ephemeral dynamic context injection.
-		beforeEvent := execCtx.PublishBeforeModelCall(m.modelName, messages)
+		beforeEvent := execCtx.PublishBeforeModelCall(
+			m.modelName, request,
+			gent.WithModelStream(streamId, streamTopicId),
+			gent.WithModelProvider(m.provider),
+		)
 
-		// Use event.Request (possibly modified by subscribers)
-		// Type assert back to []llms.MessageContent
-		if modifiedRequest, ok := beforeEvent.Request.([]llms.MessageContent); ok {
-			requestMessages = modifiedRequest
-		}
+		// Subscribers may inject ephemeral context into Request.Messages. Use the same mutated
+		// request for the provider call and after-event so traces show what was actually sent.
+		request = beforeEvent.Request
 		callIteration = beforeEvent.Iteration
-		sourcePath = execCtx.BuildSourcePath()
+		sourcePath = beforeEvent.Source
+		modelCallId = beforeEvent.ModelCallId
+		contextId = beforeEvent.ContextId
+		parentContextId = beforeEvent.ParentContextId
+		callDepth = beforeEvent.Depth
 		baseCtx = execCtx.Context()
 	}
 
@@ -250,10 +291,15 @@ func (m *LCGWrapper) GenerateContentStream(
 		func(_ context.Context, contentChunk []byte) error {
 			if len(contentChunk) > 0 {
 				chunk := gent.StreamChunk{
-					Content:       string(contentChunk),
-					StreamId:      streamId,
-					StreamTopicId: streamTopicId,
-					Source:        sourcePath,
+					Content:         string(contentChunk),
+					Source:          sourcePath,
+					Iteration:       callIteration,
+					Depth:           callDepth,
+					ContextId:       contextId,
+					ParentContextId: parentContextId,
+					ModelCallId:     modelCallId,
+					StreamId:        streamId,
+					StreamTopicId:   streamTopicId,
 				}
 				if stream.SendContent(chunk.Content) {
 					if execCtx != nil {
@@ -271,9 +317,14 @@ func (m *LCGWrapper) GenerateContentStream(
 			if len(reasoningChunk) > 0 {
 				chunk := gent.StreamChunk{
 					ReasoningContent: string(reasoningChunk),
+					Source:           sourcePath,
+					Iteration:        callIteration,
+					Depth:            callDepth,
+					ContextId:        contextId,
+					ParentContextId:  parentContextId,
+					ModelCallId:      modelCallId,
 					StreamId:         streamId,
 					StreamTopicId:    streamTopicId,
-					Source:           sourcePath,
 				}
 				if stream.SendReasoning(chunk.ReasoningContent) {
 					if execCtx != nil {
@@ -287,10 +338,15 @@ func (m *LCGWrapper) GenerateContentStream(
 					return nil
 				}
 				chunk := gent.StreamChunk{
-					Content:       string(contentChunk),
-					StreamId:      streamId,
-					StreamTopicId: streamTopicId,
-					Source:        sourcePath,
+					Content:         string(contentChunk),
+					Source:          sourcePath,
+					Iteration:       callIteration,
+					Depth:           callDepth,
+					ContextId:       contextId,
+					ParentContextId: parentContextId,
+					ModelCallId:     modelCallId,
+					StreamId:        streamId,
+					StreamTopicId:   streamTopicId,
 				}
 				if stream.SendContent(chunk.Content) {
 					if execCtx != nil {
@@ -314,7 +370,7 @@ func (m *LCGWrapper) GenerateContentStream(
 	go func() {
 		defer cancel()
 
-		lcgResponse, err := m.model.GenerateContent(ctx, requestMessages, opts...)
+		lcgResponse, err := m.model.GenerateContent(ctx, request.Messages, opts...)
 		duration := stream.Duration()
 
 		// Convert response
@@ -337,7 +393,11 @@ func (m *LCGWrapper) GenerateContentStream(
 		// Publish AfterModelCall event (also updates stats for tokens)
 		if execCtx != nil {
 			execCtx.PublishAfterModelCallForIteration(
-				callIteration, m.modelName, requestMessages, response, duration, err,
+				callIteration, m.modelName, request, response, duration, err,
+				gent.WithModelCallId(modelCallId),
+				gent.WithModelStream(streamId, streamTopicId),
+				gent.WithModelCallSource(sourcePath),
+				gent.WithModelProvider(m.provider),
 			)
 		}
 
@@ -347,10 +407,15 @@ func (m *LCGWrapper) GenerateContentStream(
 		// Emit error chunk if error occurred before the consumer closed the stream.
 		if err != nil && completed && execCtx != nil {
 			execCtx.EmitChunk(gent.StreamChunk{
-				StreamId:      streamId,
-				StreamTopicId: streamTopicId,
-				Source:        sourcePath,
-				Err:           err,
+				Source:          sourcePath,
+				Iteration:       callIteration,
+				Depth:           callDepth,
+				ContextId:       contextId,
+				ParentContextId: parentContextId,
+				ModelCallId:     modelCallId,
+				StreamId:        streamId,
+				StreamTopicId:   streamTopicId,
+				Err:             err,
 			})
 		}
 	}()

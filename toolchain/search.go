@@ -522,10 +522,14 @@ func (c *SearchJSON) executeSearch(
 
 	// Publish BeforeToolCall
 	argsToUse := call.Args
+	var toolCallId string
+	var toolCallSource string
 	if execCtx != nil {
 		beforeEvent := execCtx.PublishBeforeToolCall(
 			call.Name, call.Args,
 		)
+		toolCallId = beforeEvent.ToolCallId
+		toolCallSource = beforeEvent.Source
 		if beforeArgs, ok :=
 			beforeEvent.Args.(map[string]any); ok {
 			argsToUse = beforeArgs
@@ -556,6 +560,8 @@ func (c *SearchJSON) executeSearch(
 			execCtx.PublishAfterToolCall(
 				call.Name, argsToUse,
 				nil, duration, err,
+				gent.WithToolCallId(toolCallId),
+				gent.WithToolCallSource(toolCallSource),
 			)
 		}
 		return
@@ -575,6 +581,8 @@ func (c *SearchJSON) executeSearch(
 			execCtx.PublishAfterToolCall(
 				call.Name, argsToUse,
 				nil, duration, err,
+				gent.WithToolCallId(toolCallId),
+				gent.WithToolCallSource(toolCallSource),
 			)
 		}
 		return
@@ -602,6 +610,8 @@ func (c *SearchJSON) executeSearch(
 			execCtx.PublishAfterToolCall(
 				call.Name, argsToUse,
 				c.noResultsMessage, duration, nil,
+				gent.WithToolCallId(toolCallId),
+				gent.WithToolCallSource(toolCallSource),
 			)
 		}
 		return
@@ -671,6 +681,8 @@ func (c *SearchJSON) executeSearch(
 		execCtx.PublishAfterToolCall(
 			call.Name, argsToUse,
 			outputStr, duration, nil,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
 		)
 	}
 }
@@ -686,9 +698,13 @@ func (c *SearchJSON) executeGetSchema(
 ) {
 	startTime := time.Now()
 	toolName, _ := call.Args["tool_name"].(string)
+	var toolCallId string
+	var toolCallSource string
 
 	if execCtx != nil {
-		execCtx.PublishBeforeToolCall(call.Name, call.Args)
+		beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args)
+		toolCallId = beforeEvent.ToolCallId
+		toolCallSource = beforeEvent.Source
 	}
 
 	if toolName == "" {
@@ -701,6 +717,8 @@ func (c *SearchJSON) executeGetSchema(
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
 				call.Name, call.Args, nil, 0, err,
+				gent.WithToolCallId(toolCallId),
+				gent.WithToolCallSource(toolCallSource),
 			)
 		}
 		return
@@ -717,6 +735,8 @@ func (c *SearchJSON) executeGetSchema(
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
 				call.Name, call.Args, nil, 0, err,
+				gent.WithToolCallId(toolCallId),
+				gent.WithToolCallSource(toolCallSource),
 			)
 		}
 		return
@@ -743,6 +763,8 @@ func (c *SearchJSON) executeGetSchema(
 		execCtx.PublishAfterToolCall(
 			call.Name, call.Args,
 			outputStr, duration, nil,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
 		)
 	}
 }
@@ -805,11 +827,15 @@ func (c *SearchJSON) executeRegularTool(
 
 	// Publish BeforeToolCall (may modify args)
 	inputToUse := typedInput
+	var toolCallId string
+	var toolCallSource string
 	if execCtx != nil {
 		beforeEvent := execCtx.PublishBeforeToolCall(
 			call.Name, typedInput,
 		)
 		inputToUse = beforeEvent.Args
+		toolCallId = beforeEvent.ToolCallId
+		toolCallSource = beforeEvent.Source
 	}
 
 	startTime := time.Now()
@@ -879,6 +905,8 @@ func (c *SearchJSON) executeRegularTool(
 		execCtx.PublishAfterToolCall(
 			call.Name, inputToUse,
 			outputVal, duration, err,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
 		)
 	}
 }

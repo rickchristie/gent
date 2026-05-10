@@ -91,9 +91,24 @@ func (m *MockModel) GenerateContent(
 		m.CapturedMessages, messages,
 	)
 
+	request := gent.ModelCallRequest{
+		Messages:              messages,
+		Options:               llms.CallOptions{},
+		OptionCaptureComplete: true,
+	}
+	modelCallId := ""
+	source := ""
+
 	// Publish BeforeModelCall event
 	if execCtx != nil {
-		execCtx.PublishBeforeModelCall(m.name, messages)
+		beforeEvent := execCtx.PublishBeforeModelCall(
+			m.name, request,
+			gent.WithModelStream(streamId, streamTopicId),
+		)
+		modelCallId = beforeEvent.ModelCallId
+		source = beforeEvent.Source
+		request = beforeEvent.Request
+		messages = request.Messages
 	}
 
 	startTime := time.Now()
@@ -122,7 +137,12 @@ func (m *MockModel) GenerateContent(
 
 	// Publish AfterModelCall event (stats are auto-updated)
 	if execCtx != nil {
-		execCtx.PublishAfterModelCall(m.name, messages, resp, duration, err)
+		execCtx.PublishAfterModelCall(
+			m.name, request, resp, duration, err,
+			gent.WithModelCallId(modelCallId),
+			gent.WithModelStream(streamId, streamTopicId),
+			gent.WithModelCallSource(source),
+		)
 	}
 
 	return resp, err
@@ -306,8 +326,12 @@ func (tc *MockToolChain) Execute(
 	}
 
 	// Publish BeforeToolCall event (stats are auto-updated)
+	var toolCallId string
+	var toolCallSource string
 	if execCtx != nil {
-		execCtx.PublishBeforeToolCall(toolName, nil)
+		beforeEvent := execCtx.PublishBeforeToolCall(toolName, nil)
+		toolCallId = beforeEvent.ToolCallId
+		toolCallSource = beforeEvent.Source
 	}
 
 	startTime := time.Now()
@@ -325,7 +349,11 @@ func (tc *MockToolChain) Execute(
 
 	// Publish AfterToolCall event (stats are auto-updated)
 	if execCtx != nil {
-		execCtx.PublishAfterToolCall(toolName, nil, output, duration, toolErr)
+		execCtx.PublishAfterToolCall(
+			toolName, nil, output, duration, toolErr,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
+		)
 
 		// Reset consecutive error counters on success
 		if toolErr == nil {

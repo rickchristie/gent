@@ -139,6 +139,20 @@ type GenerationInfo struct {
 	Duration time.Duration
 }
 
+// ModelCallRequest captures the debuggable and mutable parts of a model request.
+// Model-call events use this typed shape instead of raw message slices so subscribers, trace
+// capture, and tests all share one request contract.
+// Subscribers may modify Messages in BeforeModelCallEvent for ephemeral context injection.
+// Options contains meaningful resolved call options when the model wrapper can capture them.
+// OptionCaptureComplete must be false when provider-specific options cannot be fully introspected.
+type ModelCallRequest struct {
+	Messages []llms.MessageContent
+	Options  llms.CallOptions
+
+	OptionCaptureComplete bool
+	OptionCaptureNotes    []string
+}
+
 // StreamingModel is an alias for [Model] for backward compatibility.
 // Deprecated: Use [Model] directly.
 type StreamingModel = Model
@@ -175,12 +189,31 @@ type StreamChunk struct {
 	// When Err is non-nil, the stream should be considered terminated.
 	Err error
 
+	// Timestamp is when this chunk was emitted.
+	Timestamp time.Time
+
+	// Iteration is the iteration number when this chunk was emitted.
+	Iteration int
+
+	// Depth is the nesting depth when this chunk was emitted.
+	Depth int
+
 	// Source is the hierarchical execution path that produced this chunk.
 	// Format: "contextName/iteration/childName/childIteration/..."
 	// Examples:
 	//   - "main/1" - Root context, iteration 1
 	//   - "main/2/research/1" - Root iter 2, child "research" iter 1
 	Source string
+
+	// ContextId is the opaque identity of the context that emitted this chunk.
+	ContextId string
+
+	// ParentContextId is the opaque identity of the parent context.
+	// Empty for root contexts.
+	ParentContextId string
+
+	// ModelCallId identifies the model call that emitted this chunk.
+	ModelCallId string
 
 	// StreamId uniquely identifies this stream (caller-provided).
 	// This should be unique per LLM call to avoid interleaving confusion.

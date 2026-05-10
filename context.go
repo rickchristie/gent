@@ -8,10 +8,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
+
+var nextExecutionContextId atomic.Uint64
 
 // EventPublisher is an interface for dispatching events to subscribers.
 // This is implemented by events.Registry and set on ExecutionContext by the Executor.
@@ -98,6 +101,14 @@ type ExecutionContext struct {
 	// Execution name (e.g., "main", "compaction", "tool:search")
 	name string
 
+	// Opaque context identity for reliable trace correlation.
+	contextId       string
+	parentContextId string
+
+	// Per-context call sequences for generated model/tool call IDs.
+	nextModelCallSeq uint64
+	nextToolCallSeq  uint64
+
 	// Current position (auto-tracked)
 	iteration int
 	depth     int // nesting level (0 for root)
@@ -147,6 +158,7 @@ func NewExecutionContext(ctx context.Context, name string, data LoopData) *Execu
 		cancel:    cancel,
 		limits:    DefaultLimits(),
 		name:      name,
+		contextId: newContextId(),
 		data:      data,
 		depth:     0,
 		events:    make([]Event, 0),
@@ -160,6 +172,10 @@ func NewExecutionContext(ctx context.Context, name string, data LoopData) *Execu
 		data.SetExecutionContext(execCtx)
 	}
 	return execCtx
+}
+
+func newContextId() string {
+	return fmt.Sprintf("ctx:%d", nextExecutionContextId.Add(1))
 }
 
 // -----------------------------------------------------------------------------
@@ -178,6 +194,21 @@ func (ctx *ExecutionContext) Name() string {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 	return ctx.name
+}
+
+// ContextId returns the opaque identity of this execution context.
+func (ctx *ExecutionContext) ContextId() string {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.contextId
+}
+
+// ParentContextId returns the opaque identity of this context's parent.
+// It is empty for root contexts.
+func (ctx *ExecutionContext) ParentContextId() string {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.parentContextId
 }
 
 // SetEventPublisher sets the event publisher for dispatching events to subscribers.
@@ -537,6 +568,7 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 	var publisher EventPublisher
 	var goroutineID uint64
 	var depthTracked bool
+	source := ctx.BuildSourcePath()
 
 	ctx.updateContextState(func() {
 		publisher = ctx.eventPublisher
@@ -554,7 +586,7 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 		}
 
 		// Populate base event fields
-		ctx.populateBaseEvent(event)
+		ctx.populateBaseEvent(event, source)
 		if iteration != nil {
 			if e, ok := event.(*AfterModelCallEvent); ok {
 				e.Iteration = *iteration
@@ -621,72 +653,63 @@ func (ctx *ExecutionContext) Publish(event Event) {
 
 // populateBaseEvent fills in BaseEvent fields.
 // Must be called with lock held.
-func (ctx *ExecutionContext) populateBaseEvent(event Event) {
+func (ctx *ExecutionContext) populateBaseEvent(event Event, source string) {
+	base := eventBase(event)
+	if base == nil {
+		return
+	}
+	base.Timestamp = time.Now()
+	base.Iteration = ctx.iteration
+	base.Depth = ctx.depth
+	if base.Source == "" {
+		base.Source = source
+	}
+	if base.ContextId == "" {
+		base.ContextId = ctx.contextId
+	}
+	if base.ParentContextId == "" {
+		base.ParentContextId = ctx.parentContextId
+	}
+}
+
+func eventBase(event Event) *BaseEvent {
 	switch e := event.(type) {
 	case *BeforeExecutionEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *AfterExecutionEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *BeforeIterationEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *AfterIterationEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
+	case *BeforeSystemPromptEvent:
+		return &e.BaseEvent
 	case *BeforeModelCallEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *AfterModelCallEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *BeforeToolCallEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *AfterToolCallEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *ParseErrorEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *ValidatorCalledEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *ValidatorResultEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *ErrorEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *CommonEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *CommonDiffEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *LimitExceededEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
 	case *CompactionEvent:
-		e.Timestamp = time.Now()
-		e.Iteration = ctx.iteration
-		e.Depth = ctx.depth
+		return &e.BaseEvent
+	default:
+		return nil
 	}
 }
 
@@ -860,6 +883,102 @@ func (ctx *ExecutionContext) Events() []Event {
 	return result
 }
 
+type modelCallEventOptions struct {
+	modelCallId   string
+	streamId      string
+	streamTopicId string
+	source        string
+	provider      string
+}
+
+// ModelCallEventOption configures model call event metadata.
+type ModelCallEventOption func(*modelCallEventOptions)
+
+// WithModelCallId associates before/after model events with a specific model call.
+func WithModelCallId(id string) ModelCallEventOption {
+	return func(opts *modelCallEventOptions) {
+		opts.modelCallId = id
+	}
+}
+
+// WithModelStream associates model events with a stream ID and topic ID.
+func WithModelStream(streamId string, streamTopicId string) ModelCallEventOption {
+	return func(opts *modelCallEventOptions) {
+		opts.streamId = streamId
+		opts.streamTopicId = streamTopicId
+	}
+}
+
+// WithModelCallSource pins model event source when completion happens asynchronously.
+func WithModelCallSource(source string) ModelCallEventOption {
+	return func(opts *modelCallEventOptions) {
+		opts.source = source
+	}
+}
+
+// WithModelProvider records the provider name when the model wrapper knows it.
+func WithModelProvider(provider string) ModelCallEventOption {
+	return func(opts *modelCallEventOptions) {
+		opts.provider = provider
+	}
+}
+
+type toolCallEventOptions struct {
+	toolCallId string
+	source     string
+}
+
+// ToolCallEventOption configures tool call event metadata.
+type ToolCallEventOption func(*toolCallEventOptions)
+
+// WithToolCallId associates before/after tool events with a specific tool call.
+func WithToolCallId(id string) ToolCallEventOption {
+	return func(opts *toolCallEventOptions) {
+		opts.toolCallId = id
+	}
+}
+
+// WithToolCallSource pins tool event source when completion happens asynchronously.
+func WithToolCallSource(source string) ToolCallEventOption {
+	return func(opts *toolCallEventOptions) {
+		opts.source = source
+	}
+}
+
+func applyModelCallEventOptions(opts []ModelCallEventOption) modelCallEventOptions {
+	var result modelCallEventOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&result)
+		}
+	}
+	return result
+}
+
+func applyToolCallEventOptions(opts []ToolCallEventOption) toolCallEventOptions {
+	var result toolCallEventOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&result)
+		}
+	}
+	return result
+}
+
+func (ctx *ExecutionContext) nextModelCallId() string {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.nextModelCallSeq++
+	return fmt.Sprintf("%s:model:%d", ctx.contextId, ctx.nextModelCallSeq)
+}
+
+func (ctx *ExecutionContext) nextToolCallId() string {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.nextToolCallSeq++
+	return fmt.Sprintf("%s:tool:%d", ctx.contextId, ctx.nextToolCallSeq)
+}
+
 // -----------------------------------------------------------------------------
 // PublishXXX Convenience Methods
 // -----------------------------------------------------------------------------
@@ -928,12 +1047,24 @@ func (ctx *ExecutionContext) PublishBeforeSystemPrompt(
 // Returns the event so callers can use the (potentially modified) Request field.
 func (ctx *ExecutionContext) PublishBeforeModelCall(
 	model string,
-	request any,
+	request ModelCallRequest,
+	opts ...ModelCallEventOption,
 ) *BeforeModelCallEvent {
+	options := applyModelCallEventOptions(opts)
+	if options.modelCallId == "" {
+		options.modelCallId = ctx.nextModelCallId()
+	}
 	event := &BeforeModelCallEvent{
-		BaseEvent: BaseEvent{EventName: EventNameModelCallBefore},
-		Model:     model,
-		Request:   request,
+		BaseEvent: BaseEvent{
+			EventName: EventNameModelCallBefore,
+			Source:    options.source,
+		},
+		Model:         model,
+		Provider:      options.provider,
+		Request:       request,
+		ModelCallId:   options.modelCallId,
+		StreamId:      options.streamId,
+		StreamTopicId: options.streamTopicId,
 	}
 	ctx.publish(event)
 	return event
@@ -943,12 +1074,14 @@ func (ctx *ExecutionContext) PublishBeforeModelCall(
 // Stats updated: InputTokens, OutputTokens (and per-model variants).
 func (ctx *ExecutionContext) PublishAfterModelCall(
 	model string,
-	request any,
+	request ModelCallRequest,
 	response *ContentResponse,
 	duration time.Duration,
 	err error,
+	opts ...ModelCallEventOption,
 ) *AfterModelCallEvent {
-	event := newAfterModelCallEvent(model, request, response, duration, err)
+	options := applyModelCallEventOptions(opts)
+	event := newAfterModelCallEvent(model, request, response, duration, err, options)
 	ctx.publish(event)
 	return event
 }
@@ -959,30 +1092,40 @@ func (ctx *ExecutionContext) PublishAfterModelCall(
 func (ctx *ExecutionContext) PublishAfterModelCallForIteration(
 	iteration int,
 	model string,
-	request any,
+	request ModelCallRequest,
 	response *ContentResponse,
 	duration time.Duration,
 	err error,
+	opts ...ModelCallEventOption,
 ) *AfterModelCallEvent {
-	event := newAfterModelCallEvent(model, request, response, duration, err)
+	options := applyModelCallEventOptions(opts)
+	event := newAfterModelCallEvent(model, request, response, duration, err, options)
 	ctx.publishWithEventIteration(event, &iteration)
 	return event
 }
 
 func newAfterModelCallEvent(
 	model string,
-	request any,
+	request ModelCallRequest,
 	response *ContentResponse,
 	duration time.Duration,
 	err error,
+	options modelCallEventOptions,
 ) *AfterModelCallEvent {
 	event := &AfterModelCallEvent{
-		BaseEvent: BaseEvent{EventName: EventNameModelCallAfter},
-		Model:     model,
-		Request:   request,
-		Response:  response,
-		Duration:  duration,
-		Error:     err,
+		BaseEvent: BaseEvent{
+			EventName: EventNameModelCallAfter,
+			Source:    options.source,
+		},
+		Model:         model,
+		Provider:      options.provider,
+		Request:       request,
+		Response:      response,
+		Duration:      duration,
+		Error:         err,
+		ModelCallId:   options.modelCallId,
+		StreamId:      options.streamId,
+		StreamTopicId: options.streamTopicId,
 	}
 	if response != nil && response.Info != nil {
 		event.InputTokens = response.Info.InputTokens
@@ -997,11 +1140,20 @@ func newAfterModelCallEvent(
 func (ctx *ExecutionContext) PublishBeforeToolCall(
 	toolName string,
 	args any,
+	opts ...ToolCallEventOption,
 ) *BeforeToolCallEvent {
+	options := applyToolCallEventOptions(opts)
+	if options.toolCallId == "" {
+		options.toolCallId = ctx.nextToolCallId()
+	}
 	event := &BeforeToolCallEvent{
-		BaseEvent: BaseEvent{EventName: EventNameToolCallBefore},
-		ToolName:  toolName,
-		Args:      args,
+		BaseEvent: BaseEvent{
+			EventName: EventNameToolCallBefore,
+			Source:    options.source,
+		},
+		ToolName:   toolName,
+		Args:       args,
+		ToolCallId: options.toolCallId,
 	}
 	ctx.publish(event)
 	return event
@@ -1015,14 +1167,20 @@ func (ctx *ExecutionContext) PublishAfterToolCall(
 	output any,
 	duration time.Duration,
 	err error,
+	opts ...ToolCallEventOption,
 ) *AfterToolCallEvent {
+	options := applyToolCallEventOptions(opts)
 	event := &AfterToolCallEvent{
-		BaseEvent: BaseEvent{EventName: EventNameToolCallAfter},
-		ToolName:  toolName,
-		Args:      args,
-		Output:    output,
-		Duration:  duration,
-		Error:     err,
+		BaseEvent: BaseEvent{
+			EventName: EventNameToolCallAfter,
+			Source:    options.source,
+		},
+		ToolName:   toolName,
+		Args:       args,
+		Output:     output,
+		Duration:   duration,
+		Error:      err,
+		ToolCallId: options.toolCallId,
 	}
 	ctx.publish(event)
 	return event
@@ -1243,46 +1401,54 @@ func (ctx *ExecutionContext) Stats() *ExecutionStats {
 // (e.g., due to limit exceeded) automatically cancels all children.
 func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionContext {
 	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
+	childContextId := newContextId()
+	parentContextId := ctx.contextId
+	parentPublisher := ctx.eventPublisher
 
 	// Create child context that is cancelled when parent is cancelled
 	childGoCtx, childCancel := context.WithCancelCause(ctx.goCtx)
 
 	child := &ExecutionContext{
-		goCtx:     childGoCtx,
-		cancel:    childCancel,
-		limits:    ctx.limits, // Inherit parent limits
-		name:      name,
-		data:      data,
-		depth:     ctx.depth + 1,
-		parent:    ctx,
-		events:    make([]Event, 0),
-		startTime: time.Now(),
-		streamHub: newStreamHub(),
+		goCtx:           childGoCtx,
+		cancel:          childCancel,
+		limits:          ctx.limits, // Inherit parent limits
+		name:            name,
+		contextId:       childContextId,
+		parentContextId: parentContextId,
+		data:            data,
+		depth:           ctx.depth + 1,
+		parent:          ctx,
+		events:          make([]Event, 0),
+		startTime:       time.Now(),
+
+		// Inherit the publisher so root subscribers observe nested executor lifecycle events.
+		// A child executor may still replace this if it intentionally wants a different registry.
+		eventPublisher: parentPublisher,
+		streamHub:      newStreamHub(),
 	}
 	// Create stats with back-reference to child for limit checking
 	// Stats also link to parent stats for real-time aggregation
 	child.stats = newExecutionStatsWithContextAndParent(child, ctx.stats)
+
+	ctx.children = append(ctx.children, child)
+	ctx.mu.Unlock()
 
 	// Set execution context on LoopData for automatic event publishing
 	if data != nil {
 		data.SetExecutionContext(child)
 	}
 
-	ctx.children = append(ctx.children, child)
-
-	// Record child spawn event
-	spawnEvent := &CommonEvent{
-		BaseEvent: BaseEvent{
-			EventName: EventNameChildSpawn,
-			Timestamp: time.Now(),
-			Iteration: ctx.iteration,
-			Depth:     ctx.depth,
+	ctx.PublishCommonEvent(
+		EventNameChildSpawn,
+		"Child context spawned",
+		map[string]any{
+			"child_context_id":  child.ContextId(),
+			"parent_context_id": parentContextId,
+			"child_name":        name,
+			"child_source":      child.BuildSourcePath(),
+			"child_depth":       child.Depth(),
 		},
-		Description: "Child context spawned",
-		Data:        map[string]any{"child_name": name},
-	}
-	ctx.events = append(ctx.events, spawnEvent)
+	)
 
 	return child
 }
@@ -1293,32 +1459,30 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 // Note: Stats aggregation happens in real-time via parent reference,
 // so this method only records the completion event.
 func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-
 	child.mu.Lock()
 	child.endTime = time.Now()
 	childDuration := child.endTime.Sub(child.startTime)
 	childReason := child.terminationReason
 	childName := child.name
+	childContextId := child.contextId
+	parentContextId := child.parentContextId
+	childDepth := child.depth
 	child.mu.Unlock()
+	childSource := child.BuildSourcePath()
 
-	// Record child complete event
-	completeEvent := &CommonEvent{
-		BaseEvent: BaseEvent{
-			EventName: EventNameChildComplete,
-			Timestamp: time.Now(),
-			Iteration: ctx.iteration,
-			Depth:     ctx.depth,
-		},
-		Description: "Child context completed",
-		Data: map[string]any{
+	ctx.PublishCommonEvent(
+		EventNameChildComplete,
+		"Child context completed",
+		map[string]any{
+			"child_context_id":   childContextId,
+			"parent_context_id":  parentContextId,
 			"child_name":         childName,
+			"child_source":       childSource,
+			"child_depth":        childDepth,
 			"termination_reason": childReason,
 			"duration":           childDuration,
 		},
-	}
-	ctx.events = append(ctx.events, completeEvent)
+	)
 }
 
 // Parent returns the parent context, or nil if this is the root.
@@ -1471,14 +1635,29 @@ func (ctx *ExecutionContext) SubscribeToTopic(topicId string) (<-chan StreamChun
 }
 
 // EmitChunk emits a streaming chunk to all relevant subscribers.
-// Called by model wrappers during streaming. Automatically propagates to parent.
+// Called by model wrappers during streaming. Automatically propagates to parent while preserving
+// child-populated metadata; parent contexts only fill fields that are still empty.
 // Safe for concurrent use.
 //
 // If chunk.Source is empty, it will be populated with BuildSourcePath().
 func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) {
-	// Populate source path if not set
+	if chunk.Timestamp.IsZero() {
+		chunk.Timestamp = time.Now()
+	}
 	if chunk.Source == "" {
 		chunk.Source = ctx.BuildSourcePath()
+	}
+	if chunk.Iteration == 0 {
+		chunk.Iteration = ctx.Iteration()
+	}
+	if chunk.Depth == 0 {
+		chunk.Depth = ctx.Depth()
+	}
+	if chunk.ContextId == "" {
+		chunk.ContextId = ctx.ContextId()
+	}
+	if chunk.ParentContextId == "" {
+		chunk.ParentContextId = ctx.ParentContextId()
 	}
 
 	// Emit to local subscribers

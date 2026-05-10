@@ -567,7 +567,7 @@ func (l *modelCallingLoop) Next(
 		},
 	}
 	execCtx.PublishAfterModelCall(
-		"test-model", nil, resp, 0, nil,
+		"test-model", gent.ModelCallRequest{}, resp, 0, nil,
 	)
 
 	// Add iteration to scratchpad

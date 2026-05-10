@@ -465,9 +465,13 @@ func (c *YAML) Execute(
 
 		// Publish BeforeToolCall event (may modify args)
 		inputToUse := typedInput
+		var toolCallId string
+		var toolCallSource string
 		if execCtx != nil {
 			beforeEvent := execCtx.PublishBeforeToolCall(call.Name, typedInput)
 			inputToUse = beforeEvent.Args
+			toolCallId = beforeEvent.ToolCallId
+			toolCallSource = beforeEvent.Source
 		}
 
 		startTime := time.Now()
@@ -530,6 +534,8 @@ func (c *YAML) Execute(
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
 				call.Name, inputToUse, outputVal, duration, err,
+				gent.WithToolCallId(toolCallId),
+				gent.WithToolCallSource(toolCallSource),
 			)
 		}
 	}

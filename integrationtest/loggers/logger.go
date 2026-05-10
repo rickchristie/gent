@@ -175,8 +175,8 @@ func (h *LoggerSubscriber) OnBeforeModelCall(
 ) {
 	h.logEvent(fmt.Sprintf("BeforeModelCall: %s", event.Model))
 
-	// Log request messages (type assert to []llms.MessageContent)
-	if messages, ok := event.Request.([]llms.MessageContent); ok && len(messages) > 0 {
+	// Log request messages.
+	if messages := event.Request.Messages; len(messages) > 0 {
 		h.log("Request:")
 		for i, msg := range messages {
 			h.log("  [%d] Role: %s", i, msg.Role)
