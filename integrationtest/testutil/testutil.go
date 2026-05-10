@@ -4,13 +4,11 @@ package testutil
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 
 	"path/filepath"
 
@@ -21,7 +19,6 @@ import (
 	"github.com/rickchristie/gent/events"
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/format"
-	"github.com/rickchristie/gent/integrationtest/loggers"
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/search"
 	"github.com/rickchristie/gent/toolchain"
@@ -215,8 +212,8 @@ var AvailableModels = []ModelOption{
 		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
-		Label: "xAI grok-4.20-0309-non-reasoning",
-		Name: gent.ModelXAIGrok420NonReasoning,
+		Label:  "xAI grok-4.20-0309-non-reasoning",
+		Name:   gent.ModelXAIGrok420NonReasoning,
 		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
@@ -268,48 +265,48 @@ var AvailableModels = []ModelOption{
 		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-2.5-flash-lite",
-		Name:    gent.ModelGoogleGemini25FlashLite,
-		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
+		Label:  "Google gemini-2.5-flash-lite",
+		Name:   gent.ModelGoogleGemini25FlashLite,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3-pro-preview",
-		Name:    gent.ModelGoogleGemini3Pro,
-		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
+		Label:  "Google gemini-3-pro-preview",
+		Name:   gent.ModelGoogleGemini3Pro,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3-flash-preview",
-		Name:    gent.ModelGoogleGemini3Flash,
-		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
+		Label:  "Google gemini-3-flash-preview",
+		Name:   gent.ModelGoogleGemini3Flash,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3.1-pro-preview",
-		Name:    gent.ModelGoogleGemini31Pro,
-		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
+		Label:  "Google gemini-3.1-pro-preview",
+		Name:   gent.ModelGoogleGemini31Pro,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label:   "Google gemini-3.1-flash-lite-preview",
-		Name:    gent.ModelGoogleGemini31FlashLite,
-		EnvKey:  envKeyGemini, BaseURL: baseURLGemini,
+		Label:  "Google gemini-3.1-flash-lite-preview",
+		Name:   gent.ModelGoogleGemini31FlashLite,
+		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label: "Anthropic claude-opus-4-6",
-		Name: gent.ModelAnthropicClaude46Opus,
+		Label:  "Anthropic claude-opus-4-6",
+		Name:   gent.ModelAnthropicClaude46Opus,
 		EnvKey: envKeyAnthropic,
 	},
 	{
-		Label: "Anthropic claude-sonnet-4-6",
-		Name: gent.ModelAnthropicClaude46Sonnet,
+		Label:  "Anthropic claude-sonnet-4-6",
+		Name:   gent.ModelAnthropicClaude46Sonnet,
 		EnvKey: envKeyAnthropic,
 	},
 	{
-		Label: "Anthropic claude-sonnet-4-5",
-		Name: gent.ModelAnthropicClaude45Sonnet,
+		Label:  "Anthropic claude-sonnet-4-5",
+		Name:   gent.ModelAnthropicClaude45Sonnet,
 		EnvKey: envKeyAnthropic,
 	},
 	{
-		Label: "Anthropic claude-haiku-4-5",
-		Name: gent.ModelAnthropicClaude45Haiku,
+		Label:  "Anthropic claude-haiku-4-5",
+		Name:   gent.ModelAnthropicClaude45Haiku,
 		EnvKey: envKeyAnthropic,
 	},
 }
@@ -677,38 +674,19 @@ func RunScenario(
 	)
 
 	registry := events.NewRegistry()
+	seq := NewIntegrationTrace(scenario.Name)
+	streamWait := StartTraceStreamOutput(seq, w)
+	var logWait func()
+	if testCfg.LogWriter != nil {
+		logWait = StartTraceEventLogger(seq, testCfg.LogWriter)
+	}
+	registry.Subscribe(seq)
 
 	if scenario.PolicySuggester != nil {
 		registry.Subscribe(&PolicySuggestionHook{
 			suggester: scenario.PolicySuggester,
 			text:      scenario.CustomerRequest,
 		})
-	}
-
-	var streamWg sync.WaitGroup
-	streamingHook := NewStreamingOutputHook(w)
-	registry.Subscribe(streamingHook)
-
-	chunks, unsubscribe := execCtx.SubscribeToTopic(
-		"llm-response",
-	)
-
-	streamWg.Add(1)
-	go func() {
-		defer streamWg.Done()
-		StreamConsumer(chunks, w, streamingHook)
-	}()
-
-	defer func() {
-		unsubscribe()
-		streamWg.Wait()
-	}()
-
-	if testCfg.LogWriter != nil {
-		fileLogger := loggers.NewSubscriberWithWriter(
-			testCfg.LogWriter,
-		)
-		registry.Subscribe(fileLogger)
 	}
 
 	exec := executor.New[*gent.BasicLoopData](
@@ -744,6 +722,12 @@ func RunScenario(
 	fmt.Fprintln(w)
 
 	exec.Execute(execCtx)
+	seq.Close()
+	streamWait()
+	if logWait != nil {
+		logWait()
+		WriteTraceSnapshot(testCfg.LogWriter, seq.Snapshot())
+	}
 	result := execCtx.Result()
 
 	fmt.Fprintln(w)
@@ -801,237 +785,14 @@ func RunScenario(
 
 	if testCfg.ShowEvents {
 		fmt.Fprintln(w)
-		PrintHeader(w, "ALL EVENTS")
-		printEvents(w, execCtx)
+		PrintHeader(w, "TRACE EVENTS")
+		printTraceEvents(w, seq.Snapshot().RecentEvents)
 	}
 
 	fmt.Fprintln(w)
 	PrintHeader(w, "TEST COMPLETE")
 
 	return result.Error
-}
-
-// printEvents prints all events from the execution context.
-func printEvents(w io.Writer, execCtx *gent.ExecutionContext) {
-	for i, event := range execCtx.Events() {
-		fmt.Fprintf(w, "\n[%d] ", i+1)
-		switch e := event.(type) {
-		case *gent.BeforeIterationEvent:
-			fmt.Fprintf(w,
-				"BeforeIteration: iteration=%d\n",
-				e.Iteration)
-		case *gent.AfterIterationEvent:
-			fmt.Fprintf(w,
-				"AfterIteration: iteration=%d, "+
-					"duration=%s\n",
-				e.Iteration, e.Duration)
-		case *gent.AfterModelCallEvent:
-			fmt.Fprintf(w,
-				"AfterModelCall: model=%s, input=%d, "+
-					"output=%d, duration=%s\n",
-				e.Model, e.InputTokens,
-				e.OutputTokens, e.Duration)
-		case *gent.AfterToolCallEvent:
-			outputJSON, _ := json.Marshal(e.Output)
-			outputStr := string(outputJSON)
-			if len(outputStr) > 200 {
-				outputStr = outputStr[:200] + "..."
-			}
-			fmt.Fprintf(w,
-				"AfterToolCall: tool=%s, "+
-					"duration=%s\n",
-				e.ToolName, e.Duration)
-			fmt.Fprintf(w,
-				"               args=%v\n", e.Args)
-			fmt.Fprintf(w,
-				"               output=%s\n",
-				outputStr)
-			if e.Error != nil {
-				fmt.Fprintf(w,
-					"               error=%v\n",
-					e.Error)
-			}
-		case *gent.CompactionEvent:
-			fmt.Fprintf(w,
-				"Compaction: %d -> %d iterations"+
-					" (removed %d, duration=%s)\n",
-				e.ScratchpadLengthBefore,
-				e.ScratchpadLengthAfter,
-				e.ScratchpadLengthBefore-
-					e.ScratchpadLengthAfter,
-				e.Duration)
-		case *gent.LimitExceededEvent:
-			fmt.Fprintf(w,
-				"LimitExceeded: key=%s, "+
-					"value=%.0f, max=%.0f\n",
-				e.MatchedKey,
-				e.CurrentValue,
-				e.Limit.MaxValue)
-		default:
-			fmt.Fprintf(w, "%T\n", event)
-		}
-	}
-}
-
-// -------------------------------------------------------------------------
-// Streaming Infrastructure
-// -------------------------------------------------------------------------
-
-// StreamingOutputHook handles iteration and tool call output for
-// streaming mode.
-type StreamingOutputHook struct {
-	mu              sync.Mutex
-	w               io.Writer
-	currentIter     int
-	iterHeaderShown bool
-}
-
-// NewStreamingOutputHook creates a new streaming output hook.
-func NewStreamingOutputHook(w io.Writer) *StreamingOutputHook {
-	return &StreamingOutputHook{w: w}
-}
-
-// OnBeforeIteration is called before each iteration.
-func (h *StreamingOutputHook) OnBeforeIteration(
-	_ *gent.ExecutionContext,
-	event *gent.BeforeIterationEvent,
-) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.currentIter = event.Iteration
-	h.iterHeaderShown = false
-}
-
-// OnAfterToolCall is called after each tool execution.
-func (h *StreamingOutputHook) OnAfterToolCall(
-	_ *gent.ExecutionContext,
-	event *gent.AfterToolCallEvent,
-) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	fmt.Fprintf(h.w, "\n\n  [Tool: %s]\n", event.ToolName)
-
-	if event.Args != nil {
-		inputJSON, _ := json.MarshalIndent(
-			event.Args, "    ", "  ",
-		)
-		fmt.Fprintf(h.w, "    Args: %s\n",
-			string(inputJSON))
-	}
-
-	if event.Error != nil {
-		fmt.Fprintf(h.w, "    Error: %v\n", event.Error)
-	} else if event.Output != nil {
-		outputJSON, _ := json.MarshalIndent(
-			event.Output, "    ", "  ",
-		)
-		fmt.Fprintf(h.w, "    Output: %s\n",
-			string(outputJSON))
-	}
-	fmt.Fprintf(h.w, "    Duration: %v\n", event.Duration)
-}
-
-// OnCompaction prints compaction events in real-time.
-func (h *StreamingOutputHook) OnCompaction(
-	_ *gent.ExecutionContext,
-	event *gent.CompactionEvent,
-) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	fmt.Fprintf(h.w,
-		"\n\n  [Compaction: %d → %d iterations "+
-			"(removed %d, took %v)]\n",
-		event.ScratchpadLengthBefore,
-		event.ScratchpadLengthAfter,
-		event.ScratchpadLengthBefore-
-			event.ScratchpadLengthAfter,
-		event.Duration,
-	)
-}
-
-// OnLimitExceeded prints limit exceeded events.
-func (h *StreamingOutputHook) OnLimitExceeded(
-	_ *gent.ExecutionContext,
-	event *gent.LimitExceededEvent,
-) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	fmt.Fprintf(h.w,
-		"\n\n  [Limit Exceeded: %s = %.0f (max: %.0f)]\n",
-		event.MatchedKey,
-		event.CurrentValue,
-		event.Limit.MaxValue,
-	)
-}
-
-// GetCurrentIter returns the current iteration number.
-func (h *StreamingOutputHook) GetCurrentIter() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.currentIter
-}
-
-// MarkIterHeaderShown marks the iteration header as shown
-// and returns whether it was already shown.
-func (h *StreamingOutputHook) MarkIterHeaderShown() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	wasShown := h.iterHeaderShown
-	h.iterHeaderShown = true
-	return wasShown
-}
-
-// StreamConsumer processes streaming chunks and displays them.
-func StreamConsumer(
-	chunks <-chan gent.StreamChunk,
-	w io.Writer,
-	hook *StreamingOutputHook,
-) {
-	var lastIter int
-	var hasContent bool
-
-	for chunk := range chunks {
-		currentIter := hook.GetCurrentIter()
-		if currentIter != lastIter && currentIter > 0 {
-			if hasContent {
-				fmt.Fprintln(w)
-			}
-			if !hook.MarkIterHeaderShown() {
-				fmt.Fprintf(w,
-					"\n--- Iteration %d ---\n",
-					currentIter)
-				fmt.Fprint(w, "  LLM: ")
-			}
-			lastIter = currentIter
-			hasContent = false
-		}
-
-		if chunk.Content != "" {
-			fmt.Fprint(w, chunk.Content)
-			hasContent = true
-		}
-
-		if chunk.ReasoningContent != "" {
-			fmt.Fprint(w, chunk.ReasoningContent)
-			hasContent = true
-		}
-
-		if chunk.Err != nil {
-			if hasContent {
-				fmt.Fprintln(w)
-			}
-			fmt.Fprintf(w,
-				"  [Stream Error: %v]\n", chunk.Err)
-			hasContent = false
-		}
-	}
-
-	if hasContent {
-		fmt.Fprintln(w)
-	}
 }
 
 // -------------------------------------------------------------------------
@@ -1168,6 +929,13 @@ func (s *InteractiveChat) SendMessage(
 	)
 
 	registry := events.NewRegistry()
+	seq := NewIntegrationTrace(fmt.Sprintf("%s-chat-%d", s.ChatCfg.Name, len(s.History)))
+	streamWait := StartTraceStreamOutput(seq, s.Writer)
+	var logWait func()
+	if s.Config.LogWriter != nil {
+		logWait = StartTraceEventLogger(seq, s.Config.LogWriter)
+	}
+	registry.Subscribe(seq)
 
 	if s.ChatCfg.PolicySuggester != nil {
 		registry.Subscribe(&PolicySuggestionHook{
@@ -1175,32 +943,6 @@ func (s *InteractiveChat) SendMessage(
 			text:      s.recentHistoryText(10),
 		})
 	}
-
-	var streamWg sync.WaitGroup
-	streamingHook := NewStreamingOutputHook(s.Writer)
-	registry.Subscribe(streamingHook)
-
-	if s.Config.LogWriter != nil {
-		fileLogger := loggers.NewSubscriberWithWriter(
-			s.Config.LogWriter,
-		)
-		registry.Subscribe(fileLogger)
-	}
-
-	chunks, unsubscribe := execCtx.SubscribeToTopic(
-		"llm-response",
-	)
-
-	streamWg.Add(1)
-	go func() {
-		defer streamWg.Done()
-		StreamConsumer(chunks, s.Writer, streamingHook)
-	}()
-
-	defer func() {
-		unsubscribe()
-		streamWg.Wait()
-	}()
 
 	exec := executor.New[*gent.BasicLoopData](
 		loop, executor.Config{},
@@ -1215,6 +957,12 @@ func (s *InteractiveChat) SendMessage(
 	fmt.Fprintln(s.Writer)
 
 	exec.Execute(execCtx)
+	seq.Close()
+	streamWait()
+	if logWait != nil {
+		logWait()
+		WriteTraceSnapshot(s.Config.LogWriter, seq.Snapshot())
+	}
 	result := execCtx.Result()
 
 	fmt.Fprintln(s.Writer)

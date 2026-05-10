@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"context"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -14,7 +13,14 @@ func (s *Sequencer) ObserveStreams(execCtx *gent.ExecutionContext) gent.Unsubscr
 	}
 	contextId := execCtx.ContextId()
 
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return func() {}
+	}
 	// SubscribeAll already includes descendant chunks. Observing both an ancestor and child would
 	// double-record streams, so prefer the highest observed context in each execution tree.
 	if s.hasObservedAncestorLocked(execCtx) {
@@ -27,33 +33,36 @@ func (s *Sequencer) ObserveStreams(execCtx *gent.ExecutionContext) gent.Unsubscr
 		return func() {}
 	}
 	chunks, unsubscribe := execCtx.SubscribeAll()
-	s.streamObservers[contextId] = &streamObserver{execCtx: execCtx, unsubscribe: unsubscribe}
+	done := make(chan struct{})
+	s.streamObservers[contextId] = &streamObserver{
+		execCtx:     execCtx,
+		unsubscribe: unsubscribe,
+		done:        done,
+	}
 	s.mu.Unlock()
 
-	go s.ConsumeChunks(execCtx.Context(), chunks)
+	go func() {
+		defer close(done)
+		s.ConsumeChunks(chunks)
+	}()
 	return func() {
-		s.mu.Lock()
-		observer := s.streamObservers[contextId]
-		delete(s.streamObservers, contextId)
-		s.mu.Unlock()
-		if observer != nil && observer.unsubscribe != nil {
-			observer.unsubscribe()
+		s.closeMu.Lock()
+		defer s.closeMu.Unlock()
+
+		observer := s.removeStreamObserver(contextId)
+		if observer != nil {
+			observer.closeAndWait()
 		}
 	}
 }
 
-// ConsumeChunks consumes chunks until ctx is canceled or chunks is closed.
-func (s *Sequencer) ConsumeChunks(ctx context.Context, chunks <-chan gent.StreamChunk) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case chunk, ok := <-chunks:
-			if !ok {
-				return
-			}
-			s.ConsumeChunk(chunk)
-		}
+// ConsumeChunks consumes chunks until the stream subscription channel closes.
+// Do not stop on execution context cancellation here: stream subscribers intentionally close
+// after draining buffered chunks, and canceled or limit-exceeded runs still need those final
+// chunks in the trace snapshot and live integration output.
+func (s *Sequencer) ConsumeChunks(chunks <-chan gent.StreamChunk) {
+	for chunk := range chunks {
+		s.ConsumeChunk(chunk)
 	}
 }
 

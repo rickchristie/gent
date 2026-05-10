@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -460,6 +461,121 @@ func TestSequencer_BoundedSubscriptionOverflow(t *testing.T) {
 	}, expected{received: []uint64{first.EventNumber}, overflow: overflow})
 }
 
+func TestSequencer_CloseDrainsObservedStreamChunks(t *testing.T) {
+	enteredRedactor := make(chan struct{})
+	releaseRedactor := make(chan struct{})
+	seq := NewSequencer("run", Config{
+		IncludeChunkText: true,
+		Redactor: RedactorFuncs{
+			Chunk: func(chunk gent.StreamChunk) gent.StreamChunk {
+				close(enteredRedactor)
+				<-releaseRedactor
+				return chunk
+			},
+		},
+	})
+	execCtx := gent.NewExecutionContext(context.Background(), "main", nil)
+	seq.ObserveStreams(execCtx)
+
+	execCtx.EmitChunk(gent.StreamChunk{
+		Content:       "hello",
+		StreamId:      "stream",
+		StreamTopicId: "topic",
+	})
+	receiveSignal(t, enteredRedactor)
+	execCtx.CloseStreams()
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		seq.Close()
+	}()
+	close(releaseRedactor)
+	receiveSignal(t, closed)
+
+	snapshot := seq.Snapshot()
+	require.Len(t, snapshot.RecentChunkEvents, 1)
+	event := snapshot.RecentChunkEvents[0]
+	payload, ok := event.Payload.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, EventTypeModelStreamChunk, event.Type)
+	assert.Equal(t, "hello", payload["content"])
+}
+
+func TestSequencer_ConsumeChunksDrainsUntilChannelCloseAfterContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	seq := NewSequencer("run", Config{IncludeChunkText: true})
+	chunks := make(chan gent.StreamChunk, 2)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		seq.ConsumeChunks(chunks)
+	}()
+
+	cancel()
+	chunks <- gent.StreamChunk{Content: "first", StreamId: "stream", StreamTopicId: "topic"}
+	chunks <- gent.StreamChunk{Content: "second", StreamId: "stream", StreamTopicId: "topic"}
+	close(chunks)
+	receiveSignal(t, done)
+
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	assert.Equal(t, []string{"first", "second"}, traceChunkContents(seq.Snapshot()))
+}
+
+func TestSequencer_ObserveStreamsDrainsBufferedChunksAfterContextCancellation(t *testing.T) {
+	enteredRedactor := make(chan struct{})
+	releaseRedactor := make(chan struct{})
+	var blockFirstChunk sync.Once
+	seq := NewSequencer("run", Config{
+		IncludeChunkText: true,
+		Redactor: RedactorFuncs{
+			Chunk: func(chunk gent.StreamChunk) gent.StreamChunk {
+				blockFirstChunk.Do(func() {
+					close(enteredRedactor)
+					<-releaseRedactor
+				})
+				return chunk
+			},
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	execCtx := gent.NewExecutionContext(ctx, "main", nil)
+	seq.ObserveStreams(execCtx)
+
+	const chunkCount = 32
+	expected := make([]string, 0, chunkCount)
+	execCtx.EmitChunk(gent.StreamChunk{
+		Content:       "chunk-00",
+		StreamId:      "stream",
+		StreamTopicId: "topic",
+	})
+	expected = append(expected, "chunk-00")
+	receiveSignal(t, enteredRedactor)
+
+	for i := 1; i < chunkCount; i++ {
+		content := fmt.Sprintf("chunk-%02d", i)
+		execCtx.EmitChunk(gent.StreamChunk{
+			Content:       content,
+			StreamId:      "stream",
+			StreamTopicId: "topic",
+		})
+		expected = append(expected, content)
+	}
+	cancel()
+	execCtx.CloseStreams()
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		seq.Close()
+	}()
+	close(releaseRedactor)
+	receiveSignal(t, closed)
+
+	assert.Equal(t, expected, traceChunkContents(seq.Snapshot()))
+}
+
 func TestSequencer_ConcurrentRecordingIsMonotonic(t *testing.T) {
 	seq := NewSequencer("run", Config{})
 	const workers = 50
@@ -505,6 +621,16 @@ func countTraceEventType(events []*Event, eventType EventType) int {
 	return count
 }
 
+func traceChunkContents(snapshot *Snapshot) []string {
+	contents := make([]string, 0, len(snapshot.RecentChunkEvents))
+	for _, event := range snapshot.RecentChunkEvents {
+		payload, _ := event.Payload.(map[string]any)
+		content, _ := payload["content"].(string)
+		contents = append(contents, content)
+	}
+	return contents
+}
+
 func onlyChildTraceContext(t *testing.T, snapshot *Snapshot) *Context {
 	t.Helper()
 	children := make([]*Context, 0)
@@ -543,5 +669,14 @@ func receiveOverflow(t *testing.T, ch <-chan OverflowInfo) OverflowInfo {
 	case <-time.After(time.Second):
 		t.Fatal("expected overflow info")
 		return OverflowInfo{}
+	}
+}
+
+func receiveSignal(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected signal")
 	}
 }

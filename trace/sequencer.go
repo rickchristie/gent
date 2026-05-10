@@ -10,7 +10,8 @@ import (
 
 // Sequencer assigns trace event numbers and maintains a materialized snapshot.
 type Sequencer struct {
-	mu sync.RWMutex
+	closeMu sync.Mutex
+	mu      sync.RWMutex
 
 	runId string
 	cfg   config
@@ -39,6 +40,7 @@ type Sequencer struct {
 type streamObserver struct {
 	execCtx     *gent.ExecutionContext
 	unsubscribe gent.UnsubscribeFunc
+	done        chan struct{}
 }
 
 type normalizedEvent struct {
@@ -136,8 +138,16 @@ func (s *Sequencer) EventsAfter(lastEventNumber uint64) ([]*Event, error) {
 	return result, nil
 }
 
-// Close closes live subscriptions and stream observers.
+// Close drains observed stream chunks, then closes live subscriptions.
 func (s *Sequencer) Close() {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+
+	observers := s.takeStreamObservers()
+	for _, observer := range observers {
+		observer.closeAndWait()
+	}
+
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -146,17 +156,40 @@ func (s *Sequencer) Close() {
 	s.closed = true
 	subs := s.liveSubscribers
 	s.liveSubscribers = make(map[uint64]*liveSubscriber)
-	observers := s.streamObservers
-	s.streamObservers = make(map[string]*streamObserver)
 	s.mu.Unlock()
 
 	for _, sub := range subs {
 		sub.close()
 	}
-	for _, observer := range observers {
-		if observer.unsubscribe != nil {
-			observer.unsubscribe()
-		}
+}
+
+func (s *Sequencer) takeStreamObservers() []*streamObserver {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	observers := make([]*streamObserver, 0, len(s.streamObservers))
+	for _, observer := range s.streamObservers {
+		observers = append(observers, observer)
+	}
+	s.streamObservers = make(map[string]*streamObserver)
+	return observers
+}
+
+func (s *Sequencer) removeStreamObserver(contextId string) *streamObserver {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	observer := s.streamObservers[contextId]
+	delete(s.streamObservers, contextId)
+	return observer
+}
+
+func (o *streamObserver) closeAndWait() {
+	if o.unsubscribe != nil {
+		o.unsubscribe()
+	}
+	if o.done != nil {
+		<-o.done
 	}
 }
 
