@@ -121,6 +121,27 @@ Integration tests use real ONNX models. Test setup downloads all 10 registered p
 go test ./search -run TestOnnxEmbedder_AllModels -count=1 -timeout 300s
 ```
 
+### Quantized inference on CPUs without VNNI
+
+The registry includes full-range INT8 models, including `model_qint8_avx512_vnni.onnx`.
+ONNX Runtime's default U8S8 matrix multiplication can saturate on AVX2/AVX512 CPUs without
+VNNI, producing incorrect embeddings even when model downloads and library setup are correct.
+The embedder enables `session.x64quantprecision=1` so ONNX Runtime uses its U8U8 conversion
+on affected CPUs. This preserves the quantized weights and uses a slower, accurate kernel;
+ONNX Runtime leaves unaffected CPUs alone. See the [ONNX Runtime quantization guidance][quantization].
+
+[quantization]: https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html
+
+`TestOnnxEmbedder_QuantizedMatMul` uses a 460-byte checked-in model with a known integer result
+to catch this overflow independently of downloaded model weights. Regenerate it with
+`go generate ./search` from the repository root. The Go generator uses the existing protobuf
+dependency, so no additional tooling is required. The test skips if ONNX Runtime is unavailable.
+
+Real-model search quality checks should specify relevant policies, rather than unrelated
+lower-ranked matches whose close scores can change with inference kernels. The cancellation
+and loyalty policy tests request exactly their relevant results and still compare the full
+response. Deterministic policy unit tests also verify complete responses with multiple results.
+
 ### ONNX Runtime Resolution Order
 
 1. `search.OnnxOptions.OnnxLibraryPath`.

@@ -4,14 +4,15 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/rickchristie/gent/common"
 	"github.com/daulet/tokenizers"
+	"github.com/rickchristie/gent/common"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
@@ -166,8 +167,8 @@ func (e *onnxEmbedder) EmbedTextBatch(
 	return results, nil
 }
 
-func (e *onnxEmbedder) Dimensions() int  { return e.hiddenDim }
-func (e *onnxEmbedder) MaxTokens() int   { return e.maxSeqLen }
+func (e *onnxEmbedder) Dimensions() int { return e.hiddenDim }
+func (e *onnxEmbedder) MaxTokens() int  { return e.maxSeqLen }
 
 // TokenCount returns the number of tokens the text produces when tokenized. This only runs
 // the tokenizer (~12μs), not ONNX inference (~15-200ms).
@@ -184,7 +185,7 @@ func (e *onnxEmbedder) Close() error {
 }
 
 // embed runs the full pipeline: tokenize → pad → inference → mean pool → L2 normalize.
-func (e *onnxEmbedder) embed(ctx context.Context, text string) ([]float32, error) {
+func (e *onnxEmbedder) embed(ctx context.Context, text string) (embedding []float32, err error) {
 	// Acquire semaphore.
 	select {
 	case e.sem <- struct{}{}:
@@ -221,7 +222,7 @@ func (e *onnxEmbedder) embed(ctx context.Context, text string) ([]float32, error
 	shape := ort.NewShape(1, int64(seqLen))
 	tensorMap := map[string]func() (*ort.Tensor[int64], error){
 		"input_ids":      func() (*ort.Tensor[int64], error) { return ort.NewTensor(shape, inputIDs) },
-		"attention_mask":  func() (*ort.Tensor[int64], error) { return ort.NewTensor(shape, maskI64) },
+		"attention_mask": func() (*ort.Tensor[int64], error) { return ort.NewTensor(shape, maskI64) },
 		"token_type_ids": func() (*ort.Tensor[int64], error) { return ort.NewTensor(shape, typeI64) },
 	}
 
@@ -257,10 +258,28 @@ func (e *onnxEmbedder) embed(ctx context.Context, text string) ([]float32, error
 	}
 	defer outputTensor.Destroy()
 
+	sessionOptions, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, fmt.Errorf("search: ONNX session options: %w", err)
+	}
+	defer func() {
+		if destroyErr := sessionOptions.Destroy(); destroyErr != nil {
+			err = errors.Join(err, fmt.Errorf("search: destroy ONNX session options: %w", destroyErr))
+		}
+	}()
+
+	// Full-range INT8 weights can overflow ONNX Runtime's U8S8 AVX2 kernels on CPUs
+	// without VNNI, changing embeddings and search rankings. Let ORT convert affected
+	// weights to U8U8 without changing their values; it leaves unaffected CPUs alone.
+	// https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html
+	if err := sessionOptions.AddSessionConfigEntry("session.x64quantprecision", "1"); err != nil {
+		return nil, fmt.Errorf("search: enable ONNX quantization precision: %w", err)
+	}
+
 	// Run inference.
 	session, err := ort.NewAdvancedSessionWithONNXData(
 		e.modelData, e.inputNames, []string{e.outputName},
-		inputs, []ort.Value{outputTensor}, nil,
+		inputs, []ort.Value{outputTensor}, sessionOptions,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search: ONNX session creation failed: %w", err)
