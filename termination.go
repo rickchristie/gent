@@ -20,6 +20,8 @@ const (
 
 // TerminationResult contains the result of a termination check.
 type TerminationResult struct {
+	// Error reports a failure to preserve required state or execute the termination contract.
+	Error error
 	// Status indicates whether to continue, reject, or accept the answer.
 	Status TerminationStatus
 

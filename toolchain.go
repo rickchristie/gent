@@ -21,6 +21,11 @@ type ToolCall struct {
 // the raw fields (Input, Output) for programmatic access such as
 // deduplication.
 type ToolCallResult struct {
+	ToolCallId           string
+	AttemptId            string
+	Instructions         string
+	DeduplicationSummary string
+	SummaryCaptured      bool
 	// Name of the tool that was called.
 	Name string
 
@@ -62,23 +67,23 @@ type ToolCallResult struct {
 // Each element in Results corresponds to one parsed tool call,
 // preserving execution order.
 //
-// Use [ToolChainResult.ToIteration] to convert into an [Iteration]
+// Use [ToolChainResult.ToHistoryEntry] to convert into an [HistoryEntry]
 // suitable for the agent loop scratchpad.
 type ToolChainResult struct {
 	Results []*ToolCallResult
 }
 
-// ToIteration builds an [Iteration] containing a single Human-role
+// ToHistoryEntry builds an [HistoryEntry] containing a single Human-role
 // observation message. The observation text is constructed by merging
 // each result's Text, wrapped using the provided [TextFormat].
 //
-// The resulting [Iteration] stores the ToolChainResult as metadata
+// The resulting [HistoryEntry] stores the ToolChainResult as metadata
 // on the observation [MessageContent] under [MMKToolChainResult].
 // This metadata is used by ScratchpadToMessages to deduplicate
 // repeated stateless tool calls.
-func (r *ToolChainResult) ToIteration(
+func (r *ToolChainResult) ToHistoryEntry(
 	format TextFormat,
-) *Iteration {
+) *HistoryEntry {
 	var sections []string
 	var allMedia []ContentPart
 	for _, result := range r.Results {
@@ -112,7 +117,7 @@ func (r *ToolChainResult) ToIteration(
 	}
 	msg.SetMetadata(MMKToolChainResult, r)
 
-	return &Iteration{
+	return &HistoryEntry{
 		Messages: []*MessageContent{msg},
 	}
 }
@@ -208,7 +213,7 @@ type ToolChain interface {
 	// Each [ToolCallResult] in the returned [ToolChainResult] contains
 	// the per-call formatted Text, Media, and raw Input/Output. The
 	// caller is responsible for merging and wrapping results (typically
-	// via [ToolChainResult.ToIteration]).
+	// via [ToolChainResult.ToHistoryEntry]).
 	//
 	// The execCtx parameter enables automatic tracing and provides
 	// context for tool execution. Use execCtx.Context() for operations

@@ -144,7 +144,7 @@ Subscriber tests must prove routing and ordering.
 
 Use race tests for behavior with shared stats, children, streams, or subscribers.
 
-- Run `go test -race` for packages touched by concurrency changes.
+- Run `go test -race ./... -count=1 -timeout 300s` across the full repository.
 - Cover concurrent child stat updates when changing stat propagation.
 - Cover concurrent subscribers or stream consumers when changing event or stream dispatch.
 - Do not rely on goroutine sleeps alone; use channels or `require.Eventually` with evidence.
@@ -303,7 +303,8 @@ When adding or changing a framework stat:
 - Add multiple-limit priority test if the stat can be updated with other limited stats.
 - Update docs if the stat's propagation or limit semantics are unusual.
 - Run `go test ./... -count=1 -timeout 300s`.
-- Run `go test -race` for packages touched by concurrency-sensitive stat behavior.
+- Run `CGO_ENABLED=0 go test ./... -count=1 -timeout 300s`.
+- Run `go test -race ./... -count=1 -timeout 300s`.
 
 ## New Agent Checklist
 
@@ -314,4 +315,4 @@ When implementing executor limit tests for a new agent:
 - Cover child context propagation for agent behavior that can spawn child contexts.
 - Use exact expected stats, limits, termination reasons, errors, and lifecycle events.
 - Verify `NextPrompt` content for every continued iteration.
-- Run `go test ./agents/<agent_name>/... -count=1 -timeout 300s`.
+- Run the full native, CGO-disabled, and race suites over `./...`.

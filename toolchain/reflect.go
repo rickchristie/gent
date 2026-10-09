@@ -130,6 +130,9 @@ func CallToolWithTypedInputReflect(
 	tool any,
 	typedInput any,
 ) (*ToolCallOutput, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	toolVal := reflect.ValueOf(tool)
 	if !toolVal.IsValid() {
 		return nil, errors.New("invalid tool value")
@@ -365,12 +368,12 @@ func parseTime(s string) (time.Time, error) {
 	formats := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
-		"2006-01-02T15:04:05",      // ISO without timezone
-		"2006-01-02 15:04:05",      // Datetime with space
+		"2006-01-02T15:04:05",       // ISO without timezone
+		"2006-01-02 15:04:05",       // Datetime with space
 		"2006-01-02 15:04:05Z07:00", // Datetime with space and timezone
-		"2006-01-02",               // Date only
-		"2006-01-02T15:04",         // ISO without seconds
-		"2006-01-02 15:04",         // Datetime without seconds
+		"2006-01-02",                // Date only
+		"2006-01-02T15:04",          // ISO without seconds
+		"2006-01-02 15:04",          // Datetime without seconds
 	}
 
 	for _, format := range formats {

@@ -92,13 +92,14 @@ type stubTrigger struct{}
 
 func (s *stubTrigger) ShouldCompact(
 	_ *ExecutionContext,
-) bool {
-	return false
+) (bool, error) {
+	return false, nil
 }
 
 func (s *stubTrigger) NotifyCompacted(
 	_ *ExecutionContext,
-) {
+) error {
+	return nil
 }
 
 // stubStrategy is a minimal CompactionStrategy for testing
@@ -106,7 +107,7 @@ func (s *stubTrigger) NotifyCompacted(
 type stubStrategy struct{}
 
 func (s *stubStrategy) Compact(
-	_ *ExecutionContext,
-) error {
-	return nil
+	_ *ExecutionContext, input CompactionInput,
+) (HistoryUpdate, error) {
+	return HistoryUpdate{ExpectedDraftRevision: input.Revision, Active: input.EntryIds()}, nil
 }

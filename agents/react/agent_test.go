@@ -63,14 +63,10 @@ func (m *mockModel) GenerateContent(
 }
 
 func (m *mockModel) GenerateContentStream(
-	execCtx *gent.ExecutionContext,
-	streamId string,
-	streamTopicId string,
-	messages []llms.MessageContent,
-	opts ...llms.CallOption,
+	_ context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	resp, err := m.GenerateContent(
-		execCtx, streamId, streamTopicId, messages, opts...,
+		nil, "", "", request.Messages, llms.WithOptions(request.Options),
 	)
 	if err != nil {
 		return gent.NewCompletedStream(nil, err), nil
@@ -176,7 +172,10 @@ func (m *mockTermination) WithParseError(err error) *mockTermination {
 func (m *mockTermination) Name() string     { return m.name }
 func (m *mockTermination) Guidance() string { return m.guidance }
 
-func (m *mockTermination) ParseSection(execCtx *gent.ExecutionContext, content string) (any, error) {
+func (m *mockTermination) ParseSection(
+	execCtx *gent.ExecutionContext,
+	content string,
+) (any, error) {
 	if m.parseErr != nil {
 		if execCtx != nil {
 			execCtx.PublishParseError(gent.ParseErrorTypeTermination, content, m.parseErr)
@@ -359,7 +358,8 @@ func TestAgent_BuildMessages(t *testing.T) {
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
 		execCtx := newTestExecCtx(data)
 
-		messages := loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
+		messages, messageErr := loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
+		assert.NoError(t, messageErr)
 
 		// Expected structure: system, task, BEGIN!
 		require.Len(t, messages, 3, "expected 3 messages: system, task, BEGIN!")
@@ -394,7 +394,7 @@ func TestAgent_BuildMessages(t *testing.T) {
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Do something"})
 
 		// Add scratchpad with one iteration (AI response + observation)
-		iter := &gent.Iteration{
+		iter := &gent.HistoryEntry{
 			Messages: []*gent.MessageContent{
 				{
 					Role:  llms.ChatMessageTypeAI,
@@ -406,10 +406,11 @@ func TestAgent_BuildMessages(t *testing.T) {
 				},
 			},
 		}
-		data.SetScratchPad([]*gent.Iteration{iter})
 		execCtx := newTestExecCtx(data)
+		setTestRecords(t, execCtx, []*gent.HistoryEntry{iter})
 
-		messages := loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
+		messages, messageErr := loop.buildMessages(execCtx, data, "output prompt", "tools prompt")
+		assert.NoError(t, messageErr)
 
 		// Expected: system, task, AI, observation, CONTINUE!
 		require.Len(t, messages, 5,
@@ -498,7 +499,9 @@ func TestAgent_Next_Termination(t *testing.T) {
 
 func TestAgent_Next_ToolExecution(t *testing.T) {
 	response := &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: "<action>tool: search\nargs:\n  q: test</action>"}},
+		Choices: []*gent.ContentChoice{
+			{Content: "<action>tool: search\nargs:\n  q: test</action>"},
+		},
 	}
 	model := newMockModel(response)
 
@@ -527,7 +530,7 @@ func TestAgent_Next_ToolExecution(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, gent.LAContinue, result.Action)
 	assert.NotEmpty(t, result.NextPrompt)
-	assert.Len(t, data.GetScratchPad(), 1)
+	assert.Len(t, testScratchpad(t, execCtx), 1)
 }
 
 func TestAgent_Next_ToolError(t *testing.T) {
@@ -608,12 +611,12 @@ func TestAgent_Next_ParseError_LogsExpiredIteration(t *testing.T) {
 	assert.Contains(t, result.NextPrompt, "<system_error>")
 
 	// Scratchpad: expired iteration + system error iteration
-	require.Len(t, data.GetScratchPad(), 2)
-	assert.Greater(t, data.GetScratchPad()[0].ExpireAfterIteration, 0)
-	assert.Equal(t, 0, data.GetScratchPad()[1].ExpireAfterIteration)
+	require.Len(t, testScratchpad(t, execCtx), 2)
+	assert.Greater(t, testScratchpad(t, execCtx)[0].ExpireAfterIteration, 0)
+	assert.Equal(t, 0, testScratchpad(t, execCtx)[1].ExpireAfterIteration)
 
 	// Iteration history has both
-	require.Len(t, data.GetIterationHistory(), 2)
+	require.Len(t, testHistoryRecords(t, execCtx), 2)
 }
 
 func TestAgent_Next_UnclosedTag_ExpiresAndReminder(t *testing.T) {
@@ -666,10 +669,10 @@ Here is my answer but I forgot to close the tag.
 		"You MUST follow the output format")
 
 	// Scratchpad: expired iteration + system_error reminder
-	require.Len(t, data.GetScratchPad(), 2)
+	require.Len(t, testScratchpad(t, execCtx), 2)
 
 	// First iteration is expired (raw response + error)
-	expiredIter := data.GetScratchPad()[0]
+	expiredIter := testScratchpad(t, execCtx)[0]
 	assert.Greater(t, expiredIter.ExpireAfterIteration, 0,
 		"first iteration should be expired")
 
@@ -688,17 +691,17 @@ Here is my answer but I forgot to close the tag.
 	assert.Contains(t, errorText.Text, "<answer>")
 
 	// Second iteration is the system_error reminder (not expired)
-	reminderIter := data.GetScratchPad()[1]
+	reminderIter := testScratchpad(t, execCtx)[1]
 	assert.Equal(t, 0, reminderIter.ExpireAfterIteration,
 		"system_error reminder should not be expired")
-	assert.Equal(t, gent.IterationSystemInjected, reminderIter.Origin)
+	assert.Equal(t, gent.RecordSystemInjected, reminderIter.Origin)
 
 	reminderText, ok := reminderIter.Messages[0].Parts[0].(llms.TextContent)
 	require.True(t, ok)
 	assert.Contains(t, reminderText.Text, "<system_error>")
 
 	// Iteration history has both
-	require.Len(t, data.GetIterationHistory(), 2)
+	require.Len(t, testHistoryRecords(t, execCtx), 2)
 
 	// Stats should track the format parse error
 	stats := execCtx.Stats()
@@ -904,15 +907,15 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 			assert.Equal(t, tt.expected.nextPrompt, result.NextPrompt)
 			assert.Equal(t,
 				tt.expected.scratchpadLen,
-				len(data.GetScratchPad()),
+				len(testScratchpad(t, execCtx)),
 			)
 			assert.Equal(t,
 				tt.expected.iterationHistoryLen,
-				len(data.GetIterationHistory()),
+				len(testHistoryRecords(t, execCtx)),
 			)
 
 			if tt.expected.scratchpadLen > 0 {
-				scratchpad := data.GetScratchPad()
+				scratchpad := testScratchpad(t, execCtx)
 
 				if tt.expected.expired {
 					// First iteration is the expired one with the error
@@ -953,7 +956,9 @@ func TestAgent_Next_ParseErrorFeedback(t *testing.T) {
 
 func TestAgent_Next_MultipleTools(t *testing.T) {
 	response := &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: "<action>tool: a</action><action>tool: b</action>"}},
+		Choices: []*gent.ContentChoice{
+			{Content: "<action>tool: a</action><action>tool: b</action>"},
+		},
 	}
 	model := newMockModel(response)
 
@@ -1151,7 +1156,7 @@ func TestAgent_Next_ActionTakesPriorityOverTermination(t *testing.T) {
 				assert.Contains(t, result.NextPrompt, tt.expected.promptContains)
 			}
 
-			assert.Equal(t, tt.expected.scratchpadLen, len(data.GetScratchPad()))
+			assert.Equal(t, tt.expected.scratchpadLen, len(testScratchpad(t, execCtx)))
 
 			if tt.expected.toolChainCalled {
 				assert.Equal(t, 1, tc.callCount)
@@ -1269,7 +1274,8 @@ func TestAgent_WithSystemPromptBuilder(t *testing.T) {
 
 		data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
 		execCtx := newTestExecCtx(data)
-		messages := loop.buildMessages(execCtx, data, "output", "tools")
+		messages, messageErr := loop.buildMessages(execCtx, data, "output", "tools")
+		assert.NoError(t, messageErr)
 
 		// First message should be system prompt with our custom section
 		require.GreaterOrEqual(t, len(messages), 1)
@@ -1826,8 +1832,8 @@ func TestAgent_BeforeSystemPromptEvent(t *testing.T) {
 			name: "subscriber appends a dynamic reminder section",
 			input: input{
 				behaviorAndContext: "You are helpful.",
-				responseContent:   "<answer>done</answer>",
-				parsedSections:    map[string][]string{"answer": {"done"}},
+				responseContent:    "<answer>done</answer>",
+				parsedSections:     map[string][]string{"answer": {"done"}},
 			},
 			mocks: mocks{
 				onEvent: func(
@@ -1861,9 +1867,9 @@ func TestAgent_BeforeSystemPromptEvent(t *testing.T) {
 			name: "subscriber replaces all sections",
 			input: input{
 				behaviorAndContext: "You are helpful.",
-				criticalRules:     "Never lie.",
-				responseContent:   "<answer>done</answer>",
-				parsedSections:    map[string][]string{"answer": {"done"}},
+				criticalRules:      "Never lie.",
+				responseContent:    "<answer>done</answer>",
+				parsedSections:     map[string][]string{"answer": {"done"}},
 			},
 			mocks: mocks{
 				onEvent: func(
@@ -1902,9 +1908,9 @@ func TestAgent_BeforeSystemPromptEvent(t *testing.T) {
 			name: "subscriber removes a section",
 			input: input{
 				behaviorAndContext: "You are helpful.",
-				criticalRules:     "Never lie.",
-				responseContent:   "<answer>done</answer>",
-				parsedSections:    map[string][]string{"answer": {"done"}},
+				criticalRules:      "Never lie.",
+				responseContent:    "<answer>done</answer>",
+				parsedSections:     map[string][]string{"answer": {"done"}},
 			},
 			mocks: mocks{
 				onEvent: func(
@@ -1942,8 +1948,8 @@ func TestAgent_BeforeSystemPromptEvent(t *testing.T) {
 			name: "no subscriber does not modify sections",
 			input: input{
 				behaviorAndContext: "You are helpful.",
-				responseContent:   "<answer>done</answer>",
-				parsedSections:    map[string][]string{"answer": {"done"}},
+				responseContent:    "<answer>done</answer>",
+				parsedSections:     map[string][]string{"answer": {"done"}},
 			},
 			mocks: mocks{
 				onEvent: nil,
@@ -2202,7 +2208,7 @@ func (r *testRegistry) Dispatch(
 
 func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 	type input struct {
-		scratchpad       []*gent.Iteration
+		scratchpad       []*gent.HistoryEntry
 		currentIteration int
 	}
 
@@ -2219,7 +2225,7 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 		{
 			name: "no expiry includes all iterations",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -2264,7 +2270,7 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 		{
 			name: "expired iteration is skipped",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -2310,7 +2316,7 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 		{
 			name: "not yet expired iteration is included",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -2334,7 +2340,7 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 		{
 			name: "iteration expires exactly at boundary",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -2358,7 +2364,7 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 		{
 			name: "all expired shows BEGIN not CONTINUE",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -2393,7 +2399,7 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 		{
 			name: "mixed expired and non-expired",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -2450,19 +2456,20 @@ func TestAgent_BuildMessages_IterationExpiry(t *testing.T) {
 				WithTermination(term)
 
 			data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
-			data.SetScratchPad(tt.input.scratchpad)
 
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,
 			)
+			setTestRecords(t, execCtx, tt.input.scratchpad)
 			execCtx.SetLimits(nil)
 			for i := 0; i < tt.input.currentIteration; i++ {
 				execCtx.IncrementIteration()
 			}
 
-			messages := loop.buildMessages(
+			messages, messageErr := loop.buildMessages(
 				execCtx, data, "output", "tools",
 			)
+			assert.NoError(t, messageErr)
 
 			assert.Equal(t,
 				tt.expected.messageCount,

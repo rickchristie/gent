@@ -161,11 +161,12 @@ func TestLCGWrapperGenerateContentStream_ConcurrentCallbacksDedupeContent(t *tes
 				chunks: tc.input.chunks,
 			}
 			wrapper := NewLCGWrapper(model).WithModelName("callback-race-test")
-			stream, err := wrapper.GenerateContentStream(
-				nil,
-				"stream",
-				"topic",
-				[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+			stream, err := (*gent.ExecutionContext)(nil).GenerateContentStream(
+				wrapper,
+				gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
+				gent.NewModelCallRequest(
+					[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+				),
 			)
 			require.NoError(t, err)
 

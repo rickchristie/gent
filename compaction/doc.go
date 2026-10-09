@@ -9,7 +9,7 @@
 //
 // # Strategies
 //
-//   - [SlidingWindowStrategy]: keeps last N iterations
+//   - [SlidingWindowStrategy]: keeps last N entries
 //   - [SummarizationStrategy]: progressive summarization
 //     with configurable keep-recent window
 package compaction

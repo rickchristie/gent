@@ -13,7 +13,7 @@ import (
 // -----------------------------------------------------------------------------
 
 // IsLifecycleEvent returns true if the event is a lifecycle event relevant for limit testing.
-// Filters out CommonDiffEvent and CommonEvent which are state change tracking events.
+// Filters out StateChangeEvent and CommonEvent which are state change tracking events.
 func IsLifecycleEvent(event gent.Event) bool {
 	switch event.(type) {
 	case *gent.BeforeExecutionEvent,
@@ -37,7 +37,7 @@ func IsLifecycleEvent(event gent.Event) bool {
 }
 
 // CollectLifecycleEvents collects all lifecycle events from an ExecutionContext.
-// Filters out CommonDiffEvent and CommonEvent which are state change tracking events.
+// Filters out StateChangeEvent and CommonEvent which are state change tracking events.
 // Events are returned as-is without normalization.
 func CollectLifecycleEvents(execCtx *gent.ExecutionContext) []gent.Event {
 	var result []gent.Event
@@ -50,7 +50,7 @@ func CollectLifecycleEvents(execCtx *gent.ExecutionContext) []gent.Event {
 }
 
 // CollectLifecycleEventsWithChildren collects lifecycle events from ExecutionContext and
-// all children. Filters out CommonDiffEvent and CommonEvent. Events are returned as-is.
+// all children. Filters out StateChangeEvent and CommonEvent. Events are returned as-is.
 func CollectLifecycleEventsWithChildren(execCtx *gent.ExecutionContext) []gent.Event {
 	result := CollectLifecycleEvents(execCtx)
 	for _, child := range execCtx.Children() {

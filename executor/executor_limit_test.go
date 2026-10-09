@@ -90,40 +90,18 @@ func simulateModelCall(
 
 // mockLoopData implements gent.LoopData for testing.
 type mockLoopData struct {
-	task             *gent.Task
-	iterationHistory []*gent.Iteration
-	scratchpad       []*gent.Iteration
+	task *gent.Task
 }
 
 func newMockLoopData() *mockLoopData {
 	return &mockLoopData{
-		task:             &gent.Task{Text: "test task"},
-		iterationHistory: make([]*gent.Iteration, 0),
-		scratchpad:       make([]*gent.Iteration, 0),
+		task: &gent.Task{Text: "test task"},
 	}
 }
 
 func (d *mockLoopData) GetTask() *gent.Task {
 	return d.task
 }
-
-func (d *mockLoopData) GetIterationHistory() []*gent.Iteration {
-	return d.iterationHistory
-}
-
-func (d *mockLoopData) AddIterationHistory(iter *gent.Iteration) {
-	d.iterationHistory = append(d.iterationHistory, iter)
-}
-
-func (d *mockLoopData) GetScratchPad() []*gent.Iteration {
-	return d.scratchpad
-}
-
-func (d *mockLoopData) SetScratchPad(iters []*gent.Iteration) {
-	d.scratchpad = iters
-}
-
-func (d *mockLoopData) SetExecutionContext(ctx *gent.ExecutionContext) {}
 
 // mockAgentLoop implements gent.AgentLoop[*mockLoopData] for testing.
 type mockAgentLoop struct {
@@ -297,7 +275,11 @@ func TestLimits_IterationLimit_Exceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: tc.input.maxIterations},
+				{
+					Type:     gent.LimitExactKey,
+					Key:      gent.SCIterations,
+					MaxValue: tc.input.maxIterations,
+				},
 			})
 
 			exec.Execute(execCtx)
@@ -387,7 +369,11 @@ func TestLimits_IterationLimit_NotExceeded(t *testing.T) {
 			data := newMockLoopData()
 			execCtx := gent.NewExecutionContext(ctx, "test", data)
 			execCtx.SetLimits([]gent.Limit{
-				{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: tc.input.maxIterations},
+				{
+					Type:     gent.LimitExactKey,
+					Key:      gent.SCIterations,
+					MaxValue: tc.input.maxIterations,
+				},
 			})
 
 			exec.Execute(execCtx)
@@ -1186,7 +1172,6 @@ func TestLimits_EdgeCase_ContextAlreadyCancelled(t *testing.T) {
 	// Verify events
 	expectedEvents := []gent.Event{
 		tt.BeforeExec(0, 0),
-		tt.AfterExec(0, 0, gent.TerminationContextCanceled),
 	}
 	tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 }

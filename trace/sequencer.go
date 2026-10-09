@@ -1,17 +1,18 @@
 package trace
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
-	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/internal/buffer"
 )
 
-// Sequencer assigns trace event numbers and maintains a materialized snapshot.
+// Sequencer projects accepted events into display snapshots and bounded live subscriptions.
 type Sequencer struct {
-	closeMu sync.Mutex
-	mu      sync.RWMutex
+	observeMu sync.Mutex
+	closeMu   sync.Mutex
+	mu        sync.RWMutex
 
 	runId string
 	cfg   config
@@ -25,31 +26,20 @@ type Sequencer struct {
 	recentLifecycleEvents []*Event
 	recentChunkEvents     []*Event
 
-	contextById      map[string]*Context
-	modelById        map[string]*ModelCall
-	modelIdsByStream map[string][]string
-	toolById         map[string]*ToolCall
-	iterationByKey   map[string]*Iteration
+	contextById    map[string]*Context
+	modelById      map[string]*ModelCall
+	toolById       map[string]*ToolCall
+	iterationByKey map[string]*Iteration
 
 	liveSubscribers    map[uint64]*liveSubscriber
 	nextLiveSubscriber uint64
-
-	streamObservers map[string]*streamObserver
-}
-
-type streamObserver struct {
-	execCtx     *gent.ExecutionContext
-	unsubscribe gent.UnsubscribeFunc
-	done        chan struct{}
-}
-
-type normalizedEvent struct {
-	event *Event
-	apply func(*Sequencer, *Event)
 }
 
 // NewSequencer creates a trace sequencer for a run.
-func NewSequencer(runId string, cfg Config) *Sequencer {
+func NewSequencer(runId string, cfg Config) (*Sequencer, error) {
+	if runId == "" {
+		return nil, fmt.Errorf("trace: empty run identity")
+	}
 	normalized := normalizeConfig(cfg)
 	now := time.Now()
 	seq := &Sequencer{
@@ -62,23 +52,21 @@ func NewSequencer(runId string, cfg Config) *Sequencer {
 			StartedTs:     now,
 			LastUpdatedTs: now,
 		},
-		contextById:      make(map[string]*Context),
-		modelById:        make(map[string]*ModelCall),
-		modelIdsByStream: make(map[string][]string),
-		toolById:         make(map[string]*ToolCall),
-		iterationByKey:   make(map[string]*Iteration),
-		liveSubscribers:  make(map[uint64]*liveSubscriber),
-		streamObservers:  make(map[string]*streamObserver),
+		contextById:     make(map[string]*Context),
+		modelById:       make(map[string]*ModelCall),
+		toolById:        make(map[string]*ToolCall),
+		iterationByKey:  make(map[string]*Iteration),
+		liveSubscribers: make(map[uint64]*liveSubscriber),
 	}
-	return seq
+	return seq, nil
 }
 
-func (s *Sequencer) record(input normalizedEvent) *Event {
-	if input.event == nil {
+func (s *Sequencer) record(event *Event) *Event {
+	if event == nil {
 		return nil
 	}
-	if input.event.Ts.IsZero() {
-		input.event.Ts = time.Now()
+	if event.Ts.IsZero() {
+		event.Ts = time.Now()
 	}
 
 	s.mu.Lock()
@@ -87,19 +75,18 @@ func (s *Sequencer) record(input normalizedEvent) *Event {
 		return nil
 	}
 
-	s.nextEventNumber++
-	input.event.EventNumber = s.nextEventNumber
-	input.event.RunId = s.runId
-	s.fillErrorMetadata(input.event)
-
-	if input.apply != nil {
-		input.apply(s, input.event)
+	if event.EventNumber == 0 || event.EventNumber <= s.nextEventNumber {
+		return nil
 	}
-	input.event.Payload = jsonSafeValue(input.event.Payload)
-	s.snapshot.LastEventNumber = input.event.EventNumber
-	s.snapshot.LastUpdatedTs = input.event.Ts
+	s.nextEventNumber = event.EventNumber
+	event.RunId = s.runId
+	s.fillErrorMetadata(event)
+	s.applyEvent(event)
+	event.Payload = jsonSafeValue(event.Payload)
+	s.snapshot.LastEventNumber = event.EventNumber
+	s.snapshot.LastUpdatedTs = event.Ts
 
-	stored := cloneEvent(input.event)
+	stored := cloneEvent(event)
 	s.appendRecent(stored)
 	s.sendLive(stored)
 	return cloneEvent(stored)
@@ -138,15 +125,13 @@ func (s *Sequencer) EventsAfter(lastEventNumber uint64) ([]*Event, error) {
 	return result, nil
 }
 
-// Close drains observed stream chunks, then closes live subscriptions.
+// Close waits for the current projection and closes live subscriptions.
 func (s *Sequencer) Close() {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
 
-	observers := s.takeStreamObservers()
-	for _, observer := range observers {
-		observer.closeAndWait()
-	}
+	s.observeMu.Lock()
+	defer s.observeMu.Unlock()
 
 	s.mu.Lock()
 	if s.closed {
@@ -160,36 +145,6 @@ func (s *Sequencer) Close() {
 
 	for _, sub := range subs {
 		sub.close()
-	}
-}
-
-func (s *Sequencer) takeStreamObservers() []*streamObserver {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	observers := make([]*streamObserver, 0, len(s.streamObservers))
-	for _, observer := range s.streamObservers {
-		observers = append(observers, observer)
-	}
-	s.streamObservers = make(map[string]*streamObserver)
-	return observers
-}
-
-func (s *Sequencer) removeStreamObserver(contextId string) *streamObserver {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	observer := s.streamObservers[contextId]
-	delete(s.streamObservers, contextId)
-	return observer
-}
-
-func (o *streamObserver) closeAndWait() {
-	if o.unsubscribe != nil {
-		o.unsubscribe()
-	}
-	if o.done != nil {
-		<-o.done
 	}
 }
 

@@ -14,7 +14,7 @@ const llmResponseTopic = "llm-response"
 // NewIntegrationTrace creates the trace configuration used by integration tests and the CLI.
 // Integration observability intentionally uses trace as the primary source so real scenarios
 // exercise the same event stream and snapshots that applications should consume.
-func NewIntegrationTrace(runID string) *genttrace.Sequencer {
+func NewIntegrationTrace(runID string) (*genttrace.Sequencer, error) {
 	return genttrace.NewSequencer(runID, genttrace.Config{
 		IncludeChunkText:      true,
 		IncludeModelRequests:  true,
@@ -226,7 +226,7 @@ func (r *traceStreamRenderer) writeCompaction(event *genttrace.Event) {
 	before := traceInt(payload, "scratchpadLengthBefore")
 	after := traceInt(payload, "scratchpadLengthAfter")
 	fmt.Fprintf(r.w,
-		"\n\n  [Compaction: %d -> %d iterations (removed %d, took %s)]\n",
+		"\n\n  [Compaction: %d -> %d entries (removed %d, took %s)]\n",
 		before, after, before-after, durationFromPayload(payload),
 	)
 }

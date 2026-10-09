@@ -3,7 +3,9 @@ package react
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/rickchristie/gent"
 	agentutil "github.com/rickchristie/gent/agents"
@@ -29,19 +31,21 @@ import (
 //
 // System prompts can be customized via WithSystemPromptBuilder() for full control over prompting.
 type Agent struct {
-	behaviorAndContext  string
-	criticalRules       string
-	systemPromptBuilder SystemPromptBuilder
-	model               gent.Model
-	format              gent.TextFormat
-	toolChain           gent.ToolChain
-	termination         gent.Termination
-	thinkingSection     gent.TextSection
-	timeProvider        gent.TimeProvider
+	behaviorAndContext     string
+	criticalRules          string
+	systemPromptBuilder    SystemPromptBuilder
+	model                  gent.Model
+	format                 gent.TextFormat
+	toolChain              gent.ToolChain
+	termination            gent.Termination
+	thinkingSection        gent.TextSection
+	timeProvider           gent.TimeProvider
 	callOptions            []llms.CallOption
+	userSampling           llms.CallOptions
 	repetitionConfig       agentutil.RepetitionConfig
 	maxResponseChars       int
 	responseTooLongMessage string
+	recoveryVersion        string
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -113,6 +117,12 @@ func (r *Agent) WithTimeProvider(tp gent.TimeProvider) *Agent {
 	return r
 }
 
+// WithClock sets the clock used by all standard time helpers in prompt templates.
+// Use WithTimeProvider to also change how dates and times are formatted.
+func (r *Agent) WithClock(now func() time.Time) *Agent {
+	return r.WithTimeProvider(gent.TimeProviderFunc(now))
+}
+
 // TimeProvider returns the current time provider.
 func (r *Agent) TimeProvider() gent.TimeProvider {
 	return r.timeProvider
@@ -128,14 +138,6 @@ func (r *Agent) WithThinking(guidance string) *Agent {
 // WithThinkingSection sets a custom thinking section.
 func (r *Agent) WithThinkingSection(s gent.TextSection) *Agent {
 	r.thinkingSection = s
-	return r
-}
-
-// WithStreaming is a no-op retained for backward compatibility.
-// All model calls now use streaming unconditionally.
-//
-// Deprecated: Streaming is always enabled. This method will be removed.
-func (r *Agent) WithStreaming(_ bool) *Agent {
 	return r
 }
 
@@ -168,10 +170,29 @@ func (r *Agent) WithResponseTooLongMessage(msg string) *Agent {
 	return r
 }
 
-// WithCallOptions sets LLM call options (e.g., temperature, top-p, max tokens) that are
-// forwarded to the model on every GenerateContent call.
+// WithCallOptions resolves the supplied functions once into reusable configuration. The saved
+// compatibility manifest and every request therefore use the same option values.
 func (r *Agent) WithCallOptions(options ...llms.CallOption) *Agent {
-	r.callOptions = options
+	resolved := gent.NewModelCallRequest(nil).Options
+	// NaN distinguishes an omitted sampling parameter from an explicit zero without evaluating
+	// an option function twice. Replace the sentinels before using or encoding the configuration.
+	resolved.Temperature, resolved.TopP = math.NaN(), math.NaN()
+	for _, option := range options {
+		option(&resolved)
+	}
+	r.userSampling = llms.CallOptions{}
+	defaults := gent.DefaultSamplingParams(r.model)
+	if math.IsNaN(resolved.Temperature) {
+		resolved.Temperature, _ = defaults.Temperature.EffectiveValue()
+	} else {
+		r.userSampling.Temperature = resolved.Temperature
+	}
+	if math.IsNaN(resolved.TopP) {
+		resolved.TopP, _ = defaults.TopP.EffectiveValue()
+	} else {
+		r.userSampling.TopP = resolved.TopP
+	}
+	r.callOptions = []llms.CallOption{llms.WithOptions(resolved)}
 	return r
 }
 
@@ -192,8 +213,12 @@ func (r *Agent) RegisterTool(tool any) *Agent {
 // This order ensures that tool calls are always executed before termination. If the model
 // outputs both an action and an answer in the same response, the action takes priority.
 // This prevents premature termination when tools might fail or produce unexpected results.
-func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+func (r *Agent) next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 	data := execCtx.Data()
+	frame, err := r.loadFrame(execCtx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Register output sections and generate prompts
 	for _, section := range r.buildOutputSections() {
@@ -202,18 +227,22 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	outputPrompt := r.format.DescribeStructure()
 	toolsPrompt := r.toolChain.AvailableToolsPrompt()
 
-	// Build messages for model call
-	messages := r.buildMessages(execCtx, data, outputPrompt, toolsPrompt)
-
-	// Generate stream ID based on iteration for unique identification
-	streamId := fmt.Sprintf("iter-%d", execCtx.Iteration())
-	streamTopicId := "llm-response"
-
-	// Call model with streaming + repetition detection.
-	response, repResult, err := r.callModel(execCtx, streamId, streamTopicId, messages)
-	if err != nil {
-		return nil, fmt.Errorf("model call failed: %w", err)
+	if frame.Response == nil {
+		messages, err := r.buildMessages(execCtx, data, outputPrompt, toolsPrompt)
+		if err != nil {
+			return nil, err
+		}
+		streamId := fmt.Sprintf("iter-%d", execCtx.Iteration())
+		response, repetition, err := r.callModel(execCtx, streamId, "llm-response", messages)
+		if err != nil {
+			return nil, fmt.Errorf("model call failed: %w", err)
+		}
+		frame.Response, frame.Repetition = response, repetition
+		if err := saveFrame(execCtx, frame); err != nil {
+			return nil, err
+		}
 	}
+	response, repResult := frame.Response, frame.Repetition
 
 	// Handle repetition or max-size truncation.
 	if repResult != nil {
@@ -231,20 +260,28 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 
 	// Parse complete response to identify all available sections
 	// The format handles tracing of parse errors and resetting consecutive counter
-	parsed, parseErr := r.format.Parse(execCtx, responseContent)
+	parsed, parseErr := frame.Sections, frame.ParseError
+	if !frame.Parsed {
+		parsed, parseErr = r.format.Parse(execCtx, responseContent)
 
-	// Process thinking section if configured and present
-	// This validates structured thinking output and tracks section parse errors.
-	// Section parse errors don't stop the current iteration, but the executor
-	// will terminate if section parse error limits are exceeded.
-	if r.thinkingSection != nil {
-		if thinkingContents, ok := parsed[r.thinkingSection.Name()]; ok {
-			for _, content := range thinkingContents {
-				// ParseSection handles stats tracking:
-				// - On error: publishes ParseErrorEvent, increments total/consecutive counters
-				// - On success: resets consecutive counter
-				_, _ = r.thinkingSection.ParseSection(execCtx, content)
+		// Process thinking section if configured and present
+		// This validates structured thinking output and tracks section parse errors.
+		// Section parse errors don't stop the current iteration, but the executor
+		// will terminate if section parse error limits are exceeded.
+		if r.thinkingSection != nil {
+			if thinkingContents, ok := parsed[r.thinkingSection.Name()]; ok {
+				for _, content := range thinkingContents {
+					// ParseSection handles stats tracking:
+					// - On error: publishes ParseErrorEvent, increments total/consecutive counters
+					// - On success: resets consecutive counter
+					_, _ = r.thinkingSection.ParseSection(execCtx, content)
+				}
 			}
+		}
+
+		frame.Sections, frame.ParseError, frame.Parsed = parsed, parseErr, true
+		if err := saveFrame(execCtx, frame); err != nil {
+			return nil, err
 		}
 	}
 
@@ -253,25 +290,28 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	actionContents, hasActions := parsed[r.toolChain.Name()]
 	if hasActions && len(actionContents) > 0 {
 		// Execute tool calls (automatically traced via execCtx)
-		tcResult, observation := r.executeToolCalls(
-			execCtx, actionContents,
+		tcResult, observation, err := r.executeToolCalls(
+			execCtx, frame, actionContents,
 		)
+		if err != nil {
+			return nil, err
+		}
 
-		// Build iteration: AI response + observation from tool results
+		// Group the AI response and tool observations in one context record.
 		iter := r.buildToolCallIteration(
 			responseContent, tcResult,
 		)
-		data.AddIterationHistory(iter)
+		if err := execCtx.AppendRecord(iter, true); err != nil {
+			return nil, err
+		}
 
 		// Add to scratchpad for next call
-		scratchpad := data.GetScratchPad()
-		scratchpad = append(scratchpad, iter)
 
 		// Check for violations: action + answer, or extra sections after action
 		_, hasAnswer := parsed[r.termination.Name()]
 		if hasAnswer && len(parsed[r.termination.Name()]) > 0 {
-			reminder := &gent.Iteration{
-				Origin: gent.IterationSystemInjected,
+			reminder := &gent.HistoryEntry{
+				Origin: gent.RecordSystemInjected,
 				Messages: []*gent.MessageContent{{
 					Role: llms.ChatMessageTypeHuman,
 					Parts: []gent.ContentPart{llms.TextContent{
@@ -284,11 +324,12 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 					}},
 				}},
 			}
-			data.AddIterationHistory(reminder)
-			scratchpad = append(scratchpad, reminder)
+			if err := execCtx.AppendRecord(reminder, true); err != nil {
+				return nil, err
+			}
 		} else if r.hasExtraSections(parsed) {
-			reminder := &gent.Iteration{
-				Origin: gent.IterationSystemInjected,
+			reminder := &gent.HistoryEntry{
+				Origin: gent.RecordSystemInjected,
 				Messages: []*gent.MessageContent{{
 					Role: llms.ChatMessageTypeHuman,
 					Parts: []gent.ContentPart{llms.TextContent{
@@ -300,11 +341,10 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 					}},
 				}},
 			}
-			data.AddIterationHistory(reminder)
-			scratchpad = append(scratchpad, reminder)
+			if err := execCtx.AppendRecord(reminder, true); err != nil {
+				return nil, err
+			}
 		}
-
-		data.SetScratchPad(scratchpad)
 
 		// Successful tool execution resets the repetition loop gauge.
 		execCtx.Stats().ResetGauge(gent.SGRepetitionLoopConsecutive)
@@ -330,11 +370,16 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 
 			// ParseSection succeeded, check if we should terminate
 			result := r.termination.ShouldTerminate(execCtx, content)
+			if result.Error != nil {
+				return nil, result.Error
+			}
 			switch result.Status {
 			case gent.TerminationAnswerAccepted:
 				execCtx.Stats().ResetGauge(gent.SGRepetitionLoopConsecutive)
 				iter := r.buildIteration(responseContent, "")
-				data.AddIterationHistory(iter)
+				if err := execCtx.AppendRecord(iter, false); err != nil {
+					return nil, err
+				}
 				return &gent.AgentLoopResult{
 					Action: gent.LATerminate,
 					Result: result.Content,
@@ -357,11 +402,9 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 				})
 
 				iter := r.buildIteration(responseContent, observation)
-				data.AddIterationHistory(iter)
-
-				scratchpad := data.GetScratchPad()
-				scratchpad = append(scratchpad, iter)
-				data.SetScratchPad(scratchpad)
+				if err := execCtx.AppendRecord(iter, true); err != nil {
+					return nil, err
+				}
 
 				return &gent.AgentLoopResult{
 					Action:     gent.LAContinue,
@@ -383,11 +426,9 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 			})
 
 			iter := r.buildIteration(responseContent, observation)
-			data.AddIterationHistory(iter)
-
-			scratchpad := data.GetScratchPad()
-			scratchpad = append(scratchpad, iter)
-			data.SetScratchPad(scratchpad)
+			if err := execCtx.AppendRecord(iter, true); err != nil {
+				return nil, err
+			}
 
 			return &gent.AgentLoopResult{
 				Action:     gent.LAContinue,
@@ -397,14 +438,14 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	}
 
 	// Handle parse error or no recognized sections — the model's response
-	// could not be processed. Two iterations are added:
+	// could not be processed. Two context records are added within this one loop iteration:
 	//
-	// 1. Expired iteration: the raw response + error message, logged for
+	// 1. Expired record: the raw response + error message, logged for
 	//    debugging but never sent back to the model (prevents hallucinated
 	//    content from polluting the scratchpad).
 	//
-	// 2. System error iteration: a stern reminder that the model must follow
-	//    the output format described in the system prompt. This iteration
+	// 2. System error record: a stern reminder that the model must follow
+	//    the output format described in the system prompt. This record
 	//    persists in the scratchpad so the model sees it on retry.
 	//
 	// Stats are already updated by format.Parse() which publishes
@@ -417,10 +458,12 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 		errorMsg = "No recognized action or answer sections in response."
 	}
 
-	// 1. Expired iteration with raw response (for debugging only)
+	// 1. Expired record with raw response (for debugging only)
 	expiredIter := r.buildIteration(responseContent, errorMsg)
 	expiredIter.ExpireAfterIteration = max(execCtx.Iteration(), 1)
-	data.AddIterationHistory(expiredIter)
+	if err := execCtx.AppendRecord(expiredIter, true); err != nil {
+		return nil, err
+	}
 
 	// 2. System error reminder (persists in scratchpad)
 	systemError := r.format.FormatSections([]gent.FormattedSection{
@@ -430,8 +473,8 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 			"or observations — only use the sections defined in your " +
 			"instructions."},
 	})
-	errorIter := &gent.Iteration{
-		Origin: gent.IterationSystemInjected,
+	errorIter := &gent.HistoryEntry{
+		Origin: gent.RecordSystemInjected,
 		Messages: []*gent.MessageContent{
 			{
 				Role:  llms.ChatMessageTypeHuman,
@@ -439,12 +482,9 @@ func (r *Agent) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 			},
 		},
 	}
-	data.AddIterationHistory(errorIter)
-
-	scratchpad := data.GetScratchPad()
-	scratchpad = append(scratchpad, expiredIter)
-	scratchpad = append(scratchpad, errorIter)
-	data.SetScratchPad(scratchpad)
+	if err := execCtx.AppendRecord(errorIter, true); err != nil {
+		return nil, err
+	}
 
 	return &gent.AgentLoopResult{
 		Action:     gent.LAContinue,
@@ -464,27 +504,27 @@ func (r *Agent) handleResponseTooLong(
 		responseContent = response.Choices[0].Content
 	}
 
-	// Expired iteration with truncated response (debugging only).
+	// Expired record with truncated response (debugging only).
 	expiredIter := r.buildIteration(responseContent, "Response exceeded max length")
 	expiredIter.ExpireAfterIteration = max(execCtx.Iteration(), 1)
-	data.AddIterationHistory(expiredIter)
+	if err := execCtx.AppendRecord(expiredIter, true); err != nil {
+		return nil, err
+	}
 
 	// Conciseness reminder (persists in scratchpad).
 	reminder := r.format.FormatSections([]gent.FormattedSection{
 		{Name: "system_error", Content: r.responseTooLongMessage},
 	})
-	reminderIter := &gent.Iteration{
-		Origin: gent.IterationSystemInjected,
+	reminderIter := &gent.HistoryEntry{
+		Origin: gent.RecordSystemInjected,
 		Messages: []*gent.MessageContent{{
 			Role:  llms.ChatMessageTypeHuman,
 			Parts: []gent.ContentPart{llms.TextContent{Text: reminder}},
 		}},
 	}
-	data.AddIterationHistory(reminderIter)
-
-	scratchpad := data.GetScratchPad()
-	scratchpad = append(scratchpad, expiredIter, reminderIter)
-	data.SetScratchPad(scratchpad)
+	if err := execCtx.AppendRecord(reminderIter, true); err != nil {
+		return nil, err
+	}
 
 	return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: reminder}, nil
 }
@@ -530,27 +570,27 @@ func (r *Agent) handleRepetition(
 		responseContent = response.Choices[0].Content
 	}
 
-	// 1. Expired iteration with the truncated response (debugging only).
+	// 1. Expired record with the truncated response (debugging only).
 	expiredIter := r.buildIteration(responseContent, "Repetition loop detected")
 	expiredIter.ExpireAfterIteration = max(execCtx.Iteration(), 1)
-	data.AddIterationHistory(expiredIter)
+	if err := execCtx.AppendRecord(expiredIter, true); err != nil {
+		return nil, err
+	}
 
 	// 2. Recovery reminder (persists in scratchpad).
 	reminder := r.format.FormatSections([]gent.FormattedSection{
 		{Name: "system_error", Content: reminderText},
 	})
-	reminderIter := &gent.Iteration{
-		Origin: gent.IterationSystemInjected,
+	reminderIter := &gent.HistoryEntry{
+		Origin: gent.RecordSystemInjected,
 		Messages: []*gent.MessageContent{{
 			Role:  llms.ChatMessageTypeHuman,
 			Parts: []gent.ContentPart{llms.TextContent{Text: reminder}},
 		}},
 	}
-	data.AddIterationHistory(reminderIter)
-
-	scratchpad := data.GetScratchPad()
-	scratchpad = append(scratchpad, expiredIter, reminderIter)
-	data.SetScratchPad(scratchpad)
+	if err := execCtx.AppendRecord(reminderIter, true); err != nil {
+		return nil, err
+	}
 
 	return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: reminder}, nil
 }
@@ -575,8 +615,8 @@ func (r *Agent) hasExtraSections(parsed map[string][]string) bool {
 }
 
 // buildOutputSections constructs the list of output sections.
-func (r *Agent) buildOutputSections() []gent.TextOutputSection {
-	var sections []gent.TextOutputSection
+func (r *Agent) buildOutputSections() []gent.TextSection {
+	var sections []gent.TextSection
 
 	// Add thinking section if configured
 	if r.thinkingSection != nil {
@@ -603,7 +643,7 @@ func (r *Agent) buildMessages(
 	data gent.LoopData,
 	outputPrompt string,
 	toolsPrompt string,
-) []llms.MessageContent {
+) ([]llms.MessageContent, error) {
 	var messages []llms.MessageContent
 
 	// 1. System prompt: build sections, publish event, format
@@ -628,11 +668,19 @@ func (r *Agent) buildMessages(
 	})
 
 	// 2. Task message (role: user) - text + media parts
-	messages = append(messages, r.buildTaskMessage(data))
+	task, err := execCtx.Task()
+	if err != nil {
+		return nil, err
+	}
+	messages = append(messages, r.buildTaskMessage(gent.NewBasicLoopData(task)))
 
 	// 3. Scratchpad messages with deduplication
+	records, err := execCtx.Scratchpad()
+	if err != nil {
+		return nil, err
+	}
 	scratchpadMsgs, includedIterations := agentutil.ScratchpadToMessages(
-		data.GetScratchPad(),
+		records,
 		execCtx.Iteration(),
 		r.toolChain,
 		r.format,
@@ -649,7 +697,7 @@ func (r *Agent) buildMessages(
 		Parts: []llms.ContentPart{llms.TextContent{Text: continueText}},
 	})
 
-	return messages
+	return messages, execCtx.RecordingError()
 }
 
 // buildTaskMessage constructs the task message with text and media parts.
@@ -684,16 +732,23 @@ func (r *Agent) buildTaskMessage(data gent.LoopData) llms.MessageContent {
 // storage on the iteration) and the formatted observation
 // text (for NextPrompt).
 func (r *Agent) executeToolCalls(
-	execCtx *gent.ExecutionContext,
+	execCtx *gent.ExecutionContext, frame *iterationFrame,
 	contents []string,
-) (*gent.ToolChainResult, string) {
-	var allResults []*gent.ToolCallResult
-	var errorSections []string
+) (*gent.ToolChainResult, string, error) {
+	allResults := frame.ToolResults
+	errorSections := frame.ToolErrors
 
-	for _, content := range contents {
-		result, err := r.toolChain.Execute(
-			execCtx, content, r.format,
-		)
+	for frame.ToolContent < len(contents) {
+		result, err := r.executeRecoverableToolContent(execCtx, frame, contents[frame.ToolContent])
+		if recordErr := execCtx.RecordingError(); recordErr != nil {
+			return nil, "", recordErr
+		}
+		if execCtx.IsWorkerInterrupted() {
+			return nil, "", execCtx.Context().Err()
+		}
+		if errors.Is(err, gent.ErrUncertainTool) || errors.Is(err, gent.ErrUnsupportedRecovery) {
+			return nil, "", err
+		}
 		if err != nil {
 			errorText := r.format.FormatSections(
 				[]gent.FormattedSection{
@@ -708,11 +763,21 @@ func (r *Agent) executeToolCalls(
 			errorSections = append(
 				errorSections, errorText,
 			)
+			frame.ToolErrors = errorSections
+			frame.ToolContent++
+			frame.ToolPlanActive = false
+			if err := saveFrame(execCtx, frame); err != nil {
+				return nil, "", err
+			}
 			continue
 		}
-		allResults = append(
-			allResults, result.Results...,
-		)
+		allResults = append(allResults, result.Results...)
+		frame.ToolResults = allResults
+		frame.ToolContent++
+		frame.ToolPlanActive = false
+		if err := saveFrame(execCtx, frame); err != nil {
+			return nil, "", err
+		}
 	}
 
 	// Add error sections as synthetic ToolCallResults
@@ -735,7 +800,7 @@ func (r *Agent) executeToolCalls(
 		}
 	}
 	if len(sections) == 0 {
-		return tcResult, ""
+		return tcResult, "", nil
 	}
 	observation := r.format.FormatSections(
 		[]gent.FormattedSection{
@@ -745,15 +810,15 @@ func (r *Agent) executeToolCalls(
 			},
 		},
 	)
-	return tcResult, observation
+	return tcResult, observation, nil
 }
 
-// buildIteration creates an Iteration from response and observation.
+// buildIteration groups a response and observation in one HistoryEntry.
 // The response is stored as AI role, and observation as Human role.
 // Note: We use Human role for observations because the text-based ReAct pattern
 // doesn't use native tool calling APIs. The observation is a user message containing
 // tool output in text form.
-func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
+func (r *Agent) buildIteration(response, observation string) *gent.HistoryEntry {
 	var messages []*gent.MessageContent
 
 	// Assistant message (response)
@@ -770,32 +835,32 @@ func (r *Agent) buildIteration(response, observation string) *gent.Iteration {
 		})
 	}
 
-	return &gent.Iteration{
+	return &gent.HistoryEntry{
 		Messages: messages,
 	}
 }
 
-// buildToolCallIteration creates an Iteration from an AI
+// buildToolCallIteration creates a HistoryEntry from an AI
 // response and a ToolChainResult. The AI response is stored
-// as the first message. The observation (from ToIteration)
+// as the first message. The observation (from ToHistoryEntry)
 // carries tool chain metadata for deduplication.
 func (r *Agent) buildToolCallIteration(
 	response string,
 	tcResult *gent.ToolChainResult,
-) *gent.Iteration {
+) *gent.HistoryEntry {
 	aiMsg := &gent.MessageContent{
-		Role:  llms.ChatMessageTypeAI,
+		Role: llms.ChatMessageTypeAI,
 		Parts: []gent.ContentPart{
 			llms.TextContent{Text: response},
 		},
 	}
 
-	obsIter := tcResult.ToIteration(r.format)
+	obsIter := tcResult.ToHistoryEntry(r.format)
 	messages := append(
 		[]*gent.MessageContent{aiMsg},
 		obsIter.Messages...,
 	)
-	return &gent.Iteration{Messages: messages}
+	return &gent.HistoryEntry{Messages: messages}
 }
 
 // callModel calls the model via streaming and returns the complete response.
@@ -862,10 +927,7 @@ func (r *Agent) warnRestrictiveSampling(
 	// (r.callOptions), not the full merged set — the framework itself sends
 	// temperature=1.0 for forbidden models as a langchaingo workaround.
 	params := gent.DefaultSamplingParams(r.model)
-	var userResolved llms.CallOptions
-	for _, opt := range r.callOptions {
-		opt(&userResolved)
-	}
+	userResolved := r.userSampling
 	if params.Temperature.Directive == gent.ParamForbidden &&
 		userResolved.Temperature > 0 {
 		execCtx.PublishCommonEvent(
@@ -899,8 +961,10 @@ func (r *Agent) callModelStreaming(
 	streamId string, streamTopicId string,
 	messages []llms.MessageContent, opts []llms.CallOption,
 ) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
-	stream, err := r.model.GenerateContentStream(
-		execCtx, streamId, streamTopicId, messages, opts...,
+	stream, err := execCtx.GenerateContentStream(
+		r.model,
+		gent.ModelCall{StreamId: streamId, StreamTopicId: streamTopicId},
+		gent.NewModelCallRequest(messages, opts...),
 	)
 	if err != nil {
 		return nil, nil, err
@@ -942,8 +1006,10 @@ func (r *Agent) callModelStreaming(
 	if err != nil {
 		return nil, nil, err
 	}
-	return acc.ResponseWithInfo(streamResponse), nil, nil
+	// The final response can include content or choice data that is absent from chunks.
+	// Use the accumulator only when repetition or size limits stop the stream early.
+	return streamResponse, nil, nil
 }
 
-// Compile-time check that Agent implements gent.AgentLoop.
-var _ gent.AgentLoop[*gent.BasicLoopData] = (*Agent)(nil)
+// Compile-time check that Agent implements gent.Loop.
+var _ gent.Loop = (*Agent)(nil)

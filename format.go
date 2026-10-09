@@ -132,13 +132,11 @@ type TextFormat interface {
 	FormatSections(sections []FormattedSection) string
 }
 
-// TextOutputFormat is an alias for TextFormat for backward compatibility.
-// Deprecated: Use TextFormat instead.
-type TextOutputFormat = TextFormat
-
 // Parse errors
 var (
 	ErrNoSectionsFound = errors.New("no recognized sections found in output")
+	ErrAmbiguousTags   = errors.New("ambiguous tags: section tag found inside another section")
+	ErrUnclosedTag     = errors.New("unclosed tag")
 	ErrInvalidJSON     = errors.New("invalid JSON in section content")
 	ErrInvalidYAML     = errors.New("invalid YAML in section content")
 	ErrMissingToolName = errors.New("tool call missing 'tool' field")

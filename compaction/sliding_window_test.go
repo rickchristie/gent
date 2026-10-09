@@ -10,8 +10,8 @@ import (
 )
 
 // makeIter creates a simple Iteration with text content.
-func makeIter(text string) *gent.Iteration {
-	return &gent.Iteration{
+func makeIter(text string) *gent.HistoryEntry {
+	return &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeAI,
@@ -26,7 +26,7 @@ func makeIter(text string) *gent.Iteration {
 // makePinnedIter creates an Iteration with an importance
 // score >= ImportanceScorePinned (i.e., it will be treated
 // as pinned by the standard strategies).
-func makePinnedIter(text string) *gent.Iteration {
+func makePinnedIter(text string) *gent.HistoryEntry {
 	iter := makeIter(text)
 	iter.SetMetadata(
 		gent.IMKImportanceScore,
@@ -38,12 +38,12 @@ func makePinnedIter(text string) *gent.Iteration {
 func TestSlidingWindow_Compact(t *testing.T) {
 	type input struct {
 		windowSize int
-		scratchpad []*gent.Iteration
+		scratchpad []*gent.HistoryEntry
 	}
 
 	type expected struct {
 		scratchpadLen  int
-		keptIterations []*gent.Iteration
+		keptIterations []*gent.HistoryEntry
 	}
 
 	// Pre-create iterations so we can check pointer identity
@@ -76,11 +76,11 @@ func TestSlidingWindow_Compact(t *testing.T) {
 			name: "scratchpad within window no change",
 			input: input{
 				windowSize: 5,
-				scratchpad: []*gent.Iteration{a, b, c},
+				scratchpad: []*gent.HistoryEntry{a, b, c},
 			},
 			expected: expected{
 				scratchpadLen:  3,
-				keptIterations: []*gent.Iteration{a, b, c},
+				keptIterations: []*gent.HistoryEntry{a, b, c},
 			},
 		},
 		{
@@ -88,26 +88,26 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"dropped",
 			input: input{
 				windowSize: 2,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					a, b, c, d, e,
 				},
 			},
 			expected: expected{
 				scratchpadLen:  2,
-				keptIterations: []*gent.Iteration{d, e},
+				keptIterations: []*gent.HistoryEntry{d, e},
 			},
 		},
 		{
 			name: "all iterations pinned no change",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					pinAt2, pinAt4,
 				},
 			},
 			expected: expected{
 				scratchpadLen: 2,
-				keptIterations: []*gent.Iteration{
+				keptIterations: []*gent.HistoryEntry{
 					pinAt2, pinAt4,
 				},
 			},
@@ -118,14 +118,14 @@ func TestSlidingWindow_Compact(t *testing.T) {
 			input: input{
 				windowSize: 2,
 				// [a, pinAt2, b, c, pinAt4, d, e]
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					a, pinAt2, b, c, pinAt4, d, e,
 				},
 			},
 			expected: expected{
 				// pinned (2) + last 2 unpinned (d, e) = 4
 				scratchpadLen: 4,
-				keptIterations: []*gent.Iteration{
+				keptIterations: []*gent.HistoryEntry{
 					pinAt2, pinAt4, d, e,
 				},
 			},
@@ -136,14 +136,14 @@ func TestSlidingWindow_Compact(t *testing.T) {
 			input: input{
 				windowSize: 1,
 				// [a, pinAt2, b, c]
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					a, pinAt2, b, c,
 				},
 			},
 			expected: expected{
 				// pinAt2 before c in original order
 				scratchpadLen: 2,
-				keptIterations: []*gent.Iteration{
+				keptIterations: []*gent.HistoryEntry{
 					pinAt2, c,
 				},
 			},
@@ -153,13 +153,13 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"unpinned",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					a, b, c, d, e,
 				},
 			},
 			expected: expected{
 				scratchpadLen:  1,
-				keptIterations: []*gent.Iteration{e},
+				keptIterations: []*gent.HistoryEntry{e},
 			},
 		},
 		{
@@ -167,13 +167,13 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"NOT pinned",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					zeroScore, a, b,
 				},
 			},
 			expected: expected{
 				scratchpadLen:  1,
-				keptIterations: []*gent.Iteration{b},
+				keptIterations: []*gent.HistoryEntry{b},
 			},
 		},
 		{
@@ -181,26 +181,26 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"NOT pinned",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					negScore, a, b,
 				},
 			},
 			expected: expected{
 				scratchpadLen:  1,
-				keptIterations: []*gent.Iteration{b},
+				keptIterations: []*gent.HistoryEntry{b},
 			},
 		},
 		{
 			name: "nil metadata NOT pinned",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					noMeta, a, b,
 				},
 			},
 			expected: expected{
 				scratchpadLen:  1,
-				keptIterations: []*gent.Iteration{b},
+				keptIterations: []*gent.HistoryEntry{b},
 			},
 		},
 		{
@@ -208,13 +208,13 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"(below threshold)",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					almostPinned, a, b,
 				},
 			},
 			expected: expected{
 				scratchpadLen:  1,
-				keptIterations: []*gent.Iteration{b},
+				keptIterations: []*gent.HistoryEntry{b},
 			},
 		},
 		{
@@ -222,13 +222,13 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"(at threshold)",
 			input: input{
 				windowSize: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					a, exactPinned, b,
 				},
 			},
 			expected: expected{
 				scratchpadLen: 2,
-				keptIterations: []*gent.Iteration{
+				keptIterations: []*gent.HistoryEntry{
 					exactPinned, b,
 				},
 			},
@@ -238,11 +238,11 @@ func TestSlidingWindow_Compact(t *testing.T) {
 				"no change",
 			input: input{
 				windowSize: 3,
-				scratchpad: []*gent.Iteration{a, b, c},
+				scratchpad: []*gent.HistoryEntry{a, b, c},
 			},
 			expected: expected{
 				scratchpadLen:  3,
-				keptIterations: []*gent.Iteration{a, b, c},
+				keptIterations: []*gent.HistoryEntry{a, b, c},
 			},
 		},
 	}
@@ -250,19 +250,20 @@ func TestSlidingWindow_Compact(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			data := gent.NewBasicLoopData(nil)
-			data.SetScratchPad(tc.input.scratchpad)
+
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,
 			)
+			setTestRecords(t, execCtx, tc.input.scratchpad)
 			execCtx.SetLimits(nil)
 
 			strategy := NewSlidingWindow(
 				tc.input.windowSize,
 			)
-			err := strategy.Compact(execCtx)
+			err := applyTestCompaction(execCtx, strategy)
 
 			assert.NoError(t, err)
-			result := data.GetScratchPad()
+			result := testScratchpad(t, execCtx)
 			assert.Equal(t,
 				tc.expected.scratchpadLen, len(result),
 			)

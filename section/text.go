@@ -53,7 +53,7 @@ func NewText(name string) *Text {
 }
 
 // WithGuidance sets the guidance text for this section. The guidance appears inside
-// the section tags when TextOutputFormat.DescribeStructure() generates the format prompt.
+// the section tags when TextFormat.DescribeStructure() generates the format prompt.
 //
 // This can be instructions (e.g., "Think step by step about the problem") or examples
 // showing the expected format, or a combination of both.
@@ -82,5 +82,5 @@ func (t *Text) ParseSection(_ *gent.ExecutionContext, content string) (any, erro
 	return strings.TrimSpace(content), nil
 }
 
-// Compile-time check that Text implements gent.TextOutputSection.
-var _ gent.TextOutputSection = (*Text)(nil)
+// Compile-time check that Text implements gent.TextSection.
+var _ gent.TextSection = (*Text)(nil)

@@ -196,10 +196,10 @@ func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
 				sub.OnLimitExceeded(execCtx, e)
 			}
 		}
-	case *gent.CommonDiffEvent:
+	case *gent.StateChangeEvent:
 		for _, s := range r.subscribers {
-			if sub, ok := s.(gent.CommonDiffEventSubscriber); ok {
-				sub.OnCommonDiffEvent(execCtx, e)
+			if sub, ok := s.(gent.StateChangeEventSubscriber); ok {
+				sub.OnStateChangeEvent(execCtx, e)
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package tt
 
 import (
+	"context"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -37,6 +38,8 @@ func (m *MockModel) WithName(name string) *MockModel {
 	m.name = name
 	return m
 }
+
+func (m *MockModel) ModelName() string { return m.name }
 
 // AddResponse queues a response with the specified content and token counts.
 func (m *MockModel) AddResponse(content string, inputTokens, outputTokens int) *MockModel {
@@ -152,30 +155,10 @@ func (m *MockModel) GenerateContent(
 // response in a completed stream. This enables the mock to satisfy
 // the streaming-only Model interface without actual streaming.
 func (m *MockModel) GenerateContentStream(
-	execCtx *gent.ExecutionContext,
-	streamId string,
-	streamTopicId string,
-	messages []llms.MessageContent,
-	opts ...llms.CallOption,
+	_ context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	resp, err := m.GenerateContent(
-		execCtx, streamId, streamTopicId, messages, opts...,
-	)
-	if err != nil {
-		return gent.NewCompletedStream(nil, err), nil
-	}
-
-	// Emit chunk for subscribers (matching real model behavior).
-	if execCtx != nil && resp != nil && len(resp.Choices) > 0 {
-		execCtx.EmitChunk(gent.StreamChunk{
-			Content:          resp.Choices[0].Content,
-			ReasoningContent: resp.Choices[0].ReasoningContent,
-			StreamId:         streamId,
-			StreamTopicId:    streamTopicId,
-		})
-	}
-
-	return gent.NewCompletedStream(resp, nil), nil
+	resp, err := m.GenerateContent(nil, "", "", request.Messages, llms.WithOptions(request.Options))
+	return gent.NewCompletedStream(resp, err), nil
 }
 
 // -----------------------------------------------------------------------------
@@ -847,7 +830,7 @@ func (t *MockCompactionTrigger) WithShouldCompact(
 // ShouldCompact implements gent.CompactionTrigger.
 func (t *MockCompactionTrigger) ShouldCompact(
 	_ *gent.ExecutionContext,
-) bool {
+) (bool, error) {
 	if t.callIdx >= len(t.shouldCompact) {
 		panic(
 			"MockCompactionTrigger: exhausted " +
@@ -856,14 +839,13 @@ func (t *MockCompactionTrigger) ShouldCompact(
 	}
 	result := t.shouldCompact[t.callIdx]
 	t.callIdx++
-	return result
+	return result, nil
 }
 
 // NotifyCompacted implements gent.CompactionTrigger.
-func (t *MockCompactionTrigger) NotifyCompacted(
-	_ *gent.ExecutionContext,
-) {
+func (t *MockCompactionTrigger) NotifyCompacted(_ *gent.ExecutionContext) error {
 	t.notifiedCount++
+	return nil
 }
 
 // NotifiedCount returns how many times NotifyCompacted was
@@ -882,7 +864,7 @@ var _ gent.CompactionTrigger = (*MockCompactionTrigger)(nil)
 // MockCompactionStrategy is a configurable mock that
 // implements gent.CompactionStrategy.
 type MockCompactionStrategy struct {
-	compactFunc func(execCtx *gent.ExecutionContext) error
+	compactFunc func(*gent.ExecutionContext, gent.CompactionInput) (gent.HistoryUpdate, error)
 	callCount   int
 }
 
@@ -894,7 +876,7 @@ func NewMockCompactionStrategy() *MockCompactionStrategy {
 
 // WithCompactFunc sets the Compact implementation.
 func (s *MockCompactionStrategy) WithCompactFunc(
-	fn func(execCtx *gent.ExecutionContext) error,
+	fn func(*gent.ExecutionContext, gent.CompactionInput) (gent.HistoryUpdate, error),
 ) *MockCompactionStrategy {
 	s.compactFunc = fn
 	return s
@@ -906,22 +888,22 @@ func (s *MockCompactionStrategy) WithError(
 	err error,
 ) *MockCompactionStrategy {
 	s.compactFunc = func(
-		_ *gent.ExecutionContext,
-	) error {
-		return err
+		_ *gent.ExecutionContext, _ gent.CompactionInput,
+	) (gent.HistoryUpdate, error) {
+		return gent.HistoryUpdate{}, err
 	}
 	return s
 }
 
 // Compact implements gent.CompactionStrategy.
 func (s *MockCompactionStrategy) Compact(
-	execCtx *gent.ExecutionContext,
-) error {
+	execCtx *gent.ExecutionContext, input gent.CompactionInput,
+) (gent.HistoryUpdate, error) {
 	s.callCount++
 	if s.compactFunc != nil {
-		return s.compactFunc(execCtx)
+		return s.compactFunc(execCtx, input)
 	}
-	return nil
+	return gent.HistoryUpdate{ExpectedDraftRevision: input.Revision, Active: input.EntryIds()}, nil
 }
 
 // CallCount returns how many times Compact was called.

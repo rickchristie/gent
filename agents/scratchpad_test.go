@@ -12,7 +12,7 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// TestToolChainResult_ToIteration
+// TestToolChainResult_ToHistoryEntry
 // -----------------------------------------------------------------------------
 
 // testXMLFormat is a minimal TextFormat that wraps content in XML
@@ -49,7 +49,7 @@ func (f *testXMLFormat) FormatSections(
 	return result
 }
 
-func TestToolChainResult_ToIteration(t *testing.T) {
+func TestToolChainResult_ToHistoryEntry(t *testing.T) {
 	xmlFmt := &testXMLFormat{}
 
 	type input struct {
@@ -198,7 +198,7 @@ Error: connection refused
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tcr := &gent.ToolChainResult{Results: tc.input.results}
-			iter := tcr.ToIteration(xmlFmt)
+			iter := tcr.ToHistoryEntry(xmlFmt)
 
 			assert.Equal(
 				t, tc.expected.messageCount, len(iter.Messages),
@@ -284,13 +284,13 @@ func buildIteration(
 	aiText string,
 	tcr *gent.ToolChainResult,
 	xmlFmt gent.TextFormat,
-) *gent.Iteration {
-	obsIter := tcr.ToIteration(xmlFmt)
+) *gent.HistoryEntry {
+	obsIter := tcr.ToHistoryEntry(xmlFmt)
 	aiMsg := &gent.MessageContent{
 		Role:  llms.ChatMessageTypeAI,
 		Parts: []gent.ContentPart{llms.TextContent{Text: aiText}},
 	}
-	return &gent.Iteration{
+	return &gent.HistoryEntry{
 		Messages: append(
 			[]*gent.MessageContent{aiMsg}, obsIter.Messages...,
 		),
@@ -301,8 +301,8 @@ func buildIteration(
 func buildPlainIteration(
 	aiText string,
 	humanText string,
-) *gent.Iteration {
-	return &gent.Iteration{
+) *gent.HistoryEntry {
+	return &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeAI,
@@ -324,7 +324,7 @@ func TestScratchpadToMessages(t *testing.T) {
 	xmlFmt := &testXMLFormat{}
 
 	type input struct {
-		scratchpad       []*gent.Iteration
+		scratchpad       []*gent.HistoryEntry
 		currentIteration int
 		toolChain        gent.ToolChain
 	}
@@ -381,7 +381,7 @@ func TestScratchpadToMessages(t *testing.T) {
 		{
 			name: "no metadata passthrough as-is",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildPlainIteration(
 						"I will search", "Search result",
 					),
@@ -404,7 +404,7 @@ func TestScratchpadToMessages(t *testing.T) {
 		{
 			name: "expired iterations skipped",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -435,7 +435,7 @@ func TestScratchpadToMessages(t *testing.T) {
 		{
 			name: "non-expired iterations included",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					{
 						Messages: []*gent.MessageContent{
 							{
@@ -469,7 +469,7 @@ func TestScratchpadToMessages(t *testing.T) {
 		{
 			name: "single dedup: same tool+args in iter 1 and 2",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Searching...",
 						&gent.ToolChainResult{
@@ -533,7 +533,7 @@ Sunny, 72F
 		{
 			name: "multiple dedup: iters 1,2,3 same tool+args",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Iter1",
 						&gent.ToolChainResult{
@@ -617,7 +617,7 @@ Page content
 		{
 			name: "mixed observation: one deduplicatable, one not",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Iter1",
 						&gent.ToolChainResult{
@@ -689,7 +689,7 @@ Sunny
 		{
 			name: "errored calls not deduped",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Iter1",
 						&gent.ToolChainResult{
@@ -754,7 +754,7 @@ Sunny
 		{
 			name: "tool returns empty DeduplicateSummary: no dedup",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Iter1",
 						&gent.ToolChainResult{
@@ -815,7 +815,7 @@ Result B
 		{
 			name: "nil toolChain disables dedup, only expiry",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Iter1",
 						&gent.ToolChainResult{
@@ -874,7 +874,7 @@ Sunny
 		{
 			name: "last occurrence keeps full text",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"First",
 						&gent.ToolChainResult{
@@ -958,7 +958,7 @@ func main() {}
 		{
 			name: "different args produce different hash, not deduped",
 			input: input{
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					buildIteration(
 						"Iter1",
 						&gent.ToolChainResult{
@@ -1021,20 +1021,20 @@ Headlines
 		{
 			name: "included count correct with mixed expiry",
 			input: input{
-				scratchpad: []*gent.Iteration{
-					func() *gent.Iteration {
+				scratchpad: []*gent.HistoryEntry{
+					func() *gent.HistoryEntry {
 						iter := buildPlainIteration("a", "b")
 						iter.ExpireAfterIteration = 2
 						return iter
 					}(),
 					buildPlainIteration("c", "d"),
-					func() *gent.Iteration {
+					func() *gent.HistoryEntry {
 						iter := buildPlainIteration("e", "f")
 						iter.ExpireAfterIteration = 3
 						return iter
 					}(),
 					buildPlainIteration("g", "h"),
-					func() *gent.Iteration {
+					func() *gent.HistoryEntry {
 						iter := buildPlainIteration("i", "j")
 						iter.ExpireAfterIteration = 10
 						return iter

@@ -1,6 +1,10 @@
 package compaction
 
-import "github.com/rickchristie/gent"
+import (
+	"fmt"
+	"github.com/rickchristie/gent"
+	"strings"
+)
 
 // StatThresholdTrigger fires when any configured stat
 // threshold is exceeded. Supports both counter and gauge
@@ -51,7 +55,6 @@ type counterThreshold struct {
 	key       gent.StatKey
 	matchMode gent.LimitType
 	delta     int64
-	lastValue map[string]int64
 }
 
 type gaugeThreshold struct {
@@ -78,7 +81,6 @@ func (t *StatThresholdTrigger) OnCounter(
 			key:       key,
 			matchMode: gent.LimitExactKey,
 			delta:     delta,
-			lastValue: make(map[string]int64),
 		},
 	)
 	return t
@@ -97,7 +99,6 @@ func (t *StatThresholdTrigger) OnCounterPrefix(
 			key:       prefix,
 			matchMode: gent.LimitKeyPrefix,
 			delta:     delta,
-			lastValue: make(map[string]int64),
 		},
 	)
 	return t
@@ -141,41 +142,53 @@ func (t *StatThresholdTrigger) OnGaugePrefix(
 // ShouldCompact implements gent.CompactionTrigger.
 func (t *StatThresholdTrigger) ShouldCompact(
 	execCtx *gent.ExecutionContext,
-) bool {
+) (bool, error) {
 	stats := execCtx.Stats()
+	saved, ok, err := execCtx.CheckpointState("gent:compaction_baseline")
+	if err != nil {
+		return false, err
+	}
+	baseline := map[string]int64{}
+	if ok {
+		var valid bool
+		baseline, valid = saved.(map[string]int64)
+		if !valid {
+			return false, fmt.Errorf("gent: invalid compaction baseline %T", saved)
+		}
+	}
 
 	for i := range t.counterThresholds {
 		ct := &t.counterThresholds[i]
-		if t.counterExceeded(stats, ct) {
-			return true
+		if t.counterExceeded(stats, ct, baseline) {
+			return true, nil
 		}
 	}
 
 	for i := range t.gaugeThresholds {
 		gt := &t.gaugeThresholds[i]
 		if t.gaugeExceeded(stats, gt) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (t *StatThresholdTrigger) counterExceeded(
 	stats *gent.ExecutionStats,
-	ct *counterThreshold,
+	ct *counterThreshold, baseline map[string]int64,
 ) bool {
 	switch ct.matchMode {
 	case gent.LimitExactKey:
 		current := stats.GetCounter(ct.key)
-		last := ct.lastValue[string(ct.key)]
+		last := baseline[string(ct.key)]
 		return current-last >= ct.delta
 	case gent.LimitKeyPrefix:
 		prefix := string(ct.key)
 		for key, current := range stats.Counters() {
 			if len(key) >= len(prefix) &&
 				key[:len(prefix)] == prefix {
-				last := ct.lastValue[key]
+				last := baseline[key]
 				if current-last >= ct.delta {
 					return true
 				}
@@ -208,28 +221,20 @@ func (t *StatThresholdTrigger) gaugeExceeded(
 
 // NotifyCompacted implements gent.CompactionTrigger.
 // Snapshots ALL counter values for delta tracking.
-func (t *StatThresholdTrigger) NotifyCompacted(
-	execCtx *gent.ExecutionContext,
-) {
-	stats := execCtx.Stats()
-	counters := stats.Counters()
-
-	for i := range t.counterThresholds {
-		ct := &t.counterThresholds[i]
-		switch ct.matchMode {
-		case gent.LimitExactKey:
-			ct.lastValue[string(ct.key)] =
-				counters[string(ct.key)]
-		case gent.LimitKeyPrefix:
-			prefix := string(ct.key)
-			for key, val := range counters {
-				if len(key) >= len(prefix) &&
-					key[:len(prefix)] == prefix {
-					ct.lastValue[key] = val
-				}
+func (t *StatThresholdTrigger) NotifyCompacted(execCtx *gent.ExecutionContext) error {
+	baseline := map[string]int64{}
+	for _, threshold := range t.counterThresholds {
+		for key, value := range execCtx.Stats().Counters() {
+			matches := key == string(threshold.key)
+			if threshold.matchMode == gent.LimitKeyPrefix {
+				matches = strings.HasPrefix(key, string(threshold.key))
+			}
+			if matches {
+				baseline[key] = value
 			}
 		}
 	}
+	return execCtx.SetCheckpointState("gent:compaction_baseline", baseline)
 }
 
 // Compile-time check.

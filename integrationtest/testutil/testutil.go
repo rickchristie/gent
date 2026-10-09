@@ -330,7 +330,7 @@ var AvailableModels = []ModelOption{
 // [AvailableModels] to determine the API key env var and base URL.
 func CreateModel(
 	modelName string,
-) (gent.StreamingModel, error) {
+) (gent.Model, error) {
 	if modelName == "" {
 		modelName = DefaultModelName
 	}
@@ -392,7 +392,7 @@ func CreateModel(
 // createAnthropicModel creates an Anthropic Claude model.
 func createAnthropicModel(
 	modelName, apiKey string, httpClient *http.Client,
-) (gent.StreamingModel, error) {
+) (gent.Model, error) {
 	llm, err := anthropic.New(
 		anthropic.WithToken(apiKey),
 		anthropic.WithModel(modelName),
@@ -565,8 +565,8 @@ func (h *PolicySuggestionHook) OnBeforeIteration(
 		},
 	)
 
-	iter := &gent.Iteration{
-		Origin:               gent.IterationSystemInjected,
+	iter := &gent.HistoryEntry{
+		Origin:               gent.RecordSystemInjected,
 		ExpireAfterIteration: 3,
 		Messages: []*gent.MessageContent{
 			{
@@ -578,9 +578,9 @@ func (h *PolicySuggestionHook) OnBeforeIteration(
 		},
 	}
 
-	scratchpad := execCtx.Data().GetScratchPad()
-	scratchpad = append(scratchpad, iter)
-	execCtx.Data().SetScratchPad(scratchpad)
+	if err := execCtx.AppendRecord(iter, true); err != nil {
+		execCtx.PublishError(fmt.Errorf("policy suggestion history: %w", err))
+	}
 }
 
 // ContainsIgnoreCase checks if s contains substr, case-insensitive.
@@ -662,6 +662,7 @@ func RunScenario(
 
 	loop := react.NewAgent(model).
 		WithToolChain(tc).
+		WithRecoveryVersion("integration/v1").
 		WithTimeProvider(scenario.TimeProvider).
 		WithBehaviorAndContext(scenario.SystemPrompt).
 		WithCriticalRules(scenario.CriticalRules).
@@ -671,8 +672,12 @@ func RunScenario(
 		&gent.Task{Text: scenario.CustomerRequest},
 	)
 
+	seq, err := NewIntegrationTrace(scenario.Name)
+	if err != nil {
+		return err
+	}
 	execCtx := gent.NewExecutionContext(
-		ctx, scenario.Name, data,
+		ctx, scenario.Name, data, gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq),
 	)
 	execCtx.SetLimits([]gent.Limit{
 		{
@@ -688,13 +693,11 @@ func RunScenario(
 	)
 
 	registry := events.NewRegistry()
-	seq := NewIntegrationTrace(scenario.Name)
 	streamWait := StartTraceStreamOutput(seq, w)
 	var logWait func()
 	if testCfg.LogWriter != nil {
 		logWait = StartTraceEventLogger(seq, testCfg.LogWriter)
 	}
-	registry.Subscribe(seq)
 
 	if scenario.PolicySuggester != nil {
 		registry.Subscribe(&PolicySuggestionHook{
@@ -735,12 +738,15 @@ func RunScenario(
 	PrintSection(w, "Agent Execution")
 	fmt.Fprintln(w)
 
-	exec.Execute(execCtx)
+	_, executionErr := exec.Execute(execCtx)
 	seq.Close()
 	streamWait()
 	if logWait != nil {
 		logWait()
 		WriteTraceSnapshot(testCfg.LogWriter, seq.Snapshot())
+	}
+	if executionErr != nil {
+		return executionErr
 	}
 	result := execCtx.Result()
 
@@ -778,9 +784,13 @@ func RunScenario(
 		fmt.Fprintln(w)
 		PrintHeader(w, "FULL ITERATION HISTORY")
 
-		for i, iter := range data.GetIterationHistory() {
-			fmt.Fprintf(w, "\n--- Iteration %d ---\n", i+1)
-			for _, msg := range iter.Messages {
+		history := execCtx.History()
+		for _, entry := range history.Entries {
+			if entry.Kind == gent.HistoryCompaction {
+				continue
+			}
+			fmt.Fprintf(w, "\n--- Iteration %d, record %s ---\n", entry.Iteration, entry.Id)
+			for _, msg := range entry.Messages {
 				fmt.Fprintf(w, "[%s]\n", msg.Role)
 				for _, part := range msg.Parts {
 					if tc, ok := part.(llms.TextContent); ok {
@@ -832,7 +842,7 @@ type ChatConfig struct {
 // InteractiveChat holds state for an interactive chat session.
 type InteractiveChat struct {
 	History []ConversationMessage
-	Model   gent.StreamingModel
+	Model   gent.Model
 	Config  TestConfig
 	Writer  io.Writer
 	ChatCfg ChatConfig
@@ -916,6 +926,7 @@ func (s *InteractiveChat) SendMessage(
 
 	loop := react.NewAgent(s.Model).
 		WithToolChain(tc).
+		WithRecoveryVersion("integration/v1").
 		WithTimeProvider(s.ChatCfg.TimeProvider).
 		WithBehaviorAndContext(s.ChatCfg.SystemPrompt).
 		WithCriticalRules(s.ChatCfg.CriticalRules).
@@ -926,8 +937,12 @@ func (s *InteractiveChat) SendMessage(
 		&gent.Task{Text: taskContent},
 	)
 
+	seq, err := NewIntegrationTrace(fmt.Sprintf("%s-chat-%d", s.ChatCfg.Name, len(s.History)))
+	if err != nil {
+		return err
+	}
 	execCtx := gent.NewExecutionContext(
-		ctx, s.ChatCfg.Name+"-chat", data,
+		ctx, s.ChatCfg.Name+"-chat", data, gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq),
 	)
 	execCtx.SetLimits([]gent.Limit{
 		{
@@ -943,13 +958,11 @@ func (s *InteractiveChat) SendMessage(
 	)
 
 	registry := events.NewRegistry()
-	seq := NewIntegrationTrace(fmt.Sprintf("%s-chat-%d", s.ChatCfg.Name, len(s.History)))
 	streamWait := StartTraceStreamOutput(seq, s.Writer)
 	var logWait func()
 	if s.Config.LogWriter != nil {
 		logWait = StartTraceEventLogger(seq, s.Config.LogWriter)
 	}
-	registry.Subscribe(seq)
 
 	if s.ChatCfg.PolicySuggester != nil {
 		registry.Subscribe(&PolicySuggestionHook{
@@ -970,12 +983,15 @@ func (s *InteractiveChat) SendMessage(
 	PrintSection(s.Writer, "Agent Processing")
 	fmt.Fprintln(s.Writer)
 
-	exec.Execute(execCtx)
+	_, executionErr := exec.Execute(execCtx)
 	seq.Close()
 	streamWait()
 	if logWait != nil {
 		logWait()
 		WriteTraceSnapshot(s.Config.LogWriter, seq.Snapshot())
+	}
+	if executionErr != nil {
+		return executionErr
 	}
 	result := execCtx.Result()
 

@@ -133,7 +133,9 @@ func (c *YAML) Guidance() string {
 	sb.WriteString("- tool: send_email\n")
 	sb.WriteString("  args:\n")
 	sb.WriteString("    subject: \"Unsubscribe Confirmation: Newsletter\"\n")
-	sb.WriteString("    body: \"You have been unsubscribed.\\n\\nYou will no longer receive emails.\"")
+	sb.WriteString(
+		"    body: \"You have been unsubscribed.\\n\\nYou will no longer receive emails.\"",
+	)
 	return sb.String()
 }
 
@@ -390,7 +392,7 @@ func (c *YAML) RegisterTool(tool any) gent.ToolChain {
 // If execCtx is nil, tools are executed without tracing using context.Background().
 //
 // Panics if textFormat is nil.
-func (c *YAML) Execute(
+func (c *YAML) executeUnmanaged(
 	execCtx *gent.ExecutionContext,
 	content string,
 	textFormat gent.TextFormat,
@@ -433,7 +435,7 @@ func (c *YAML) Execute(
 					"tool names.",
 				call.Name,
 			))
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr)
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr, results[i])
 			continue
 		}
 
@@ -445,7 +447,7 @@ func (c *YAML) Execute(
 					textFormat, call.Name,
 					fmt.Sprintf("Error: %v", validationErr),
 				)
-				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr)
+				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr, results[i])
 				continue
 			}
 		}
@@ -458,7 +460,7 @@ func (c *YAML) Execute(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", transformErr),
 			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr)
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr, results[i])
 			continue
 		}
 		results[i].Input = typedInput
@@ -474,6 +476,18 @@ func (c *YAML) Execute(
 			toolCallSource = beforeEvent.Source
 		}
 
+		results[i].Input = inputToUse
+		results[i].ToolCallId = toolCallId
+		if execCtx != nil {
+			if err := execCtx.RecordingError(); err != nil {
+				return nil, err
+			}
+			if err := execCtx.Context().Err(); err != nil {
+				return nil, err
+			}
+			ctx = execCtx.ToolContext(toolCallId)
+			results[i].AttemptId = execCtx.AttemptId()
+		}
 		startTime := time.Now()
 		output, err := CallToolWithTypedInputReflect(ctx, tool, inputToUse)
 		duration := time.Since(startTime)
@@ -494,10 +508,13 @@ func (c *YAML) Execute(
 			}
 
 			results[i].Output = output.Text
+			results[i].Instructions = output.Instructions
 
 			// Format output. String outputs pass through as-is (no YAML wrapping).
 			outputText, marshalErr := formatToolOutputYAML(output.Text)
 			if marshalErr != nil {
+				results[i].Error = fmt.Errorf("format tool output: %w", marshalErr)
+				err = results[i].Error
 				results[i].Text = formatSectionText(
 					textFormat, call.Name,
 					"error: failed to marshal output",
@@ -526,14 +543,12 @@ func (c *YAML) Execute(
 			}
 		}
 
-		// Publish AfterToolCall event
-		var outputVal any
-		if output != nil {
-			outputVal = output.Text
-		}
+		// Save the exact rendered result and dedup summary while this tool version is bound.
+		results[i].DeduplicationSummary = c.DeduplicateSummary(results[i])
+		results[i].SummaryCaptured = true
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
-				call.Name, inputToUse, outputVal, duration, err,
+				call.Name, inputToUse, results[i], duration, err,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)

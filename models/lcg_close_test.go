@@ -61,7 +61,7 @@ func (m *closeTestModel) GenerateContent(
 	if m.streamAfterRelease && opts.StreamingFunc != nil {
 		if err := opts.StreamingFunc(ctx, []byte("late")); err != nil {
 			m.done <- err
-			return nil, err
+			return m.response, err
 		}
 	}
 
@@ -122,12 +122,13 @@ func TestLCGWrapperGenerateContentStream_BeforeModelCallUsesTypedRequestInjectio
 	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 	execCtx.SetEventPublisher(registry)
 
-	stream, err := wrapper.GenerateContentStream(
-		execCtx,
-		"stream",
-		"topic",
-		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
-		llms.WithTemperature(0.2),
+	stream, err := execCtx.GenerateContentStream(
+		wrapper,
+		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
+		gent.NewModelCallRequest(
+			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+			llms.WithTemperature(0.2),
+		),
 	)
 	require.NoError(t, err)
 	receiveCallContext(t, model.started)
@@ -162,11 +163,12 @@ func TestLCGWrapperGenerateContentStream_CloseCancelsModelContext(t *testing.T) 
 	wrapper := NewLCGWrapper(model).WithModelName("close-test")
 	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
-	stream, err := wrapper.GenerateContentStream(
-		execCtx,
-		"stream",
-		"topic",
-		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+	stream, err := execCtx.GenerateContentStream(
+		wrapper,
+		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
+		gent.NewModelCallRequest(
+			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+		),
 	)
 	require.NoError(t, err)
 
@@ -194,11 +196,12 @@ func TestLCGWrapperGenerateContentStream_NormalCompletionCancelsModelContext(t *
 	wrapper := NewLCGWrapper(model).WithModelName("normal-completion-test")
 	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
-	stream, err := wrapper.GenerateContentStream(
-		execCtx,
-		"stream",
-		"topic",
-		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+	stream, err := execCtx.GenerateContentStream(
+		wrapper,
+		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
+		gent.NewModelCallRequest(
+			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+		),
 	)
 	require.NoError(t, err)
 
@@ -229,11 +232,12 @@ func TestLCGWrapperGenerateContentStream_NilExecutionContextSkipsTracing(t *test
 	model := newCloseTestModel()
 	wrapper := NewLCGWrapper(model).WithModelName("nil-context-test")
 
-	stream, err := wrapper.GenerateContentStream(
-		nil,
-		"stream",
-		"topic",
-		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+	stream, err := (*gent.ExecutionContext)(nil).GenerateContentStream(
+		wrapper,
+		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
+		gent.NewModelCallRequest(
+			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+		),
 	)
 	require.NoError(t, err)
 	receiveCallContext(t, model.started)
@@ -271,18 +275,19 @@ func TestLCGWrapperGenerateContentStream_LateCompletionKeepsCallIteration(t *tes
 	defer unsubscribe()
 
 	expectedChunkEarliestTs := time.Now()
-	stream, err := wrapper.GenerateContentStream(
-		execCtx,
-		"stream",
-		"topic",
-		[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+	stream, err := execCtx.GenerateContentStream(
+		wrapper,
+		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
+		gent.NewModelCallRequest(
+			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+		),
 	)
 	require.NoError(t, err)
 	receiveCallContext(t, model.started)
 
 	streamChunk := receiveStreamChunk(t, stream.Chunks())
-	assert.Equal(t, gent.StreamChunk{Content: "first"}, streamChunk)
 	emittedChunk := receiveStreamChunk(t, chunks)
+	assert.Equal(t, emittedChunk, streamChunk)
 	beforeEvents := beforeModelCallEvents(execCtx)
 	require.Len(t, beforeEvents, 1)
 	assert.GreaterOrEqual(t, emittedChunk.Timestamp.UnixNano(), expectedChunkEarliestTs.UnixNano())
@@ -299,13 +304,22 @@ func TestLCGWrapperGenerateContentStream_LateCompletionKeepsCallIteration(t *tes
 	}, emittedChunk)
 
 	stream.Close()
-	response, err := stream.Response()
-	assert.NoError(t, err)
-	assert.Nil(t, response)
+	responseDone := make(chan struct{})
+	go func() {
+		defer close(responseDone)
+		_, responseErr := stream.Response()
+		assert.ErrorIs(t, responseErr, context.Canceled)
+	}()
+	select {
+	case <-responseDone:
+		t.Fatal("Response returned before the provider finished")
+	default:
+	}
 
 	execCtx.IncrementIteration()
 	execCtx.PublishBeforeIteration()
 	close(model.release)
+	<-responseDone
 	require.Eventually(t, func() bool {
 		return len(afterModelCallEvents(execCtx)) == 1
 	}, time.Second, 10*time.Millisecond)

@@ -15,7 +15,7 @@ type Redactor interface {
 	RedactToolOutput(output any) any
 	RedactSystemPrompt(sections []gent.FormattedSection) any
 	RedactCommonPayload(eventName string, payload any) any
-	RedactDiffPayload(eventName string, before any, after any, diff string) any
+	RedactStateChange(eventName string, change gent.HistoryChange) any
 	RedactRunOutput(output []gent.ContentPart) any
 	RedactChunk(chunk gent.StreamChunk) gent.StreamChunk
 	RedactError(err error) *Error
@@ -30,7 +30,7 @@ type RedactorFuncs struct {
 	ToolOutput    func(any) any
 	SystemPrompt  func([]gent.FormattedSection) any
 	CommonPayload func(string, any) any
-	DiffPayload   func(string, any, any, string) any
+	StateChange   func(string, gent.HistoryChange) any
 	RunOutput     func([]gent.ContentPart) any
 	Chunk         func(gent.StreamChunk) gent.StreamChunk
 	Error         func(error) *Error
@@ -78,16 +78,11 @@ func (r RedactorFuncs) RedactCommonPayload(eventName string, payload any) any {
 	return r.CommonPayload(eventName, payload)
 }
 
-func (r RedactorFuncs) RedactDiffPayload(
-	eventName string,
-	before any,
-	after any,
-	diff string,
-) any {
-	if r.DiffPayload == nil {
-		return map[string]any{"before": before, "after": after, "diff": diff}
+func (r RedactorFuncs) RedactStateChange(eventName string, change gent.HistoryChange) any {
+	if r.StateChange == nil {
+		return change
 	}
-	return r.DiffPayload(eventName, before, after, diff)
+	return r.StateChange(eventName, change)
 }
 
 func (r RedactorFuncs) RedactRunOutput(output []gent.ContentPart) any {

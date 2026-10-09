@@ -9,10 +9,10 @@ import (
 )
 
 // ErrAmbiguousTags is returned in strict mode when section tags appear inside other sections.
-var ErrAmbiguousTags = fmt.Errorf("ambiguous tags: section tag found inside another section")
+var ErrAmbiguousTags = gent.ErrAmbiguousTags
 
 // ErrUnclosedTag is returned when an opening tag has no matching closing tag.
-var ErrUnclosedTag = fmt.Errorf("unclosed tag")
+var ErrUnclosedTag = gent.ErrUnclosedTag
 
 // XML implements [gent.TextFormat] using XML-style tags to delimit sections.
 //

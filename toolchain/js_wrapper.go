@@ -241,6 +241,28 @@ func (w *JsToolChainWrapper) ParseSection(
 // same action. When both are present, results are wrapped
 // in <direct_call> and <code_execution> sections.
 func (w *JsToolChainWrapper) Execute(
+	execCtx *gent.ExecutionContext, content string, textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	if execCtx == nil {
+		return w.execute(execCtx, content, textFormat)
+	}
+	if err := execCtx.SetCheckpointState(
+		"gent:toolchain_active",
+		"JavaScript toolchain",
+	); err != nil {
+		return nil, err
+	}
+	if err := execCtx.CommitCheckpoint(gent.PhaseDecisionReady); err != nil {
+		return nil, err
+	}
+	result, err := w.execute(execCtx, content, textFormat)
+	if !execCtx.IsWorkerInterrupted() {
+		execCtx.ClearCheckpointState("gent:toolchain_active")
+	}
+	return result, err
+}
+
+func (w *JsToolChainWrapper) execute(
 	execCtx *gent.ExecutionContext,
 	content string,
 	textFormat gent.TextFormat,

@@ -21,10 +21,10 @@ func newTestExecCtx() *gent.ExecutionContext {
 
 func TestStatThresholdTrigger_Counter(t *testing.T) {
 	type input struct {
-		trigger      *StatThresholdTrigger
-		setupStats   func(ctx *gent.ExecutionContext)
-		preCompact   bool // call NotifyCompacted before check
-		postSetup    func(ctx *gent.ExecutionContext)
+		trigger    *StatThresholdTrigger
+		setupStats func(ctx *gent.ExecutionContext)
+		preCompact bool // call NotifyCompacted before check
+		postSetup  func(ctx *gent.ExecutionContext)
 	}
 
 	type expected struct {
@@ -180,7 +180,8 @@ func TestStatThresholdTrigger_Counter(t *testing.T) {
 				tc.input.postSetup(ctx)
 			}
 
-			result := tc.input.trigger.ShouldCompact(ctx)
+			result, err := tc.input.trigger.ShouldCompact(ctx)
+			assert.NoError(t, err)
 			assert.Equal(t, tc.expected.shouldCompact, result)
 		})
 	}
@@ -263,7 +264,8 @@ func TestStatThresholdTrigger_Gauge(t *testing.T) {
 			ctx := newTestExecCtx()
 			tc.input.setupStats(ctx)
 
-			result := tc.input.trigger.ShouldCompact(ctx)
+			result, err := tc.input.trigger.ShouldCompact(ctx)
+			assert.NoError(t, err)
 			assert.Equal(t, tc.expected.shouldCompact, result)
 		})
 	}
@@ -367,7 +369,8 @@ func TestStatThresholdTrigger_Prefix(t *testing.T) {
 			ctx := newTestExecCtx()
 			tc.input.setupStats(ctx)
 
-			result := tc.input.trigger.ShouldCompact(ctx)
+			result, err := tc.input.trigger.ShouldCompact(ctx)
+			assert.NoError(t, err)
 			assert.Equal(t, tc.expected.shouldCompact, result)
 		})
 	}
@@ -440,13 +443,10 @@ func TestStatThresholdTrigger_NotifyCompacted(t *testing.T) {
 
 			tc.input.trigger.NotifyCompacted(ctx)
 
-			for i := range tc.input.trigger.counterThresholds {
-				ct := &tc.input.trigger.counterThresholds[i]
-				assert.Equal(t,
-					tc.expected.lastValues,
-					ct.lastValue,
-				)
-			}
+			saved, ok, err := ctx.CheckpointState("gent:compaction_baseline")
+			assert.NoError(t, err)
+			assert.True(t, ok)
+			assert.Equal(t, tc.expected.lastValues, saved)
 		})
 	}
 }
@@ -464,7 +464,7 @@ func TestStatThresholdTrigger_CombinedScenario(t *testing.T) {
 	// Iteration 5, 120K tokens → token fires
 	ctx.Stats().IncrCounter("myapp:iterations", 5)
 	ctx.Stats().IncrCounter("myapp:input_tokens", 120000)
-	assert.True(t, trigger.ShouldCompact(ctx),
+	assert.True(t, testShouldCompact(t, trigger, ctx),
 		"should fire: 120K tokens >= 100K delta")
 	trigger.NotifyCompacted(ctx)
 
@@ -472,7 +472,7 @@ func TestStatThresholdTrigger_CombinedScenario(t *testing.T) {
 	// delta iterations = 5 (10-5), delta tokens = 80K
 	ctx.Stats().IncrCounter("myapp:iterations", 5)
 	ctx.Stats().IncrCounter("myapp:input_tokens", 80000)
-	assert.False(t, trigger.ShouldCompact(ctx),
+	assert.False(t, testShouldCompact(t, trigger, ctx),
 		"should not fire: delta 5 iter < 10, "+
 			"delta 80K tokens < 100K")
 
@@ -480,13 +480,13 @@ func TestStatThresholdTrigger_CombinedScenario(t *testing.T) {
 	// delta iterations = 10 (15-5), delta tokens = 130K
 	ctx.Stats().IncrCounter("myapp:iterations", 5)
 	ctx.Stats().IncrCounter("myapp:input_tokens", 50000)
-	assert.True(t, trigger.ShouldCompact(ctx),
+	assert.True(t, testShouldCompact(t, trigger, ctx),
 		"should fire: delta 10 iterations >= 10 delta")
 	trigger.NotifyCompacted(ctx)
 
 	// After second compaction: both snapshots reset
 	// delta iterations = 0, delta tokens = 0
-	assert.False(t, trigger.ShouldCompact(ctx),
+	assert.False(t, testShouldCompact(t, trigger, ctx),
 		"should not fire: both deltas are 0 after "+
 			"compaction")
 }

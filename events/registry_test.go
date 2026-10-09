@@ -103,14 +103,14 @@ func (s *mockCommonEventSubscriber) OnCommonEvent(
 	s.event = e
 }
 
-type mockCommonDiffEventSubscriber struct {
+type mockStateChangeEventSubscriber struct {
 	called bool
-	event  *gent.CommonDiffEvent
+	event  *gent.StateChangeEvent
 }
 
-func (s *mockCommonDiffEventSubscriber) OnCommonDiffEvent(
+func (s *mockStateChangeEventSubscriber) OnStateChangeEvent(
 	_ *gent.ExecutionContext,
-	e *gent.CommonDiffEvent,
+	e *gent.StateChangeEvent,
 ) {
 	s.called = true
 	s.event = e
@@ -118,13 +118,16 @@ func (s *mockCommonDiffEventSubscriber) OnCommonDiffEvent(
 
 // multiSubscriber implements multiple interfaces
 type multiSubscriber struct {
-	beforeExecCalled   bool
-	afterExecCalled    bool
-	beforeIterCalled   bool
-	afterModelCalled   bool
+	beforeExecCalled bool
+	afterExecCalled  bool
+	beforeIterCalled bool
+	afterModelCalled bool
 }
 
-func (s *multiSubscriber) OnBeforeExecution(_ *gent.ExecutionContext, _ *gent.BeforeExecutionEvent) {
+func (s *multiSubscriber) OnBeforeExecution(
+	_ *gent.ExecutionContext,
+	_ *gent.BeforeExecutionEvent,
+) {
 	s.beforeExecCalled = true
 }
 
@@ -132,7 +135,10 @@ func (s *multiSubscriber) OnAfterExecution(_ *gent.ExecutionContext, _ *gent.Aft
 	s.afterExecCalled = true
 }
 
-func (s *multiSubscriber) OnBeforeIteration(_ *gent.ExecutionContext, _ *gent.BeforeIterationEvent) {
+func (s *multiSubscriber) OnBeforeIteration(
+	_ *gent.ExecutionContext,
+	_ *gent.BeforeIterationEvent,
+) {
 	s.beforeIterCalled = true
 }
 
@@ -308,16 +314,14 @@ func TestRegistry_Dispatch_CommonEvent(t *testing.T) {
 	assert.Equal(t, event, sub.event)
 }
 
-func TestRegistry_Dispatch_CommonDiffEvent(t *testing.T) {
+func TestRegistry_Dispatch_StateChangeEvent(t *testing.T) {
 	registry := NewRegistry()
-	sub := &mockCommonDiffEventSubscriber{}
+	sub := &mockStateChangeEventSubscriber{}
 	registry.Subscribe(sub)
 
 	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
-	event := &gent.CommonDiffEvent{
-		Before: map[string]int{"a": 1},
-		After:  map[string]int{"a": 2},
-		Diff:   "-a: 1\n+a: 2",
+	event := &gent.StateChangeEvent{
+		Change: gent.HistoryChange{PreviousRevision: 1, Revision: 2, Reason: gent.ContextReorder},
 	}
 
 	registry.Dispatch(execCtx, event)
@@ -363,7 +367,10 @@ type orderTrackingSubscriber struct {
 	id    int
 }
 
-func (s *orderTrackingSubscriber) OnBeforeExecution(_ *gent.ExecutionContext, _ *gent.BeforeExecutionEvent) {
+func (s *orderTrackingSubscriber) OnBeforeExecution(
+	_ *gent.ExecutionContext,
+	_ *gent.BeforeExecutionEvent,
+) {
 	*s.order = append(*s.order, s.id)
 }
 

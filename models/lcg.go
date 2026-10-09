@@ -10,20 +10,35 @@ import (
 )
 
 // LCGWrapper wraps an llms.Model and implements gent's Model interface.
-// It normalizes token usage across providers and automatically publishes model call events
-// when an ExecutionContext is provided.
+// It normalizes token usage across providers. Invoke it through ExecutionContext's managed
+// GenerateContentStream method so requests, chunks, responses, and usage are recorded together.
 //
 // Example usage:
 //
-//	llm, _ := openai.New(openai.WithToken(apiKey))
-//	model := models.NewLCGWrapper(llm).WithModelName("gpt-4")
+//	model := models.NewLCGWrapper(llm).WithModelName(modelName)
+//	request := gent.NewModelCallRequest(messages)
+//	stream, err := execCtx.GenerateContentStream(
+//	    model, gent.ModelCall{StreamId: "answer"}, request,
+//	)
 //
-//	// Generate content with event publishing and streaming support
-//	response, err := model.GenerateContent(execCtx, "req-1", "llm", messages)
+// Handle err, consume stream.Chunks(), then call stream.Response() to await producer completion.
 type LCGWrapper struct {
-	model     llms.Model
-	modelName string // Optional model name for events
-	provider  string // Optional provider name for trace/debug events
+	model           llms.Model
+	modelName       string // Optional model name for events
+	provider        string // Optional provider name for trace/debug events
+	recoveryVersion string
+}
+
+// WithRecoveryVersion identifies provider configuration hidden inside the injected client.
+// Change this value when endpoint, provider defaults, or middleware behavior changes.
+func (m *LCGWrapper) WithRecoveryVersion(version string) *LCGWrapper {
+	m.recoveryVersion = version
+	return m
+}
+
+func (m *LCGWrapper) RecoveryConfig() any {
+	return map[string]any{"model": m.modelName, "provider": m.provider,
+		"clientVersion": m.recoveryVersion}
 }
 
 type callbackContentDeduper struct {
@@ -254,224 +269,62 @@ func getIntFromMap(m map[string]any, key string) int {
 	}
 }
 
-func resolveCallOptions(options []llms.CallOption) llms.CallOptions {
-	var resolved llms.CallOptions
-	llms.WithStreamThinking(true)(&resolved)
-	for _, option := range options {
-		if option != nil {
-			option(&resolved)
-		}
-	}
-	return resolved
-}
-
-// GenerateContentStream implements gent.StreamingModel.GenerateContentStream.
-// It provides streaming token-by-token generation with support for reasoning/thinking content.
-//
-// The returned stream uses an unbounded internal buffer, so this method never blocks
-// the producer even if the consumer is slow or not reading.
-//
-// When execCtx is provided, chunks are also emitted to streaming subscribers via EmitChunk.
+// GenerateContentStream adapts LangChainGo's callbacks to a provider stream. Framework observation
+// belongs to ExecutionContext.GenerateContentStream, which captures the final resolved options.
 func (m *LCGWrapper) GenerateContentStream(
-	execCtx *gent.ExecutionContext,
-	streamId string,
-	streamTopicId string,
-	messages []llms.MessageContent,
-	options ...llms.CallOption,
+	base context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	request := gent.ModelCallRequest{
-		Messages:              messages,
-		Options:               resolveCallOptions(options),
-		OptionCaptureComplete: false,
-		OptionCaptureNotes: []string{
-			"LangChainGo may hide provider-specific client options outside llms.CallOptions",
-		},
+	ctx, cancel := context.WithCancel(base)
+	stream, err := gent.NewBoundedStreamWithDuration(ctx, 64, cancel)
+	if err != nil {
+		cancel()
+		return nil, err
 	}
-	callIteration := 0
-	sourcePath := ""
-	modelCallId := ""
-	contextId := ""
-	parentContextId := ""
-	callDepth := 0
-	baseCtx := context.Background()
-
-	if execCtx != nil {
-		// Publish BeforeModelCall event — subscribers may modify event.Request
-		// for ephemeral dynamic context injection.
-		beforeEvent := execCtx.PublishBeforeModelCall(
-			m.modelName, request,
-			gent.WithModelStream(streamId, streamTopicId),
-			gent.WithModelProvider(m.provider),
-		)
-
-		// Subscribers may inject ephemeral context into Request.Messages. Use the same mutated
-		// request for the provider call and after-event so traces show what was actually sent.
-		request = beforeEvent.Request
-		callIteration = beforeEvent.Iteration
-		sourcePath = beforeEvent.Source
-		modelCallId = beforeEvent.ModelCallId
-		contextId = beforeEvent.ContextId
-		parentContextId = beforeEvent.ParentContextId
-		callDepth = beforeEvent.Depth
-		baseCtx = execCtx.Context()
+	deduper := newCallbackContentDeduper()
+	options := request.Options
+	if options.Model == "" {
+		options.Model = m.modelName
 	}
-
-	ctx, cancel := context.WithCancel(baseCtx)
-
-	// Create stream with duration tracking
-	stream := gent.NewStreamWithDurationWithClose(cancel)
-
-	// Set up streaming callbacks.
-	//
-	// We use BOTH WithStreamingFunc and WithStreamingReasoningFunc because
-	// providers handle them differently:
-	//   - OpenAI: routes both reasoning and content through StreamingReasoningFunc
-	//   - Anthropic: routes content through StreamingFunc and reasoning through
-	//     StreamingReasoningFunc separately. Also has a bug (langchaingo v0.1.14)
-	//     where only StreamingFunc is checked for streaming response routing —
-	//     without it, the client tries to JSON-parse SSE data.
-	//
-	// LangChainGo can deliver the same content chunk through both callbacks. We emit
-	// whichever callback arrives first and pair off the later duplicate from the other
-	// callback. Counts preserve legitimate repeated same-text chunks from one callback.
-	contentDeduper := newCallbackContentDeduper()
-
-	streamingContentCallback := llms.WithStreamingFunc(
-		func(_ context.Context, contentChunk []byte) error {
-			if len(contentChunk) > 0 {
-				content := string(contentChunk)
-				if !contentDeduper.shouldEmitStreaming(content) {
-					return nil
-				}
-				chunk := gent.StreamChunk{
-					Content:         content,
-					Source:          sourcePath,
-					Iteration:       callIteration,
-					Depth:           callDepth,
-					ContextId:       contextId,
-					ParentContextId: parentContextId,
-					ModelCallId:     modelCallId,
-					StreamId:        streamId,
-					StreamTopicId:   streamTopicId,
-				}
-				if stream.SendContent(chunk.Content) {
-					if execCtx != nil {
-						execCtx.EmitChunk(chunk)
-					}
-				}
+	options.StreamingFunc = func(_ context.Context, content []byte) error {
+		if len(content) > 0 && deduper.shouldEmitStreaming(string(content)) {
+			if !stream.SendContent(string(content)) {
+				return ctx.Err()
 			}
-			return nil
-		},
-	)
-
-	streamingReasoningCallback := llms.WithStreamingReasoningFunc(
-		func(_ context.Context, reasoningChunk, contentChunk []byte) error {
-			if len(reasoningChunk) > 0 {
-				chunk := gent.StreamChunk{
-					ReasoningContent: string(reasoningChunk),
-					Source:           sourcePath,
-					Iteration:        callIteration,
-					Depth:            callDepth,
-					ContextId:        contextId,
-					ParentContextId:  parentContextId,
-					ModelCallId:      modelCallId,
-					StreamId:         streamId,
-					StreamTopicId:    streamTopicId,
-				}
-				if stream.SendReasoning(chunk.ReasoningContent) {
-					if execCtx != nil {
-						execCtx.EmitChunk(chunk)
-					}
-				}
+		}
+		return ctx.Err()
+	}
+	options.StreamingReasoningFunc = func(_ context.Context, reasoning, content []byte) error {
+		if len(reasoning) > 0 {
+			if !stream.SendReasoning(string(reasoning)) {
+				return ctx.Err()
 			}
-			if len(contentChunk) > 0 {
-				content := string(contentChunk)
-				if !contentDeduper.shouldEmitReasoning(content) {
-					return nil
-				}
-				chunk := gent.StreamChunk{
-					Content:         content,
-					Source:          sourcePath,
-					Iteration:       callIteration,
-					Depth:           callDepth,
-					ContextId:       contextId,
-					ParentContextId: parentContextId,
-					ModelCallId:     modelCallId,
-					StreamId:        streamId,
-					StreamTopicId:   streamTopicId,
-				}
-				if stream.SendContent(chunk.Content) {
-					if execCtx != nil {
-						execCtx.EmitChunk(chunk)
-					}
-				}
+		}
+		if len(content) > 0 && deduper.shouldEmitReasoning(string(content)) {
+			if !stream.SendContent(string(content)) {
+				return ctx.Err()
 			}
-			return nil
-		},
-	)
-
-	// Build options with streaming enabled.
-	// StreamThinking is added before user options so users can override it.
-	// The streaming callbacks are added last to ensure they take effect.
-	opts := make([]llms.CallOption, 0, len(options)+3)
-	opts = append(opts, llms.WithStreamThinking(true))
-	opts = append(opts, options...)
-	opts = append(opts, streamingContentCallback, streamingReasoningCallback)
-
-	// Start the model call in a goroutine
+		}
+		return ctx.Err()
+	}
 	go func() {
 		defer cancel()
-
-		lcgResponse, err := m.model.GenerateContent(ctx, request.Messages, opts...)
+		providerResponse, err := m.model.GenerateContent(
+			ctx,
+			request.Messages,
+			llms.WithOptions(options),
+		)
 		duration := stream.Duration()
-
-		// Convert response
 		var response *gent.ContentResponse
-		if lcgResponse != nil && err == nil {
-			response = convertLCGResponse(lcgResponse, duration)
-		} else if err == nil {
-			// Build response from accumulated content
-			response = &gent.ContentResponse{
-				Choices: []*gent.ContentChoice{
-					{
-						Content:          stream.AccumulatedContent(),
-						ReasoningContent: stream.AccumulatedReasoning(),
-					},
-				},
-				Info: &gent.GenerationInfo{Duration: duration},
-			}
+		if providerResponse != nil {
+			response = convertLCGResponse(providerResponse, duration)
+		} else {
+			response = &gent.ContentResponse{Choices: []*gent.ContentChoice{{
+				Content:          stream.AccumulatedContent(),
+				ReasoningContent: stream.AccumulatedReasoning(),
+			}}, Info: &gent.GenerationInfo{Duration: duration}}
 		}
-
-		// Publish AfterModelCall event (also updates stats for tokens)
-		if execCtx != nil {
-			execCtx.PublishAfterModelCallForIteration(
-				callIteration, m.modelName, request, response, duration, err,
-				gent.WithModelCallId(modelCallId),
-				gent.WithModelStream(streamId, streamTopicId),
-				gent.WithModelCallSource(sourcePath),
-				gent.WithModelProvider(m.provider),
-			)
-		}
-
-		// Complete the stream
-		completed := stream.TryComplete(response, err)
-
-		// Emit error chunk if error occurred before the consumer closed the stream.
-		if err != nil && completed && execCtx != nil {
-			execCtx.EmitChunk(gent.StreamChunk{
-				Source:          sourcePath,
-				Iteration:       callIteration,
-				Depth:           callDepth,
-				ContextId:       contextId,
-				ParentContextId: parentContextId,
-				ModelCallId:     modelCallId,
-				StreamId:        streamId,
-				StreamTopicId:   streamTopicId,
-				Err:             err,
-			})
-		}
+		stream.Complete(response, err)
 	}()
-
 	return stream, nil
 }
 

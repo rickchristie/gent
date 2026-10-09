@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -15,10 +16,7 @@ import (
 type drainRequiredSummaryModel struct{}
 
 func (m *drainRequiredSummaryModel) GenerateContentStream(
-	_ *gent.ExecutionContext,
-	_, _ string,
-	_ []llms.MessageContent,
-	_ ...llms.CallOption,
+	_ context.Context, _ gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	stream := &drainRequiredSummaryStream{
 		chunks:       make(chan gent.StreamChunk),
@@ -54,14 +52,15 @@ func (s *drainRequiredSummaryStream) Close() {}
 
 func TestSummarization_CompactDrainsModelStream(t *testing.T) {
 	data := gent.NewBasicLoopData(nil)
-	data.SetScratchPad([]*gent.Iteration{makeIter("data")})
+
 	execCtx := gent.NewExecutionContext(context.Background(), "test", data)
+	setTestRecords(t, execCtx, []*gent.HistoryEntry{makeIter("data")})
 	execCtx.SetLimits(nil)
 	strategy := NewSummarization(&drainRequiredSummaryModel{}, tt.NewMockFormat())
 
 	done := make(chan error, 1)
 	go func() {
-		done <- strategy.Compact(execCtx)
+		done <- applyTestCompaction(execCtx, strategy)
 	}()
 
 	select {
@@ -76,7 +75,7 @@ func TestSummarization_Compact(t *testing.T) {
 	type input struct {
 		keepRecent       int
 		customPrompt     string
-		scratchpad       []*gent.Iteration
+		scratchpad       []*gent.HistoryEntry
 		modelResponse    string
 		modelError       error
 		modelRawResponse *gent.ContentResponse
@@ -98,7 +97,7 @@ func TestSummarization_Compact(t *testing.T) {
 
 	mockFmt := tt.NewMockFormat()
 
-	existingSynthetic := &gent.Iteration{
+	existingSynthetic := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeAI,
@@ -116,10 +115,10 @@ func TestSummarization_Compact(t *testing.T) {
 				},
 			},
 		},
-		Origin: gent.IterationCompactedSynthetic,
+		Origin: gent.RecordCompactedSynthetic,
 	}
 
-	imageIter := &gent.Iteration{
+	imageIter := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeAI,
@@ -145,7 +144,7 @@ func TestSummarization_Compact(t *testing.T) {
 			name: "empty scratchpad no change",
 			input: input{
 				keepRecent:    0,
-				scratchpad:    []*gent.Iteration{},
+				scratchpad:    []*gent.HistoryEntry{},
 				modelResponse: "summary",
 			},
 			expected: expected{
@@ -160,7 +159,7 @@ func TestSummarization_Compact(t *testing.T) {
 				"no change",
 			input: input{
 				keepRecent: 5,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("a"), makeIter("b"),
 				},
 				modelResponse: "summary",
@@ -177,7 +176,7 @@ func TestSummarization_Compact(t *testing.T) {
 				"summarizes all",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("step 1"),
 					makeIter("step 2"),
 					makeIter("step 3"),
@@ -201,7 +200,7 @@ func TestSummarization_Compact(t *testing.T) {
 				"older keeps recent",
 			input: input{
 				keepRecent: 2,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("old 1"),
 					makeIter("old 2"),
 					makeIter("recent 1"),
@@ -226,7 +225,7 @@ func TestSummarization_Compact(t *testing.T) {
 				"replaced",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					existingSynthetic,
 					makeIter("new step 1"),
 					makeIter("new step 2"),
@@ -249,7 +248,7 @@ func TestSummarization_Compact(t *testing.T) {
 			name: "pinned iterations preserved",
 			input: input{
 				keepRecent: 1,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("old"),
 					pinned1,
 					makeIter("recent"),
@@ -273,7 +272,7 @@ func TestSummarization_Compact(t *testing.T) {
 			name: "multiple pinned iterations preserved",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					pinned1,
 					makeIter("a"),
 					pinned2,
@@ -299,7 +298,7 @@ func TestSummarization_Compact(t *testing.T) {
 				"extracted",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					imageIter,
 					makeIter("text only"),
 				},
@@ -321,7 +320,7 @@ func TestSummarization_Compact(t *testing.T) {
 			name: "model error returns error",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("data"),
 				},
 				modelError: errors.New(
@@ -343,7 +342,7 @@ func TestSummarization_Compact(t *testing.T) {
 			input: input{
 				keepRecent:    0,
 				customPrompt:  "Summarize: %s\n%s",
-				scratchpad:    []*gent.Iteration{makeIter("x")},
+				scratchpad:    []*gent.HistoryEntry{makeIter("x")},
 				modelResponse: "Custom summarized",
 			},
 			expected: expected{
@@ -363,7 +362,7 @@ func TestSummarization_Compact(t *testing.T) {
 				"returns error",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("data"),
 				},
 				modelRawResponse: &gent.ContentResponse{
@@ -415,13 +414,14 @@ func TestSummarization_Compact(t *testing.T) {
 			}
 
 			data := gent.NewBasicLoopData(nil)
-			data.SetScratchPad(tc.input.scratchpad)
+
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,
 			)
+			setTestRecords(t, execCtx, tc.input.scratchpad)
 			execCtx.SetLimits(nil)
 
-			err := strategy.Compact(execCtx)
+			err := applyTestCompaction(execCtx, strategy)
 
 			if tc.expected.err != "" {
 				assert.EqualError(t, err, tc.expected.err)
@@ -429,7 +429,7 @@ func TestSummarization_Compact(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			result := data.GetScratchPad()
+			result := testScratchpad(t, execCtx)
 			assert.Equal(t,
 				tc.expected.scratchpadLen, len(result),
 			)
@@ -439,7 +439,7 @@ func TestSummarization_Compact(t *testing.T) {
 			for _, iter := range result {
 				switch {
 				case iter.Origin ==
-					gent.IterationCompactedSynthetic:
+					gent.RecordCompactedSynthetic:
 					synthetics++
 				case isPinned(iter):
 					pinnedCount++
@@ -466,7 +466,7 @@ func TestSummarization_Compact(t *testing.T) {
 				found := false
 				for _, iter := range result {
 					if iter.Origin !=
-						gent.IterationCompactedSynthetic {
+						gent.RecordCompactedSynthetic {
 						continue
 					}
 					text := extractText(iter)
@@ -511,7 +511,7 @@ func TestSummarization_Compact(t *testing.T) {
 func TestSummarization_PromptContent(t *testing.T) {
 	type input struct {
 		keepRecent    int
-		scratchpad    []*gent.Iteration
+		scratchpad    []*gent.HistoryEntry
 		modelResponse string
 	}
 
@@ -520,12 +520,12 @@ func TestSummarization_PromptContent(t *testing.T) {
 		systemContains  []string
 		userContains    []string
 		userNotContains []string
-		pinnedInResult  []*gent.Iteration
+		pinnedInResult  []*gent.HistoryEntry
 	}
 
 	mockFmt := tt.NewMockFormat()
 
-	existingSynthetic := &gent.Iteration{
+	existingSynthetic := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeAI,
@@ -543,7 +543,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 				},
 			},
 		},
-		Origin: gent.IterationCompactedSynthetic,
+		Origin: gent.RecordCompactedSynthetic,
 	}
 
 	pinned := makePinnedIter("secret pinned data")
@@ -558,7 +558,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 				"user message",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					existingSynthetic,
 					makeIter("new data"),
 				},
@@ -586,7 +586,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 				"existing summary",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("step 1"),
 				},
 				modelResponse: "summary",
@@ -609,7 +609,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 				"from user message",
 			input: input{
 				keepRecent: 0,
-				scratchpad: []*gent.Iteration{
+				scratchpad: []*gent.HistoryEntry{
 					makeIter("normal step"),
 					pinned,
 					makeIter("another step"),
@@ -628,7 +628,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 				userNotContains: []string{
 					"secret pinned data",
 				},
-				pinnedInResult: []*gent.Iteration{
+				pinnedInResult: []*gent.HistoryEntry{
 					pinned,
 				},
 			},
@@ -652,13 +652,14 @@ func TestSummarization_PromptContent(t *testing.T) {
 			}
 
 			data := gent.NewBasicLoopData(nil)
-			data.SetScratchPad(tc.input.scratchpad)
+
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,
 			)
+			setTestRecords(t, execCtx, tc.input.scratchpad)
 			execCtx.SetLimits(nil)
 
-			err := strategy.Compact(execCtx)
+			err := applyTestCompaction(execCtx, strategy)
 			assert.NoError(t, err)
 
 			// Verify message structure
@@ -716,11 +717,11 @@ func TestSummarization_PromptContent(t *testing.T) {
 			}
 
 			// Verify pinned iterations in result
-			result := data.GetScratchPad()
+			result := testScratchpad(t, execCtx)
 			for _, pin := range tc.expected.pinnedInResult {
 				found := false
 				for _, iter := range result {
-					if iter == pin {
+					if reflect.DeepEqual(iter, pin) {
 						found = true
 						break
 					}
@@ -736,7 +737,7 @@ func TestSummarization_PromptContent(t *testing.T) {
 
 // TestSummarization_WithPromptSingleMessage verifies that
 // WithPrompt sends everything in a single user message
-// (no system message), preserving backward compatibility.
+// with no separate system message.
 func TestSummarization_WithPromptSingleMessage(
 	t *testing.T,
 ) {
@@ -748,15 +749,16 @@ func TestSummarization_WithPromptSingleMessage(
 		WithPrompt("Custom: %s\n%s")
 
 	data := gent.NewBasicLoopData(nil)
-	data.SetScratchPad([]*gent.Iteration{
-		makeIter("test data"),
-	})
+
 	execCtx := gent.NewExecutionContext(
 		context.Background(), "test", data,
 	)
+	setTestRecords(t, execCtx, []*gent.HistoryEntry{
+		makeIter("test data"),
+	})
 	execCtx.SetLimits(nil)
 
-	err := strategy.Compact(execCtx)
+	err := applyTestCompaction(execCtx, strategy)
 	assert.NoError(t, err)
 
 	// Should be a single user message (no system)
@@ -786,16 +788,17 @@ func TestSummarization_DefaultTwoMessages(t *testing.T) {
 	strategy := NewSummarization(model, mockFmt)
 
 	data := gent.NewBasicLoopData(nil)
-	data.SetScratchPad([]*gent.Iteration{
-		makeIter("step 1"),
-		makeIter("step 2"),
-	})
+
 	execCtx := gent.NewExecutionContext(
 		context.Background(), "test", data,
 	)
+	setTestRecords(t, execCtx, []*gent.HistoryEntry{
+		makeIter("step 1"),
+		makeIter("step 2"),
+	})
 	execCtx.SetLimits(nil)
 
-	err := strategy.Compact(execCtx)
+	err := applyTestCompaction(execCtx, strategy)
 	assert.NoError(t, err)
 
 	assert.Len(t, model.CapturedMessages, 1)

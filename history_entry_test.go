@@ -6,15 +6,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIteration_SetMetadata(t *testing.T) {
+func TestHistoryEntry_SetMetadata(t *testing.T) {
 	type input struct {
-		initialMetadata map[IterationMetadataKey]any
-		key             IterationMetadataKey
+		initialMetadata map[RecordMetadataKey]any
+		key             RecordMetadataKey
 		value           any
 	}
 
 	type expected struct {
-		metadata map[IterationMetadataKey]any
+		metadata map[RecordMetadataKey]any
 	}
 
 	tests := []struct {
@@ -30,7 +30,7 @@ func TestIteration_SetMetadata(t *testing.T) {
 				value:           5.0,
 			},
 			expected: expected{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 5.0,
 				},
 			},
@@ -38,14 +38,14 @@ func TestIteration_SetMetadata(t *testing.T) {
 		{
 			name: "sets value on existing map",
 			input: input{
-				initialMetadata: map[IterationMetadataKey]any{
+				initialMetadata: map[RecordMetadataKey]any{
 					"existing_key": "existing_value",
 				},
 				key:   IMKImportanceScore,
 				value: 3.0,
 			},
 			expected: expected{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					"existing_key":     "existing_value",
 					IMKImportanceScore: 3.0,
 				},
@@ -54,14 +54,14 @@ func TestIteration_SetMetadata(t *testing.T) {
 		{
 			name: "overwrites existing key",
 			input: input{
-				initialMetadata: map[IterationMetadataKey]any{
+				initialMetadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 1.0,
 				},
 				key:   IMKImportanceScore,
 				value: 9.0,
 			},
 			expected: expected{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 9.0,
 				},
 			},
@@ -70,7 +70,7 @@ func TestIteration_SetMetadata(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			iter := &Iteration{
+			iter := &HistoryEntry{
 				Metadata: tc.input.initialMetadata,
 			}
 
@@ -81,10 +81,10 @@ func TestIteration_SetMetadata(t *testing.T) {
 	}
 }
 
-func TestIteration_GetMetadata(t *testing.T) {
+func TestHistoryEntry_GetMetadata(t *testing.T) {
 	type input struct {
-		metadata map[IterationMetadataKey]any
-		key      IterationMetadataKey
+		metadata map[RecordMetadataKey]any
+		key      RecordMetadataKey
 	}
 
 	type expected struct {
@@ -111,7 +111,7 @@ func TestIteration_GetMetadata(t *testing.T) {
 		{
 			name: "missing key returns nil false",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					"other_key": "other_value",
 				},
 				key: IMKImportanceScore,
@@ -124,7 +124,7 @@ func TestIteration_GetMetadata(t *testing.T) {
 		{
 			name: "present key returns value true",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 7.5,
 				},
 				key: IMKImportanceScore,
@@ -138,7 +138,7 @@ func TestIteration_GetMetadata(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			iter := &Iteration{
+			iter := &HistoryEntry{
 				Metadata: tc.input.metadata,
 			}
 
@@ -152,7 +152,7 @@ func TestIteration_GetMetadata(t *testing.T) {
 
 func TestGetImportanceScore(t *testing.T) {
 	type input struct {
-		metadata map[IterationMetadataKey]any
+		metadata map[RecordMetadataKey]any
 	}
 
 	type expected struct {
@@ -178,7 +178,7 @@ func TestGetImportanceScore(t *testing.T) {
 		{
 			name: "missing key returns 0 false",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					"other": "value",
 				},
 			},
@@ -190,7 +190,7 @@ func TestGetImportanceScore(t *testing.T) {
 		{
 			name: "wrong type returns 0 false",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: "not a float",
 				},
 			},
@@ -202,7 +202,7 @@ func TestGetImportanceScore(t *testing.T) {
 		{
 			name: "int type returns 0 false",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 5,
 				},
 			},
@@ -214,7 +214,7 @@ func TestGetImportanceScore(t *testing.T) {
 		{
 			name: "valid positive float64 returns score true",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 8.5,
 				},
 			},
@@ -226,7 +226,7 @@ func TestGetImportanceScore(t *testing.T) {
 		{
 			name: "valid negative float64 returns score true",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: -3.0,
 				},
 			},
@@ -238,7 +238,7 @@ func TestGetImportanceScore(t *testing.T) {
 		{
 			name: "zero float64 returns 0 true",
 			input: input{
-				metadata: map[IterationMetadataKey]any{
+				metadata: map[RecordMetadataKey]any{
 					IMKImportanceScore: 0.0,
 				},
 			},
@@ -251,7 +251,7 @@ func TestGetImportanceScore(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			iter := &Iteration{
+			iter := &HistoryEntry{
 				Metadata: tc.input.metadata,
 			}
 

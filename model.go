@@ -1,70 +1,44 @@
 package gent
 
 import (
+	"context"
 	"time"
 
 	"github.com/tmc/langchaingo/llms"
 )
 
-// Model is gent's model interface. All model calls use streaming — chunks are
-// emitted in real-time as they arrive from the LLM, enabling real-time
-// observation, repetition detection, and early cancellation.
-//
-// When an ExecutionContext is provided, the model will automatically trace the
-// call and emit chunks for streaming subscribers.
-//
-// If execCtx is nil, tracing and chunk emission are skipped.
+// Model is a provider adapter. The framework owns request capture, IDs, statistics and streaming.
+// Implementations honor cancellation and complete Response only after their producer has exited.
 type Model interface {
-	// GenerateContentStream generates content with streaming support.
-	// It returns a Stream that provides chunks as they arrive from the model.
-	//
-	// Parameters:
-	//   - execCtx: ExecutionContext for tracing, cancellation, and stream fan-in
-	//   - streamId: Unique identifier for this stream (caller-provided)
-	//   - streamTopicId: Topic for grouping related streams (caller-provided)
-	//   - messages: Input messages
-	//   - options: LLM call options
-	//
-	// Cancellation:
-	// The implementation should use execCtx.Context() for HTTP client calls.
-	// This context is cancelled when limits are exceeded or the execution is
-	// stopped.
-	//
-	// Stream Emission Requirement:
-	// Implementations MUST call execCtx.EmitChunk() for each chunk as it
-	// arrives from the LLM. This enables real-time observation of responses
-	// across the execution tree.
-	//
-	// Each emitted chunk should have:
-	//   - Content/ReasoningContent: The chunk's content delta
-	//   - StreamId: The provided streamId
-	//   - StreamTopicId: The provided streamTopicId
-	//   - Source: Will be auto-populated by EmitChunk if empty
-	//   - Err: Set if an error occurred (final chunk only)
-	//
-	// The streamId should be unique across concurrent streams. If empty,
-	// chunks are still emitted but cannot be filtered by stream ID.
-	//
-	// Usage:
-	//
-	//	stream, err := model.GenerateContentStream(execCtx, "req-1", "llm", msgs)
-	//	if err != nil {
-	//	    return err
-	//	}
-	//	for chunk := range stream.Chunks() {
-	//	    if chunk.Err != nil {
-	//	        return chunk.Err
-	//	    }
-	//	    fmt.Print(chunk.Content)
-	//	}
-	//	response, err := stream.Response()
-	GenerateContentStream(
-		execCtx *ExecutionContext,
-		streamId string,
-		streamTopicId string,
-		messages []llms.MessageContent,
-		options ...llms.CallOption,
-	) (Stream, error)
+	GenerateContentStream(context.Context, ModelCallRequest) (Stream, error)
+}
+
+// ModelCall identifies a logical call independently from its physical worker attempt.
+// Id is optional. An empty Id uses call order after the last checkpoint for recovery.
+// Supply a stable, unique Id when calls can run concurrently or in a different order on recovery.
+// StreamId and StreamTopicId group display output; they do not identify a logical call.
+type ModelCall struct {
+	Id            string
+	StreamId      string
+	StreamTopicId string
+	Source        string
+	Model         string
+	Provider      string
+}
+
+// NewModelCallRequest resolves option functions exactly once, before mutable request hooks.
+func NewModelCallRequest(
+	messages []llms.MessageContent,
+	options ...llms.CallOption,
+) ModelCallRequest {
+	var resolved llms.CallOptions
+	llms.WithStreamThinking(true)(&resolved)
+	for _, option := range options {
+		if option != nil {
+			option(&resolved)
+		}
+	}
+	return ModelCallRequest{Messages: messages, Options: resolved, OptionCaptureComplete: true}
 }
 
 // ContentResponse is the response from a GenerateContent call.
@@ -146,16 +120,14 @@ type GenerationInfo struct {
 // Options contains meaningful resolved call options when the model wrapper can capture them.
 // OptionCaptureComplete must be false when provider-specific options cannot be fully introspected.
 type ModelCallRequest struct {
-	Messages []llms.MessageContent
-	Options  llms.CallOptions
+	Messages          []llms.MessageContent
+	Options           llms.CallOptions
+	SelectionRevision HistoryRevision
+	ActiveEntryIds    []EntryId
 
 	OptionCaptureComplete bool
 	OptionCaptureNotes    []string
 }
-
-// StreamingModel is an alias for [Model] for backward compatibility.
-// Deprecated: Use [Model] directly.
-type StreamingModel = Model
 
 // Stream represents a streaming response from the model.
 // It provides access to content chunks as they arrive and the final response.

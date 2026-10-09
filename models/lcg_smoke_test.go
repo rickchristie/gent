@@ -15,10 +15,8 @@ import (
 )
 
 // TestSmokeAllProviders sends "Hello World!" to one representative model per
-// provider and verifies a non-empty streaming response. Every subtest is
-// skipped by default — remove the t.Skip() line for the provider you want to
-// verify manually (e.g., after updating langchaingo or changing sampling
-// params).
+// provider and verifies a non-empty streaming response. Set GENT_SMOKE_TEST=1 to enable
+// these live calls when running the full suite. Each provider also requires its API key.
 //
 // Environment variables required per provider:
 //
@@ -31,15 +29,15 @@ func TestSmokeAllProviders(t *testing.T) {
 		name    string
 		envKey  string
 		modelID string
-		setup   func(t *testing.T, apiKey string) gent.StreamingModel
+		setup   func(t *testing.T, apiKey string) gent.Model
 	}
 
 	// openAICompat creates a model using the OpenAI-compatible client with an
 	// optional base URL override.
 	openAICompat := func(
 		modelID, baseURL string,
-	) func(*testing.T, string) gent.StreamingModel {
-		return func(t *testing.T, apiKey string) gent.StreamingModel {
+	) func(*testing.T, string) gent.Model {
+		return func(t *testing.T, apiKey string) gent.Model {
 			opts := []openai.Option{
 				openai.WithToken(apiKey),
 				openai.WithModel(modelID),
@@ -59,8 +57,8 @@ func TestSmokeAllProviders(t *testing.T) {
 	// anthropicClient creates a model using the native Anthropic client.
 	anthropicClient := func(
 		modelID string,
-	) func(*testing.T, string) gent.StreamingModel {
-		return func(t *testing.T, apiKey string) gent.StreamingModel {
+	) func(*testing.T, string) gent.Model {
+		return func(t *testing.T, apiKey string) gent.Model {
 			llm, err := anthropic.New(
 				anthropic.WithToken(apiKey),
 				anthropic.WithModel(modelID),
@@ -162,14 +160,15 @@ func TestSmokeAllProviders(t *testing.T) {
 				callOpts = append(callOpts, llms.WithTopP(v))
 			}
 
-			stream, err := model.GenerateContentStream(
-				execCtx, "", "", []llms.MessageContent{
+			stream, err := execCtx.GenerateContentStream(
+				model,
+				gent.ModelCall{StreamId: "", StreamTopicId: ""},
+				gent.NewModelCallRequest([]llms.MessageContent{
 					llms.TextParts(
 						llms.ChatMessageTypeHuman,
 						"Hello World! Reply with a short greeting.",
 					),
-				},
-				callOpts...,
+				}, callOpts...),
 			)
 			require.NoError(t, err, "failed to start stream")
 

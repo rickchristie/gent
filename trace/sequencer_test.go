@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -41,11 +40,11 @@ func TestSequencer_EventNumbersReplayAndJSONSafety(t *testing.T) {
 		stitchStatus    StitchStatus
 	}
 
-	seq := NewSequencer("run", Config{MaxRecentEvents: 3})
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
+	seq := newTestSequencer(t, "run", Config{MaxRecentEvents: 3})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
 
 	snapshot := seq.Snapshot()
 	replay, err := seq.EventsAfter(2)
@@ -70,19 +69,22 @@ func TestSequencer_EventNumbersReplayAndJSONSafety(t *testing.T) {
 }
 
 func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
-	seq := NewSequencer("run", Config{
+	seq := newTestSequencer(t, "run", Config{
 		IncludeChunkText:      true,
 		IncludeModelRequests:  true,
 		IncludeModelResponses: true,
 		IncludeToolArgs:       true,
 		IncludeToolOutput:     true,
 	})
-	registry := events.NewRegistry().Subscribe(seq)
-	execCtx := gent.NewExecutionContext(context.Background(), "main", nil)
+	registry := events.NewRegistry()
+	execCtx := gent.NewExecutionContext(context.Background(), "main", nil,
+		gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq))
 	execCtx.SetEventPublisher(registry)
 	execCtx.PublishBeforeExecution()
+	assert.NoError(t, execCtx.FlushProgress())
 	execCtx.IncrementIteration()
 	execCtx.PublishBeforeIteration()
+	assert.NoError(t, execCtx.FlushProgress())
 
 	request := gent.ModelCallRequest{
 		Messages: []llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
@@ -93,7 +95,8 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		gent.WithModelStream("stream", "topic"),
 		gent.WithModelProvider("openai"),
 	)
-	seq.ConsumeChunk(gent.StreamChunk{
+	assert.NoError(t, execCtx.FlushProgress())
+	assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
 		Content:       "hel",
 		ModelCallId:   beforeModel.ModelCallId,
 		StreamId:      "stream",
@@ -102,8 +105,8 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		Iteration:     beforeModel.Iteration,
 		Depth:         beforeModel.Depth,
 		ContextId:     beforeModel.ContextId,
-	})
-	seq.ConsumeChunk(gent.StreamChunk{
+	}))
+	assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
 		Content:       "lo",
 		ModelCallId:   beforeModel.ModelCallId,
 		StreamId:      "stream",
@@ -112,7 +115,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		Iteration:     beforeModel.Iteration,
 		Depth:         beforeModel.Depth,
 		ContextId:     beforeModel.ContextId,
-	})
+	}))
 	response := &gent.ContentResponse{Info: &gent.GenerationInfo{
 		InputTokens: 3, OutputTokens: 4, CachedInputTokens: 1, ReasoningTokens: 2, TotalTokens: 7,
 	}}
@@ -123,16 +126,21 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		gent.WithModelCallSource(beforeModel.Source),
 		gent.WithModelProvider("openai"),
 	)
+	assert.NoError(t, execCtx.FlushProgress())
 
 	beforeTool := execCtx.PublishBeforeToolCall("search", map[string]any{"query": "gent"})
+	assert.NoError(t, execCtx.FlushProgress())
 	execCtx.PublishAfterToolCall(
 		"search", beforeTool.Args, "result", 5*time.Millisecond, nil,
 		gent.WithToolCallId(beforeTool.ToolCallId),
 		gent.WithToolCallSource(beforeTool.Source),
 	)
+	assert.NoError(t, execCtx.FlushProgress())
 	execCtx.PublishAfterIteration(&gent.AgentLoopResult{Action: gent.LATerminate}, time.Millisecond)
+	assert.NoError(t, execCtx.FlushProgress())
 	execCtx.SetTermination(gent.TerminationSuccess, nil, nil)
 	execCtx.PublishAfterExecution(gent.TerminationSuccess, nil)
+	assert.NoError(t, execCtx.FlushProgress())
 
 	snapshot := seq.Snapshot()
 	require.Len(t, snapshot.ModelCalls, 1)
@@ -176,7 +184,7 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 		executionFinishedEvents int
 	}
 
-	seq := NewSequencer("run", Config{
+	seq := newTestSequencer(t, "run", Config{
 		IncludeRunOutput: true,
 		Redactor: RedactorFuncs{
 			RunOutput: func(output []gent.ContentPart) any {
@@ -188,7 +196,7 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 			},
 		},
 	})
-	registry := events.NewRegistry().Subscribe(seq)
+	registry := events.NewRegistry()
 	childExec := executor.New[*gent.BasicLoopData](
 		&traceTestLoop{result: []gent.ContentPart{llms.TextContent{Text: "child result"}}},
 		executor.Config{Events: registry},
@@ -209,7 +217,12 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 	}
 	rootExec := executor.New[*gent.BasicLoopData](parentLoop, executor.Config{Events: registry})
 	rootData := gent.NewBasicLoopData(&gent.Task{Text: "root task"})
-	rootCtx := gent.NewExecutionContext(context.Background(), "root", rootData)
+	rootCtx := gent.NewExecutionContext(
+		context.Background(),
+		"root",
+		rootData,
+		gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq),
+	)
 
 	rootExec.Execute(rootCtx)
 
@@ -222,12 +235,18 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 		executionStartedEvents:  1,
 		executionFinishedEvents: 0,
 	}, expectedAfterChild{
-		status:                  afterChild.Status,
-		startedTs:               afterChild.StartedTs,
-		completed:               afterChild.CompletedTs != nil,
-		result:                  afterChild.Result,
-		executionStartedEvents:  countTraceEventType(afterChild.RecentEvents, EventTypeExecutionStarted),
-		executionFinishedEvents: countTraceEventType(afterChild.RecentEvents, EventTypeExecutionFinished),
+		status:    afterChild.Status,
+		startedTs: afterChild.StartedTs,
+		completed: afterChild.CompletedTs != nil,
+		result:    afterChild.Result,
+		executionStartedEvents: countTraceEventType(
+			afterChild.RecentEvents,
+			EventTypeExecutionStarted,
+		),
+		executionFinishedEvents: countTraceEventType(
+			afterChild.RecentEvents,
+			EventTypeExecutionFinished,
+		),
 	})
 	childContext := onlyChildTraceContext(t, afterChild)
 	assert.Equal(t, expectedChildContext{
@@ -258,12 +277,18 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 		executionStartedEvents:  1,
 		executionFinishedEvents: 1,
 	}, expectedFinal{
-		status:                  snapshot.Status,
-		startedTs:               snapshot.StartedTs,
-		completed:               snapshot.CompletedTs != nil,
-		result:                  snapshot.Result,
-		executionStartedEvents:  countTraceEventType(snapshot.RecentEvents, EventTypeExecutionStarted),
-		executionFinishedEvents: countTraceEventType(snapshot.RecentEvents, EventTypeExecutionFinished),
+		status:    snapshot.Status,
+		startedTs: snapshot.StartedTs,
+		completed: snapshot.CompletedTs != nil,
+		result:    snapshot.Result,
+		executionStartedEvents: countTraceEventType(
+			snapshot.RecentEvents,
+			EventTypeExecutionStarted,
+		),
+		executionFinishedEvents: countTraceEventType(
+			snapshot.RecentEvents,
+			EventTypeExecutionFinished,
+		),
 	})
 }
 
@@ -334,14 +359,15 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			seq := NewSequencer("run", Config{})
-			registry := events.NewRegistry().Subscribe(seq)
+			seq := newTestSequencer(t, "run", Config{})
+			registry := events.NewRegistry()
 			goCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			rootCtx := gent.NewExecutionContext(
 				goCtx,
 				"root",
 				gent.NewBasicLoopData(&gent.Task{Text: "root task"}),
+				gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq),
 			)
 			rootCtx.SetEventPublisher(registry)
 			childCtx := rootCtx.SpawnChild(
@@ -376,7 +402,7 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 }
 
 func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
-	seq := NewSequencer("run", Config{
+	seq := newTestSequencer(t, "run", Config{
 		IncludeChunkText:      true,
 		MaxModelContentBytes:  5,
 		IncludeModelRequests:  true,
@@ -393,7 +419,7 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 		Timestamp: time.Now(), EventName: gent.EventNameModelCallBefore,
 		Iteration: 1, Source: "main/1", ContextId: "ctx:1",
 	}
-	seq.OnBeforeModelCall(nil, &gent.BeforeModelCallEvent{
+	recordTestValue(t, seq, "model_call_started", &gent.BeforeModelCallEvent{
 		BaseEvent: base,
 		Model:     "gpt",
 		Request: gent.ModelCallRequest{
@@ -402,7 +428,7 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 		ModelCallId: "model-1",
 		StreamId:    "stream",
 	})
-	seq.ConsumeChunk(gent.StreamChunk{
+	recordTestValue(t, seq, "model_stream_chunk", gent.StreamChunk{
 		Content:     "abcédef",
 		ModelCallId: "model-1",
 		StreamId:    "stream",
@@ -410,7 +436,7 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 		ContextId:   "ctx:1",
 		Iteration:   1,
 	})
-	seq.OnAfterModelCall(nil, &gent.AfterModelCallEvent{
+	recordTestValue(t, seq, "model_call_finished", &gent.AfterModelCallEvent{
 		BaseEvent: base,
 		Model:     "gpt",
 		Duration:  time.Millisecond,
@@ -436,7 +462,7 @@ func TestSequencer_BoundedSubscriptionOverflow(t *testing.T) {
 		overflow OverflowInfo
 	}
 
-	seq := NewSequencer("run", Config{})
+	seq := newTestSequencer(t, "run", Config{})
 	overflowCh := make(chan OverflowInfo, 1)
 	eventsCh, unsubscribe := seq.SubscribeWithConfig(SubscribeConfig{
 		BufferSize:     1,
@@ -446,8 +472,8 @@ func TestSequencer_BoundedSubscriptionOverflow(t *testing.T) {
 		},
 	})
 	defer unsubscribe()
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
 
 	first := receiveTraceEvent(t, eventsCh)
 	overflow := receiveOverflow(t, overflowCh)
@@ -462,10 +488,10 @@ func TestSequencer_BoundedSubscriptionOverflow(t *testing.T) {
 }
 
 func TestSequencer_UnsubscribeDiscardsQueuedLiveEvents(t *testing.T) {
-	seq := NewSequencer("run", Config{})
+	seq := newTestSequencer(t, "run", Config{})
 	eventsCh, unsubscribe := seq.Subscribe()
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
-	seq.record(normalizedEvent{event: &Event{Type: EventTypeCommon, Ts: time.Now()}})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
+	recordTestValue(t, seq, "common", &gent.CommonEvent{})
 
 	unsubscribe()
 
@@ -477,123 +503,10 @@ func TestSequencer_UnsubscribeDiscardsQueuedLiveEvents(t *testing.T) {
 	}
 }
 
-func TestSequencer_CloseDrainsObservedStreamChunks(t *testing.T) {
-	enteredRedactor := make(chan struct{})
-	releaseRedactor := make(chan struct{})
-	seq := NewSequencer("run", Config{
-		IncludeChunkText: true,
-		Redactor: RedactorFuncs{
-			Chunk: func(chunk gent.StreamChunk) gent.StreamChunk {
-				close(enteredRedactor)
-				<-releaseRedactor
-				return chunk
-			},
-		},
-	})
-	execCtx := gent.NewExecutionContext(context.Background(), "main", nil)
-	seq.ObserveStreams(execCtx)
-
-	execCtx.EmitChunk(gent.StreamChunk{
-		Content:       "hello",
-		StreamId:      "stream",
-		StreamTopicId: "topic",
-	})
-	receiveSignal(t, enteredRedactor)
-	execCtx.CloseStreams()
-
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
-		seq.Close()
-	}()
-	close(releaseRedactor)
-	receiveSignal(t, closed)
-
-	snapshot := seq.Snapshot()
-	require.Len(t, snapshot.RecentChunkEvents, 1)
-	event := snapshot.RecentChunkEvents[0]
-	payload, ok := event.Payload.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, EventTypeModelStreamChunk, event.Type)
-	assert.Equal(t, "hello", payload["content"])
-}
-
-func TestSequencer_ConsumeChunksDrainsUntilChannelCloseAfterContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	seq := NewSequencer("run", Config{IncludeChunkText: true})
-	chunks := make(chan gent.StreamChunk, 2)
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		seq.ConsumeChunks(chunks)
-	}()
-
-	cancel()
-	chunks <- gent.StreamChunk{Content: "first", StreamId: "stream", StreamTopicId: "topic"}
-	chunks <- gent.StreamChunk{Content: "second", StreamId: "stream", StreamTopicId: "topic"}
-	close(chunks)
-	receiveSignal(t, done)
-
-	assert.ErrorIs(t, ctx.Err(), context.Canceled)
-	assert.Equal(t, []string{"first", "second"}, traceChunkContents(seq.Snapshot()))
-}
-
-func TestSequencer_ObserveStreamsDrainsBufferedChunksAfterContextCancellation(t *testing.T) {
-	enteredRedactor := make(chan struct{})
-	releaseRedactor := make(chan struct{})
-	var blockFirstChunk sync.Once
-	seq := NewSequencer("run", Config{
-		IncludeChunkText: true,
-		Redactor: RedactorFuncs{
-			Chunk: func(chunk gent.StreamChunk) gent.StreamChunk {
-				blockFirstChunk.Do(func() {
-					close(enteredRedactor)
-					<-releaseRedactor
-				})
-				return chunk
-			},
-		},
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	execCtx := gent.NewExecutionContext(ctx, "main", nil)
-	seq.ObserveStreams(execCtx)
-
-	const chunkCount = 32
-	expected := make([]string, 0, chunkCount)
-	execCtx.EmitChunk(gent.StreamChunk{
-		Content:       "chunk-00",
-		StreamId:      "stream",
-		StreamTopicId: "topic",
-	})
-	expected = append(expected, "chunk-00")
-	receiveSignal(t, enteredRedactor)
-
-	for i := 1; i < chunkCount; i++ {
-		content := fmt.Sprintf("chunk-%02d", i)
-		execCtx.EmitChunk(gent.StreamChunk{
-			Content:       content,
-			StreamId:      "stream",
-			StreamTopicId: "topic",
-		})
-		expected = append(expected, content)
-	}
-	cancel()
-	execCtx.CloseStreams()
-
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
-		seq.Close()
-	}()
-	close(releaseRedactor)
-	receiveSignal(t, closed)
-
-	assert.Equal(t, expected, traceChunkContents(seq.Snapshot()))
-}
-
 func TestSequencer_ConcurrentRecordingIsMonotonic(t *testing.T) {
-	seq := NewSequencer("run", Config{})
+	seq := newTestSequencer(t, "run", Config{})
+	execCtx := gent.NewExecutionContext(context.Background(), "root", nil,
+		gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq))
 	const workers = 50
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -602,7 +515,7 @@ func TestSequencer_ConcurrentRecordingIsMonotonic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			seq.ConsumeChunk(gent.StreamChunk{Content: "x", StreamId: "s"})
+			assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{Content: "x", StreamId: "s"}))
 		}(i)
 	}
 	close(start)
@@ -635,16 +548,6 @@ func countTraceEventType(events []*Event, eventType EventType) int {
 		}
 	}
 	return count
-}
-
-func traceChunkContents(snapshot *Snapshot) []string {
-	contents := make([]string, 0, len(snapshot.RecentChunkEvents))
-	for _, event := range snapshot.RecentChunkEvents {
-		payload, _ := event.Payload.(map[string]any)
-		content, _ := payload["content"].(string)
-		contents = append(contents, content)
-	}
-	return contents
 }
 
 func onlyChildTraceContext(t *testing.T, snapshot *Snapshot) *Context {
@@ -685,14 +588,5 @@ func receiveOverflow(t *testing.T, ch <-chan OverflowInfo) OverflowInfo {
 	case <-time.After(time.Second):
 		t.Fatal("expected overflow info")
 		return OverflowInfo{}
-	}
-}
-
-func receiveSignal(t *testing.T, ch <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("expected signal")
 	}
 }

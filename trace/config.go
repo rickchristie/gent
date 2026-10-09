@@ -1,5 +1,7 @@
 package trace
 
+import "github.com/rickchristie/gent"
+
 const (
 	DefaultMaxRecentEvents          = 5000
 	DefaultMaxRecentLifecycleEvents = 500
@@ -13,13 +15,14 @@ const (
 
 // Config controls trace capture and snapshot retention.
 type Config struct {
+	Codecs                *gent.CodecRegistry
 	IncludeModelRequests  bool
 	IncludeModelResponses bool
 	IncludeToolArgs       bool
 	IncludeToolOutput     bool
 	IncludeSystemPrompt   bool
 	IncludeCommonPayload  bool
-	IncludeDiffPayload    bool
+	IncludeStateChanges   bool
 	IncludeChunkText      bool
 	IncludeRunOutput      bool
 

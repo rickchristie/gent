@@ -2,11 +2,12 @@ package gent
 
 import (
 	"sync"
+	"time"
 
 	"github.com/tmc/langchaingo/llms"
 )
 
-// AgentLoop orchestrates a single iteration of the agent's think-act-observe cycle.
+// Loop runs one iteration of the agent's think-act-observe cycle.
 //
 // # Responsibilities
 //
@@ -23,57 +24,12 @@ import (
 // # Implementing Custom Loops
 //
 // Custom loops can use provided building blocks ([ToolChain], [Termination], [TextFormat])
-// or implement everything from scratch. Example:
-//
-//	type MyLoop struct {
-//	    model      gent.Model
-//	    toolchain  gent.ToolChain
-//	    termination gent.Termination
-//	    format     gent.TextFormat
-//	}
-//
-//	func (l *MyLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-//	    data := execCtx.Data().(*MyLoopData)
-//
-//	    // 1. Build prompt from task and scratchpad
-//	    messages := l.buildMessages(data)
-//
-//	    // 2. Call model
-//	    response, err := l.model.GenerateContent(execCtx, "gpt-4", systemPrompt, messages)
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//
-//	    // 3. Parse output
-//	    sections, err := l.format.Parse(execCtx, response.Text)
-//	    if err != nil {
-//	        // Feed parse error back to LLM
-//	        return &gent.AgentLoopResult{
-//	            Action:     gent.LAContinue,
-//	            NextPrompt: fmt.Sprintf("Parse error: %v", err),
-//	        }, nil
-//	    }
-//
-//	    // 4. Check for tool calls
-//	    if actionContent, ok := sections[l.toolchain.Name()]; ok {
-//	        result, _ := l.toolchain.Execute(execCtx, actionContent[0], l.format)
-//	        data.AddIterationHistory(...)
-//	        return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: result.Text}, nil
-//	    }
-//
-//	    // 5. Check for termination
-//	    if answerContent, ok := sections[l.termination.Name()]; ok {
-//	        result := l.termination.ShouldTerminate(execCtx, answerContent[0])
-//	        if result.Status == gent.TerminationAnswerAccepted {
-//	            return &gent.AgentLoopResult{Action: gent.LATerminate, Result: result.Content}, nil
-//	        }
-//	    }
-//
-//	    return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: "Continue..."}, nil
-//	}
+// or implement everything from scratch. Use ExecutionContext.GenerateContentStream for managed
+// model calls, AppendRecord/UpdateHistory for context edits, and explicit checkpoint barriers.
+// Custom continuation state implements CheckpointState; see docs/history.md and examples/history.
 //
 // The executor calls Next() repeatedly until it returns [LATerminate] or a limit is exceeded.
-type AgentLoop[Data LoopData] interface {
+type Loop interface {
 	// Next performs one iteration of the agent loop.
 	//
 	// The ExecutionContext provides:
@@ -92,48 +48,25 @@ type AgentLoop[Data LoopData] interface {
 	Next(execCtx *ExecutionContext) (*AgentLoopResult, error)
 }
 
-// LoopData is the data that is being passed through each [AgentLoop] execution. Each [AgentLoop]
-// implementation may define their own Data interface.
+// AgentLoop keeps the existing generic API. Data does not restrict the execution context.
 //
-// The interface methods within this interface allows custom [AgentLoop] implementations to work with
-// provided hooks, for logging, metrics, etc.
+// Deprecated: Use Loop. It has the same Next method and needs no type argument.
+type AgentLoop[Data LoopData] interface {
+	Loop
+}
+
+// LoopData supplies the initial task and can carry application-specific state for an AgentLoop.
+// ExecutionContext freezes that task and owns history and the active context selection. History
+// changes go through its APIs so evidence, selection changes, and checkpoints can commit together.
+// Custom data implements CheckpointState when its mutable fields must survive worker replacement.
 type LoopData interface {
-	// GetTask returns the original input provided by the user that started the agent loop.
-	// The Task.Text should be pre-formatted by the client (including chat history if applicable).
 	GetTask() *Task
-
-	// GetIterationHistory returns all [Iteration] recorded, including those that may be
-	// compacted away from GetScratchPad.
-	GetIterationHistory() []*Iteration
-
-	// AddIterationHistory adds a new [Iteration] to the full history only.
-	AddIterationHistory(iter *Iteration)
-
-	// GetScratchPad returns all [Iteration] recorded, that will be used in next iteration.
-	// When compaction happens, some earlier iterations may be removed from this slice, but they
-	// are preserved in GetIterationHistory.
-	GetScratchPad() []*Iteration
-
-	// SetScratchPad sets the iterations to be used in next iteration.
-	// [AgentLoop] implementations are free to call [GetScratchPad] and modify it how they want,
-	// then call this method to set the modified iterations to be used in the next iteration.
-	SetScratchPad([]*Iteration)
-
-	// SetExecutionContext sets the ExecutionContext for this LoopData.
-	// Called automatically by [NewExecutionContext] to enable automatic event publishing
-	// when iteration history or scratchpad changes.
-	//
-	// Implementations that embed [BasicLoopData] get this for free via method promotion.
-	// Custom implementations can use this to publish [CommonDiffEvent] on state changes,
-	// or implement as a no-op if event publishing is not needed.
-	SetExecutionContext(ctx *ExecutionContext)
 }
 
 // BasicLoopData is the default implementation of [LoopData].
 //
-// It provides concurrency-safe storage for task, iteration history, and scratchpad. This is
-// used by the built-in agent loops (e.g., agents/react) and can be used directly or embedded
-// in custom structs for additional data.
+// It stores the initial task with concurrency-safe access. ExecutionContext owns history and
+// scratchpad. Use BasicLoopData directly or embed it in custom structs for additional loop data.
 //
 // # Direct Usage
 //
@@ -160,126 +93,65 @@ type LoopData interface {
 //
 // The embedded struct automatically satisfies [LoopData] and works with all agent loops.
 type BasicLoopData struct {
-	mu sync.RWMutex
-
-	task             *Task
-	iterationHistory []*Iteration
-	scratchpad       []*Iteration
-	execCtx          *ExecutionContext
+	mu   sync.RWMutex
+	task *Task
 }
 
-// NewBasicLoopData creates a new [BasicLoopData] with the given task.
+// NewBasicLoopData copies the task envelope. ExecutionContext freezes its complete typed content.
 func NewBasicLoopData(task *Task) *BasicLoopData {
-	return &BasicLoopData{
-		task:             task,
-		iterationHistory: make([]*Iteration, 0),
-		scratchpad:       make([]*Iteration, 0),
-	}
+	return &BasicLoopData{task: copyTask(task)}
 }
 
-// GetTask returns the original input provided by the user.
+func copyTask(task *Task) *Task {
+	if task == nil {
+		return nil
+	}
+	result := *task
+	result.Media = append([]ContentPart(nil), task.Media...)
+	return &result
+}
+
+// GetTask supplies the initial task. Managed loops use ExecutionContext.Task for owned snapshots.
 func (d *BasicLoopData) GetTask() *Task {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.task
+	return copyTask(d.task)
 }
 
-// GetIterationHistory returns all Iteration recorded, including compacted ones.
-func (d *BasicLoopData) GetIterationHistory() []*Iteration {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return append([]*Iteration(nil), d.iterationHistory...)
-}
-
-// AddIterationHistory adds a new Iteration to the full history.
-// Publishes a CommonDiffEvent if ExecutionContext is set.
-func (d *BasicLoopData) AddIterationHistory(iter *Iteration) {
-	d.mu.Lock()
-	before := append([]*Iteration(nil), d.iterationHistory...)
-	d.iterationHistory = append(d.iterationHistory, iter)
-	after := append([]*Iteration(nil), d.iterationHistory...)
-	execCtx := d.execCtx
-	d.mu.Unlock()
-	if execCtx != nil {
-		execCtx.PublishIterationHistoryChange(before, after)
-	}
-}
-
-// GetScratchPad returns all Iteration that will be used in next iteration.
-func (d *BasicLoopData) GetScratchPad() []*Iteration {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return append([]*Iteration(nil), d.scratchpad...)
-}
-
-// SetScratchPad sets the iterations to be used in next iteration.
-// Sets the SGScratchpadLength gauge and publishes a CommonDiffEvent
-// if ExecutionContext is set.
-func (d *BasicLoopData) SetScratchPad(iterations []*Iteration) {
-	next := append([]*Iteration(nil), iterations...)
-	d.mu.Lock()
-	before := append([]*Iteration(nil), d.scratchpad...)
-	d.scratchpad = next
-	after := append([]*Iteration(nil), d.scratchpad...)
-	execCtx := d.execCtx
-	d.mu.Unlock()
-	if execCtx != nil {
-		execCtx.Stats().SetGauge(
-			SGScratchpadLength, float64(len(after)),
-		)
-		execCtx.PublishScratchPadChange(before, after)
-	}
-}
-
-// SetExecutionContext sets the ExecutionContext for automatic event publishing.
-func (d *BasicLoopData) SetExecutionContext(ctx *ExecutionContext) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.execCtx = ctx
-}
-
-// Compile-time check that BasicLoopData implements LoopData.
-var _ LoopData = (*BasicLoopData)(nil)
-
-// IterationOrigin indicates how an Iteration was created.
-// Used for debugging and observability — helps trace whether
-// an iteration is original, was synthesized by compaction, or
-// was modified in place.
-type IterationOrigin string
+// RecordOrigin indicates how a HistoryEntry was created: an original observation, a summary,
+// a replacement derived from earlier content, retrieved history, or a system injection.
+type RecordOrigin string
 
 const (
-	// IterationOriginal is the zero value. The iteration was
+	// RecordOriginal is the zero value. The record was
 	// created normally by the AgentLoop during execution.
-	IterationOriginal IterationOrigin = ""
+	RecordOriginal RecordOrigin = ""
 
-	// IterationCompactedSynthetic means this iteration was
-	// created by a CompactionStrategy to summarize multiple
-	// iterations.
-	IterationCompactedSynthetic IterationOrigin = "compacted_synthetic"
+	// RecordCompactedSynthetic means this record summarizes earlier records, which may span
+	// multiple executor iterations.
+	RecordCompactedSynthetic RecordOrigin = "compacted_synthetic"
 
-	// IterationCompactedModified means this is an original
-	// iteration that was modified in place by a
-	// CompactionStrategy.
-	IterationCompactedModified IterationOrigin = "compacted_modified"
+	// RecordCompactedModified means this record was derived by modifying earlier content.
+	// The replacement gets a new history entry; the original entry remains unchanged.
+	RecordCompactedModified RecordOrigin = "compacted_modified"
 
-	// IterationRetrievedHistory means this iteration was pulled
-	// back from evicted history (e.g., via a
-	// retrieval-augmented strategy).
-	IterationRetrievedHistory IterationOrigin = "retrieved_history"
+	// RecordRetrievedHistory means this record was retrieved from earlier history for reuse
+	// in working context (e.g., via a retrieval-augmented strategy).
+	RecordRetrievedHistory RecordOrigin = "retrieved_history"
 
-	// IterationSystemInjected means this iteration was injected
+	// RecordSystemInjected means this record was injected
 	// by a system hook (e.g., pre-search policy suggestions).
 	// It is not produced by the agent or user.
-	IterationSystemInjected IterationOrigin = "system_injected"
+	RecordSystemInjected RecordOrigin = "system_injected"
 )
 
-// IterationMetadataKey is a typed key for Iteration metadata.
+// RecordMetadataKey is a typed key for HistoryEntry metadata.
 // The framework defines standard keys (IMK* constants). Users
 // can define their own keys with a custom prefix.
-type IterationMetadataKey string
+type RecordMetadataKey string
 
 // IMKImportanceScore is a float64 value in [-10, 10] that
-// indicates how important this iteration is.
+// indicates how important this record is.
 //
 // Positive values = more important (prefer to keep).
 // Negative values = less important (prefer to discard).
@@ -287,56 +159,75 @@ type IterationMetadataKey string
 //
 // The standard strategies treat any score >=
 // [ImportanceScorePinned] (10.0) as "pinned" and preserve
-// those iterations through compaction.
+// those records in the active selection through compaction.
 //
 // Usage:
 //
-//	// Pin this iteration (will survive compaction):
-//	iter.SetMetadata(
+//	// Keep this record in the active selection through compaction:
+//	record.SetMetadata(
 //	    gent.IMKImportanceScore,
 //	    gent.ImportanceScorePinned,
 //	)
 //
-//	score, ok := gent.GetImportanceScore(iter)
-const IMKImportanceScore IterationMetadataKey = "gent:importance_score"
+//	score, ok := gent.GetImportanceScore(record)
+const IMKImportanceScore RecordMetadataKey = "gent:importance_score"
 
 // ImportanceScorePinned is the minimum importance score for
-// an iteration to be considered "pinned" by the standard
-// compaction strategies. Pinned iterations are always
-// preserved through compaction.
+// a record to be considered "pinned" by the standard
+// compaction strategies. Pinned records remain selected
+// through compaction; all original history entries are retained regardless of their score.
 //
 // The standard strategies use: score >= ImportanceScorePinned.
 const ImportanceScorePinned float64 = 10.0
 
-// Iteration represents a single iteration's message content.
+// HistoryEntry preserves a message group, a summary, or a compaction decision with stable identity.
+// Message entries are selected, expired, and compacted together. One Next call can produce several
+// entries, and a summary can represent several iterations. A compaction decision stores provenance
+// in Compaction instead of Messages. Iteration counters and limits count Next calls, never entries.
+//
+// Execution owns accepted entries. Getters and recorder/observer callbacks return owned snapshots;
+// mutating those pointers never updates execution. Use UpdateHistory to append a replacement.
 //
 // Messages must never contain nil elements. All code that
-// constructs or modifies an Iteration must ensure every
+// constructs or modifies a HistoryEntry must ensure every
 // element in Messages is a valid, non-nil pointer.
-type Iteration struct {
+type HistoryEntry struct {
+	Id EntryId `json:"id"`
+	Order uint64 `json:"order"`
+	RunId string `json:"runId"`
+	ContextId string `json:"contextId"`
+	Iteration int `json:"iteration"`
+	AttemptId string `json:"attemptId"`
+	Kind HistoryEntryKind `json:"kind"`
+	ModelCallId string `json:"modelCallId,omitempty"`
+	ToolCallIds []string `json:"toolCallIds,omitempty"`
+	Compaction *CompactionRecord `json:"compaction,omitempty"`
+	Replaces []EntryId `json:"replaces,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+
 	Messages []*MessageContent
 
-	// Origin indicates how this iteration was created.
-	// Zero value (IterationOriginal) means it was created
+	// Origin indicates how this record was created.
+	// Zero value (RecordOriginal) means it was created
 	// normally by the AgentLoop.
-	Origin IterationOrigin
+	Origin RecordOrigin
 
 	// ExpireAfterIteration is the executor iteration number
-	// at which this iteration expires. Zero (default) means
+	// at which this record expires from working context. Zero (default) means
 	// no expiry. Since executor iterations are 1-indexed,
 	// zero is unambiguous.
 	//
-	// When set to a positive value, the iteration is
+	// When set to a positive value, the record is
 	// included when execCtx.Iteration() < ExpireAfterIteration
 	// and skipped when execCtx.Iteration() >= ExpireAfterIteration.
 	//
-	// Example: ExpireAfterIteration = 3 means the iteration
+	// Example: ExpireAfterIteration = 3 means the record
 	// is included in iterations 1 and 2, and skipped from
-	// iteration 3 onward.
+	// iteration 3 onward. Its original history entry remains available.
 	ExpireAfterIteration int
 
 	// Metadata contains optional key-value pairs for this
-	// iteration. The framework defines standard keys (IMK*
+	// record. The framework defines standard keys (IMK*
 	// constants); users can add custom keys.
 	//
 	// This field is exported for JSON marshalling. Use
@@ -356,17 +247,17 @@ type Iteration struct {
 	//
 	//   // CORRECT — safe, returns zero value + false:
 	//   val, ok := iter.GetMetadata(gent.IMKImportanceScore)
-	Metadata map[IterationMetadataKey]any
+	Metadata map[RecordMetadataKey]any
 }
 
 // SetMetadata sets a metadata value, initializing the map
 // if nil.
-func (i *Iteration) SetMetadata(
-	key IterationMetadataKey,
+func (i *HistoryEntry) SetMetadata(
+	key RecordMetadataKey,
 	value any,
 ) {
 	if i.Metadata == nil {
-		i.Metadata = make(map[IterationMetadataKey]any)
+		i.Metadata = make(map[RecordMetadataKey]any)
 	}
 	i.Metadata[key] = value
 }
@@ -374,8 +265,8 @@ func (i *Iteration) SetMetadata(
 // GetMetadata returns a metadata value and whether it was
 // present. Returns (nil, false) if Metadata is nil or the
 // key is absent.
-func (i *Iteration) GetMetadata(
-	key IterationMetadataKey,
+func (i *HistoryEntry) GetMetadata(
+	key RecordMetadataKey,
 ) (any, bool) {
 	if i.Metadata == nil {
 		return nil, false
@@ -385,9 +276,9 @@ func (i *Iteration) GetMetadata(
 }
 
 // GetImportanceScore is a convenience function that returns
-// the importance score for an iteration.
+// the importance score for a record.
 // Returns (0, false) if the key is absent or not a float64.
-func GetImportanceScore(iter *Iteration) (float64, bool) {
+func GetImportanceScore(iter *HistoryEntry) (float64, bool) {
 	val, ok := iter.GetMetadata(IMKImportanceScore)
 	if !ok {
 		return 0, false

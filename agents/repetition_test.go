@@ -500,8 +500,8 @@ func TestDefaultFilterPoisonedText(t *testing.T) {
 			expected: expected{result: strings.Repeat("abcde", 40) + "..."},
 		},
 		{
-			name: "empty text returns empty",
-			input: input{text: "", keywords: nil},
+			name:     "empty text returns empty",
+			input:    input{text: "", keywords: nil},
 			expected: expected{result: ""},
 		},
 		{

@@ -112,15 +112,17 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 				strategy: tt.NewMockCompactionStrategy().
 					WithCompactFunc(
 						func(
-							ctx *gent.ExecutionContext,
-						) error {
-							sp := ctx.Data().GetScratchPad()
-							if len(sp) > 1 {
-								ctx.Data().SetScratchPad(
-									sp[len(sp)-1:],
-								)
+							_ *gent.ExecutionContext,
+							input gent.CompactionInput,
+						) (gent.HistoryUpdate, error) {
+							active := input.EntryIds()
+							if len(active) > 1 {
+								active = active[len(active)-1:]
 							}
-							return nil
+							return gent.HistoryUpdate{
+								ExpectedDraftRevision: input.Revision,
+								Active:                active,
+							}, nil
 						},
 					),
 				terminateAt: 3,
@@ -164,15 +166,17 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 				strategy: tt.NewMockCompactionStrategy().
 					WithCompactFunc(
 						func(
-							ctx *gent.ExecutionContext,
-						) error {
-							sp := ctx.Data().GetScratchPad()
-							if len(sp) > 1 {
-								ctx.Data().SetScratchPad(
-									sp[len(sp)-1:],
-								)
+							_ *gent.ExecutionContext,
+							input gent.CompactionInput,
+						) (gent.HistoryUpdate, error) {
+							active := input.EntryIds()
+							if len(active) > 1 {
+								active = active[len(active)-1:]
 							}
-							return nil
+							return gent.HistoryUpdate{
+								ExpectedDraftRevision: input.Revision,
+								Active:                active,
+							}, nil
 						},
 					),
 				terminateAt: 4,
@@ -255,15 +259,17 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					return tt.NewMockCompactionStrategy().
 						WithCompactFunc(
 							func(
-								ctx *gent.ExecutionContext,
-							) error {
+								_ *gent.ExecutionContext,
+								input gent.CompactionInput,
+							) (gent.HistoryUpdate, error) {
 								callCount++
 								if callCount == 1 {
-									return nil
+									return gent.HistoryUpdate{
+										ExpectedDraftRevision: input.Revision,
+										Active:                input.EntryIds(),
+									}, nil
 								}
-								return errors.New(
-									"second call fails",
-								)
+								return gent.HistoryUpdate{}, errors.New("second call fails")
 							},
 						)
 				}(),
@@ -363,7 +369,7 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 
 			assert.Equal(t,
 				tc.expected.scratchpadLen,
-				len(data.GetScratchPad()),
+				len(testScratchpad(t, execCtx)),
 			)
 
 			lifecycleEvents := collectLifecycleAndCompaction(
@@ -391,12 +397,12 @@ func (l *scratchpadTrackingLoop) Next(
 	l.calls++
 
 	// Add an iteration to scratchpad (like real agents do)
-	iter := &gent.Iteration{
+	iter := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{},
 	}
-	execCtx.Data().SetScratchPad(
-		append(execCtx.Data().GetScratchPad(), iter),
-	)
+	if err := execCtx.AppendRecord(iter, true); err != nil {
+		return nil, err
+	}
 
 	if l.terminateAt > 0 && l.calls >= l.terminateAt {
 		return tt.Terminate("done"), nil
@@ -571,12 +577,12 @@ func (l *modelCallingLoop) Next(
 	)
 
 	// Add iteration to scratchpad
-	iter := &gent.Iteration{
+	iter := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{},
 	}
-	execCtx.Data().SetScratchPad(
-		append(execCtx.Data().GetScratchPad(), iter),
-	)
+	if err := execCtx.AppendRecord(iter, true); err != nil {
+		return nil, err
+	}
 
 	if l.terminateAt > 0 && l.calls >= l.terminateAt {
 		return tt.Terminate("done"), nil
@@ -595,7 +601,7 @@ type gaugeCapturingTrigger struct {
 
 func (t *gaugeCapturingTrigger) ShouldCompact(
 	execCtx *gent.ExecutionContext,
-) bool {
+) (bool, error) {
 	t.callCount++
 	stats := execCtx.Stats()
 	t.capturedInputTokens = stats.GetGauge(
@@ -607,10 +613,7 @@ func (t *gaugeCapturingTrigger) ShouldCompact(
 	t.capturedTotalTokens = stats.GetGauge(
 		gent.SGTotalTokensLastIteration,
 	)
-	return false // Don't actually compact
+	return false, nil // Don't actually compact
 }
 
-func (t *gaugeCapturingTrigger) NotifyCompacted(
-	_ *gent.ExecutionContext,
-) {
-}
+func (t *gaugeCapturingTrigger) NotifyCompacted(_ *gent.ExecutionContext) error { return nil }

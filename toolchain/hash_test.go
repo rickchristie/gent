@@ -218,9 +218,9 @@ func TestToolCallResultHash(t *testing.T) {
 
 func TestCallDeduplicateSummaryReflect(t *testing.T) {
 	type input struct {
-		tool       any
-		inputVal   any
-		outputVal  any
+		tool      any
+		inputVal  any
+		outputVal any
 	}
 
 	type expected struct {

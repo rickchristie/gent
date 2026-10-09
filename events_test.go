@@ -30,7 +30,7 @@ func TestEvent_MarkerInterface(t *testing.T) {
 		&ErrorEvent{},
 		&LimitExceededEvent{},
 		&CommonEvent{},
-		&CommonDiffEvent{},
+		&StateChangeEvent{},
 	}
 
 	for _, e := range events {
@@ -231,237 +231,8 @@ func TestPublishLimitExceeded_PrefixLimitMatchedKey(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// CommonDiffEvent Tests
+// StateChangeEvent Tests
 // -----------------------------------------------------------------------------
-
-func TestPublishCommonDiffEvent_SetsCorrectFields(t *testing.T) {
-	type testStruct struct {
-		Name  string `json:"name"`
-		Value int    `json:"value"`
-	}
-
-	type input struct {
-		eventName string
-		before    any
-		after     any
-	}
-
-	type expected struct {
-		eventName    string
-		before       any
-		after        any
-		diffContains []string // substrings that should appear in diff
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "diff shows added field",
-			input: input{
-				eventName: "myapp:config_change",
-				before:    testStruct{Name: "test", Value: 1},
-				after:     testStruct{Name: "test", Value: 2},
-			},
-			expected: expected{
-				eventName:    "myapp:config_change",
-				before:       testStruct{Name: "test", Value: 1},
-				after:        testStruct{Name: "test", Value: 2},
-				diffContains: []string{"-  \"value\": 1", "+  \"value\": 2"},
-			},
-		},
-		{
-			name: "diff shows multiple changes",
-			input: input{
-				eventName: "myapp:state_change",
-				before:    map[string]string{"a": "1", "b": "2"},
-				after:     map[string]string{"a": "changed", "b": "2"},
-			},
-			expected: expected{
-				eventName:    "myapp:state_change",
-				before:       map[string]string{"a": "1", "b": "2"},
-				after:        map[string]string{"a": "changed", "b": "2"},
-				diffContains: []string{"-  \"a\": \"1\"", "+  \"a\": \"changed\""},
-			},
-		},
-		{
-			name: "no diff when values are equal",
-			input: input{
-				eventName: "myapp:no_change",
-				before:    testStruct{Name: "same", Value: 42},
-				after:     testStruct{Name: "same", Value: 42},
-			},
-			expected: expected{
-				eventName:    "myapp:no_change",
-				before:       testStruct{Name: "same", Value: 42},
-				after:        testStruct{Name: "same", Value: 42},
-				diffContains: nil, // empty diff
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			execCtx := NewExecutionContext(context.Background(), "test", nil)
-
-			event := execCtx.PublishCommonDiffEvent(
-				tt.input.eventName,
-				tt.input.before,
-				tt.input.after,
-			)
-
-			assert.Equal(t, tt.expected.eventName, event.EventName)
-			assert.Equal(t, tt.expected.before, event.Before)
-			assert.Equal(t, tt.expected.after, event.After)
-			assert.NotZero(t, event.Timestamp)
-
-			for _, substr := range tt.expected.diffContains {
-				assert.Contains(t, event.Diff, substr,
-					"diff should contain %q", substr)
-			}
-
-			if tt.expected.diffContains == nil {
-				assert.Empty(t, event.Diff, "diff should be empty when no changes")
-			}
-		})
-	}
-}
-
-func TestPublishCommonDiffEvent_MarshalError(t *testing.T) {
-	type input struct {
-		before any
-		after  any
-	}
-
-	type expected struct {
-		diffContains []string
-	}
-
-	// Create an unmarshallable value (channel)
-	ch := make(chan int)
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "marshal error for before only",
-			input: input{
-				before: ch,
-				after:  map[string]int{"valid": 1},
-			},
-			expected: expected{
-				diffContains: []string{"<marshal error (before):"},
-			},
-		},
-		{
-			name: "marshal error for after only",
-			input: input{
-				before: map[string]int{"valid": 1},
-				after:  ch,
-			},
-			expected: expected{
-				diffContains: []string{"<marshal error (after):"},
-			},
-		},
-		{
-			name: "marshal error for both",
-			input: input{
-				before: ch,
-				after:  ch,
-			},
-			expected: expected{
-				diffContains: []string{
-					"<marshal error (before):",
-					"<marshal error (after):",
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			execCtx := NewExecutionContext(context.Background(), "test", nil)
-
-			event := execCtx.PublishCommonDiffEvent(
-				"test:marshal_error",
-				tt.input.before,
-				tt.input.after,
-			)
-
-			for _, substr := range tt.expected.diffContains {
-				assert.Contains(t, event.Diff, substr,
-					"diff should contain error message %q", substr)
-			}
-		})
-	}
-}
-
-func TestPublishIterationHistoryChange_SetsCorrectEventName(t *testing.T) {
-	execCtx := NewExecutionContext(context.Background(), "test", nil)
-
-	before := []*Iteration{
-		{Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "hello"}}},
-		}},
-	}
-	after := []*Iteration{
-		{Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "hello"}}},
-		}},
-		{Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "world"}}},
-		}},
-	}
-
-	event := execCtx.PublishIterationHistoryChange(before, after)
-
-	assert.Equal(t, EventNameIterationHistoryChange, event.EventName)
-	assert.Equal(t, before, event.Before)
-	assert.Equal(t, after, event.After)
-	assert.Contains(t, event.Diff, "world", "diff should show added iteration")
-}
-
-func TestPublishScratchPadChange_SetsCorrectEventName(t *testing.T) {
-	execCtx := NewExecutionContext(context.Background(), "test", nil)
-
-	before := []*Iteration{
-		{Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "old"}}},
-		}},
-	}
-	after := []*Iteration{
-		{Messages: []*MessageContent{
-			{Role: llms.ChatMessageTypeHuman, Parts: []ContentPart{llms.TextContent{Text: "new"}}},
-		}},
-	}
-
-	event := execCtx.PublishScratchPadChange(before, after)
-
-	assert.Equal(t, EventNameScratchPadChange, event.EventName)
-	assert.Equal(t, before, event.Before)
-	assert.Equal(t, after, event.After)
-	assert.Contains(t, event.Diff, "-", "diff should show removed content")
-	assert.Contains(t, event.Diff, "+", "diff should show added content")
-}
-
-func TestPublishCommonDiffEvent_RecordedInEvents(t *testing.T) {
-	execCtx := NewExecutionContext(context.Background(), "test", nil)
-
-	execCtx.PublishCommonDiffEvent("test:change", "before", "after")
-
-	events := execCtx.Events()
-	assert.Len(t, events, 1)
-	assert.IsType(t, &CommonDiffEvent{}, events[0])
-
-	event := events[0].(*CommonDiffEvent)
-	assert.Equal(t, "test:change", event.EventName)
-	assert.Equal(t, "before", event.Before)
-	assert.Equal(t, "after", event.After)
-}
 
 // -----------------------------------------------------------------------------
 // BaseEvent Population Tests
@@ -598,7 +369,11 @@ func TestEvents_HidesMutableEventUntilDispatchCompletes(t *testing.T) {
 	if assert.Len(t, loggedEvents, 1) {
 		loggedEvent, ok := loggedEvents[0].(*BeforeModelCallEvent)
 		if assert.True(t, ok) {
-			assert.Equal(t, []string{"original", "injected"}, modelRequestTexts(loggedEvent.Request))
+			assert.Equal(
+				t,
+				[]string{"original", "injected"},
+				modelRequestTexts(loggedEvent.Request),
+			)
 		}
 	}
 
@@ -1658,17 +1433,15 @@ func TestGauge_ScratchpadLength_SetOnScratchPadChange(
 	ctx := NewExecutionContext(
 		context.Background(), "test", nil,
 	)
-	data := NewBasicLoopData(&Task{Text: "test"})
-	data.SetExecutionContext(ctx)
 
 	// Empty scratchpad → gauge 0
-	data.SetScratchPad([]*Iteration{})
+	setTestRecords(t, ctx, []*HistoryEntry{})
 	assert.Equal(t, float64(0),
 		ctx.Stats().GetGauge(SGScratchpadLength),
 		"empty scratchpad should set gauge to 0")
 
 	// 1 iteration → gauge 1
-	data.SetScratchPad([]*Iteration{
+	setTestRecords(t, ctx, []*HistoryEntry{
 		{Messages: []*MessageContent{}},
 	})
 	assert.Equal(t, float64(1),
@@ -1676,7 +1449,7 @@ func TestGauge_ScratchpadLength_SetOnScratchPadChange(
 		"1-element scratchpad should set gauge to 1")
 
 	// 3 iterations → gauge 3
-	data.SetScratchPad([]*Iteration{
+	setTestRecords(t, ctx, []*HistoryEntry{
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},
@@ -1686,7 +1459,7 @@ func TestGauge_ScratchpadLength_SetOnScratchPadChange(
 		"3-element scratchpad should set gauge to 3")
 
 	// Compaction back to 1 → gauge 1
-	data.SetScratchPad([]*Iteration{
+	setTestRecords(t, ctx, []*HistoryEntry{
 		{Messages: []*MessageContent{}},
 	})
 	assert.Equal(t, float64(1),
@@ -1702,10 +1475,7 @@ func TestGauge_ScratchpadLength_DoesNotPropagateToParent(
 	)
 	child := parent.SpawnChild("child", nil)
 
-	childData := NewBasicLoopData(&Task{Text: "test"})
-	childData.SetExecutionContext(child)
-
-	childData.SetScratchPad([]*Iteration{
+	setTestRecords(t, child, []*HistoryEntry{
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},
@@ -1733,11 +1503,8 @@ func TestLimit_ScratchpadLengthGaugeWorksCorrectly(
 		},
 	})
 
-	data := NewBasicLoopData(&Task{Text: "test"})
-	data.SetExecutionContext(ctx)
-
 	// At limit (2) — should not trigger
-	data.SetScratchPad([]*Iteration{
+	setTestRecords(t, ctx, []*HistoryEntry{
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},
 	})
@@ -1745,7 +1512,7 @@ func TestLimit_ScratchpadLengthGaugeWorksCorrectly(
 		"scratchpad at 2 should not exceed MaxValue 2")
 
 	// Exceeds limit (3 > 2) — should trigger
-	data.SetScratchPad([]*Iteration{
+	setTestRecords(t, ctx, []*HistoryEntry{
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},
 		{Messages: []*MessageContent{}},

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="Learn Gent by running, breaking, and restoring an agent." />
+    <title>Gent — An interactive explainer</title>
+    <style>
+      /* FONTS */
+    </style>
+    <style>
+      /* STYLES */
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="masthead">
+      <a class="wordmark" href="#view=learn" aria-label="Gent interactive explainer home"
+        >gent<span>↗</span></a
+      >
+      <span class="masthead-label">AN INTERACTIVE EXPLAINER</span>
+      <span class="snapshot" id="snapshot"></span>
+    </header>
+    <nav class="navigation" aria-label="Guide sections">
+      <div class="navigation-items">
+        <button type="button" data-view="learn" aria-current="page">
+          <span>Learn by doing</span>
+        </button>
+        <button type="button" data-view="architecture"><span>System map</span></button>
+        <button type="button" data-view="atlas"><span>Reference</span></button>
+        <button type="button" data-view="recovery"><span>Recovery details</span></button>
+        <button type="button" data-view="review">
+          <span>Review notes</span><span id="note-count">0</span>
+        </button>
+      </div>
+      <button type="button" class="quiet-button" id="export">Export notes ↗</button>
+    </nav>
+    <main id="main">
+      <section id="learn" class="view" aria-labelledby="learn-title">
+        <div class="learning-intro">
+          <div>
+            <p class="eyebrow">FIVE EXPERIMENTS / ONE AGENT FRAMEWORK</p>
+            <h1 id="learn-title">Pull a thread. <em>See what moves.</em></h1>
+          </div>
+          <p>
+            Run an agent. Change its memory. Break a save.<br />
+            Learn the contracts by changing what happens.
+          </p>
+        </div>
+        <nav id="lesson-rail" class="lesson-rail" aria-label="Interactive lessons"></nav>
+        <div id="lesson-body"></div>
+        <div class="learning-footnote">
+          <span>Small, local teaching models. No provider, database, or refund is called.</span>
+          <span id="lesson-coverage"></span>
+        </div>
+      </section>
+      <section id="architecture" class="view" aria-labelledby="architecture-title" hidden>
+        <div class="hero">
+          <div>
+            <p class="eyebrow">GENT / CURRENT WORKING TREE</p>
+            <h1 id="architecture-title">Small contracts.<br /><em>One coherent run.</em></h1>
+            <p class="hero-copy">
+              Explore what each interface owns, how the pieces connect, and where the history
+              refactor draws the boundaries.
+            </p>
+            <div class="hero-actions">
+              <button type="button" class="primary-button" data-open="gent.LoopData">
+                Start with LoopData →
+              </button>
+              <button type="button" class="text-button" id="show-changes">
+                Inspect signature changes ↗
+              </button>
+            </div>
+          </div>
+          <aside class="scope">
+            <span class="eyebrow">SOURCE-DERIVED INVENTORY</span>
+            <div class="scope-number" id="interface-count">53<span>named interfaces</span></div>
+            <p id="scope-detail"></p>
+            <p class="small">
+              Exact declarations and source locations come from Go’s parser. Explanations describe
+              the current implementation.
+            </p>
+          </aside>
+        </div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">THE SYSTEM AT A GLANCE</p>
+            <h2>Choose a boundary to explore.</h2>
+          </div>
+          <p class="small">Select a group to browse its contracts.</p>
+        </div>
+        <div class="system-map" id="system-map"></div>
+        <div class="context-strip">
+          <div>
+            <span class="eyebrow">THE CONCRETE HUB</span>
+            <h3>ExecutionContext</h3>
+          </div>
+          <p>
+            Owns the task, history, active selection, acceptance, stats, and cancellation. The
+            executor moves control through the loop and its checkpoints.
+          </p>
+          <button type="button" class="light-button" data-open="gent.ExecutionContext">
+            Inspect public API →
+          </button>
+        </div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">READ THE REFACTOR</p>
+            <h2>Six boundaries worth discussing.</h2>
+          </div>
+        </div>
+        <div class="boundaries" id="boundaries"></div>
+        <details class="scope-details">
+          <summary>Coverage, comparison rules, and source provenance</summary>
+          <p id="provenance"></p>
+          <p>
+            Every named non-test interface in repository Go source is included. The additional
+            capability checks are listed under Recovery. Eighteen concrete types supply context;
+            this is not an inventory of every exported function, alias, or struct.
+          </p>
+          <p>
+            New and changed badges compare declarations with the same file and name at the recorded
+            HEAD. Comments and method bodies are excluded. An unchanged signature can still have
+            changed behavior. This is a snapshot: rebuild after editing Go source.
+          </p>
+          <p>
+            Tests, dependencies, hidden directories, and documentation generators are excluded.
+            Source references are local checkout paths. No browser requests or provider calls are
+            made.
+          </p>
+        </details>
+      </section>
+
+      <section id="atlas" class="view" aria-labelledby="atlas-title" hidden>
+        <div class="atlas-heading">
+          <div>
+            <p class="eyebrow">THE CONTRACT CATALOG</p>
+            <h1 id="atlas-title">Inside each interface.</h1>
+          </div>
+          <p class="small">
+            Search names, methods, or responsibilities.<br />Press <kbd>/</kbd> to search.
+          </p>
+        </div>
+        <div class="atlas-layout">
+          <aside class="catalog-sidebar">
+            <details id="catalog-panel" open>
+              <summary>Browse contracts <span id="mobile-count"></span></summary>
+              <label class="field-label" for="search">Search contracts</label>
+              <input
+                type="search"
+                id="search"
+                placeholder="e.g. Recorder, Save, recovery"
+                autocomplete="off"
+              />
+              <div class="filter-row">
+                <label class="field-label" for="group"
+                  >Boundary
+                  <select id="group">
+                    <option value="all">All boundaries</option>
+                  </select>
+                </label>
+                <label class="field-label" for="kind"
+                  >Include
+                  <select id="kind">
+                    <option value="interface">Interfaces</option>
+                    <option value="support">Supporting types</option>
+                    <option value="all">Both</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field-label" for="change"
+                >Declaration compared with HEAD
+                <select id="change">
+                  <option value="all">All declarations</option>
+                  <option value="different">New or changed</option>
+                  <option value="new">New</option>
+                  <option value="changed">Changed signature</option>
+                  <option value="same">Unchanged declaration</option>
+                </select>
+              </label>
+              <div class="catalog-count">
+                <span id="result-count" role="status"></span>
+                <button type="button" class="text-button" id="clear-filters">Clear filters</button>
+              </div>
+              <div id="contract-list" class="contract-list" aria-label="Matching contracts"></div>
+            </details>
+          </aside>
+          <article id="contract-detail" class="contract-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <section id="recovery" class="view" aria-labelledby="recovery-title" hidden>
+        <div class="page-heading">
+          <p class="eyebrow">EVIDENCE, THEN CONTINUATION</p>
+          <h1 id="recovery-title">Know what a checkpoint proves.</h1>
+          <p>
+            Explore the eight declared execution phases. These are supported boundaries for root
+            ReAct recovery, with branches and repetition—not a mandatory eight-step sequence.
+          </p>
+        </div>
+        <div class="phase-layout">
+          <nav class="phase-list" id="phase-list" aria-label="Execution phases"></nav>
+          <article class="phase-detail" id="phase-detail" aria-live="polite"></article>
+        </div>
+        <div class="acceptance">
+          <div>
+            <p class="eyebrow">THE ACCEPTANCE BOUNDARY</p>
+            <h2>A save can fail after storage commits.</h2>
+            <p>
+              Select an acknowledgment outcome to inspect the contract. This is an illustration, not
+              a running Gent execution.
+            </p>
+          </div>
+          <label class="field-label" for="save-outcome"
+            >Recorder outcome
+            <select id="save-outcome">
+              <option value="success">Successful acknowledgment</option>
+              <option value="lost">Lost acknowledgment after commit</option>
+              <option value="rejected">Rejected stale writer</option>
+            </select>
+          </label>
+          <div class="save-lanes" id="save-lanes" aria-live="polite"></div>
+          <p id="save-explanation" class="save-explanation"></p>
+          <button type="button" class="text-button" data-open="gent.Recorder">
+            Inspect Recorder →
+          </button>
+        </div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ALSO DETECTED IN THE SOURCE</p>
+            <h2>Structural capability checks.</h2>
+          </div>
+          <p class="small">Anonymous interfaces are checked where needed.</p>
+        </div>
+        <div id="capabilities" class="capabilities"></div>
+      </section>
+
+      <section id="review" class="view" aria-labelledby="review-title" hidden>
+        <div class="page-heading">
+          <p class="eyebrow">OUR REVIEW QUEUE</p>
+          <h1 id="review-title">Keep the questions close.</h1>
+          <p>
+            Mark contracts as reviewed or leave questions in the inspector. Notes stay in this
+            browser and can be exported as Markdown for our discussion.
+          </p>
+        </div>
+        <div id="review-summary" class="review-summary"></div>
+        <div id="review-list"></div>
+      </section>
+    </main>
+    <footer>
+      <span>GENT / INTERFACE REVIEW</span><span id="footer-source"></span>
+      <button type="button" class="text-button" id="show-licenses">Font licenses</button>
+    </footer>
+    <p id="feedback" role="status" class="feedback" hidden></p>
+    <dialog id="licenses">
+      <div class="dialog-heading">
+        <h2>Font licenses</h2>
+        <button type="button" class="quiet-button" id="close-licenses">Close ×</button>
+      </div>
+      <div id="license-content"></div>
+    </dialog>
+    <dialog id="copy-help">
+      <div class="dialog-heading">
+        <h2>Copy the selected text</h2>
+        <button type="button" class="quiet-button" id="close-copy">Close ×</button>
+      </div>
+      <label class="field-label" for="manual-copy">Use your keyboard copy command.</label>
+      <textarea id="manual-copy" readonly></textarea>
+    </dialog>
+    <dialog id="lesson-contract" aria-labelledby="lesson-contract-title">
+      <div class="dialog-heading">
+        <p class="eyebrow">THE CONTRACT BEHIND THIS BEHAVIOR</p>
+        <button type="button" class="quiet-button" id="close-lesson-contract">Close ×</button>
+      </div>
+      <div id="lesson-contract-content"></div>
+    </dialog>
+    <noscript
+      ><p>
+        This guide needs JavaScript for search, contract inspection, and review notes. Enable
+        JavaScript and reopen this file. It works without a network connection.
+      </p></noscript
+    >
+    <script id="gent-data" type="application/json">
+      /* DATA */
+    </script>
+    <script>
+      /* APPLICATION */
+    </script>
+  </body>
+</html>

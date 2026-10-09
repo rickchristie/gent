@@ -23,8 +23,8 @@ type domainInfo struct {
 //
 // Output format:
 //
-//	- Customer (tenant, landlord) - 25 tools
-//	- Communication (email, SMS) - 12 tools
+//   - Customer (tenant, landlord) - 25 tools
+//   - Communication (email, SMS) - 12 tools
 func buildDomainSummary(
 	tools []gent.IndexableTool,
 ) string {
@@ -273,8 +273,8 @@ func buildSearchToolPrompt(
 //
 // Output format:
 //
-//	  - search_customer
-//	  - get_policy
+//   - search_customer
+//   - get_policy
 func buildSimpleList(
 	tools []gent.IndexableTool,
 ) string {

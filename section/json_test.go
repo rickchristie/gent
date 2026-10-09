@@ -76,7 +76,7 @@ func TestJSON_Name(t *testing.T) {
 func TestJSON_Prompt(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    func() gent.TextOutputSection
+		input    func() gent.TextSection
 		expected struct {
 			containsSchema  bool
 			containsPrompt  bool
@@ -86,7 +86,7 @@ func TestJSON_Prompt(t *testing.T) {
 	}{
 		{
 			name: "default prompt with schema",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewJSON[SimpleStruct]("data")
 			},
 			expected: struct {
@@ -103,7 +103,7 @@ func TestJSON_Prompt(t *testing.T) {
 		},
 		{
 			name: "with custom prompt",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewJSON[SimpleStruct]("data").WithGuidance("Analyze the data.")
 			},
 			expected: struct {
@@ -120,7 +120,7 @@ func TestJSON_Prompt(t *testing.T) {
 		},
 		{
 			name: "with example",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewJSON[SimpleStruct]("data").WithExample(SimpleStruct{
 					Name:  "test",
 					Value: 42,
@@ -140,7 +140,7 @@ func TestJSON_Prompt(t *testing.T) {
 		},
 		{
 			name: "with description fields",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewJSON[StructWithDescription]("data")
 			},
 			expected: struct {
@@ -455,9 +455,9 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 			presetGauge bool
 		}
 		expected struct {
-			hasErr                bool
-			totalErrors           int64
-			consecutiveErrors     float64
+			hasErr            bool
+			totalErrors       int64
+			consecutiveErrors float64
 		}
 	}{
 		{
@@ -470,13 +470,13 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				presetGauge: false,
 			},
 			expected: struct {
-				hasErr                bool
-				totalErrors           int64
-				consecutiveErrors     float64
-				}{
-				hasErr:                true,
-				totalErrors:           1,
-				consecutiveErrors:     1,
+				hasErr            bool
+				totalErrors       int64
+				consecutiveErrors float64
+			}{
+				hasErr:            true,
+				totalErrors:       1,
+				consecutiveErrors: 1,
 			},
 		},
 		{
@@ -489,13 +489,13 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				presetGauge: true,
 			},
 			expected: struct {
-				hasErr                bool
-				totalErrors           int64
-				consecutiveErrors     float64
-				}{
-				hasErr:                false,
-				totalErrors:           0,
-				consecutiveErrors:     0,
+				hasErr            bool
+				totalErrors       int64
+				consecutiveErrors float64
+			}{
+				hasErr:            false,
+				totalErrors:       0,
+				consecutiveErrors: 0,
 			},
 		},
 	}
@@ -555,8 +555,8 @@ func TestJSON_MethodChaining(t *testing.T) {
 	assert.Contains(t, section.Guidance(), "example")
 }
 
-func TestJSON_ImplementsTextOutputSection(t *testing.T) {
-	var _ gent.TextOutputSection = (*JSON[any])(nil)
+func TestJSON_ImplementsTextSection(t *testing.T) {
+	var _ gent.TextSection = (*JSON[any])(nil)
 }
 
 // Helper function

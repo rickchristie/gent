@@ -118,8 +118,8 @@ type LimitExceededSubscriber interface {
 	)
 }
 
-// CommonDiffEventSubscriber receives CommonDiffEvent events.
+// StateChangeEventSubscriber receives StateChangeEvent events.
 // This is useful for receiving state change events with automatic diff generation.
-type CommonDiffEventSubscriber interface {
-	OnCommonDiffEvent(execCtx *ExecutionContext, event *CommonDiffEvent)
+type StateChangeEventSubscriber interface {
+	OnStateChangeEvent(execCtx *ExecutionContext, event *StateChangeEvent)
 }

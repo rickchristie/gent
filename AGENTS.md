@@ -1,26 +1,26 @@
 <critical_behavior>
-## Critical Behavior
-- **ALWAYS write all outputs of test, bash commands to /tmp file** when running test, scripts that you need the result for.
-  You can then run head/tail or search on the result file. This avoids re-running the script again whenever there are issues.
+# Critical Behavior
 - **ALWAYS fully finish your tasks** when executing anything. Never stop to ask "would you like to continue?" or anything similar.
-  You are given tasks, fully complete them, don't waste our time.
+  You are given tasks, fully complete them, don't waste our time. Exception: Destructive actions with irreversible consequences.
 - **ALWAYS verify your work and assumptions**, don't just read the code, actually test what you're doing.
   Write tests, write scripts to test behaviors, run playwright to check console, take screenshots, run the commands.
-- **NEVER blame without evidence**, don't say something like "X fail due to Y", find evidence! 
+- **NEVER blame without evidence**, don't say something like "X fail due to Y", find evidence!
   **Always investigate to find root cause**, if unable to find evidence, state why and clarify it's a hypothesis.
 - **ALWAYS write proper documentation**, write *why* it was done this way, and *how* only if it's not obvious.
-  Write for a human or yourself when they revisit this code in the future, what is important for them so they work faster and with less mistakes?
+  Write for a human/yourself when revisiting this code in the future, what's important so futureself work faster, fewer mistakes, less tokens?
 - **NEVER execute staging, unstaging, or stashing git changes**, this will cause **loss of verification work** in our collaboration!
 - **NEVER remove or edit changes that are not yours**, you are not the only one working in the repository.
   When you absolutely require to touch changes that are not yours, ASK permission.
 - **NEVER delete valid comments**, contextual comments are important for maintainability.
-  Comments contains business context, the "why" - if still correct, removing them will cause **loss of context**.
+  Removing comments that contains business context (the "why") will cause **loss of context**.
   Only remove comments if they are no longer valid.
-- **ALWAYS use simple, intent-revealing names and comments**, e.g. use `shouldOrderInsertTimeline` instead of `orderQualifiesForLifecycleTimeline`.
-  Prefer concise, immediately understood, simple names that describe a concrete action, decision, noun, business purpose.
-  Avoid abstract, thesaurus-style, Java-like word salad. Applies to variables, functions, methods, tests, and comments.
+- **ALWAYS** use ASD-STE100 Simplified Technical English (STE) in ALL your outputs, e.g. when communicating with me, writing documentations, code comments, variable names, function names, entity names, tests, comments.
 - **ALWAYS prioritize readability, maintainability, simplicity, elegance** of your code.
-  Aim for low-cyclomatic complexity in your code, exit early whenever you can, it's okay to repeat lines if we reduce cyclomatic complexity or prevent interleaving conditionals.
+  Aim for low-cyclomatic complexity in your code, exit early whenever you can, it's okay to repeat lines if we reduce cyclomatic
+  complexity or prevent interleaving conditionals.
+- **DO NOT excessively nil check**. Treat pointer/interface parameters/struct fields as required unless explicitly documented optional.
+  If caller sends nil, then nil pointer panic is fine. Fail fast, unless we truly need the recovery.
+- **ALWAYS make main branch a single trunk line**. No merge commits, squash and rebase when needed.
 </critical_behavior>
 
 <codebase_architecture>
@@ -46,18 +46,19 @@ goal is to make it easy to write and experiment with custom agent loops.
 
 ### LoopData
 - Defined in: `agent.go`
-- Stores Task (user input) and iteration history for the agent loop
+- Supplies Task (user input); ExecutionContext owns history and working context
 - BasicLoopData is the default; embed it in custom struct for additional fields
-- Scratchpad: iterations used in next LLM call (can be compacted)
-- IterationHistory: full history (never compacted, for observability)
-- SIDE EFFECT: AddIterationHistory/SetScratchPad publish CommonDiffEvent for change tracking
+- Scratchpad: ordered HistoryEntry IDs used in the next model call
+- History: append-only originals, summaries, compaction decisions, and context transitions
+- SIDE EFFECT: UpdateHistory queues structured StateChangeEvent; checkpoints accept it atomically
+- History, storage, and continuation contract: docs/history.md
 
 ### Model
 - Interface: `model.go`
 - Implementation: `models/` (e.g., `models/lcg.go` for LangChainGo wrapper)
 - Wraps LLM provider, normalizes token count stats across OpenAI/Anthropic/Google/etc.
-- SIDE EFFECT: AfterModelCallEvent auto-increments input_tokens, output_tokens stats
-- SIDE EFFECT: Must emit chunks via execCtx.EmitChunk() for streaming subscribers
+- Managed ExecutionContext calls record requests, chunks, responses, and usage before delivery
+- Adapters return a Stream; they must Complete after their producer stops, including cancellation
 
 ### ToolChain
 - Interface: `toolchain.go`
@@ -100,7 +101,8 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Defined in: `context.go`
 - Central hub: holds LoopData, Stats, Events, Limits, streaming subscriptions
 - SpawnChild() creates nested context with shared stats propagation
-- All PublishXXX() methods: record event → update stats → check limits → notify subscribers
+- PublishXXX() runs mutable hooks and queues frozen evidence; stats updates enforce limits
+- FlushProgress/CommitCheckpoint accept evidence before StateChange and trace observers see it
 
 ## Data Flow (ReAct Agent)
 1. Executor.Run() → creates ExecutionContext with LoopData, Stats, Limits
@@ -167,9 +169,13 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Assert exact string matches. Do NOT use `Contains`, `HasPrefix`, or other partial match shortcuts. If the full expected output is known, assert it exactly.
 
 **Running Tests**
+- Always run full test suites over `./...` after the final changes, including native, CGO-disabled,
+  and race configurations. Targeted checks never replace a full suite.
 - Run tests without `-v` and without piping to `grep`. Go test already prints full output for failing packages — no filtering needed.
 - Use 300s timeout to accommodate ONNX embedder index builds in policy/search tests.
 - Example: `go test ./... -count=1 -timeout 300s`
+- Portable suite: `CGO_ENABLED=0 go test ./... -count=1 -timeout 300s`
+- Race suite: `go test -race ./... -count=1 -timeout 300s`
 
 **Testing Stats & Limits**
 - Whenever we create new stats (`*ExecutionStats`), we need to create tests on:

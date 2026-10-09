@@ -7,7 +7,7 @@ import (
 )
 
 // SchemaVersion is the JSON schema version for trace snapshots and events.
-const SchemaVersion = 1
+const SchemaVersion = gent.RunSchemaVersion
 
 // EventType is the normalized trace event type used by UIs and replay code.
 type EventType string
@@ -32,7 +32,7 @@ const (
 	EventTypeLimitExceeded     EventType = "limit_exceeded"
 	EventTypeCompaction        EventType = "compaction"
 	EventTypeCommon            EventType = "common"
-	EventTypeCommonDiff        EventType = "common_diff"
+	EventTypeStateChange       EventType = "state_change"
 )
 
 // RunStatus is the materialized status of a traced run.
@@ -51,14 +51,16 @@ const (
 type StepStatus string
 
 const (
-	StepStatusRunning   StepStatus = "running"
-	StepStatusSucceeded StepStatus = "succeeded"
-	StepStatusFailed    StepStatus = "failed"
-	StepStatusCanceled  StepStatus = "canceled"
+	StepStatusInterrupted StepStatus = "interrupted"
+	StepStatusRunning     StepStatus = "running"
+	StepStatusSucceeded   StepStatus = "succeeded"
+	StepStatusFailed      StepStatus = "failed"
+	StepStatusCanceled    StepStatus = "canceled"
 )
 
 // Event is a sequenced trace event.
 type Event struct {
+	AttemptId   string    `json:"attemptId,omitempty"`
 	EventNumber uint64    `json:"eventNumber"`
 	RunId       string    `json:"runId"`
 	Ts          time.Time `json:"ts"`
@@ -138,6 +140,7 @@ type Context struct {
 
 // Iteration is a materialized agent-loop iteration record.
 type Iteration struct {
+	AttemptId string `json:"attemptId"`
 	Iteration int    `json:"iteration"`
 	Depth     int    `json:"depth"`
 	Source    string `json:"source,omitempty"`
@@ -165,6 +168,7 @@ type Iteration struct {
 
 // ModelCall is a materialized model call record.
 type ModelCall struct {
+	AttemptId     string `json:"attemptId"`
 	Id            string `json:"id"`
 	Model         string `json:"model"`
 	Provider      string `json:"provider,omitempty"`
@@ -219,6 +223,7 @@ type ModelUsage struct {
 
 // ToolCall is a materialized tool call record.
 type ToolCall struct {
+	AttemptId string `json:"attemptId"`
 	Id        string `json:"id"`
 	Name      string `json:"name"`
 	Source    string `json:"source,omitempty"`

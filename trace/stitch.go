@@ -1,9 +1,9 @@
 package trace
 
-import "errors"
+import "github.com/rickchristie/gent"
 
 // ErrReplayUnavailable means the requested event range is no longer in memory.
-var ErrReplayUnavailable = errors.New("trace replay unavailable")
+var ErrReplayUnavailable = gent.ErrReplayUnavailable
 
 // CanStitch reports whether the first buffered event could stitch to a snapshot.
 func CanStitch(snapshotLastEventNumber uint64, firstBufferedEventNumber uint64) bool {

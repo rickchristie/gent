@@ -1,0 +1,21 @@
+{
+  "name": "gent-field-guide",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "preview": "node preview.mjs",
+    "format": "prettier --write src test *.mjs *.json README.md assets/fonts.css",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/browser.mjs",
+    "test:design": "node test/design-browser.mjs",
+    "screenshots": "node test/screenshots.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "prettier": "3.6.2"
+  }
+}

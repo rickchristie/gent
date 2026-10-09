@@ -1,17 +1,17 @@
 package agents
 
 import (
-	"errors"
+	"github.com/rickchristie/gent"
 	"hash/fnv"
 )
 
 // ErrRepetitionDetected is returned when the repetition detector
 // identifies a degenerate loop in the model's streaming output.
-var ErrRepetitionDetected = errors.New("repetition detected: model output is looping")
+var ErrRepetitionDetected = gent.ErrRepetitionDetected
 
 // ErrMaxResponseSize is returned when the accumulated response
 // exceeds the configured maximum character limit.
-var ErrMaxResponseSize = errors.New("max response size exceeded")
+var ErrMaxResponseSize = gent.ErrMaxResponseSize
 
 // RepetitionAction controls what happens when repetition is detected.
 type RepetitionAction int

@@ -1,0 +1,1047 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="An interactive field guide to Gent, the Go agent framework.
+      Explore its loop, interfaces, durable history, journal, and checkpoint recovery offline."
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+      script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data:;
+      connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Gent · A field guide to agents that remember</title>
+    <style>
+      /* __FONTS__ */
+    </style>
+    <style>
+      /* __STYLES__ */
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#one-run">Skip to the interactive guide</a>
+    <svg class="symbol-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="icon-arrow" viewBox="0 0 24 24">
+        <path
+          d="M4 12h15m-6-6 6 6-6 6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24">
+        <path d="m8 5 11 7-11 7Z" fill="currentColor" />
+      </symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24">
+        <path
+          d="m6 6 12 12M18 6 6 18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        />
+      </symbol>
+      <symbol id="icon-reset" viewBox="0 0 24 24">
+        <path
+          d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </symbol>
+    </svg>
+
+    <header class="masthead">
+      <a class="brand" href="#top" aria-label="Gent field guide, back to top">
+        <svg viewBox="0 0 36 36" aria-hidden="true" class="brand-mark">
+          <path
+            d="M28 9H12L5 18l7 9h16V17H17"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="4"
+            stroke-linecap="square"
+          />
+          <circle cx="28" cy="9" r="3" fill="var(--accent)" />
+        </svg>
+        <span>gent<span class="brand-period">.</span></span>
+        <span class="brand-divider"></span><span class="brand-edition">THE FIELD GUIDE</span>
+      </a>
+      <div class="masthead-actions">
+        <span class="offline-label"><span class="status-dot"></span> MADE TO EXPLORE OFFLINE</span>
+        <button id="motion-toggle" class="quiet-button" type="button" aria-pressed="false">
+          <span class="motion-icon" aria-hidden="true">≋</span
+          ><span id="motion-label">Pause motion</span>
+        </button>
+        <a class="atlas-link" href="#atlas">Interface atlas <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="reading-progress" aria-hidden="true"><span id="reading-progress"></span></div>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow hero-enter">
+            <span class="tiny-cross" aria-hidden="true">+</span> GO AGENT FRAMEWORK / HISTORY
+            REFACTOR
+          </p>
+          <h1 id="hero-title" class="hero-enter">
+            A little loop.<br />
+            <em>A lasting record.</em>
+          </h1>
+          <p class="hero-description hero-enter">
+            An agent asks, acts, and learns from what comes back. Gent gives those steps a
+            structure—and a story that survives the worker running them.
+          </p>
+          <div class="hero-actions hero-enter">
+            <a class="button primary" href="#one-run"
+              >Follow one request <svg aria-hidden="true"><use href="#icon-arrow" /></svg
+            ></a>
+            <a class="text-link" href="#system-map">See how it fits together <span>↗</span></a>
+          </div>
+          <div class="hero-footnote hero-enter">
+            <span class="chapter-stamp">G / 01</span>
+            <span
+              >No Gent knowledge needed.<br /><strong
+                >Read. Press play. Pull a thread.</strong
+              ></span
+            >
+          </div>
+        </div>
+        <div
+          class="hero-visual hero-enter"
+          role="img"
+          aria-label="A request enters a think, act, observe loop. Its evidence accumulates
+          in a journal, allowing another worker to continue the same run."
+        >
+          <div class="diagram-caption"><span>FIG. 01</span><span>THE LOOP & THE RECORD</span></div>
+          <svg class="hero-diagram" viewBox="0 0 560 465" aria-hidden="true">
+            <defs>
+              <marker
+                id="hero-arrow"
+                markerWidth="6"
+                markerHeight="6"
+                refX="5"
+                refY="3"
+                orient="auto"
+              >
+                <path d="m0 0 6 3-6 3" fill="var(--ink)" />
+              </marker>
+              <pattern id="paper-dots" width="22" height="22" patternUnits="userSpaceOnUse">
+                <circle cx="1" cy="1" r=".75" fill="var(--line)" />
+              </pattern>
+            </defs>
+            <rect x="2" y="2" width="556" height="455" fill="url(#paper-dots)" />
+            <path d="M60 88h91" class="ink-path" marker-end="url(#hero-arrow)" />
+            <circle cx="45" cy="88" r="17" fill="var(--paper)" stroke="var(--ink)" />
+            <path d="m39 88 4 4 8-9" class="ink-path" />
+            <text x="21" y="125" class="svg-small">REQUEST</text>
+            <path
+              d="M234 89h70q89 0 89 88v3q0 88-89 88h-68q-86 0-86-87v-6"
+              class="hero-loop-path"
+              marker-end="url(#hero-arrow)"
+            />
+            <path d="M174 133V96" class="ink-path" marker-end="url(#hero-arrow)" />
+            <rect x="142" y="62" width="109" height="54" rx="4" fill="var(--ink)" />
+            <text x="196" y="95" text-anchor="middle" class="svg-node light">THINK</text>
+            <rect x="347" y="146" width="93" height="54" rx="4" fill="var(--accent)" />
+            <text x="393" y="179" text-anchor="middle" class="svg-node light">ACT</text>
+            <rect
+              x="185"
+              y="242"
+              width="125"
+              height="54"
+              rx="4"
+              fill="var(--paper)"
+              stroke="var(--ink)"
+            />
+            <text x="248" y="275" text-anchor="middle" class="svg-node">OBSERVE</text>
+            <text x="251" y="174" class="hero-loop-word" text-anchor="middle">Next?</text>
+            <text x="251" y="197" class="svg-small" text-anchor="middle">ONE ITERATION</text>
+            <circle class="orbit-dot" cx="0" cy="0" r="5" fill="var(--accent)" />
+            <path d="M393 202v127M248 297v31M197 117v210" class="evidence-path" />
+            <text x="40" y="338" class="svg-small">EVIDENCE</text>
+            <path d="M145 335h321" class="evidence-path" />
+            <path d="M161 353h300v75H161z" fill="var(--ink)" />
+            <path d="M161 353h300l-14-17H175z" fill="var(--teal)" />
+            <text x="185" y="378" class="svg-small light">THE JOURNAL</text>
+            <text x="185" y="404" class="svg-journal light">120 · 121 · 122 · …</text>
+            <path d="M463 390h53V275h-58" class="ink-path" marker-end="url(#hero-arrow)" />
+            <text x="474" y="260" class="svg-small" text-anchor="middle">RESUME</text>
+          </svg>
+          <div class="hero-diagram-footer">
+            <span><i class="legend-dot orange"></i> Work happens</span>
+            <span><i class="legend-dot teal"></i> Evidence stays</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="orientation-strip">
+        <p><strong>An agent</strong> is a program that repeatedly asks a model what to do next.</p>
+        <p>
+          <strong>Gent</strong> gives that program reusable Go components, controls, and memory.
+        </p>
+        <p>
+          <strong>This refactor</strong> makes its evidence portable and its supported steps
+          resumable.
+        </p>
+      </div>
+
+      <div class="guide-layout">
+        <aside class="contents" aria-label="Guide chapters">
+          <div class="contents-inner">
+            <p class="eyebrow">A WALK THROUGH GENT</p>
+            <nav id="chapter-nav">
+              <a href="#one-run"><span>01</span> Follow a request</a>
+              <a href="#system-map"><span>02</span> Meet the parts</a>
+              <a href="#language"><span>03</span> Words into actions</a>
+              <a href="#history"><span>04</span> History & context</a>
+              <a href="#journal"><span>05</span> Journal & storage</a>
+              <a href="#recovery"><span>06</span> Another worker</a>
+              <a href="#viewers"><span>07</span> Many viewers</a>
+              <a href="#guardrails"><span>08</span> Budgets & hooks</a>
+              <a href="#using-gent"><span>09</span> Put it together</a>
+              <a href="#atlas"><span>10</span> Interface atlas</a>
+              <a href="#check"><span>11</span> Check your model</a>
+            </nav>
+            <div class="contents-note">
+              <span class="tiny-cross">+</span> Start with the story.<br />Open the Go when you’re
+              ready.
+            </div>
+          </div>
+        </aside>
+        <div class="chapters">
+          <section id="one-run" class="chapter" aria-labelledby="run-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">01 / THE BASIC RHYTHM</p>
+              <h2 id="run-title">One request.<br /><em>A few small jobs.</em></h2>
+              <p>
+                Our user asks, “Can I get a refund?” Follow a ReAct agent as it checks a policy,
+                keeps the evidence, and returns an answer.
+              </p>
+            </div>
+            <div class="run-lab lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">FOLLOW THE REQUEST</span>
+                <span class="simulation-label">Interactive illustration</span>
+              </div>
+              <div class="run-nodes" id="run-nodes" aria-label="Components in this example">
+                <button type="button" data-inspect="executor">Runner</button><span>→</span>
+                <button type="button" data-inspect="agent">ReAct</button><span>→</span>
+                <button type="button" data-inspect="model">Model</button><span>→</span>
+                <button type="button" data-inspect="tools">Tools</button><span>→</span>
+                <button type="button" data-inspect="termination">Answer</button>
+              </div>
+              <div class="run-scene">
+                <div class="run-story" aria-live="polite" aria-atomic="true">
+                  <span id="run-step-number" class="big-step">01</span>
+                  <h3 id="run-step-title"></h3>
+                  <p id="run-step-text"></p>
+                  <p id="run-step-note" class="margin-note"></p>
+                </div>
+                <div class="run-internals">
+                  <div class="small-label">INSIDE THIS RUN</div>
+                  <dl class="run-metrics">
+                    <div>
+                      <dt>Iteration</dt>
+                      <dd id="run-iteration">0</dd>
+                    </div>
+                    <div>
+                      <dt>Tokens*</dt>
+                      <dd id="run-tokens">0</dd>
+                    </div>
+                    <div>
+                      <dt>Tool calls</dt>
+                      <dd id="run-tools">0</dd>
+                    </div>
+                  </dl>
+                  <div class="small-label">ACTIVE OBSERVATIONS</div>
+                  <div id="run-records" class="run-records"></div>
+                  <div class="checkpoint-label">
+                    <span class="status-dot"></span> CHECKPOINT <code id="run-phase">initial</code>
+                  </div>
+                </div>
+              </div>
+              <div id="run-activity" class="activity-ribbon"></div>
+              <div class="playback">
+                <button id="run-play" type="button" class="button primary small">
+                  <svg aria-hidden="true"><use href="#icon-play" /></svg><span>Play the run</span>
+                </button>
+                <button id="run-back" type="button" class="quiet-button">← Back</button>
+                <input
+                  id="run-slider"
+                  type="range"
+                  min="0"
+                  max="10"
+                  value="0"
+                  aria-label="Choose a step in the request"
+                />
+                <button id="run-next" type="button" class="quiet-button">Next →</button>
+                <span id="run-count" class="mono">1 / 11</span>
+              </div>
+              <p class="lab-footnote">
+                *Illustrative token counts. No model or network calls are made. Click a component’s
+                name to inspect its role.
+              </p>
+            </div>
+            <details class="under-the-hood">
+              <summary>What does the executor actually run?</summary>
+              <pre><code>BeforeExecution → initial checkpoint
+  [BeforeIteration → Loop.Next() → AfterIteration]*
+AfterExecution → terminal checkpoint</code></pre>
+              <p>
+                <code>LAContinue</code> requests another iteration. <code>LATerminate</code> returns
+                an answer. Limits, errors, or intentional cancellation can also end execution. A
+                worker interruption preserves a resumable boundary instead of claiming completion.
+              </p>
+            </details>
+          </section>
+
+          <section id="system-map" class="chapter" aria-labelledby="map-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">02 / SEPARATE JOBS, ONE SYSTEM</p>
+              <h2 id="map-title">Meet the parts.</h2>
+              <p>
+                Think of Gent as a set of cooperating roles. Select a part to see what it owns, who
+                uses it, and where you can replace its behavior.
+              </p>
+            </div>
+            <div class="system-map reveal" id="system-diagram">
+              <div class="map-lane">
+                <span class="lane-name">YOUR APPLICATION</span>
+                <div class="map-lane-nodes">
+                  <button data-map="loopdata">
+                    LoopData<small>Original task + custom data</small>
+                  </button>
+                  <button data-map="executor">Runner<small>Run the lifecycle</small></button>
+                </div>
+              </div>
+              <div class="map-flow-label">passes state & runs iterations <span>↓</span></div>
+              <div class="map-lane">
+                <span class="lane-name">EXECUTION</span>
+                <div class="map-lane-nodes">
+                  <button data-map="agent">Loop<small>Choose the next action</small></button>
+                  <button data-map="context" class="selected" aria-pressed="true">
+                    ExecutionContext<small>Own run state & coordinate recording</small>
+                  </button>
+                </div>
+              </div>
+              <div class="map-flow-label">composes & coordinates <span>↓</span></div>
+              <div class="map-lane">
+                <span class="lane-name">BUILDING BLOCKS</span>
+                <div class="map-lane-nodes blocks">
+                  <button data-map="model">Model<small>Generate</small></button>
+                  <button data-map="format">TextFormat<small>Extract</small></button>
+                  <button data-map="tools">ToolChain<small>Act</small></button>
+                  <button data-map="termination">Termination<small>Accept</small></button>
+                </div>
+              </div>
+              <div class="map-flow-label">records evidence & safe boundaries <span>↓</span></div>
+              <div class="map-lane">
+                <span class="lane-name">HISTORY & CONTROL</span>
+                <div class="map-lane-nodes">
+                  <button data-map="history">History<small>Everything observed</small></button>
+                  <button data-map="checkpoint">Checkpoint<small>Where to continue</small></button>
+                  <button data-map="journal">Run recording<small>Ordered acceptance</small></button>
+                </div>
+              </div>
+              <div class="map-flow-label">save, acknowledge, then observe <span>↓</span></div>
+              <div class="map-lane">
+                <span class="lane-name">STORAGE & VIEWERS</span>
+                <div class="map-lane-nodes">
+                  <button data-map="recorder">
+                    Recorder<small>Your transactional store</small>
+                  </button>
+                  <button data-map="trace">
+                    trace.Sequencer<small>Accepted display & live events</small>
+                  </button>
+                </div>
+              </div>
+              <p class="map-caption">
+                A responsibility map. ExecutionContext owns acceptance. Storage acknowledgment
+                happens before the sequencer receives display updates.
+              </p>
+            </div>
+            <div id="map-detail" class="component-detail" aria-live="polite"></div>
+            <div class="pull-note">
+              <span class="note-number">↳</span>
+              <p>
+                <strong>An interface names a job.</strong> An implementation does that job.
+                <code>Loop</code> is an interface; <code>react.Agent</code> is an
+                implementation. You can bring your own loop.
+              </p>
+            </div>
+          </section>
+
+          <section id="language" class="chapter" aria-labelledby="language-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">03 / FROM TEXT TO BEHAVIOR</p>
+              <h2 id="language-title">Words become actions.</h2>
+              <p>
+                A model returns content. Gent’s components give that content meaning before it can
+                become a tool call or an accepted answer.
+              </p>
+            </div>
+            <div class="parser-lab lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">INSPECT A MODEL RESPONSE</span>
+                <label class="select-label"
+                  >Envelope
+                  <select id="format-select">
+                    <option value="xml">XML tags</option>
+                    <option value="markdown">Markdown headings</option>
+                  </select></label
+                >
+              </div>
+              <div class="segmented" id="response-presets" aria-label="Example response">
+                <button type="button" data-response="tool" aria-pressed="true">Tool call</button>
+                <button type="button" data-response="answer" aria-pressed="false">Answer</button>
+                <button type="button" data-response="invalid" aria-pressed="false">
+                  Invalid output
+                </button>
+              </div>
+              <div class="parser-columns">
+                <pre class="model-output"><code id="parser-output"></code></pre>
+                <div id="parser-explanation" class="parser-explanation" aria-live="polite"></div>
+              </div>
+              <div class="parser-chain">
+                <button data-inspect="format">Envelope</button><span>→</span>
+                <button data-inspect="section">Section content</button><span>→</span>
+                <button data-inspect="tools">Typed tool call</button
+                ><span class="parser-or">or</span>
+                <button data-inspect="termination">Validated answer</button>
+              </div>
+            </div>
+            <p class="supporting-copy">
+              YAML and JSON toolchains validate schemas and transform typed arguments.
+              <button class="inline-link" data-inspect="searchtools">SearchJSON</button> can
+              discover tools in pages.
+              <button class="inline-link" data-inspect="validator">AnswerValidator</button> can
+              reject an answer with feedback. A parse failure becomes an observable error and can
+              supply feedback for the next iteration.
+            </p>
+          </section>
+
+          <section id="history" class="chapter" aria-labelledby="history-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">04 / THE BIG HISTORY CHANGE</p>
+              <h2 id="history-title">Keep the evidence.<br /><em>Choose the context.</em></h2>
+              <p>
+                A model request needs a manageable working context. An explanation of the run needs
+                every original observation. Those are two different views.
+              </p>
+            </div>
+            <div class="history-lab lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">THE POLICY NOTEBOOK</span>
+                <span class="mono">REVISION <strong id="history-revision">1</strong></span>
+              </div>
+              <div class="history-columns">
+                <div>
+                  <h3 class="panel-heading">All history <span>append-only</span></h3>
+                  <div id="history-ledger" class="history-ledger"></div>
+                </div>
+                <div class="working-context">
+                  <h3 class="panel-heading">Next model context <span>ordered selection</span></h3>
+                  <div id="history-selection" class="history-selection"></div>
+                  <div
+                    id="history-explanation"
+                    class="history-explanation"
+                    aria-live="polite"
+                  ></div>
+                </div>
+              </div>
+              <div class="history-controls">
+                <button id="history-compact" type="button" class="button primary small">
+                  Compact once
+                </button>
+                <button id="history-reset" type="button" class="quiet-button">
+                  <svg aria-hidden="true"><use href="#icon-reset" /></svg>Reset notebook
+                </button>
+                <label
+                  >Inspect revision
+                  <input
+                    id="history-slider"
+                    type="range"
+                    min="1"
+                    max="1"
+                    value="1"
+                    aria-label="Inspect history revision"
+                /></label>
+              </div>
+              <p class="lab-footnote">
+                After two summaries, try selecting the original policy. A fact can disappear from a
+                summary and still remain available in the evidence. This notebook explicitly records
+                the request as entry A; ReAct normally keeps the original Task separately.
+              </p>
+            </div>
+            <div class="concept-pair">
+              <div>
+                <span class="small-label">BEFORE THE REFACTOR</span>
+                <h3>LoopData owned mutable history.</h3>
+                <p>
+                  Custom data implementations stored task, scratchpad, and history. Shared record
+                  pointers could change independently of recording.
+                </p>
+              </div>
+              <div>
+                <span class="small-label">WITH DURABLE HISTORY</span>
+                <h3>Context edits are explicit.</h3>
+                <p>
+                  <code>ExecutionContext</code> owns entries and selections. Append, reorder,
+                  expiry, removal, and replacement become structured changes. A pin change creates a
+                  replacement record; it does not edit old evidence.
+                </p>
+              </div>
+            </div>
+            <details class="under-the-hood">
+              <summary>Records, iterations, and compaction proposals</summary>
+              <p>
+                <code>HistoryEntry</code> replaces the old content type named
+                <code>Iteration</code>. The executor’s iteration counter retains its meaning. A
+                final answer can enter history without entering the next scratchpad.
+              </p>
+              <p>
+                <code>CompactionTrigger</code> decides when to compact.
+                <code>CompactionStrategy</code> proposes appended entries and a complete selection.
+                The executor accepts the marker, selection, trigger baseline, accounting, and
+                checkpoint together. Sliding windows preserve selected originals; summarization
+                creates new summary entries.
+              </p>
+              <p>
+                A failed compaction preserves the old selection and records the error. No text
+                <code>Diff</code> is kept. <code>HistoryChange</code> describes the actual
+                transition.
+              </p>
+            </details>
+          </section>
+
+          <section id="journal" class="chapter journal-chapter" aria-labelledby="journal-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">05 / THE ACCEPTANCE CONTRACT</p>
+              <h2 id="journal-title">
+                A number is a promise.<br /><em>Acknowledgment makes it real.</em>
+              </h2>
+              <p>
+                The journal orders evidence. The recorder saves it. The accepted view advances after
+                the save succeeds. This is the central contract of the refactor.
+              </p>
+            </div>
+            <div class="journal-lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">TRY THE TRANSACTION</span>
+                <span class="simulation-label">Batch simulation</span>
+              </div>
+              <div class="segmented on-dark" id="journal-modes" aria-label="Save scenario">
+                <button data-journal-mode="success" aria-pressed="true">Successful save</button>
+                <button data-journal-mode="lost" aria-pressed="false">Lost acknowledgment</button>
+                <button data-journal-mode="rejected" aria-pressed="false">Stale writer</button>
+              </div>
+              <div class="transaction-rail" id="transaction-rail">
+                <div data-transaction="0">
+                  <span>01</span><strong>Prepare</strong><small>Queued evidence</small>
+                </div>
+                <span class="rail-arrow">→</span>
+                <div data-transaction="1">
+                  <span>02</span><strong>Freeze & number</strong><small>SaveBatch</small>
+                </div>
+                <span class="rail-arrow">→</span>
+                <div data-transaction="2">
+                  <span>03</span><strong>Save</strong><small>Recorder.Save</small>
+                </div>
+                <span class="rail-arrow">→</span>
+                <div data-transaction="3">
+                  <span>04</span><strong>Accept</strong><small>Accepted events</small>
+                </div>
+              </div>
+              <div class="journal-readouts">
+                <div>
+                  <span class="small-label">GENT ACCEPTED CURSOR</span>
+                  <strong id="journal-accepted">120</strong
+                  ><span id="journal-accepted-label">Readers see this</span>
+                </div>
+                <div>
+                  <span class="small-label">APPLICATION STORE</span>
+                  <strong id="journal-stored">120</strong
+                  ><span id="journal-store-label">Committed in storage</span>
+                </div>
+                <div>
+                  <span class="small-label">NEXT PROVIDER CALL</span>
+                  <strong id="journal-provider" class="word-readout">Waiting</strong>
+                  <span id="journal-provider-label">No side effect yet</span>
+                </div>
+              </div>
+              <div id="journal-explanation" class="journal-explanation" aria-live="polite"></div>
+              <div class="journal-controls">
+                <button id="journal-next" type="button" class="button paper small">
+                  Queue a batch →
+                </button>
+                <button id="journal-reset" type="button" class="quiet-button light">Reset</button>
+                <span id="journal-batch-id" class="mono"
+                  >NEXT EVENT 121 · CHECKPOINT STAYS AT 120</span
+                >
+              </div>
+            </div>
+            <div class="journal-contracts">
+              <div>
+                <span class="small-label">GENT’S ACCEPTANCE METHODS</span>
+                <h3>ExecutionContext</h3>
+                <pre><code>FlushProgress() error
+CommitCheckpoint(ExecutionPhase) error
+Export() (RunView, error)</code></pre>
+                <p>
+                  <strong>FlushProgress</strong> saves activity.
+                  <strong>CommitCheckpoint</strong> also saves a control boundary.
+                  <strong>Export</strong> returns the complete
+                  accepted run, including progress after the checkpoint.
+                </p>
+              </div>
+              <div>
+                <span class="small-label">YOUR STORAGE ADAPTER</span>
+                <h3>Recorder</h3>
+                <pre><code>type Recorder interface {
+    Save(context.Context, *SaveBatch) error
+}</code></pre>
+                <p>
+                  Check the lease and expected cursor, handle identical batches idempotently, store
+                  the batch atomically, then return success. A nil recorder gives in-memory
+                  acceptance. Shared storage supplies crash durability.
+                </p>
+              </div>
+            </div>
+            <details class="under-the-hood">
+              <summary>What happens when saving or publication fails?</summary>
+              <p>
+                <code>PersistenceError</code> retains the exact failed or uncertain batch. New
+                acceptance stops. The application reconciles that exact batch with storage. After
+                reconciliation, load the accepted store bundle into fresh execution bindings. Retry
+                does not revive an already stopped ExecutionContext.
+              </p>
+              <p>
+                <code>ApplyBatch</code> is a pure, idempotent reducer for materializing a view. It
+                provides validation, while your storage provides transactions and fencing. A failed
+                broadcast after commit is a delivery problem; a full read still finds the data.
+              </p>
+            </details>
+          </section>
+
+          <section id="recovery" class="chapter" aria-labelledby="recovery-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">06 / SAME RUN, ANOTHER WORKER</p>
+              <h2 id="recovery-title">
+                Continue the work.<br /><em>Keep the earlier attempt.</em>
+              </h2>
+              <p>
+                A checkpoint saves portable control state. A replacement worker brings fresh code,
+                credentials, models, and tools. The saved run supplies the evidence and budget.
+              </p>
+            </div>
+            <div class="recovery-lab lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">RESTART LAB</span>
+                <label class="select-label"
+                  >Boundary
+                  <select id="recovery-scenario">
+                    <option value="partial">Model still streaming</option>
+                    <option value="saved">Model response already saved</option>
+                    <option value="tool">Tool outcome uncertain</option>
+                    <option value="terminal">Run already finished</option>
+                  </select></label
+                >
+              </div>
+              <div class="worker-scene">
+                <div class="worker" id="worker-a">
+                  <span class="worker-badge">A</span> <strong>Worker A</strong
+                  ><small id="worker-a-state">Running</small>
+                </div>
+                <div class="saved-run">
+                  <span class="small-label">SAME SAVED RUN</span> <strong>refund-42</strong>
+                  <div class="cursor-pair">
+                    <span>Checkpoint <b id="recovery-checkpoint">120</b></span>
+                    <span>Saved cursor <b id="recovery-cursor">128</b></span>
+                  </div>
+                  <span class="saved-thread" aria-hidden="true"></span>
+                </div>
+                <div class="worker waiting" id="worker-b">
+                  <span class="worker-badge">B</span> <strong>Worker B</strong
+                  ><small id="worker-b-state">Not started</small>
+                </div>
+              </div>
+              <div id="recovery-copy" class="recovery-copy" aria-live="polite"></div>
+              <div id="tool-recovery-actions" class="tool-recovery-actions" hidden>
+                <span class="small-label">WHAT DID THE APPLICATION VERIFY?</span>
+                <div class="button-row">
+                  <button data-tool-recovery="completed" class="button secondary small">
+                    It completed
+                  </button>
+                  <button data-tool-recovery="retry" class="button secondary small">
+                    Safe to retry
+                  </button>
+                  <button data-tool-recovery="unresolved" class="button secondary small">
+                    Still unknown
+                  </button>
+                </div>
+              </div>
+              <div class="lab-bottomline">
+                <button id="recovery-next" class="button primary small">Stop worker A →</button
+                ><button id="recovery-reset" class="quiet-button">Reset</button>
+                <span id="recovery-identity" class="mono">CONTEXT root · ATTEMPT a</span>
+              </div>
+            </div>
+            <div class="three-notes">
+              <div>
+                <span class="note-symbol">=</span>
+                <h3>Identity survives.</h3>
+                <p>
+                  Run, context, and logical call IDs remain stable. New physical attempts receive a
+                  new attempt ID.
+                </p>
+              </div>
+              <div>
+                <span class="note-symbol">+</span>
+                <h3>Accounting survives.</h3>
+                <p>
+                  Known usage stays charged once. Remaining limits and absolute deadlines survive
+                  worker downtime.
+                </p>
+              </div>
+              <div>
+                <span class="note-symbol">↳</span>
+                <h3>Completed work stays done.</h3>
+                <p>
+                  Saved model decisions and tool results are reused. A terminal run returns its
+                  saved outcome.
+                </p>
+              </div>
+            </div>
+            <details class="under-the-hood">
+              <summary>What can this release resume?</summary>
+              <p>
+                Root ReAct execution supports initial, iteration-ready, decision-ready, tool-ready,
+                tool-completed, iteration-completed, compaction-completed, and terminal checkpoints.
+                A saved successful model response can be reused before a decision checkpoint exists.
+              </p>
+              <p>
+                Active child and JavaScript frames cannot resume: their Go/VM stacks are not saved.
+                Completed children remain archived. Unknown schemas, codecs, incompatible
+                configuration, and unsupported custom state are rejected explicitly.
+              </p>
+              <p>
+                Set <code>WithRecoveryVersion</code> for application behavior. Use
+                <code>CheckpointState</code> for mutable custom fields. Worker cancellation means
+                interruption; <code>CancelRun</code> expresses intentional terminal cancellation.
+              </p>
+            </details>
+          </section>
+
+          <section id="viewers" class="chapter" aria-labelledby="viewers-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">07 / A SHARED STORY</p>
+              <h2 id="viewers-title">Viewers can miss a beat.<br /><em>The record doesn’t.</em></h2>
+              <p>
+                A browser subscription is a delivery channel. The complete accepted run lives behind
+                a consistent read. Joining late and recovering a gap use the same full-history read.
+              </p>
+            </div>
+            <div class="viewer-lab lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">FOLLOW THE EVENT NUMBERS</span>
+                <span class="simulation-label">Lost delivery simulation</span>
+              </div>
+              <div class="event-lane">
+                <span class="lane-title">Saved activity</span>
+                <div class="event-tiles" id="saved-events"></div>
+              </div>
+              <div class="event-lane">
+                <span class="lane-title">Viewer applied</span>
+                <div class="event-tiles" id="viewer-events"></div>
+              </div>
+              <div class="viewer-state">
+                <div>
+                  <span class="small-label">VIEWER CURSOR</span>
+                  <strong id="viewer-cursor">—</strong>
+                </div>
+                <p id="viewer-copy" aria-live="polite"></p>
+              </div>
+              <div class="lab-bottomline">
+                <button id="viewer-next" class="button primary small">Join at event 128 →</button
+                ><button id="viewer-reset" class="quiet-button">Reset</button>
+                <span id="viewer-status" class="state-label">Not connected</span>
+              </div>
+            </div>
+            <div class="pull-note">
+              <span class="note-number">1 → n</span>
+              <p>
+                <strong>Subscribe, buffer, then load.</strong> Discard buffered events at or below
+                the loaded cursor. Apply later events in order. Reload on a gap, and periodically
+                reload to discover a lost final update even when no later event arrives.
+              </p>
+            </div>
+            <p class="supporting-copy">
+              <code>trace.Sequencer</code> uses the journal’s numbers for display snapshots and
+              subscriptions. Redacted <code>trace.Event</code> values and lossless
+              <code>gent.RecordedEvent</code> values are different representations of that sequence.
+              Use <code>RunView</code>/<code>Export</code> for full evidence and recovery.
+            </p>
+          </section>
+
+          <section id="guardrails" class="chapter" aria-labelledby="guardrails-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">08 / KEEP THE LOOP BOUNDED</p>
+              <h2 id="guardrails-title">Count the work.<br /><em>Know when to stop.</em></h2>
+              <p>
+                Counter values only increase. Gauges describe current state, such as consecutive
+                errors. Children contribute counters to their parents, while local gauges stay
+                local.
+              </p>
+            </div>
+            <div class="stats-lab lab reveal">
+              <div class="lab-topline">
+                <span class="eyebrow">TRY A NESTED RUN</span>
+                <label class="select-label"
+                  >Limit scope
+                  <select id="stats-scope">
+                    <option value="total">Tokens including children</option>
+                    <option value="self">Self tokens only</option>
+                  </select></label
+                >
+              </div>
+              <div class="stats-grid">
+                <div>
+                  <span class="small-label">ROOT TOTAL</span><strong id="stats-total">80</strong>
+                  <span>root + child tokens</span>
+                </div>
+                <div>
+                  <span class="small-label">ROOT $SELF:</span><strong id="stats-self">60</strong>
+                  <span>root’s own tokens</span>
+                </div>
+                <div>
+                  <span class="small-label">CHILD TOKENS</span><strong id="stats-child">20</strong>
+                  <span>child’s own tokens</span>
+                </div>
+              </div>
+              <div class="budget-bar" aria-hidden="true">
+                <span id="budget-root"></span> <span id="budget-child"></span><i></i>
+              </div>
+              <div class="budget-label">
+                <span id="stats-budget-label">Root budget: 80 / 100</span>
+                <span>Stops when greater than 100</span>
+              </div>
+              <div class="button-row stats-actions">
+                <button id="stats-add-root" class="button secondary small">
+                  Root uses 10 tokens
+                </button>
+                <button id="stats-add-child" class="button secondary small">
+                  Child uses 15 tokens
+                </button>
+                <button id="stats-reset" class="quiet-button">Reset</button>
+              </div>
+              <strong id="stats-status" class="status-heading" aria-live="polite"></strong>
+              <p id="stats-copy" class="margin-note" aria-live="polite"></p>
+              <div class="gauge-demo">
+                <div>
+                  <span class="small-label">CONSECUTIVE TOOL ERRORS</span>
+                  <p>
+                    Root <strong>0</strong><span class="gauge-divider">/</span> Child
+                    <strong id="stats-errors">0</strong>
+                  </p>
+                </div>
+                <div class="button-row">
+                  <button id="stats-fail" class="quiet-button">Child tool fails +1</button>
+                  <button id="stats-succeed" class="quiet-button">Child tool succeeds → 0</button>
+                </div>
+              </div>
+              <p class="lab-footnote">
+                This demo configures only the token limit. The child inherits that limit. Its gauge
+                stays local; a successful tool call resets the streak.
+              </p>
+            </div>
+            <div class="concept-pair hook-pair">
+              <div>
+                <span class="small-label">BEFORE AN EFFECT</span>
+                <h3>Hooks can shape input.</h3>
+                <p>
+                  Model, tool, and system-prompt before-hooks may modify effective input. The
+                  managed boundary freezes that final input before it is sent outside Gent.
+                </p>
+              </div>
+              <div>
+                <span class="small-label">AFTER ACCEPTANCE</span>
+                <h3>Observers see evidence.</h3>
+                <p>
+                  Structured state-change subscribers and trace observers see accepted data. A slow
+                  display subscriber cannot drop durable evidence. Storage backpressure remains
+                  real.
+                </p>
+              </div>
+            </div>
+            <details class="under-the-hood">
+              <summary>Exact limits, retries, and repetition</summary>
+              <p>
+                Most limits use <code>value &gt; MaxValue</code> during stats updates. Exact
+                iteration limits use <code>value &gt;= MaxValue</code> after a completed iteration.
+                Prefix limits match individual prefixed stats, such as calls to a particular tool.
+              </p>
+              <p>
+                Saved accounting includes known progress beyond the checkpoint and is imported
+                without replaying stat updates. Working-state gauges such as scratchpad length
+                follow the restored selection. New physical attempts incur new work; reused saved
+                results incur none.
+              </p>
+              <p>
+                ReAct’s repetition handling detects repeated output and applies its configured
+                response. Its continuation frame saves the state needed to avoid resetting that
+                behavior at takeover.
+              </p>
+            </details>
+          </section>
+
+          <section id="using-gent" class="chapter" aria-labelledby="using-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">09 / YOUR APPLICATION’S PART</p>
+              <h2 id="using-title">Put it together.</h2>
+              <p>
+                Compose the behavior you need. Give Gent the storage and runtime bindings your
+                application owns. These Go fragments show the connections.
+              </p>
+            </div>
+            <div class="recipe-lab reveal">
+              <div class="segmented" id="recipe-tabs" aria-label="Integration example"></div>
+              <p id="recipe-description"></p>
+              <div class="code-window">
+                <div class="code-window-bar">
+                  <span>GO / INTEGRATION SKETCH</span>
+                  <button class="copy-button" id="copy-recipe" type="button">Copy code</button>
+                </div>
+                <pre><code id="recipe-code"></code></pre>
+              </div>
+              <p class="lab-footnote">
+                Application names such as model, policyTool, task, and recorder are supplied by your
+                code. Errors must be handled. These are composition fragments.
+              </p>
+              <button type="button" class="text-link" id="open-example">
+                Read the complete executable Go example <span>↗</span>
+              </button>
+            </div>
+            <div class="ownership-boundary">
+              <span class="eyebrow">THE APPLICATION BOUNDARY</span>
+              <p>
+                <strong>Gent supplies</strong> execution contracts, typed evidence, numbered
+                acceptance, and supported continuation.
+              </p>
+              <p>
+                <strong>Your application supplies</strong> databases, transactions, writer leases,
+                access control, broadcast transport, credentials, and reconciliation of uncertain
+                external effects.
+              </p>
+            </div>
+          </section>
+
+          <section id="atlas" class="chapter" aria-labelledby="atlas-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">10 / KEEP THIS PART HANDY</p>
+              <h2 id="atlas-title">The interface atlas.</h2>
+              <p>
+                Look up a name, a responsibility, or a concept. Each entry explains the job, its
+                collaborators, and its Go contract. Supporting search libraries are included.
+              </p>
+            </div>
+            <div class="atlas-controls">
+              <label class="search-box"
+                ><span aria-hidden="true">⌕</span>
+                <input
+                  id="atlas-search"
+                  type="search"
+                  placeholder="Try “journal”, “custom data”, or “search”…"
+                  aria-label="Search Gent abstractions"
+                /><kbd>/</kbd></label
+              >
+              <label class="select-label"
+                >Layer
+                <select id="atlas-layer">
+                  <option value="all">All layers</option>
+                  <!-- __LAYER_OPTIONS__ -->
+                </select></label
+              >
+            </div>
+            <div class="atlas-count">
+              <span id="atlas-count" aria-live="polite"></span>
+              <span>NAME / RESPONSIBILITY / CONTRACT</span>
+            </div>
+            <div id="atlas-list" class="atlas-list"><!-- __ATLAS__ --></div>
+            <p id="atlas-empty" class="empty-state" hidden>
+              No matching abstraction. Try a role such as “save”, “prompt”, “state”, or “tool”.
+            </p>
+          </section>
+
+          <section id="check" class="chapter check-chapter" aria-labelledby="check-title">
+            <div class="chapter-heading reveal">
+              <p class="eyebrow">11 / CONNECT THE DOTS</p>
+              <h2 id="check-title">Does it click?</h2>
+              <p>
+                Four small situations. Use them to check the distinctions that make the system
+                understandable.
+              </p>
+            </div>
+            <div id="quiz" class="quiz"></div>
+            <p id="quiz-progress" class="quiz-progress" aria-live="polite">
+              0 of 4 ideas connected.
+            </p>
+            <div class="closing-statement">
+              <span class="eyebrow">TAKE THIS WITH YOU</span>
+              <p>
+                The loop chooses.<br />The context coordinates.<br />
+                <em>The journal keeps the story.</em>
+              </p>
+              <a class="text-link" href="#top">Back to the beginning ↑</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer class="colophon">
+      <div>
+        <a class="brand footer-brand" href="#top">gent.</a>
+        <span>A FIELD GUIDE TO THE HISTORY REFACTOR</span>
+      </div>
+      <p>
+        Current run & trace schema: 2. Diagrams are educational simulations; contracts are extracted
+        from this checkout. The file contains its own fonts, styles, scripts, and reference example.
+      </p>
+      <button id="open-colophon" class="quiet-button">About this edition & typefaces ↗</button>
+    </footer>
+    <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="dialog-title">
+      <div class="dialog-top">
+        <div>
+          <span class="eyebrow" id="dialog-eyebrow">INTERFACE ATLAS</span>
+          <strong id="dialog-current" aria-hidden="true"></strong>
+        </div>
+        <button id="close-dialog" class="icon-button" aria-label="Close details">
+          <svg aria-hidden="true"><use href="#icon-close" /></svg>
+        </button>
+      </div>
+      <div id="dialog-content"></div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <noscript
+      ><p class="no-script">
+        Enable JavaScript to use the simulations and expand Go contracts. The chapter explanations
+        and interface list remain readable without it.
+      </p></noscript
+    >
+    <script id="guide-data" type="application/json">
+      /* __DATA__ */
+    </script>
+    <script>
+      /* __APP__ */
+    </script>
+  </body>
+</html>

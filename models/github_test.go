@@ -27,14 +27,15 @@ func TestGitHubCopilotGenerate(t *testing.T) {
 	require.NoError(t, err, "failed to create GitHub Copilot model")
 
 	execCtx := gent.NewExecutionContext(ctx, "gh-test", nil)
-	stream, err := model.GenerateContentStream(
-		execCtx, "", "",
-		[]llms.MessageContent{
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
 			llms.TextParts(
 				llms.ChatMessageTypeHuman,
 				"Reply with exactly: Hello from GitHub Models",
 			),
-		},
+		}),
 	)
 	require.NoError(t, err, "GenerateContentStream failed")
 	response, err := stream.Response()
@@ -81,14 +82,15 @@ func TestGitHubCopilotStreaming(t *testing.T) {
 	require.NoError(t, err, "failed to create GitHub Copilot model")
 
 	execCtx := gent.NewExecutionContext(ctx, "gh-stream-test", nil)
-	stream, err := model.GenerateContentStream(
-		execCtx, "gh-stream", "test",
-		[]llms.MessageContent{
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "gh-stream", StreamTopicId: "test"},
+		gent.NewModelCallRequest([]llms.MessageContent{
 			llms.TextParts(
 				llms.ChatMessageTypeHuman,
 				"Write a haiku about Go programming.",
 			),
-		},
+		}),
 	)
 	require.NoError(t, err, "GenerateContentStream failed")
 

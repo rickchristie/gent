@@ -278,6 +278,6 @@ func TestText_MethodChaining(t *testing.T) {
 	assert.Equal(t, "Think carefully about the problem.", section.Guidance())
 }
 
-func TestText_ImplementsTextOutputSection(t *testing.T) {
-	var _ gent.TextOutputSection = (*Text)(nil)
+func TestText_ImplementsTextSection(t *testing.T) {
+	var _ gent.TextSection = (*Text)(nil)
 }

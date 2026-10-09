@@ -7,17 +7,17 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
-// ScratchpadToMessages converts scratchpad iterations into
+// ScratchpadToMessages converts scratchpad entries into
 // LLM messages, applying iteration expiry filtering and tool
 // call result deduplication.
 //
-// For each iteration in the scratchpad:
-//   - Expired iterations (ExpireAfterIteration > 0 and
+// For each entry in the scratchpad:
+//   - Expired entries (ExpireAfterIteration > 0 and
 //     currentIteration >= ExpireAfterIteration) are skipped.
 //   - Observation messages with [gent.MMKToolChainResult] metadata
 //     are checked for duplicate stateless tool calls. When a
 //     tool call with the same Hash appears in a later
-//     iteration, the earlier occurrence's text is replaced
+//     entry, the earlier occurrence's text is replaced
 //     with an abbreviated summary from
 //     [gent.ToolChain.DeduplicateSummary]. The most recent
 //     occurrence always keeps its full text.
@@ -28,14 +28,14 @@ import (
 // deduplication (only expiry filtering is applied).
 //
 // The format parameter is used to rebuild observation text
-// when some tool calls in an iteration are deduplicated.
+// when some tool calls in an entry are deduplicated.
 // Required when toolChain is non-nil.
 //
-// Returns the number of non-expired iterations that were
+// Returns the number of non-expired entries that were
 // included, which callers can use to decide between
 // "BEGIN!" vs "CONTINUE!" prompts.
 func ScratchpadToMessages(
-	scratchpad []*gent.Iteration,
+	scratchpad []*gent.HistoryEntry,
 	currentIteration int,
 	toolChain gent.ToolChain,
 	format gent.TextFormat,
@@ -72,7 +72,7 @@ func ScratchpadToMessages(
 	return messages, included
 }
 
-// lastOccurrenceEntry tracks the last non-expired iteration
+// lastOccurrenceEntry tracks the last non-expired entry
 // index where a given tool call hash appears.
 type lastOccurrenceEntry struct {
 	iterIndex int
@@ -80,11 +80,11 @@ type lastOccurrenceEntry struct {
 }
 
 // buildLastOccurrenceIndex walks the scratchpad and records
-// the last non-expired iteration index for each deduplicatable
+// the last non-expired entry index for each deduplicatable
 // tool call hash. Only tool calls where
 // toolChain.DeduplicateSummary returns non-empty are tracked.
 func buildLastOccurrenceIndex(
-	scratchpad []*gent.Iteration,
+	scratchpad []*gent.HistoryEntry,
 	currentIteration int,
 	toolChain gent.ToolChain,
 ) map[string]*lastOccurrenceEntry {
@@ -111,9 +111,11 @@ func buildLastOccurrenceIndex(
 					result.Error != nil {
 					continue
 				}
-				summary := toolChain.DeduplicateSummary(
-					result,
-				)
+				summary := result.DeduplicationSummary
+				if !result.SummaryCaptured {
+					// Unrecorded custom-loop observations may still use the current tool renderer.
+					summary = toolChain.DeduplicateSummary(result)
+				}
 				if summary == "" {
 					continue
 				}
@@ -148,7 +150,8 @@ func convertMessage(
 	// Check if any result in this message needs dedup
 	needsRebuild := false
 	for _, result := range tcr.Results {
-		if result.Hash == "" || result.Error != nil {
+		if result.Hash == "" || result.Error != nil ||
+			(result.SummaryCaptured && result.DeduplicationSummary == "") {
 			continue
 		}
 		entry, ok := lastOccurrence[result.Hash]
@@ -188,12 +191,18 @@ func rebuildObservation(
 		entry, isDuplicate := lastOccurrence[result.Hash]
 		if result.Hash != "" &&
 			result.Error == nil &&
+			(!result.SummaryCaptured || result.DeduplicationSummary != "") &&
 			isDuplicate &&
 			entry.iterIndex > iterIndex {
-			// Replace with summary
+			// Use the abbreviation captured with this result. A later policy lookup may have
+			// returned different evidence, even when its arguments and deduplication hash match.
+			summary := entry.summary
+			if result.SummaryCaptured {
+				summary = result.DeduplicationSummary
+			}
 			sections = append(sections, format.FormatSections(
 				[]gent.FormattedSection{
-					{Name: result.Name, Content: entry.summary},
+					{Name: result.Name, Content: summary},
 				},
 			))
 		} else {

@@ -87,8 +87,9 @@ func (s *Sequencer) applyExecutionFinished(event *Event) {
 }
 
 func (s *Sequencer) applyIterationStarted(event *Event) {
-	key := iterationKey(event.ContextId, event.Iteration)
+	key := iterationKey(event.ContextId, event.Iteration, event.AttemptId)
 	iteration := &Iteration{
+		AttemptId:          event.AttemptId,
 		Iteration:          event.Iteration,
 		Depth:              event.Depth,
 		Source:             event.Source,
@@ -106,7 +107,7 @@ func (s *Sequencer) applyIterationStarted(event *Event) {
 }
 
 func (s *Sequencer) applyIterationFinished(event *Event) {
-	iteration := s.iterationByKey[iterationKey(event.ContextId, event.Iteration)]
+	iteration := s.iterationByKey[iterationKey(event.ContextId, event.Iteration, event.AttemptId)]
 	if iteration == nil {
 		return
 	}
@@ -125,6 +126,7 @@ func (s *Sequencer) applyModelCallStarted(event *Event) {
 	}
 	payload, _ := event.Payload.(map[string]any)
 	call := &ModelCall{
+		AttemptId:          event.AttemptId,
 		Id:                 event.ModelCallId,
 		Model:              stringFromPayload(payload, "model"),
 		Provider:           stringFromPayload(payload, "provider"),
@@ -144,15 +146,10 @@ func (s *Sequencer) applyModelCallStarted(event *Event) {
 	if request, ok := payload["request"]; ok {
 		call.Request = request
 	}
-	s.modelById[event.ModelCallId] = call
-	if event.StreamId != "" {
-		s.modelIdsByStream[event.StreamId] = append(
-			s.modelIdsByStream[event.StreamId], event.ModelCallId,
-		)
-	}
+	s.modelById[callKey(event.ModelCallId, event.AttemptId)] = call
 	s.snapshot.ModelCalls = append(s.snapshot.ModelCalls, call)
 	s.snapshot.Stats.ModelCallCount++
-	s.attachModelToIteration(event.ContextId, event.Iteration, event.ModelCallId)
+	s.attachModelToIteration(event, event.ModelCallId)
 }
 
 func (s *Sequencer) applyModelCallFinished(event *Event) {
@@ -161,10 +158,7 @@ func (s *Sequencer) applyModelCallFinished(event *Event) {
 	s.addUsage(usage)
 	s.snapshot.Stats.ModelDurationMs += durationMsFromPayload(event.Payload)
 
-	call := s.modelById[event.ModelCallId]
-	if call == nil {
-		call = s.unambiguousModelCall(event)
-	}
+	call := s.modelById[callKey(event.ModelCallId, event.AttemptId)]
 	if call == nil {
 		if event.Error != nil {
 			s.appendError(event.Error)
@@ -188,10 +182,7 @@ func (s *Sequencer) applyModelCallFinished(event *Event) {
 }
 
 func (s *Sequencer) applyModelChunk(event *Event) {
-	call := s.modelById[event.ModelCallId]
-	if call == nil {
-		call = s.unambiguousModelCall(event)
-	}
+	call := s.modelById[callKey(event.ModelCallId, event.AttemptId)]
 	if call == nil {
 		if event.Error != nil {
 			s.appendError(event.Error)
@@ -228,6 +219,7 @@ func (s *Sequencer) applyToolCallStarted(event *Event) {
 	}
 	payload, _ := event.Payload.(map[string]any)
 	call := &ToolCall{
+		AttemptId:          event.AttemptId,
 		Id:                 event.ToolCallId,
 		Name:               stringFromPayload(payload, "name"),
 		Source:             event.Source,
@@ -244,18 +236,15 @@ func (s *Sequencer) applyToolCallStarted(event *Event) {
 	if args, ok := payload["args"]; ok {
 		call.Args = args
 	}
-	s.toolById[event.ToolCallId] = call
+	s.toolById[callKey(event.ToolCallId, event.AttemptId)] = call
 	s.snapshot.ToolCalls = append(s.snapshot.ToolCalls, call)
 	s.snapshot.Stats.ToolCallCount++
-	s.attachToolToIteration(event.ContextId, event.Iteration, event.ToolCallId)
+	s.attachToolToIteration(event, event.ToolCallId)
 }
 
 func (s *Sequencer) applyToolCallFinished(event *Event) {
 	s.snapshot.Stats.ToolDurationMs += durationMsFromPayload(event.Payload)
-	call := s.toolById[event.ToolCallId]
-	if call == nil {
-		call = s.unambiguousToolCall(event)
-	}
+	call := s.toolById[callKey(event.ToolCallId, event.AttemptId)]
 	if call == nil {
 		if event.Error != nil {
 			s.appendError(event.Error)
@@ -296,65 +285,26 @@ func (s *Sequencer) addUsage(usage *ModelUsage) {
 	s.snapshot.Stats.TotalTokens += usage.TotalTokens
 }
 
-func (s *Sequencer) attachModelToIteration(contextId string, iterationNumber int, id string) {
-	iteration := s.iterationByKey[iterationKey(contextId, iterationNumber)]
+func (s *Sequencer) attachModelToIteration(event *Event, id string) {
+	iteration := s.iterationByKey[iterationKey(event.ContextId, event.Iteration, event.AttemptId)]
 	if iteration == nil {
 		return
 	}
 	iteration.ModelCallIds = append(iteration.ModelCallIds, id)
 }
 
-func (s *Sequencer) attachToolToIteration(contextId string, iterationNumber int, id string) {
-	iteration := s.iterationByKey[iterationKey(contextId, iterationNumber)]
+func (s *Sequencer) attachToolToIteration(event *Event, id string) {
+	iteration := s.iterationByKey[iterationKey(event.ContextId, event.Iteration, event.AttemptId)]
 	if iteration == nil {
 		return
 	}
 	iteration.ToolCallIds = append(iteration.ToolCallIds, id)
 }
 
-func (s *Sequencer) unambiguousModelCall(event *Event) *ModelCall {
-	if event.StreamId == "" {
-		return nil
-	}
-	// Missing IDs are legacy/partial telemetry. Only stitch them when one active call is provably
-	// associated with the stream; otherwise keep the finish/chunk event uncorrelated.
-	ids := s.modelIdsByStream[event.StreamId]
-	var result *ModelCall
-	for _, id := range ids {
-		call := s.modelById[id]
-		if call == nil || call.Status != StepStatusRunning {
-			continue
-		}
-		if result != nil {
-			return nil
-		}
-		result = call
-	}
-	return result
+func iterationKey(contextId string, iteration int, attempt string) string {
+	return fmt.Sprintf("%s:%d:%s", contextId, iteration, attempt)
 }
-
-func (s *Sequencer) unambiguousToolCall(event *Event) *ToolCall {
-	payload, _ := event.Payload.(map[string]any)
-	name := stringFromPayload(payload, "name")
-	var result *ToolCall
-	for _, call := range s.toolById {
-		if call.Name != name || call.ContextId != event.ContextId || call.Iteration != event.Iteration {
-			continue
-		}
-		if call.Status != StepStatusRunning {
-			continue
-		}
-		if result != nil {
-			return nil
-		}
-		result = call
-	}
-	return result
-}
-
-func iterationKey(contextId string, iteration int) string {
-	return fmt.Sprintf("%s:%d", contextId, iteration)
-}
+func callKey(id, attempt string) string { return id + "/" + attempt }
 
 func statusFromError(err *Error) StepStatus {
 	if err != nil {

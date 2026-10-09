@@ -193,7 +193,7 @@ func GetStreamingTestCases() []StreamTestCase {
 }
 
 // createXAIModel creates an xAI model for testing, returning an error if API key is missing.
-func createXAIModel(modelName string) (gent.StreamingModel, error) {
+func createXAIModel(modelName string) (gent.Model, error) {
 	apiKey := os.Getenv("GENT_TEST_XAI_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GENT_TEST_XAI_KEY environment variable not set")
@@ -219,12 +219,16 @@ func RunStreamingBasic(ctx context.Context, w io.Writer, config StreamOutputConf
 	}
 
 	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-		llms.TextParts(
-			llms.ChatMessageTypeHuman,
-			"Write 3 paragraphs of a creative dark fantasy story",
-		),
-	})
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
+			llms.TextParts(
+				llms.ChatMessageTypeHuman,
+				"Write 3 paragraphs of a creative dark fantasy story",
+			),
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
@@ -270,12 +274,16 @@ func RunStreamingWithReasoning(ctx context.Context, w io.Writer, config StreamOu
 	}
 
 	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-		llms.TextParts(
-			llms.ChatMessageTypeHuman,
-			"What is 15 * 17? Show your reasoning step by step.",
-		),
-	})
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
+			llms.TextParts(
+				llms.ChatMessageTypeHuman,
+				"What is 15 * 17? Show your reasoning step by step.",
+			),
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
@@ -321,12 +329,16 @@ func RunStreamingSlowConsumer(ctx context.Context, w io.Writer, config StreamOut
 	}
 
 	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-		llms.TextParts(
-			llms.ChatMessageTypeHuman,
-			"Write a short poem about Go programming (4 lines).",
-		),
-	})
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
+			llms.TextParts(
+				llms.ChatMessageTypeHuman,
+				"Write a short poem about Go programming (4 lines).",
+			),
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
@@ -380,9 +392,13 @@ func RunStreamingNoListener(ctx context.Context, w io.Writer, _ StreamOutputConf
 	}
 
 	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeHuman, "Say hello in one word."),
-	})
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
+			llms.TextParts(llms.ChatMessageTypeHuman, "Say hello in one word."),
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
@@ -415,12 +431,16 @@ func RunStreamingCancellation(ctx context.Context, w io.Writer, config StreamOut
 	}
 
 	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-		llms.TextParts(
-			llms.ChatMessageTypeHuman,
-			"Write a very long story about a programmer. Make it at least 500 words.",
-		),
-	})
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
+			llms.TextParts(
+				llms.ChatMessageTypeHuman,
+				"Write a very long story about a programmer. Make it at least 500 words.",
+			),
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
@@ -493,9 +513,13 @@ func RunStreamingConcurrent(ctx context.Context, w io.Writer, _ StreamOutputConf
 			defer wg.Done()
 
 			execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-			stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-				llms.TextParts(llms.ChatMessageTypeHuman, p),
-			})
+			stream, err := execCtx.GenerateContentStream(
+				model,
+				gent.ModelCall{StreamId: "", StreamTopicId: ""},
+				gent.NewModelCallRequest([]llms.MessageContent{
+					llms.TextParts(llms.ChatMessageTypeHuman, p),
+				}),
+			)
 			if err != nil {
 				results[idx].err = err
 				return
@@ -547,9 +571,13 @@ func RunStreamingResponseInfo(ctx context.Context, w io.Writer, config StreamOut
 	}
 
 	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := model.GenerateContentStream(execCtx, "", "", []llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeHuman, "What is 2+2?"),
-	})
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
+			llms.TextParts(llms.ChatMessageTypeHuman, "What is 2+2?"),
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}

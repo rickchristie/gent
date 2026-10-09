@@ -54,9 +54,9 @@
 //   - WithToolChain: Custom tool chain (default: YAML)
 //   - WithTermination: Custom termination handler (default: Text)
 //   - WithThinking: Enable thinking section
-//   - WithStreaming: Enable streaming responses
 //   - WithSystemPromptBuilder: Custom function to build system prompt sections
-//   - WithTimeProvider: Custom time provider
+//   - WithClock: Clock function with the standard prompt time formats
+//   - WithTimeProvider: Custom time provider and prompt time formats
 //
 // # System Prompt Builder
 //

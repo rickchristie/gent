@@ -87,8 +87,8 @@ const SCIterations StatKey = "gent:iterations"
 //
 //	{Type: LimitExactKey, Key: SCInputTokensFor + "gpt-4", MaxValue: 10000}
 const (
-	SCInputTokens    StatKey = "gent:input_tokens"
-	SCInputTokensFor StatKey = "gent:input_tokens:" // + model name
+	SCInputTokens     StatKey = "gent:input_tokens"
+	SCInputTokensFor  StatKey = "gent:input_tokens:" // + model name
 	SCOutputTokens    StatKey = "gent:output_tokens"
 	SCOutputTokensFor StatKey = "gent:output_tokens:" // + model name
 )
@@ -210,8 +210,8 @@ const (
 
 // Scratchpad length tracking key (Gauge).
 //
-// Auto-updated when BasicLoopData.SetScratchPad is called.
-// Reflects the current number of iterations in the scratchpad.
+// Auto-updated when ExecutionContext.UpdateHistory changes the selected context.
+// Reflects the current number of selected history entries in the scratchpad.
 // Use for limits to prevent unbounded scratchpad growth.
 //
 // Example limit:

@@ -32,13 +32,15 @@ func TestHelloGrok(t *testing.T) {
 	model := NewLCGWrapper(llm)
 
 	execCtx := gent.NewExecutionContext(ctx, "test", nil)
-	stream, err := model.GenerateContentStream(
-		execCtx, "", "", []llms.MessageContent{
+	stream, err := execCtx.GenerateContentStream(
+		model,
+		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+		gent.NewModelCallRequest([]llms.MessageContent{
 			llms.TextParts(
 				llms.ChatMessageTypeHuman,
 				"Hello Grok! Nice to meet you!",
 			),
-		},
+		}),
 	)
 	require.NoError(t, err, "failed to start stream")
 	response, err := stream.Response()

@@ -155,16 +155,6 @@ var defaultParams = SamplingParams{
 	TopP:        SamplingParam{Directive: ParamOverride, Value: 1.0},
 }
 
-// DefaultTemperature returns the recommended default temperature for the given model.
-// This is a convenience wrapper around [DefaultSamplingParams].
-//
-// The second return value indicates whether temperature should be set at all. Returns
-// false for both [ParamForbidden] and [ParamOmit] directives.
-func DefaultTemperature(model Model) (float64, bool) {
-	p := DefaultSamplingParams(model)
-	return p.Temperature.Value, p.Temperature.Directive == ParamOverride
-}
-
 // isOpenAIReasoningModel returns true for OpenAI reasoning models that do not support
 // sampling parameters. Covers: o1, o3, o4-mini, gpt-5 family.
 func isOpenAIReasoningModel(name string) bool {

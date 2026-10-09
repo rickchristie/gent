@@ -53,13 +53,18 @@ func publishFailedToolAttempt(
 	toolName string,
 	args any,
 	err error,
+	result *gent.ToolCallResult,
 ) {
 	if execCtx == nil {
 		return
 	}
 	beforeEvent := execCtx.PublishBeforeToolCall(toolName, args)
+	result.ToolCallId = beforeEvent.ToolCallId
+	result.AttemptId = execCtx.AttemptId()
+	result.Input = beforeEvent.Args
+	result.SummaryCaptured = true
 	execCtx.PublishAfterToolCall(
-		toolName, beforeEvent.Args, nil, 0, err,
+		toolName, beforeEvent.Args, result, 0, err,
 		gent.WithToolCallId(beforeEvent.ToolCallId),
 		gent.WithToolCallSource(beforeEvent.Source),
 	)

@@ -64,7 +64,7 @@ func TestYAML_Name(t *testing.T) {
 func TestYAML_Prompt(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    func() gent.TextOutputSection
+		input    func() gent.TextSection
 		expected struct {
 			containsSchema  bool
 			containsPrompt  bool
@@ -74,7 +74,7 @@ func TestYAML_Prompt(t *testing.T) {
 	}{
 		{
 			name: "default prompt with schema",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewYAML[YAMLSimpleStruct]("data")
 			},
 			expected: struct {
@@ -91,7 +91,7 @@ func TestYAML_Prompt(t *testing.T) {
 		},
 		{
 			name: "with custom prompt",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewYAML[YAMLSimpleStruct]("data").WithGuidance("Create a plan.")
 			},
 			expected: struct {
@@ -108,7 +108,7 @@ func TestYAML_Prompt(t *testing.T) {
 		},
 		{
 			name: "with example",
-			input: func() gent.TextOutputSection {
+			input: func() gent.TextSection {
 				return NewYAML[YAMLSimpleStruct]("data").WithExample(YAMLSimpleStruct{
 					Name:  "test",
 					Value: 42,
@@ -449,51 +449,51 @@ func TestYAML_ParseSection_TracesErrors(t *testing.T) {
 	tests := []struct {
 		name  string
 		input struct {
-			content      string
-			presetGauge  bool
+			content     string
+			presetGauge bool
 		}
 		expected struct {
-			hasErr                bool
-			totalErrors           int64
-			consecutiveErrors     float64
+			hasErr            bool
+			totalErrors       int64
+			consecutiveErrors float64
 		}
 	}{
 		{
 			name: "traces error on invalid YAML",
 			input: struct {
-				content      string
-				presetGauge  bool
+				content     string
+				presetGauge bool
 			}{
 				content:     ":\n  - invalid:\n    :",
 				presetGauge: false,
 			},
 			expected: struct {
-				hasErr                bool
-				totalErrors           int64
-				consecutiveErrors     float64
-				}{
-				hasErr:                true,
-				totalErrors:           1,
-				consecutiveErrors:     1,
+				hasErr            bool
+				totalErrors       int64
+				consecutiveErrors float64
+			}{
+				hasErr:            true,
+				totalErrors:       1,
+				consecutiveErrors: 1,
 			},
 		},
 		{
 			name: "resets consecutive gauge on success",
 			input: struct {
-				content      string
-				presetGauge  bool
+				content     string
+				presetGauge bool
 			}{
 				content:     "name: test\nvalue: 42",
 				presetGauge: true,
 			},
 			expected: struct {
-				hasErr                bool
-				totalErrors           int64
-				consecutiveErrors     float64
-				}{
-				hasErr:                false,
-				totalErrors:           0,
-				consecutiveErrors:     0,
+				hasErr            bool
+				totalErrors       int64
+				consecutiveErrors float64
+			}{
+				hasErr:            false,
+				totalErrors:       0,
+				consecutiveErrors: 0,
 			},
 		},
 	}
@@ -579,8 +579,8 @@ func TestYAML_ParseSection_MultilineStrings(t *testing.T) {
 			expected: "This is a long line that wraps",
 		},
 		{
-			name: "quoted multiline",
-			input: `text: "Line 1\nLine 2\nLine 3"`,
+			name:     "quoted multiline",
+			input:    `text: "Line 1\nLine 2\nLine 3"`,
 			expected: "Line 1\nLine 2\nLine 3",
 		},
 	}
@@ -608,6 +608,6 @@ func TestYAML_MethodChaining(t *testing.T) {
 	assert.Contains(t, section.Guidance(), "example")
 }
 
-func TestYAML_ImplementsTextOutputSection(t *testing.T) {
-	var _ gent.TextOutputSection = (*YAML[any])(nil)
+func TestYAML_ImplementsTextSection(t *testing.T) {
+	var _ gent.TextSection = (*YAML[any])(nil)
 }

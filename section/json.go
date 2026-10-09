@@ -74,7 +74,7 @@ func NewJSON[T any](name string) *JSON[T] {
 }
 
 // WithGuidance sets the guidance text for this section. The guidance appears at the
-// beginning of the section content when TextOutputFormat.DescribeStructure() generates
+// beginning of the section content when TextFormat.DescribeStructure() generates
 // the format prompt, followed by the JSON schema.
 //
 // This can be instructions (e.g., "Analyze the provided text") or additional context.
@@ -151,5 +151,5 @@ func (j *JSON[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 	return result, nil
 }
 
-// Compile-time check that JSON implements gent.TextOutputSection.
-var _ gent.TextOutputSection = (*JSON[any])(nil)
+// Compile-time check that JSON implements gent.TextSection.
+var _ gent.TextSection = (*JSON[any])(nil)

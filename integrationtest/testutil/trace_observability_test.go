@@ -110,7 +110,7 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 			}},
 			expected: expected{output: `
 
-  [Compaction: 5 -> 2 iterations (removed 3, took 7ms)]
+  [Compaction: 5 -> 2 entries (removed 3, took 7ms)]
 
 
   [Limit Exceeded: gent:iterations = 10 (max: 5)]
@@ -183,7 +183,7 @@ func TestTraceEventLogger_WritesEventsAndSnapshot(t *testing.T) {
 			snapshotOutput: `
 >>> FinalTraceSnapshot
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "runId": "run",
   "status": "succeeded",
   "startedTs": "2026-05-10T12:00:00Z",

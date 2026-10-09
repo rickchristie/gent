@@ -69,7 +69,7 @@
 //	    execCtx.SetLimits(limits)
 //
 //	    // 8. Run the agent
-//	    exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
+//	    exec := executor.NewRunner(agent, executor.DefaultConfig())
 //	    exec.Execute(execCtx)
 //
 //	    // 9. Check results
@@ -299,53 +299,29 @@
 //
 //	// Now the agent will always see "2025-06-15" and "Sunday"
 //
-// See [TimeProvider], [DefaultTimeProvider], and [MockTimeProvider].
+// For a custom time source with standard prompt formats, supply one function:
+//
+//	agent.WithClock(func() time.Time { return time.Now().In(userLocation) })
+//
+// Use WithTimeProvider when the formats must also change.
+// See [TimeProvider], [TimeProviderFunc], [DefaultTimeProvider], and [MockTimeProvider].
 //
 // # Writing Your Own Loop
 //
-// To create a custom agent loop, implement [AgentLoop] and [LoopData]:
+// To create a custom agent loop, implement [Loop] and [LoopData]:
 //
 //	type MyLoopData struct {
-//	    task       *gent.Task
-//	    iterations []*gent.Iteration
-//	    scratchpad []*gent.Iteration
+//	    *gent.BasicLoopData
+//	    // Add application fields and implement CheckpointState to save mutable state.
 //	}
 //
-//	func (d *MyLoopData) GetTask() *gent.Task { return d.task }
-//	// ... implement other LoopData methods
-//
-//	type MyLoop struct {
-//	    model gent.Model
-//	    // your configuration
-//	}
-//
-//	func (l *MyLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-//	    data := execCtx.Data().(*MyLoopData)
-//
-//	    // 1. Build your prompt
-//	    messages := l.buildMessages(data)
-//
-//	    // 2. Call the model
-//	    response, err := l.model.GenerateContent(execCtx, "model-name", systemPrompt, messages)
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//
-//	    // 3. Process output and decide: continue or terminate?
-//	    if shouldTerminate(response) {
-//	        return &gent.AgentLoopResult{
-//	            Action: gent.LATerminate,
-//	            Result: []gent.ContentPart{llms.TextContent{Text: extractAnswer(response)}},
-//	        }, nil
-//	    }
-//
-//	    // 4. Continue with observation
-//	    return &gent.AgentLoopResult{
-//	        Action:     gent.LAContinue,
-//	        NextPrompt: processAndGetObservation(response),
-//	    }, nil
-//	}
+// Next builds a request from ExecutionContext.Task and Scratchpad, calls the model through
+// ExecutionContext.GenerateContentStream, consumes its chunks, and awaits Response. It then
+// records observations with AppendRecord or UpdateHistory and returns LAContinue or LATerminate
+// with the final Result. Each operation returns errors that the loop must handle.
 //
 // The executor calls Next() repeatedly until LATerminate is returned or a limit is exceeded.
-// See the agents/react package for a complete reference implementation.
+// Custom continuation requires an executor RecoveryVersion and explicit CheckpointState; see
+// docs/history.md. The agents/react package provides a complete reference implementation, and
+// examples/history shows interruption, restoration, and tool reconciliation with public APIs.
 package gent

@@ -71,7 +71,7 @@ func NewYAML[T any](name string) *YAML[T] {
 }
 
 // WithGuidance sets the guidance text for this section. The guidance appears at the
-// beginning of the section content when TextOutputFormat.DescribeStructure() generates
+// beginning of the section content when TextFormat.DescribeStructure() generates
 // the format prompt, followed by the YAML schema.
 //
 // This can be instructions (e.g., "Create a plan to achieve the goal") or additional context.
@@ -148,5 +148,5 @@ func (y *YAML[T]) ParseSection(execCtx *gent.ExecutionContext, content string) (
 	return result, nil
 }
 
-// Compile-time check that YAML implements gent.TextOutputSection.
-var _ gent.TextOutputSection = (*YAML[any])(nil)
+// Compile-time check that YAML implements gent.TextSection.
+var _ gent.TextSection = (*YAML[any])(nil)

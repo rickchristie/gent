@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,11 +10,14 @@ import (
 	"github.com/rickchristie/gent/events"
 )
 
-// Config holds configuration options for the Executor.
+// Config holds configuration options for the Runner.
 type Config struct {
 	// Events is the event registry for subscribers.
 	// If nil, a new registry is created automatically.
 	Events *events.Registry
+	// RecoveryVersion identifies custom loop, hook, or compaction behavior. Stateful extensions
+	// also implement gent.CheckpointState; a version cannot restore hidden mutable state.
+	RecoveryVersion string
 }
 
 // DefaultConfig returns a config with sensible defaults.
@@ -20,10 +25,10 @@ func DefaultConfig() Config {
 	return Config{}
 }
 
-// Executor orchestrates the execution of an AgentLoop, managing the lifecycle,
+// Runner runs a Loop and manages the lifecycle,
 // event publishing, and trace collection via ExecutionContext.
 //
-// The Executor is responsible for:
+// The Runner is responsible for:
 //   - Running the AgentLoop repeatedly until it returns [gent.LATerminate]
 //   - Publishing lifecycle events at appropriate points
 //   - Handling context cancellation and limit exceeded signals
@@ -31,19 +36,31 @@ func DefaultConfig() Config {
 // Limits are configured on the ExecutionContext, not the Executor. This allows
 // limits to be shared across nested agent loops and enforced in real-time as
 // stats are updated.
-type Executor[Data gent.LoopData] struct {
-	loop   gent.AgentLoop[Data]
+type Runner struct {
+	loop   gent.Loop
 	config Config
 	events *events.Registry
 }
 
-// New creates a new Executor with the given AgentLoop and configuration.
+// Executor keeps the existing generic API. All execution uses Runner.
+//
+// Deprecated: Use Runner with NewRunner. The loop needs no type argument.
+type Executor[Data gent.LoopData] = Runner
+
+// New keeps the existing constructor for callers that supply a data type.
+//
+// Deprecated: Use NewRunner.
 func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor[Data] {
+	return NewRunner(loop, config)
+}
+
+// NewRunner creates a runner for any Loop. The context supplies its task and custom data.
+func NewRunner(loop gent.Loop, config Config) *Runner {
 	registry := config.Events
 	if registry == nil {
 		registry = events.NewRegistry()
 	}
-	return &Executor[Data]{
+	return &Runner{
 		loop:   loop,
 		config: config,
 		events: registry,
@@ -60,9 +77,9 @@ func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor
 //	sharedRegistry := events.NewRegistry()
 //	sharedRegistry.Subscribe(&MetricsSubscriber{})
 //
-//	exec1 := executor.New(loop1, config).WithEvents(sharedRegistry)
-//	exec2 := executor.New(loop2, config).WithEvents(sharedRegistry)
-func (e *Executor[Data]) WithEvents(registry *events.Registry) *Executor[Data] {
+//	exec1 := executor.NewRunner(loop1, config).WithEvents(sharedRegistry)
+//	exec2 := executor.NewRunner(loop2, config).WithEvents(sharedRegistry)
+func (e *Runner) WithEvents(registry *events.Registry) *Runner {
 	e.events = registry
 	return e
 }
@@ -77,10 +94,10 @@ func (e *Executor[Data]) WithEvents(registry *events.Registry) *Executor[Data] {
 //
 // Example:
 //
-//	exec := executor.New(loop, config).
+//	exec := executor.NewRunner(loop, config).
 //	    Subscribe(&LoggerSubscriber{}).
 //	    Subscribe(&MetricsSubscriber{})
-func (e *Executor[Data]) Subscribe(subscriber any) *Executor[Data] {
+func (e *Runner) Subscribe(subscriber any) *Runner {
 	e.events.Subscribe(subscriber)
 	return e
 }
@@ -96,117 +113,148 @@ func (e *Executor[Data]) Subscribe(subscriber any) *Executor[Data] {
 //     - An error occurs
 //  3. Publish AfterExecutionEvent
 //
-// The result is stored in execCtx.Result() after execution completes.
-// Check execCtx.Result().Error for any errors that occurred.
+// The result is stored in execCtx.Result() after execution completes. Handle the returned
+// error even when result is nil: a rejected save may prevent recording a terminal outcome.
 //
 // Example:
 //
 //	execCtx := gent.NewExecutionContext(ctx, "main", data)
 //	execCtx.SetLimits(customLimits) // optional
-//	executor.Execute(execCtx)
-//	result := execCtx.Result()
-//	if result.Error != nil {
+//	result, err := executor.Execute(execCtx)
+//	if err != nil {
 //	    // handle error
 //	}
-func (e *Executor[Data]) Execute(execCtx *gent.ExecutionContext) {
-	// Set event publisher for event dispatching
+func (e *Runner) Execute(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
+	return e.execute(execCtx, false)
+}
+
+// Continue runs an already restored context. Prepare its loop and bindings through
+// RestoreExecutionContext before calling; Continue validates configuration without reinitializing
+// restored state. Terminal runs return the saved outcome. Resume handles this setup automatically.
+func (e *Runner) Continue(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
+	return e.execute(execCtx, true)
+}
+
+func (e *Runner) execute(
+	execCtx *gent.ExecutionContext, continuing bool,
+) (*gent.ExecutionResult, error) {
+	if execCtx.Phase() == gent.PhaseTerminal {
+		return execCtx.Result(), execCtx.Error()
+	}
+	if err := execCtx.RecordingError(); err != nil {
+		return nil, err
+	}
 	if e.events != nil {
 		execCtx.SetEventPublisher(e.events)
 	}
-
-	// Ensure streams are closed and AfterExecution is always published if BeforeExecution was
-	beforeExecutionPublished := false
-	defer func() {
-		// Always close streams when execution ends
-		execCtx.CloseStreams()
-
-		if beforeExecutionPublished {
-			execCtx.PublishAfterExecution(execCtx.TerminationReason(), execCtx.Error())
+	if continuing {
+		if err := e.configureRecovery(execCtx); err != nil {
+			return nil, err
 		}
-	}()
+	} else if err := e.configureExecution(execCtx); err != nil {
+		return nil, err
+	}
+	defer execCtx.CloseStreams()
+	if !continuing {
+		execCtx.PublishBeforeExecution()
+		if err := execCtx.CommitCheckpoint(gent.PhaseInitial); err != nil {
+			return nil, err
+		}
+	} else if err := execCtx.FlushProgress(); err != nil {
+		return nil, err
+	}
 
-	// BeforeExecution event
-	execCtx.PublishBeforeExecution()
-	beforeExecutionPublished = true
-
-	// Main execution loop
 	for {
+		if err := execCtx.RecordingError(); err != nil {
+			return nil, err
+		}
 		if terminateIfCanceled(execCtx) {
-			return
+			return e.finish(execCtx)
 		}
-
-		// Compaction check (skip first iteration — nothing to
-		// compact)
-		if execCtx.Iteration() > 0 {
-			if err := e.compactIfNeeded(execCtx); err != nil {
-				execCtx.SetTermination(
-					gent.TerminationCompactionFailed,
-					nil,
-					fmt.Errorf(
-						"compaction (iteration %d): %w",
-						execCtx.Iteration(), err,
-					),
-				)
-				return
+		phase := execCtx.Phase()
+		resumeIteration := phase == gent.PhaseIterationReady || phase == gent.PhaseDecisionReady ||
+			phase == gent.PhaseToolReady || phase == gent.PhaseToolCompleted
+		if !resumeIteration {
+			if err := execCtx.ExpireRecords(execCtx.Iteration() + 1); err != nil {
+				return nil, err
 			}
-		}
-
-		// Start iteration: increment counter and publish
-		// BeforeIterationEvent (BeforeIterationEvent updates
-		// SCIterations stat)
-		execCtx.IncrementIteration()
-		iterStart := time.Now()
-		execCtx.PublishBeforeIteration()
-
-		// Execute the AgentLoop iteration
-		loopResult, loopErr := e.loop.Next(execCtx)
-		iterDuration := time.Since(iterStart)
-
-		// Handle loop error - check if it was due to limit exceeded
-		if loopErr != nil {
-			execCtx.PublishAfterIteration(
-				&gent.AgentLoopResult{Action: gent.LATerminate},
-				iterDuration,
-			)
-			execCtx.EnforceIterationLimit()
+			if execCtx.Iteration() > 0 && phase != gent.PhaseCompactionCompleted {
+				if err := e.compactIfNeeded(execCtx); err != nil {
+					if recordErr := execCtx.RecordingError(); recordErr != nil {
+						return nil, recordErr
+					}
+					execCtx.SetTermination(gent.TerminationCompactionFailed, nil,
+						fmt.Errorf("compaction (iteration %d): %w", execCtx.Iteration(), err))
+					return e.finish(execCtx)
+				}
+			}
 			if terminateIfCanceled(execCtx) {
-				return
+				return e.finish(execCtx)
 			}
-			if execCtx.ExceededLimit() != nil {
-				execCtx.SetTermination(
-					gent.TerminationLimitExceeded,
-					nil,
-					fmt.Errorf("limit exceeded: %s > %v",
-						execCtx.ExceededLimit().Key,
-						execCtx.ExceededLimit().MaxValue),
-				)
-			} else {
-				execErr := fmt.Errorf(
-					"AgentLoop.Next (iteration %d): %w",
-					execCtx.Iteration(),
-					loopErr,
-				)
-				execCtx.SetTermination(gent.TerminationError, nil, execErr)
+			execCtx.IncrementIteration()
+			execCtx.PublishBeforeIteration()
+			if err := execCtx.CommitCheckpoint(gent.PhaseIterationReady); err != nil {
+				return nil, err
 			}
-			return
 		}
-
-		// Publish AfterIterationEvent
-		execCtx.PublishAfterIteration(loopResult, iterDuration)
+		if terminateIfCanceled(execCtx) {
+			return e.finish(execCtx)
+		}
+		started := time.Now()
+		result, loopErr := e.loop.Next(execCtx)
+		if err := execCtx.RecordingError(); err != nil {
+			return nil, err
+		}
+		if execCtx.IsWorkerInterrupted() {
+			execCtx.SetTermination(gent.TerminationContextCanceled, nil, execCtx.Context().Err())
+			return e.finish(execCtx)
+		}
+		if errors.Is(loopErr, gent.ErrUncertainTool) ||
+			errors.Is(loopErr, gent.ErrUnsupportedRecovery) ||
+			errors.Is(loopErr, gent.ErrIncompatibleCheckpoint) {
+			if err := execCtx.RecordInterruption(loopErr); err != nil {
+				return nil, err
+			}
+			return nil, loopErr
+		}
+		if result == nil && loopErr == nil {
+			loopErr = errors.New("AgentLoop.Next returned a nil result")
+		}
+		execCtx.PublishAfterIteration(result, time.Since(started), loopErr)
 		execCtx.EnforceIterationLimit()
 		if terminateIfCanceled(execCtx) {
-			return
+			return e.finish(execCtx)
 		}
-
-		// Check for termination
-		if loopResult.Action == gent.LATerminate {
-			execCtx.SetTermination(gent.TerminationSuccess, loopResult.Result, nil)
-			return
+		if loopErr != nil {
+			execCtx.SetTermination(gent.TerminationError, nil,
+				fmt.Errorf("AgentLoop.Next (iteration %d): %w", execCtx.Iteration(), loopErr))
+			return e.finish(execCtx)
 		}
-
-		// Continue - the AgentLoop is responsible for updating data with NextPrompt
-		// The exact mechanism depends on the LoopData implementation
+		if result.Action == gent.LATerminate {
+			execCtx.SetTermination(gent.TerminationSuccess, result.Result, nil)
+			return e.finish(execCtx)
+		}
+		if err := execCtx.CommitCheckpoint(gent.PhaseIterationCompleted); err != nil {
+			return nil, err
+		}
 	}
+}
+
+func (e *Runner) finish(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
+	if err := execCtx.RecordingError(); err != nil {
+		return nil, err
+	}
+	if execCtx.IsWorkerInterrupted() {
+		if err := execCtx.RecordInterruption(execCtx.Context().Err()); err != nil {
+			return nil, err
+		}
+		return execCtx.Result(), execCtx.Context().Err()
+	}
+	execCtx.PublishAfterExecution(execCtx.TerminationReason(), execCtx.Error())
+	if err := execCtx.CommitCheckpoint(gent.PhaseTerminal); err != nil {
+		return nil, err
+	}
+	return execCtx.Result(), execCtx.Error()
 }
 
 func terminateIfCanceled(execCtx *gent.ExecutionContext) bool {
@@ -227,17 +275,18 @@ func terminateIfCanceled(execCtx *gent.ExecutionContext) bool {
 		)
 		return true
 	}
-	execCtx.SetTermination(
-		gent.TerminationContextCanceled,
-		nil,
-		goCtx.Err(),
-	)
+	cause := goCtx.Err()
+	if detail := context.Cause(goCtx); detail != nil && detail != cause {
+		// Preserve both cancellation classification and the application's reason for stopping.
+		cause = errors.Join(cause, detail)
+	}
+	execCtx.SetTermination(gent.TerminationContextCanceled, nil, cause)
 	return true
 }
 
 // compactIfNeeded checks the compaction trigger and runs the
 // strategy if triggered.
-func (e *Executor[Data]) compactIfNeeded(
+func (e *Runner) compactIfNeeded(
 	execCtx *gent.ExecutionContext,
 ) error {
 	trigger := execCtx.CompactionTrigger()
@@ -246,23 +295,70 @@ func (e *Executor[Data]) compactIfNeeded(
 		return nil
 	}
 
-	if !trigger.ShouldCompact(execCtx) {
+	shouldCompact, err := trigger.ShouldCompact(execCtx)
+	if err != nil {
+		return err
+	}
+	if !shouldCompact {
 		return nil
 	}
 
-	lengthBefore := len(execCtx.Data().GetScratchPad())
-	compactStart := time.Now()
-
-	if err := strategy.Compact(execCtx); err != nil {
+	input, err := execCtx.CompactionInput()
+	if err != nil {
 		return err
 	}
-
-	lengthAfter := len(execCtx.Data().GetScratchPad())
-	duration := time.Since(compactStart)
-	execCtx.PublishCompaction(
-		lengthBefore, lengthAfter, duration,
-	)
-	trigger.NotifyCompacted(execCtx)
-
-	return nil
+	inputIds := input.EntryIds()
+	before, err := execCtx.Export()
+	if err != nil {
+		return err
+	}
+	started := time.Now()
+	proposal, compactErr := strategy.Compact(execCtx, input)
+	after, err := execCtx.Export()
+	if err != nil {
+		return err
+	}
+	var modelCallIds []string
+	seenCalls := map[string]bool{}
+	for _, event := range after.Activity {
+		if event.EventNumber <= before.LastAppliedEventNumber ||
+			event.ContextId != execCtx.ContextId() {
+			continue
+		}
+		if event.ModelCallId != "" && !seenCalls[event.ModelCallId] {
+			modelCallIds = append(modelCallIds, event.ModelCallId)
+			seenCalls[event.ModelCallId] = true
+		}
+	}
+	if compactErr != nil {
+		proposal = gent.HistoryUpdate{ExpectedDraftRevision: input.Revision, Active: inputIds}
+	}
+	if proposal.ExpectedDraftRevision != input.Revision {
+		return gent.ErrHistoryConflict
+	}
+	decision := proposal.Compaction
+	if decision == nil {
+		decision = &gent.CompactionRecord{}
+	}
+	decision.Strategy = fmt.Sprintf("%T", strategy)
+	decision.InputIds, decision.Active = inputIds, proposal.Active
+	decision.ModelCallIds, decision.Error = modelCallIds, gent.SaveError(compactErr)
+	marker, err := execCtx.NewHistoryEntry(&gent.HistoryEntry{
+		Kind: gent.HistoryCompaction, Compaction: decision})
+	if err != nil {
+		return err
+	}
+	proposal.AppendedEntries = append(proposal.AppendedEntries, marker)
+	proposal.Reason = gent.ContextCompact
+	if err := execCtx.UpdateHistory(proposal); err != nil {
+		return err
+	}
+	if compactErr != nil {
+		return compactErr
+	}
+	execCtx.PublishCompaction(len(inputIds), len(proposal.Active), time.Since(started))
+	if err := trigger.NotifyCompacted(execCtx); err != nil {
+		return err
+	}
+	return execCtx.CommitCheckpoint(gent.PhaseCompactionCompleted)
 }

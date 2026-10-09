@@ -22,12 +22,12 @@ type mockIndexableTool struct {
 }
 
 func (t *mockIndexableTool) Name() string               { return t.name }
-func (t *mockIndexableTool) Description() string         { return t.description }
-func (t *mockIndexableTool) Domain() string              { return t.domain }
-func (t *mockIndexableTool) Categories() []string        { return t.categories }
-func (t *mockIndexableTool) Keywords() []string          { return t.keywords }
-func (t *mockIndexableTool) SyntheticQueries() []string  { return t.syntheticQueries }
-func (t *mockIndexableTool) Policy() string              { return "" }
+func (t *mockIndexableTool) Description() string        { return t.description }
+func (t *mockIndexableTool) Domain() string             { return t.domain }
+func (t *mockIndexableTool) Categories() []string       { return t.categories }
+func (t *mockIndexableTool) Keywords() []string         { return t.keywords }
+func (t *mockIndexableTool) SyntheticQueries() []string { return t.syntheticQueries }
+func (t *mockIndexableTool) Policy() string             { return "" }
 func (t *mockIndexableTool) ParameterSchema() map[string]any {
 	return nil
 }

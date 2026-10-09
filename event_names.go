@@ -1,5 +1,7 @@
 package gent
 
+const EventNameStateChange = "gent:state_change"
+
 // Event name constants define the EventName values for framework events.
 //
 // # Naming Convention
@@ -51,7 +53,7 @@ const (
 	EventNameChildSpawn    = "gent:child:spawn"
 	EventNameChildComplete = "gent:child:complete"
 
-	// State change events (published as CommonDiffEvent)
+	// State change events (published as StateChangeEvent)
 	EventNameIterationHistoryChange = "gent:iteration_history:change"
 	EventNameScratchPadChange       = "gent:scratchpad:change"
 )

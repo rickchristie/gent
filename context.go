@@ -2,19 +2,13 @@ package gent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/pmezard/go-difflib/difflib"
 )
-
-var nextExecutionContextId atomic.Uint64
 
 // EventPublisher is an interface for dispatching events to subscribers.
 // This is implemented by events.Registry and set on ExecutionContext by the Executor.
@@ -46,34 +40,17 @@ type EventPublisher interface {
 //
 // # Usage in Custom AgentLoop
 //
-//	func (l *MyLoop) Next(execCtx *ExecutionContext) (*AgentLoopResult, error) {
-//	    // Access loop data
-//	    data := execCtx.Data().(*MyLoopData)
-//
-//	    // Check current iteration
-//	    fmt.Printf("Iteration %d\n", execCtx.Iteration())
-//
-//	    // Record custom event
-//	    execCtx.PublishCommonEvent("myapp:my_event", "Something happened", myData)
-//
-//	    // Use standard context for model calls
-//	    response, err := model.GenerateContent(execCtx, ...)
-//	}
+// Read the owned Task and Scratchpad to build a request. Use GenerateContentStream on this
+// context to capture effective requests, chunks, responses, and usage before continuing.
+// AppendRecord and UpdateHistory preserve evidence while changing the next working context.
+// Custom events can be queued with PublishCommonEvent; check FlushProgress before external work.
+// See docs/history.md for checkpoint state and fresh-worker bindings for custom loops.
 //
 // # Nested Agent Loops
 //
-// For tools that run sub-agents, create a child context:
-//
-//	func (t *SubAgentTool) Call(ctx context.Context, input Input) (*ToolResult[Output], error) {
-//	    // Create child context (stats propagate to parent)
-//	    childCtx := parentExecCtx.NewChild("sub-agent", childData)
-//
-//	    // Run sub-agent
-//	    exec := executor.New(subAgent, config)
-//	    exec.Execute(childCtx)
-//
-//	    return &ToolResult[Output]{Text: childCtx.FinalResult()}, nil
-//	}
+// SpawnChild links a nested loop's statistics and cancellation to its parent. Run the child
+// executor, handle its returned error, and call CompleteChild after it exits. An active child
+// frame is observable but cannot be resumed after a worker restart; completed children are saved.
 //
 // # Thread Safety
 //
@@ -82,7 +59,17 @@ type EventPublisher interface {
 // is safe for concurrent use, and custom LoopData implementations must provide their own
 // synchronization if they are accessed concurrently.
 type ExecutionContext struct {
-	mu sync.RWMutex
+	mu                 sync.RWMutex
+	run                *executionRun
+	savedTask          EncodedValue
+	active             []EntryId
+	draftRevision      uint64
+	state              map[string]EncodedValue
+	phase              ExecutionPhase
+	completedIteration int
+	restored           bool
+	runCanceled        bool
+	currentToolPlan    *ToolPlan
 
 	// Go context for cancellation (created via context.WithCancelCause)
 	goCtx  context.Context
@@ -108,6 +95,7 @@ type ExecutionContext struct {
 	// Per-context call sequences for generated model/tool call IDs.
 	nextModelCallSeq uint64
 	nextToolCallSeq  uint64
+	modelReplay      modelReplay
 
 	// Current position (auto-tracked)
 	iteration int
@@ -151,14 +139,15 @@ type ExecutionContext struct {
 // to all child contexts and ongoing operations.
 //
 // Default limits are applied automatically. Use SetLimits to customize.
-func NewExecutionContext(ctx context.Context, name string, data LoopData) *ExecutionContext {
+func NewExecutionContext(
+	ctx context.Context, name string, data LoopData, options ...ContextOption,
+) *ExecutionContext {
 	ctx, cancel := context.WithCancelCause(ctx)
 	execCtx := &ExecutionContext{
 		goCtx:     ctx,
 		cancel:    cancel,
 		limits:    DefaultLimits(),
 		name:      name,
-		contextId: newContextId(),
 		data:      data,
 		depth:     0,
 		events:    make([]Event, 0),
@@ -167,15 +156,8 @@ func NewExecutionContext(ctx context.Context, name string, data LoopData) *Execu
 	}
 	// Create stats with back-reference for limit checking
 	execCtx.stats = newExecutionStatsWithContext(execCtx)
-	// Set execution context on LoopData for automatic event publishing
-	if data != nil {
-		data.SetExecutionContext(execCtx)
-	}
+	execCtx.initializeHistory(options)
 	return execCtx
-}
-
-func newContextId() string {
-	return fmt.Sprintf("ctx:%d", nextExecutionContextId.Add(1))
 }
 
 // -----------------------------------------------------------------------------
@@ -619,22 +601,42 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 	ctx.updateStatsForEvent(event)
 
 	// Dispatch to subscribers
-	if publisher != nil {
-		publisher.Dispatch(ctx, event)
+	if publisher != nil && !ctx.isRetryingTool(event) {
+		observed := event
+		switch event.(type) {
+		case *BeforeSystemPromptEvent, *BeforeModelCallEvent, *BeforeToolCallEvent:
+			// Request hooks intentionally modify the effective input before it is captured.
+		default:
+			var err error
+			observed, err = ctx.copyEvent(event)
+			if err != nil {
+				ctx.stopRecording(err)
+				return
+			}
+		}
+		publisher.Dispatch(ctx, observed)
 	}
 
 	ctx.storePublishedEvent(eventSlot, event)
+	if err := ctx.recordEvent(event); err != nil {
+		return
+	}
 }
 
 func (ctx *ExecutionContext) storePublishedEvent(slot int, event Event) {
 	if slot < 0 {
 		return
 	}
+	owned, err := ctx.copyEvent(event)
+	if err != nil {
+		ctx.stopRecording(err)
+		return
+	}
 	ctx.updateContextState(func() {
 		if slot >= len(ctx.events) {
 			return
 		}
-		ctx.events[slot] = cloneEventForLog(event)
+		ctx.events[slot] = owned
 	})
 }
 
@@ -674,8 +676,9 @@ func currentGoroutineID() uint64 {
 
 // Publish records a custom event, updates stats, checks limits, and dispatches to subscribers.
 // Use this for user-defined Event types. For framework events, use the typed PublishXXX methods.
-func (ctx *ExecutionContext) Publish(event Event) {
+func (ctx *ExecutionContext) Publish(event Event) error {
 	ctx.publish(event)
+	return ctx.FlushProgress()
 }
 
 // populateBaseEvent fills in BaseEvent fields.
@@ -729,13 +732,16 @@ func eventBase(event Event) *BaseEvent {
 		return &e.BaseEvent
 	case *CommonEvent:
 		return &e.BaseEvent
-	case *CommonDiffEvent:
+	case *StateChangeEvent:
 		return &e.BaseEvent
 	case *LimitExceededEvent:
 		return &e.BaseEvent
 	case *CompactionEvent:
 		return &e.BaseEvent
 	default:
+		if withBase, ok := event.(interface{ EventBase() *BaseEvent }); ok {
+			return withBase.EventBase()
+		}
 		return nil
 	}
 }
@@ -904,113 +910,42 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 // Events returns a copy of all recorded events.
 func (ctx *ExecutionContext) Events() []Event {
 	ctx.mu.RLock()
-	defer ctx.mu.RUnlock()
-	result := make([]Event, 0, len(ctx.events))
-	for _, event := range ctx.events {
+	stored := append([]Event(nil), ctx.events...)
+	ctx.mu.RUnlock()
+	result := make([]Event, 0, len(stored))
+	for _, event := range stored {
 		// A nil entry is a publish currently being dispatched to subscribers. Before-event
 		// subscribers can mutate event fields, so the event only becomes visible after the
 		// final stable copy is stored.
 		if event == nil {
 			continue
 		}
-		result = append(result, event)
+		owned, err := ctx.copyEvent(event)
+		if err != nil {
+			ctx.stopRecording(err)
+			return nil
+		}
+		result = append(result, owned)
 	}
 	return result
 }
 
-func cloneEventForLog(event Event) Event {
-	switch e := event.(type) {
-	case *BeforeExecutionEvent:
-		clone := *e
-		return &clone
-	case *AfterExecutionEvent:
-		clone := *e
-		return &clone
-	case *BeforeIterationEvent:
-		clone := *e
-		return &clone
-	case *AfterIterationEvent:
-		clone := *e
-		if e.Result != nil {
-			result := *e.Result
-			result.Result = cloneContentParts(e.Result.Result)
-			clone.Result = &result
+func (ctx *ExecutionContext) copyEvent(event Event) (Event, error) {
+	if changed, ok := event.(*StateChangeEvent); ok {
+		change, err := cloneOwned(ctx.Codecs(), changed.Change)
+		if err != nil {
+			return nil, err
 		}
-		return &clone
-	case *BeforeSystemPromptEvent:
-		clone := *e
-		clone.Sections = cloneFormattedSections(e.Sections)
-		return &clone
-	case *BeforeModelCallEvent:
-		clone := *e
-		clone.Request = cloneModelCallRequest(e.Request)
-		return &clone
-	case *AfterModelCallEvent:
-		clone := *e
-		clone.Request = cloneModelCallRequest(e.Request)
-		return &clone
-	case *BeforeToolCallEvent:
-		clone := *e
-		return &clone
-	case *AfterToolCallEvent:
-		clone := *e
-		return &clone
-	case *ParseErrorEvent:
-		clone := *e
-		return &clone
-	case *ValidatorCalledEvent:
-		clone := *e
-		return &clone
-	case *ValidatorResultEvent:
-		clone := *e
-		clone.Feedback = cloneFormattedSections(e.Feedback)
-		return &clone
-	case *ErrorEvent:
-		clone := *e
-		return &clone
-	case *CommonEvent:
-		clone := *e
-		return &clone
-	case *CommonDiffEvent:
-		clone := *e
-		return &clone
-	case *LimitExceededEvent:
-		clone := *e
-		return &clone
-	case *CompactionEvent:
-		clone := *e
-		return &clone
-	default:
-		return event
+		return &StateChangeEvent{
+			BaseEvent: changed.BaseEvent,
+			Change:    change,
+		}, nil
 	}
-}
-
-func cloneModelCallRequest(request ModelCallRequest) ModelCallRequest {
-	clone := request
-	clone.Messages = append(request.Messages[:0:0], request.Messages...)
-	for i := range clone.Messages {
-		clone.Messages[i].Parts = append(clone.Messages[i].Parts[:0:0], clone.Messages[i].Parts...)
+	value, err := ctx.Codecs().Clone(event)
+	if err != nil {
+		return nil, err
 	}
-	clone.OptionCaptureNotes = append(request.OptionCaptureNotes[:0:0], request.OptionCaptureNotes...)
-	return clone
-}
-
-func cloneFormattedSections(sections []FormattedSection) []FormattedSection {
-	if sections == nil {
-		return nil
-	}
-	clone := append(sections[:0:0], sections...)
-	for i := range clone {
-		clone[i].Children = cloneFormattedSections(clone[i].Children)
-	}
-	return clone
-}
-
-func cloneContentParts(parts []ContentPart) []ContentPart {
-	if parts == nil {
-		return nil
-	}
-	return append(parts[:0:0], parts...)
+	return value.(Event), nil
 }
 
 type modelCallEventOptions struct {
@@ -1056,6 +991,12 @@ func WithModelProvider(provider string) ModelCallEventOption {
 type toolCallEventOptions struct {
 	toolCallId string
 	source     string
+	attemptId  string
+}
+
+// WithToolCallAttempt identifies the physical attempt reconciled by a recovery adapter.
+func WithToolCallAttempt(id string) ToolCallEventOption {
+	return func(options *toolCallEventOptions) { options.attemptId = id }
 }
 
 // ToolCallEventOption configures tool call event metadata.
@@ -1117,6 +1058,7 @@ func (ctx *ExecutionContext) nextToolCallId() string {
 func (ctx *ExecutionContext) PublishBeforeExecution() *BeforeExecutionEvent {
 	event := &BeforeExecutionEvent{
 		BaseEvent: BaseEvent{EventName: EventNameExecutionBefore},
+		Name:      ctx.Name(),
 	}
 	ctx.publish(event)
 	return event
@@ -1131,6 +1073,8 @@ func (ctx *ExecutionContext) PublishAfterExecution(
 		BaseEvent:         BaseEvent{EventName: EventNameExecutionAfter},
 		TerminationReason: reason,
 		Error:             err,
+		Output:            ctx.FinalResult(),
+		Duration:          ctx.Duration(),
 	}
 	ctx.publish(event)
 	return event
@@ -1150,11 +1094,15 @@ func (ctx *ExecutionContext) PublishBeforeIteration() *BeforeIterationEvent {
 func (ctx *ExecutionContext) PublishAfterIteration(
 	result *AgentLoopResult,
 	duration time.Duration,
+	iterationErrors ...error,
 ) *AfterIterationEvent {
 	event := &AfterIterationEvent{
 		BaseEvent: BaseEvent{EventName: EventNameIterationAfter},
 		Result:    result,
 		Duration:  duration,
+	}
+	if len(iterationErrors) > 0 {
+		event.Error = iterationErrors[0]
 	}
 	ctx.publish(event)
 	return event
@@ -1274,6 +1222,9 @@ func (ctx *ExecutionContext) PublishBeforeToolCall(
 ) *BeforeToolCallEvent {
 	options := applyToolCallEventOptions(opts)
 	if options.toolCallId == "" {
+		options.toolCallId = ctx.selectedToolCallId()
+	}
+	if options.toolCallId == "" {
 		options.toolCallId = ctx.nextToolCallId()
 	}
 	event := &BeforeToolCallEvent{
@@ -1285,7 +1236,18 @@ func (ctx *ExecutionContext) PublishBeforeToolCall(
 		Args:       args,
 		ToolCallId: options.toolCallId,
 	}
+	if ctx.isRetryingTool(event) {
+		input, err := ctx.retryToolInput()
+		if err != nil {
+			ctx.stopRecording(err)
+			return event
+		}
+		event.Args = input
+	}
 	ctx.publish(event)
+	if err := ctx.saveToolReady(event); err != nil {
+		ctx.stopRecording(err)
+	}
 	return event
 }
 
@@ -1304,6 +1266,7 @@ func (ctx *ExecutionContext) PublishAfterToolCall(
 		BaseEvent: BaseEvent{
 			EventName: EventNameToolCallAfter,
 			Source:    options.source,
+			AttemptId: options.attemptId,
 		},
 		ToolName:   toolName,
 		Args:       args,
@@ -1431,82 +1394,6 @@ func (ctx *ExecutionContext) PublishCommonEvent(
 	return event
 }
 
-// PublishCommonDiffEvent publishes a CommonDiffEvent for state change tracking.
-// The eventName should use the format "namespace:event_name" (e.g., "myapp:config_change").
-//
-// The diff is auto-generated by JSON-marshaling both before and after values, then computing
-// a unified diff. This is useful for hook implementers who want to log state changes.
-//
-// If marshaling fails for either value, the error message(s) are included in the Diff field.
-func (ctx *ExecutionContext) PublishCommonDiffEvent(
-	eventName string,
-	before any,
-	after any,
-) *CommonDiffEvent {
-	diff := computeDiff(before, after)
-	event := &CommonDiffEvent{
-		BaseEvent: BaseEvent{EventName: eventName},
-		Before:    before,
-		After:     after,
-		Diff:      diff,
-	}
-	ctx.publish(event)
-	return event
-}
-
-// PublishIterationHistoryChange publishes a CommonDiffEvent for iteration history changes.
-// This is a convenience method for tracking changes to LoopData.GetIterationHistory().
-func (ctx *ExecutionContext) PublishIterationHistoryChange(
-	before []*Iteration,
-	after []*Iteration,
-) *CommonDiffEvent {
-	return ctx.PublishCommonDiffEvent(EventNameIterationHistoryChange, before, after)
-}
-
-// PublishScratchPadChange publishes a CommonDiffEvent for scratchpad changes.
-// This is a convenience method for tracking changes to LoopData.GetScratchPad().
-func (ctx *ExecutionContext) PublishScratchPadChange(
-	before []*Iteration,
-	after []*Iteration,
-) *CommonDiffEvent {
-	return ctx.PublishCommonDiffEvent(EventNameScratchPadChange, before, after)
-}
-
-// computeDiff generates a unified diff between JSON representations of before and after.
-// If marshaling fails, returns error message(s) prefixed with "<marshal error: ...>".
-func computeDiff(before, after any) string {
-	var errors []string
-
-	beforeJSON, err := json.MarshalIndent(before, "", "  ")
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("<marshal error (before): %v>", err))
-	}
-
-	afterJSON, err := json.MarshalIndent(after, "", "  ")
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("<marshal error (after): %v>", err))
-	}
-
-	if len(errors) > 0 {
-		return strings.Join(errors, "\n")
-	}
-
-	diff := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(string(beforeJSON)),
-		B:        difflib.SplitLines(string(afterJSON)),
-		FromFile: "before",
-		ToFile:   "after",
-		Context:  3,
-	}
-
-	result, err := difflib.GetUnifiedDiffString(diff)
-	if err != nil {
-		return fmt.Sprintf("<diff error: %v>", err)
-	}
-
-	return result
-}
-
 // Stats returns the execution stats for this context.
 //
 // Thread Safety:
@@ -1530,8 +1417,20 @@ func (ctx *ExecutionContext) Stats() *ExecutionStats {
 // The child context inherits the parent's context.Context, so cancelling the parent
 // (e.g., due to limit exceeded) automatically cancels all children.
 func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionContext {
+	var task *Task
+	if data != nil {
+		task = data.GetTask()
+	}
+	savedTask, err := ctx.Codecs().Encode(task)
+	if err != nil {
+		ctx.stopRecording(err)
+	}
+	ctx.run.mu.Lock()
+	ctx.run.allocation++
+	childId := fmt.Sprintf("%s:child:%s:%d", ctx.run.id, ctx.run.attempt, ctx.run.allocation)
+	ctx.run.mu.Unlock()
 	ctx.mu.Lock()
-	childContextId := newContextId()
+	childContextId := childId
 	parentContextId := ctx.contextId
 	parentPublisher := ctx.eventPublisher
 
@@ -1539,6 +1438,9 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	childGoCtx, childCancel := context.WithCancelCause(ctx.goCtx)
 
 	child := &ExecutionContext{
+		run:             ctx.run,
+		state:           map[string]EncodedValue{},
+		phase:           PhaseInitial,
 		goCtx:           childGoCtx,
 		cancel:          childCancel,
 		limits:          cloneLimits(ctx.limits), // Children own their limit slice.
@@ -1546,6 +1448,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 		contextId:       childContextId,
 		parentContextId: parentContextId,
 		data:            data,
+		savedTask:       savedTask,
 		depth:           ctx.depth + 1,
 		parent:          ctx,
 		events:          make([]Event, 0),
@@ -1562,11 +1465,6 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 
 	ctx.children = append(ctx.children, child)
 	ctx.mu.Unlock()
-
-	// Set execution context on LoopData for automatic event publishing
-	if data != nil {
-		data.SetExecutionContext(child)
-	}
 
 	ctx.PublishCommonEvent(
 		EventNameChildSpawn,
@@ -1588,7 +1486,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 //
 // Note: Stats aggregation happens in real-time via parent reference,
 // so this method only records the completion event.
-func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
+func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) error {
 	child.mu.Lock()
 	child.endTime = time.Now()
 	childDuration := child.endTime.Sub(child.startTime)
@@ -1597,22 +1495,24 @@ func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) {
 	childContextId := child.contextId
 	parentContextId := child.parentContextId
 	childDepth := child.depth
+	childError := child.err
 	child.mu.Unlock()
 	childSource := child.BuildSourcePath()
 
+	data := map[string]any{
+		"child_context_id": childContextId, "parent_context_id": parentContextId,
+		"child_name": childName, "child_source": childSource, "child_depth": childDepth,
+		"termination_reason": childReason, "duration": childDuration,
+	}
+	if childError != nil {
+		data["error"] = childError
+	}
 	ctx.PublishCommonEvent(
 		EventNameChildComplete,
 		"Child context completed",
-		map[string]any{
-			"child_context_id":   childContextId,
-			"parent_context_id":  parentContextId,
-			"child_name":         childName,
-			"child_source":       childSource,
-			"child_depth":        childDepth,
-			"termination_reason": childReason,
-			"duration":           childDuration,
-		},
+		data,
 	)
+	return ctx.FlushProgress()
 }
 
 // Parent returns the parent context, or nil if this is the root.
@@ -1647,7 +1547,11 @@ func (ctx *ExecutionContext) Depth() int {
 //
 // This also populates the Result() field with an ExecutionResult containing
 // all termination information.
-func (ctx *ExecutionContext) SetTermination(reason TerminationReason, result []ContentPart, err error) {
+func (ctx *ExecutionContext) SetTermination(
+	reason TerminationReason,
+	result []ContentPart,
+	err error,
+) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 	ctx.terminationReason = reason
@@ -1782,7 +1686,7 @@ func (ctx *ExecutionContext) SubscribeToTopic(
 // Safe for concurrent use.
 //
 // If chunk.Source is empty, it will be populated with BuildSourcePath().
-func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) {
+func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) error {
 	if chunk.Timestamp.IsZero() {
 		chunk.Timestamp = time.Now()
 	}
@@ -1801,6 +1705,14 @@ func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) {
 	if chunk.ParentContextId == "" {
 		chunk.ParentContextId = ctx.ParentContextId()
 	}
+	if err := ctx.recordChunk(chunk); err != nil {
+		return err
+	}
+	ctx.emitAcceptedChunk(chunk)
+	return nil
+}
+
+func (ctx *ExecutionContext) emitAcceptedChunk(chunk StreamChunk) {
 
 	// Emit to local subscribers
 	ctx.streamHub.emit(chunk)
@@ -1812,7 +1724,7 @@ func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) {
 	ctx.mu.RUnlock()
 
 	if parent != nil {
-		parent.EmitChunk(chunk)
+		parent.emitAcceptedChunk(chunk)
 	}
 }
 

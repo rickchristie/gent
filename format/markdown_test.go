@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// mockSection is a simple TextOutputSection for testing.
+// mockSection is a simple TextSection for testing.
 type mockSection struct {
 	name     string
 	guidance string
@@ -355,7 +355,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 				shouldError       bool
 				formatErrorTotal  int64
 				formatErrorConsec float64
-				}{
+			}{
 				shouldError:       true,
 				formatErrorTotal:  1,
 				formatErrorConsec: 1,
@@ -368,7 +368,7 @@ func TestMarkdown_Parse_TracesErrors(t *testing.T) {
 				shouldError       bool
 				formatErrorTotal  int64
 				formatErrorConsec float64
-				}{
+			}{
 				shouldError:       false,
 				formatErrorTotal:  0,
 				formatErrorConsec: 0,

@@ -99,7 +99,3 @@ type TextSection interface {
 	// check for nil before tracing or updating stats.
 	ParseSection(execCtx *ExecutionContext, content string) (any, error)
 }
-
-// TextOutputSection is an alias for TextSection for backward compatibility.
-// Deprecated: Use TextSection instead.
-type TextOutputSection = TextSection

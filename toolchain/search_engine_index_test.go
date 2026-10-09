@@ -20,11 +20,11 @@ type testIndexableTool struct {
 	syntheticQueries []string
 }
 
-func (t *testIndexableTool) Name() string              { return t.name }
-func (t *testIndexableTool) Description() string       { return t.description }
-func (t *testIndexableTool) Domain() string            { return t.domain }
-func (t *testIndexableTool) Categories() []string      { return t.categories }
-func (t *testIndexableTool) Keywords() []string        { return t.keywords }
+func (t *testIndexableTool) Name() string               { return t.name }
+func (t *testIndexableTool) Description() string        { return t.description }
+func (t *testIndexableTool) Domain() string             { return t.domain }
+func (t *testIndexableTool) Categories() []string       { return t.categories }
+func (t *testIndexableTool) Keywords() []string         { return t.keywords }
 func (t *testIndexableTool) SyntheticQueries() []string { return t.syntheticQueries }
 
 func TestToolBleveAdapter_Convert(t *testing.T) {
@@ -93,19 +93,19 @@ func TestIndexToolSearcher_WithBleveIndex(t *testing.T) {
 		&testIndexableTool{
 			name: "get_billing_ledger", description: "Retrieve billing ledger entries",
 			domain: "Billing", categories: []string{"lookup"},
-			keywords: []string{"billing", "payment", "invoice", "ledger"},
+			keywords:         []string{"billing", "payment", "invoice", "ledger"},
 			syntheticQueries: []string{"check payment status"},
 		},
 		&testIndexableTool{
 			name: "send_notification", description: "Send notification via email or SMS",
 			domain: "Communication", categories: []string{"send"},
-			keywords: []string{"email", "sms", "notification", "message"},
+			keywords:         []string{"email", "sms", "notification", "message"},
 			syntheticQueries: []string{"notify customer"},
 		},
 		&testIndexableTool{
 			name: "cancel_reservation", description: "Cancel an existing reservation",
 			domain: "Reservations", categories: []string{"mutation"},
-			keywords: []string{"cancel", "reservation", "booking"},
+			keywords:         []string{"cancel", "reservation", "booking"},
 			syntheticQueries: []string{"cancel a booking"},
 		},
 	}

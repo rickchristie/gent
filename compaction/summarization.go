@@ -9,15 +9,15 @@ import (
 )
 
 // SummarizationStrategy compacts the scratchpad by
-// summarizing older iterations into a single synthetic
-// iteration. Recent iterations are preserved untouched.
+// summarizing older entries into a single summary
+// entry. Recent entries are preserved untouched.
 //
 // This implements both "progressive summarization" and
 // "summary buffer hybrid" patterns:
 //   - KeepRecent = 0: pure progressive (summarize everything)
 //   - KeepRecent > 0: hybrid (keep last N, summarize rest)
 //
-// Pinned iterations (importance score >=
+// Pinned entries (importance score >=
 // ImportanceScorePinned) are always preserved untouched,
 // regardless of their position.
 //
@@ -28,22 +28,22 @@ import (
 //	[synthetic] → [pinned...] → [toKeep...]
 //
 // This ordering cannot preserve the original chronological
-// positions of pinned iterations. Summarization collapses
-// multiple iterations into one synthetic iteration, so
-// pinned iterations that were interspersed among the
-// summarized iterations lose their original neighbors.
+// positions of pinned entries. Summarization collapses
+// multiple entries into one summary entry, so
+// pinned entries that were interspersed among the
+// summarized entries lose their original neighbors.
 //
-// For example, with keepRecent=2 and iteration 2 pinned:
+// For example, with keepRecent=2 and entry 2 pinned:
 //
-//	Before: [iter0, iter1, iter2(pinned), iter3, iter4, iter5]
-//	After:  [synthetic(0,1,3), iter2(pinned), iter4, iter5]
+//	Before: [entry0, entry1, entry2(pinned), entry3, entry4, entry5]
+//	After:  [synthetic(0,1,3), entry2(pinned), entry4, entry5]
 //
 // Neither [synthetic, pinned, ...] nor [pinned, synthetic, ...]
 // is chronologically correct — the summary covers events
-// from both before and after the pinned iteration. No linear
+// from both before and after the pinned entry. No linear
 // ordering can faithfully represent this. The only
 // theoretically correct approach would be to split the
-// summary around each pinned iteration (one summary for
+// summary around each pinned entry (one summary for
 // [0,1], then pinned 2, then another summary for [3]),
 // but this requires multiple model calls per compaction
 // and adds significant complexity for marginal benefit.
@@ -55,9 +55,9 @@ import (
 //  1. Context before detail. The synthetic summary
 //     establishes what the agent has been doing — the
 //     task, progress, and decisions made. When the LLM
-//     then encounters pinned iterations, it can interpret
+//     then encounters pinned entries, it can interpret
 //     them in context. Without that background, pinned
-//     iterations appear in a vacuum ("API returns 429
+//     entries appear in a vacuum ("API returns 429
 //     for batch > 100" is less useful without knowing the
 //     agent is building a batch pipeline).
 //
@@ -68,7 +68,7 @@ import (
 //     specifics, follows natural information hierarchy:
 //     overview → important details → recent activity.
 //
-//  3. Recency matters most. Recent iterations (toKeep)
+//  3. Recency matters most. Recent entries (toKeep)
 //     are placed last where LLMs attend to them most
 //     strongly. Both orderings achieve this, but
 //     [pinned, synthetic, toKeep] pushes the summary
@@ -76,21 +76,21 @@ import (
 //     for large contexts.
 //
 //  4. Scales with pinned count. With many pinned
-//     iterations (5-10), [pinned, synthetic, toKeep]
+//     entries (5-10), [pinned, synthetic, toKeep]
 //     front-loads a large block of decontextualized
 //     detail before any framing. This gets worse as
 //     pinned count grows.
 //
 // Note: [SlidingWindowStrategy] does not have this
 // limitation — it preserves relative ordering because it
-// only drops iterations without merging them.
+// only drops entries without merging them.
 //
 // # Multi-Modal Handling
 //
 // Non-text content parts (images, audio, etc.) in non-pinned
-// iterations are dropped during summarization. Only text
+// entries are dropped during summarization. Only text
 // content is extracted and passed to the summarization model.
-// If multi-modal content is important, pin the iteration.
+// If multi-modal content is important, pin the entry.
 //
 // # Model Usage
 //
@@ -137,7 +137,7 @@ func NewSummarization(model gent.Model, textFormat gent.TextFormat) *Summarizati
 	}
 }
 
-// WithKeepRecent sets the number of recent iterations to
+// WithKeepRecent sets the number of recent entries to
 // preserve without summarization. Default is 0 (pure
 // progressive summarization).
 func (s *SummarizationStrategy) WithKeepRecent(
@@ -378,7 +378,7 @@ func (s *SummarizationStrategy) WithUserPrompt(
 // summary quality because the model "thinks through"
 // the conversation before writing the summary. However,
 // the default prompt does NOT include this because the
-// output becomes the synthetic iteration's content
+// output becomes the summary entry's content
 // directly — analysis text would pollute the scratchpad
 // that the agent reads on subsequent iterations. If your
 // use case can tolerate the extra tokens (or you strip
@@ -625,16 +625,17 @@ const DefaultSummarizationUserPrompt = `%s
 
 // Compact implements gent.CompactionStrategy.
 func (s *SummarizationStrategy) Compact(
-	execCtx *gent.ExecutionContext,
-) error {
-	scratchpad := execCtx.Data().GetScratchPad()
+	execCtx *gent.ExecutionContext, input gent.CompactionInput,
+) (gent.HistoryUpdate, error) {
+	scratchpad := input.Entries
+	unchanged := gent.HistoryUpdate{ExpectedDraftRevision: input.Revision, Active: input.EntryIds()}
 
 	// Separate: pinned, existing summary, summarizable,
 	// recent
 	var (
-		pinned          []*gent.Iteration
-		existingSummary *gent.Iteration
-		nonPinned       []*gent.Iteration
+		pinned            []*gent.HistoryEntry
+		existingSummaries []*gent.HistoryEntry
+		nonPinned         []*gent.HistoryEntry
 	)
 
 	// First pass: extract pinned and existing summary
@@ -644,16 +645,16 @@ func (s *SummarizationStrategy) Compact(
 			continue
 		}
 		if iter.Origin ==
-			gent.IterationCompactedSynthetic {
-			existingSummary = iter
+			gent.RecordCompactedSynthetic {
+			existingSummaries = append(existingSummaries, iter)
 			continue
 		}
 		nonPinned = append(nonPinned, iter)
 	}
 
 	// Split non-pinned into toSummarize and toKeep
-	var toSummarize []*gent.Iteration
-	var toKeep []*gent.Iteration
+	var toSummarize []*gent.HistoryEntry
+	var toKeep []*gent.HistoryEntry
 
 	if s.keepRecent > 0 &&
 		len(nonPinned) > s.keepRecent {
@@ -664,24 +665,24 @@ func (s *SummarizationStrategy) Compact(
 		toSummarize = nonPinned
 	} else {
 		// Nothing to summarize
-		return nil
+		return unchanged, nil
 	}
 
 	if len(toSummarize) == 0 {
-		return nil
+		return unchanged, nil
 	}
 
 	// Build summarization input
 	existingText := ""
-	if existingSummary != nil {
+	if len(existingSummaries) > 0 {
 		existingText = "## Existing Summary\n\n" +
-			extractText(existingSummary)
+			extractTextFromEntries(existingSummaries)
 	} else {
 		existingText = "## Existing Summary\n\n" +
 			"None (first compaction)."
 	}
 
-	newMessages := extractTextFromIterations(toSummarize)
+	newMessages := extractTextFromEntries(toSummarize)
 	userText := fmt.Sprintf(
 		s.userPrompt, existingText, newMessages,
 	)
@@ -731,14 +732,13 @@ func (s *SummarizationStrategy) Compact(
 		"compaction-summarization-%d",
 		execCtx.Iteration(),
 	)
-	stream, err := s.model.GenerateContentStream(
-		execCtx,
-		streamID,
-		"compaction",
-		messages,
+	stream, err := execCtx.GenerateContentStream(
+		s.model,
+		gent.ModelCall{StreamId: streamID, StreamTopicId: "compaction"},
+		gent.NewModelCallRequest(messages),
 	)
 	if err != nil {
-		return fmt.Errorf(
+		return gent.HistoryUpdate{}, fmt.Errorf(
 			"summarization model call: %w", err,
 		)
 	}
@@ -754,13 +754,13 @@ func (s *SummarizationStrategy) Compact(
 	response, err := stream.Response()
 	<-drainDone
 	if err != nil {
-		return fmt.Errorf(
+		return gent.HistoryUpdate{}, fmt.Errorf(
 			"summarization model call: %w", err,
 		)
 	}
 
 	if len(response.Choices) == 0 {
-		return fmt.Errorf(
+		return gent.HistoryUpdate{}, fmt.Errorf(
 			"summarization model returned no choices",
 		)
 	}
@@ -774,8 +774,9 @@ func (s *SummarizationStrategy) Compact(
 		},
 	)
 
-	// Create synthetic summary iteration
-	synthetic := &gent.Iteration{
+	// Create a summary entry whose content can be selected and inspected independently.
+	synthetic := &gent.HistoryEntry{
+		Kind: gent.HistorySummary,
 		Messages: []*gent.MessageContent{
 			{
 				Role: llms.ChatMessageTypeAI,
@@ -786,7 +787,7 @@ func (s *SummarizationStrategy) Compact(
 				},
 			},
 		},
-		Origin: gent.IterationCompactedSynthetic,
+		Origin: gent.RecordCompactedSynthetic,
 	}
 
 	// Rebuild scratchpad: synthetic + pinned + toKeep.
@@ -794,7 +795,7 @@ func (s *SummarizationStrategy) Compact(
 	// ordering is used and why chronological ordering
 	// cannot be preserved.
 	result := make(
-		[]*gent.Iteration,
+		[]*gent.HistoryEntry,
 		0,
 		1+len(pinned)+len(toKeep),
 	)
@@ -802,15 +803,24 @@ func (s *SummarizationStrategy) Compact(
 	result = append(result, pinned...)
 	result = append(result, toKeep...)
 
-	execCtx.Data().SetScratchPad(result)
-	return nil
+	entry, err := execCtx.NewHistoryEntry(synthetic)
+	if err != nil {
+		return gent.HistoryUpdate{}, err
+	}
+	active := []gent.EntryId{entry.Id}
+	for _, record := range result[1:] {
+		active = append(active, record.Id)
+	}
+	return gent.HistoryUpdate{ExpectedDraftRevision: input.Revision,
+		AppendedEntries: []*gent.HistoryEntry{entry}, Active: active,
+		Compaction: &gent.CompactionRecord{SummaryIds: []gent.EntryId{entry.Id}}}, nil
 }
 
-// extractText extracts all text content from an iteration,
+// extractText extracts all text content from an entry,
 // dropping non-text content parts.
-func extractText(iter *gent.Iteration) string {
+func extractText(entry *gent.HistoryEntry) string {
 	var parts []string
-	for _, msg := range iter.Messages {
+	for _, msg := range entry.Messages {
 		for _, part := range msg.Parts {
 			if tc, ok := part.(llms.TextContent); ok {
 				parts = append(parts, tc.Text)
@@ -820,15 +830,14 @@ func extractText(iter *gent.Iteration) string {
 	return strings.Join(parts, "\n")
 }
 
-// extractTextFromIterations extracts text from multiple
-// iterations, formatting them with iteration markers.
-func extractTextFromIterations(
-	iterations []*gent.Iteration,
+// extractTextFromEntries extracts text from multiple entries, with numbered message headings.
+func extractTextFromEntries(
+	entries []*gent.HistoryEntry,
 ) string {
 	var sb strings.Builder
-	for i, iter := range iterations {
+	for i, entry := range entries {
 		fmt.Fprintf(&sb, "### Message %d\n\n", i+1)
-		sb.WriteString(extractText(iter))
+		sb.WriteString(extractText(entry))
 		sb.WriteString("\n\n")
 	}
 	return sb.String()

@@ -44,16 +44,12 @@ import (
 //
 // # Implementing Custom TimeProvider
 //
-// For custom needs (e.g., user timezone, simulated time):
+// For a different time source with the standard formats, use WithClock:
 //
-//	type UserTimezoneProvider struct {
-//	    loc *time.Location
-//	}
+//	agent.WithClock(func() time.Time { return time.Now().In(userLocation) })
 //
-//	func (p *UserTimezoneProvider) Now() time.Time {
-//	    return time.Now().In(p.loc)
-//	}
-//	// ... implement other methods
+// [TimeProviderFunc] supplies Today, Weekday, and the other formatting methods from this function.
+// Implement TimeProvider and use WithTimeProvider when the formats must also change.
 type TimeProvider interface {
 	// Now returns the current time.
 	//

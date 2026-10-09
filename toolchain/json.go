@@ -243,7 +243,7 @@ func (c *JSON) RegisterTool(tool any) gent.ToolChain {
 // If execCtx is nil, tools are executed without tracing using context.Background().
 //
 // Panics if textFormat is nil.
-func (c *JSON) Execute(
+func (c *JSON) executeUnmanaged(
 	execCtx *gent.ExecutionContext,
 	content string,
 	textFormat gent.TextFormat,
@@ -286,7 +286,7 @@ func (c *JSON) Execute(
 					"tool names.",
 				call.Name,
 			))
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr)
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr, results[i])
 			continue
 		}
 
@@ -298,7 +298,7 @@ func (c *JSON) Execute(
 					textFormat, call.Name,
 					fmt.Sprintf("Error: %v", validationErr),
 				)
-				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr)
+				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr, results[i])
 				continue
 			}
 		}
@@ -311,7 +311,7 @@ func (c *JSON) Execute(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", transformErr),
 			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr)
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr, results[i])
 			continue
 		}
 		results[i].Input = typedInput
@@ -327,6 +327,18 @@ func (c *JSON) Execute(
 			toolCallSource = beforeEvent.Source
 		}
 
+		results[i].Input = inputToUse
+		results[i].ToolCallId = toolCallId
+		if execCtx != nil {
+			if err := execCtx.RecordingError(); err != nil {
+				return nil, err
+			}
+			if err := execCtx.Context().Err(); err != nil {
+				return nil, err
+			}
+			ctx = execCtx.ToolContext(toolCallId)
+			results[i].AttemptId = execCtx.AttemptId()
+		}
 		startTime := time.Now()
 		output, err := CallToolWithTypedInputReflect(ctx, tool, inputToUse)
 		duration := time.Since(startTime)
@@ -347,6 +359,7 @@ func (c *JSON) Execute(
 			}
 
 			results[i].Output = output.Text
+			results[i].Instructions = output.Instructions
 
 			// Format output. String outputs are passed through as-is
 			// (no JSON wrapping) because they may contain Markdown,
@@ -354,6 +367,8 @@ func (c *JSON) Execute(
 			// quoted. Non-string outputs are JSON-marshalled.
 			outputText, marshalErr := formatToolOutputJSON(output.Text)
 			if marshalErr != nil {
+				results[i].Error = fmt.Errorf("format tool output: %w", marshalErr)
+				err = results[i].Error
 				results[i].Text = formatSectionText(
 					textFormat, call.Name,
 					"error: failed to marshal output",
@@ -382,14 +397,12 @@ func (c *JSON) Execute(
 			}
 		}
 
-		// Publish AfterToolCall event
-		var outputVal any
-		if output != nil {
-			outputVal = output.Text
-		}
+		// Save the exact rendered result and dedup summary while this tool version is bound.
+		results[i].DeduplicationSummary = c.DeduplicateSummary(results[i])
+		results[i].SummaryCaptured = true
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
-				call.Name, inputToUse, outputVal, duration, err,
+				call.Name, inputToUse, results[i], duration, err,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)

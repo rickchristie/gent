@@ -57,7 +57,7 @@ func NewText(name string) *Text {
 }
 
 // WithGuidance sets the guidance text for this termination. The guidance appears inside
-// the section tags when TextOutputFormat.DescribeStructure() generates the format prompt.
+// the section tags when TextFormat.DescribeStructure() generates the format prompt.
 //
 // This can be instructions (e.g., "Write your final answer") or examples, or both.
 func (t *Text) WithGuidance(guidance string) *Text {

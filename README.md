@@ -12,7 +12,7 @@ own their agent behavior in Go.
 Gent is built around a few design choices.
 
 - Library first. Your application owns the process, storage, models, tools, and deployment.
-- Custom loops are normal. ReAct is included, but `AgentLoop` is the core abstraction.
+- Custom loops are normal. ReAct is included, but `Loop` is the core abstraction.
 - Tools stay typed. Tools receive typed Go input and return typed Go output.
 - Formatting is separate. Toolchains decide how LLM text becomes typed tool calls.
 - Limits are first-class. Iterations, tokens, tool calls, parse errors, and validators are tracked.
@@ -106,10 +106,8 @@ func runAgent(ctx context.Context, llm llms.Model) error {
         {Type: gent.LimitExactKey, Key: gent.SCOutputTokens, MaxValue: 20000},
     })
 
-    exec := executor.New[*gent.BasicLoopData](agent, executor.DefaultConfig())
-    exec.Execute(execCtx)
-
-    if err := execCtx.Error(); err != nil {
+    exec := executor.NewRunner(agent, executor.DefaultConfig())
+    if _, err := exec.Execute(execCtx); err != nil {
         return err
     }
     if execCtx.TerminationReason() != gent.TerminationSuccess {
@@ -133,32 +131,37 @@ interface and normalizes model-call stats.
 
 ### Executor
 
-`executor.Executor` owns the lifecycle:
+`executor.Runner` owns the lifecycle:
 
 ```text
-BeforeExecution -> [BeforeIteration -> AgentLoop.Next -> AfterIteration]* -> AfterExecution
+BeforeExecution -> [BeforeIteration -> Loop.Next -> AfterIteration]* -> AfterExecution
 ```
 
 It stops when the loop returns `LATerminate`, a limit is exceeded, the context is canceled, or an
 error occurs.
 
-### AgentLoop
+### Loop
 
-`gent.AgentLoop` is the core interface:
+`gent.Loop` is the core interface:
 
 ```go
-type AgentLoop[Data gent.LoopData] interface {
+type Loop interface {
     Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error)
 }
 ```
 
-Use `agents/react` when a ReAct loop fits. Implement `AgentLoop` yourself when you want a planner,
+Use `agents/react` when a ReAct loop fits. Implement `Loop` yourself when you want a planner,
 router, graph, multi-agent coordinator, deterministic workflow, or a domain-specific loop.
+
+Use `executor.NewRunner(loop, config)` without a type argument. The existing `AgentLoop[Data]`,
+`Executor[Data]`, and `executor.New[Data]` APIs remain supported for source compatibility.
 
 ### LoopData
 
-`gent.BasicLoopData` stores the original task, full iteration history, and scratchpad. Embed it in
-your own struct when your loop needs more state:
+`gent.BasicLoopData` supplies the task. `ExecutionContext` owns immutable history and an ordered
+selection of `*HistoryEntry` records for working context. Use `AppendRecord`, `UpdateHistory`, and
+`Scratchpad` for those operations. Embed the basic data in custom data when your loop needs state;
+implement `CheckpointState` to make that state recoverable:
 
 ```go
 type SessionData struct {
@@ -166,6 +169,21 @@ type SessionData struct {
     UserID string
 }
 ```
+
+### History and continuation
+
+`ExecutionContext` accepts typed history, activity, and checkpoints together. Supply application
+storage with `gent.WithRecorder` and attach a `trace.Sequencer` with `gent.WithObserver`. Use
+`CodecRegistry.Marshal`/`Unmarshal` for saved runs and `Runner.Resume` for continuation.
+Completed tools and saved model decisions survive
+worker replacement. Uncertain tool outcomes require an explicit recovery decision.
+
+See [durable history and continuation](docs/history.md) and the runnable
+[Go example](examples/history/main.go). Run it with `go run ./examples/history`.
+
+For an interactive introduction, open the [Gent field guide](docs/dist/gent.html) in your browser.
+The single HTML file works offline and explains the loop, interfaces, history, journal, and recovery
+with diagrams and simulations. See its [source and build instructions](docs/code/README.md).
 
 ### Model
 
@@ -379,13 +397,22 @@ Start with the default ReAct stack, then replace only the layer you need.
 - Replace the toolchain when you want YAML, JSON, searchable tools, or programmatic tool calling.
 - Replace termination when the final output should be plain text, typed JSON, or validator-gated.
 - Replace the system prompt builder when your domain needs a different prompt structure.
-- Replace `AgentLoop` when ReAct is not the right control flow.
+- Replace `Loop` when ReAct is not the right control flow.
 - Add limits before production traffic.
 - Subscribe to events for logging, metrics, tracing, and debugging.
 
 The smallest useful customization is usually a typed tool plus a few precise system instructions.
-The largest customization is a fully custom `AgentLoop` that still reuses Gent's executor, context,
+The largest customization is a fully custom `Loop` that still reuses Gent's executor, context,
 stats, limits, toolchains, and model wrappers.
+
+For a custom clock, supply one function. All existing prompt time helpers remain available:
+
+```go
+agent.WithClock(func() time.Time { return time.Now().In(userLocation) })
+```
+
+Use `WithTimeProvider` when you also need custom date or time formats. Ordinary execution does not
+require `WithRecoveryVersion`; set it before the original run when you need recovery.
 
 ## Production Notes
 
@@ -399,7 +426,7 @@ stats, limits, toolchains, and model wrappers.
 
 ## Repository Map
 
-- `agent.go`: core `AgentLoop`, `LoopData`, task, and iteration types.
+- `agent.go`: core `Loop`, `LoopData`, task, and iteration types.
 - `context.go`: execution context, events, stats, limits, streams, and children.
 - `executor/`: executor lifecycle implementation.
 - `agents/react/`: default ReAct agent.

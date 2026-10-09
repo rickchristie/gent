@@ -26,15 +26,23 @@
 // tool's input struct. Supported conversions:
 //
 //   - string -> time.Time: Parses common date/time formats:
+//
 //   - RFC3339: "2006-01-02T15:04:05Z07:00"
+//
 //   - RFC3339Nano: "2006-01-02T15:04:05.999999999Z07:00"
+//
 //   - ISO without timezone: "2006-01-02T15:04:05"
+//
 //   - Date only: "2006-01-02"
+//
 //   - Datetime with space: "2006-01-02 15:04:05"
 //
 //   - string -> time.Duration: Parses using time.ParseDuration:
+//
 //   - "1h30m" -> 1 hour 30 minutes
+//
 //   - "2h45m30s" -> 2 hours 45 minutes 30 seconds
+//
 //   - "500ms" -> 500 milliseconds
 //
 //   - If target field is `any` or `map[string]any`, intermediary value is used as-is

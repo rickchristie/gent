@@ -102,24 +102,18 @@ cfg.PostProcess = func(v []float32) []float32 {
 
 ## Running Tests
 
-### Unit Tests
-
-Unit tests do not require downloaded models or ONNX Runtime.
+Run the full repository suites from the repository root after changes:
 
 ```bash
-go test ./search \
-  -run 'Test(TheoreticalMax|NormalizeBM25|WeightedLinear|FlatIndex|BleveIndex|FusedIndex)' \
-  -count=1
+go test ./... -count=1 -timeout 300s
+CGO_ENABLED=0 go test ./... -count=1 -timeout 300s
+go test -race ./... -count=1 -timeout 300s
 ```
 
-### Integration Tests
-
-Integration tests use real ONNX models. Test setup downloads all 10 registered physical models to
-`~/.gent/models/` on first run. Tests skip gracefully if ONNX Runtime is not installed.
-
-```bash
-go test ./search -run TestOnnxEmbedder_AllModels -count=1 -timeout 300s
-```
+Native integration tests use real ONNX models. Test setup downloads all 10 registered physical
+models to `~/.gent/models/` on first run. Install ONNX Runtime with `go run ./cmd/gent setup onnx`
+before testing; otherwise these tests skip. The CGO-disabled suite covers the portable code and
+the unavailable-embedder behavior. It cannot verify native inference.
 
 ### Quantized inference on CPUs without VNNI
 

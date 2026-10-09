@@ -428,7 +428,7 @@ func (c *SearchJSON) doParse(
 // Handles both the built-in search tool and regular tools.
 //
 // Panics if textFormat is nil.
-func (c *SearchJSON) Execute(
+func (c *SearchJSON) executeUnmanaged(
 	execCtx *gent.ExecutionContext,
 	content string,
 	textFormat gent.TextFormat,
@@ -463,6 +463,19 @@ func (c *SearchJSON) Execute(
 	}
 
 	seenTools := make(map[string]bool)
+	if execCtx != nil {
+		saved, ok, err := execCtx.CheckpointState("gent:search_seen")
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			var valid bool
+			seenTools, valid = saved.(map[string]bool)
+			if !valid {
+				return nil, fmt.Errorf("invalid SearchJSON checkpoint state %T", saved)
+			}
+		}
+	}
 
 	for i, call := range calls {
 		if call.Name == searchToolName {
@@ -483,6 +496,11 @@ func (c *SearchJSON) Execute(
 		}
 	}
 
+	if execCtx != nil {
+		if err := execCtx.SetCheckpointState("gent:search_seen", seenTools); err != nil {
+			return nil, err
+		}
+	}
 	return &gent.ToolChainResult{Results: results}, nil
 }
 
@@ -508,7 +526,7 @@ func (c *SearchJSON) executeSearch(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", err),
 			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, err)
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, err, result)
 			return
 		}
 	}
@@ -530,6 +548,18 @@ func (c *SearchJSON) executeSearch(
 		)
 		toolCallId = beforeEvent.ToolCallId
 		toolCallSource = beforeEvent.Source
+		result.ToolCallId = toolCallId
+		result.AttemptId = execCtx.AttemptId()
+		result.Input = beforeEvent.Args
+		result.SummaryCaptured = true
+		if err := execCtx.RecordingError(); err != nil {
+			result.Error = err
+			return
+		}
+		if err := execCtx.Context().Err(); err != nil {
+			result.Error = err
+			return
+		}
 		if beforeArgs, ok :=
 			beforeEvent.Args.(map[string]any); ok {
 			argsToUse = beforeArgs
@@ -559,7 +589,7 @@ func (c *SearchJSON) executeSearch(
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
 				call.Name, argsToUse,
-				nil, duration, err,
+				result, duration, err,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)
@@ -580,7 +610,7 @@ func (c *SearchJSON) executeSearch(
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
 				call.Name, argsToUse,
-				nil, duration, err,
+				result, duration, err,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)
@@ -609,7 +639,7 @@ func (c *SearchJSON) executeSearch(
 			)
 			execCtx.PublishAfterToolCall(
 				call.Name, argsToUse,
-				c.noResultsMessage, duration, nil,
+				result, duration, nil,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)
@@ -680,7 +710,7 @@ func (c *SearchJSON) executeSearch(
 		)
 		execCtx.PublishAfterToolCall(
 			call.Name, argsToUse,
-			outputStr, duration, nil,
+			result, duration, nil,
 			gent.WithToolCallId(toolCallId),
 			gent.WithToolCallSource(toolCallSource),
 		)
@@ -705,6 +735,22 @@ func (c *SearchJSON) executeGetSchema(
 		beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args)
 		toolCallId = beforeEvent.ToolCallId
 		toolCallSource = beforeEvent.Source
+		result.ToolCallId = toolCallId
+		result.AttemptId = execCtx.AttemptId()
+		result.Input = beforeEvent.Args
+		if args, ok := beforeEvent.Args.(map[string]any); ok {
+			call.Args = args
+			toolName, _ = args["tool_name"].(string)
+		}
+		result.SummaryCaptured = true
+		if err := execCtx.RecordingError(); err != nil {
+			result.Error = err
+			return
+		}
+		if err := execCtx.Context().Err(); err != nil {
+			result.Error = err
+			return
+		}
 	}
 
 	if toolName == "" {
@@ -716,7 +762,7 @@ func (c *SearchJSON) executeGetSchema(
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
-				call.Name, call.Args, nil, 0, err,
+				call.Name, call.Args, result, 0, err,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)
@@ -734,7 +780,7 @@ func (c *SearchJSON) executeGetSchema(
 		)
 		if execCtx != nil {
 			execCtx.PublishAfterToolCall(
-				call.Name, call.Args, nil, 0, err,
+				call.Name, call.Args, result, 0, err,
 				gent.WithToolCallId(toolCallId),
 				gent.WithToolCallSource(toolCallSource),
 			)
@@ -762,7 +808,7 @@ func (c *SearchJSON) executeGetSchema(
 		)
 		execCtx.PublishAfterToolCall(
 			call.Name, call.Args,
-			outputStr, duration, nil,
+			result, duration, nil,
 			gent.WithToolCallId(toolCallId),
 			gent.WithToolCallSource(toolCallSource),
 		)
@@ -793,7 +839,7 @@ func (c *SearchJSON) executeRegularTool(
 				call.Name,
 			),
 		)
-		publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr)
+		publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr, result)
 		return
 	}
 
@@ -805,7 +851,7 @@ func (c *SearchJSON) executeRegularTool(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", err),
 			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, err)
+			publishFailedToolAttempt(execCtx, call.Name, call.Args, err, result)
 			return
 		}
 	}
@@ -820,7 +866,7 @@ func (c *SearchJSON) executeRegularTool(
 			textFormat, call.Name,
 			fmt.Sprintf("Error: %v", err),
 		)
-		publishFailedToolAttempt(execCtx, call.Name, call.Args, err)
+		publishFailedToolAttempt(execCtx, call.Name, call.Args, err, result)
 		return
 	}
 	result.Input = typedInput
@@ -838,6 +884,12 @@ func (c *SearchJSON) executeRegularTool(
 		toolCallSource = beforeEvent.Source
 	}
 
+	result.Input = inputToUse
+	result.ToolCallId = toolCallId
+	if execCtx != nil {
+		ctx = execCtx.ToolContext(toolCallId)
+		result.AttemptId = execCtx.AttemptId()
+	}
 	startTime := time.Now()
 	output, err := CallToolWithTypedInputReflect(
 		ctx, tool, inputToUse,
@@ -863,6 +915,7 @@ func (c *SearchJSON) executeRegularTool(
 		}
 
 		result.Output = output.Text
+		result.Instructions = output.Instructions
 
 		// Format output. String outputs pass through
 		// as-is (no JSON wrapping).
@@ -870,6 +923,8 @@ func (c *SearchJSON) executeRegularTool(
 			output.Text,
 		)
 		if marshalErr != nil {
+			result.Error = fmt.Errorf("format tool output: %w", marshalErr)
+			err = result.Error
 			result.Text = formatSectionText(
 				textFormat, call.Name,
 				"error: failed to marshal output",
@@ -897,14 +952,12 @@ func (c *SearchJSON) executeRegularTool(
 		}
 	}
 
-	var outputVal any
-	if output != nil {
-		outputVal = output.Text
-	}
+	result.DeduplicationSummary = c.DeduplicateSummary(result)
+	result.SummaryCaptured = true
 	if execCtx != nil {
 		execCtx.PublishAfterToolCall(
 			call.Name, inputToUse,
-			outputVal, duration, err,
+			result, duration, err,
 			gent.WithToolCallId(toolCallId),
 			gent.WithToolCallSource(toolCallSource),
 		)

@@ -2,6 +2,7 @@ package gent
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -25,14 +26,17 @@ type streamBuffer struct {
 	drainDone       chan struct{}
 
 	// Internal queue protected by mutex
-	mu    sync.Mutex
-	queue []StreamChunk
-	cond  *sync.Cond
+	mu        sync.Mutex
+	queue     []StreamChunk
+	cond      *sync.Cond
+	capacity  int
+	stopWatch func() bool
 
 	// State tracking
-	closed   bool
-	onClose  func()
-	closeErr error
+	closed         bool
+	closeRequested bool
+	onClose        func()
+	closeErr       error
 
 	// Final response (populated when complete)
 	responseMu   sync.Mutex
@@ -118,7 +122,7 @@ func (s *streamBuffer) dequeue() (StreamChunk, bool) {
 	defer s.mu.Unlock()
 
 	// Wait until there's something in the queue or we're closed
-	for len(s.queue) == 0 && !s.closed {
+	for len(s.queue) == 0 && !s.closed && !s.closeRequested {
 		s.cond.Wait()
 	}
 
@@ -130,17 +134,21 @@ func (s *streamBuffer) dequeue() (StreamChunk, bool) {
 	// Pop from front of queue
 	chunk := s.queue[0]
 	s.queue = s.queue[1:]
+	s.cond.Broadcast()
 
 	return chunk, true
 }
 
-// Send adds a chunk to the stream. This method NEVER blocks.
-// It's safe to call from any goroutine.
+// Send adds a chunk. Bounded provider streams apply backpressure until space is available or
+// the stream is closed; convenience streams created without a capacity do not block.
 func (s *streamBuffer) Send(chunk StreamChunk) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for s.capacity > 0 && len(s.queue) >= s.capacity && !s.closed && !s.closeRequested {
+		s.cond.Wait()
+	}
 
-	if s.closed {
+	if s.closed || s.closeRequested {
 		return false // Silently ignore sends after close
 	}
 
@@ -180,7 +188,7 @@ func (s *streamBuffer) Complete(response *ContentResponse, err error) {
 }
 
 // TryComplete marks the stream as complete and reports whether it completed the stream.
-// It returns false when the stream was already closed by the consumer.
+// It returns false after a previous producer completion. Consumer Close only requests stopping.
 func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 	s.mu.Lock()
 
@@ -190,6 +198,9 @@ func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 	}
 
 	s.closed = true
+	if s.stopWatch != nil {
+		s.stopWatch()
+	}
 	s.onClose = nil
 	s.closeErr = err
 
@@ -205,7 +216,7 @@ func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 	close(s.responseDone)
 	s.responseMu.Unlock()
 
-	s.cond.Signal()
+	s.cond.Broadcast()
 	s.mu.Unlock()
 	return true
 }
@@ -256,31 +267,20 @@ func (s *streamBuffer) Response() (*ContentResponse, error) {
 // Close implements Stream.Close.
 func (s *streamBuffer) Close() {
 	s.mu.Lock()
-	wasClosed := s.closed
-	s.closed = true
+	wasClosed := s.closed || s.closeRequested
+	s.closeRequested = true
 	s.queue = nil
 	s.closeDrain()
 	onClose := s.onClose
 	s.onClose = nil
-	s.cond.Signal()
+	s.cond.Broadcast()
 	s.mu.Unlock()
 
 	if !wasClosed && onClose != nil {
 		onClose()
 	}
-	if wasClosed {
-		return
-	}
-
-	// Also signal response done if not already done
-	s.responseMu.Lock()
-	select {
-	case <-s.responseDone:
-		// Already closed
-	default:
-		close(s.responseDone)
-	}
-	s.responseMu.Unlock()
+	// Only producer completion closes responseDone. Cancellation is a request, not evidence
+	// that the provider stopped or that its final token usage has been accounted for.
 }
 
 func (s *streamBuffer) closeDrain() {
@@ -311,7 +311,9 @@ var _ Stream = (*streamBuffer)(nil)
 //
 // This is useful for adapting LangChainGo's callback-based streaming to gent's channel-based
 // streaming.
-func StreamingCallbackAdapter() (contentCallback, reasoningCallback llms.CallOption, stream *streamBuffer) {
+func StreamingCallbackAdapter() (
+	contentCallback, reasoningCallback llms.CallOption, stream *streamBuffer,
+) {
 	stream = newStreamBuffer()
 
 	contentCallback = llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
@@ -385,6 +387,21 @@ func NewStreamWithDurationWithClose(onClose func()) *StreamWithDuration {
 		streamBuffer: newStreamBufferWithClose(onClose),
 		startTime:    time.Now(),
 	}
+}
+
+// NewBoundedStreamWithDuration is intended for provider adapters that produce in a goroutine.
+// The framework drains Chunks while accepting evidence. Cancellation releases a blocked Send;
+// Response still waits for the adapter to finish and report its partial output and usage.
+func NewBoundedStreamWithDuration(
+	ctx context.Context, capacity int, onClose func(),
+) (*StreamWithDuration, error) {
+	if capacity < 1 {
+		return nil, errors.New("gent: stream capacity must be positive")
+	}
+	stream := NewStreamWithDurationWithClose(onClose)
+	stream.capacity = capacity
+	stream.stopWatch = context.AfterFunc(ctx, stream.Close)
+	return stream, nil
 }
 
 // Duration returns the time elapsed since the stream started.

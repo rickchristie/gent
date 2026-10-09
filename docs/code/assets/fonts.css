@@ -1,0 +1,56 @@
+@font-face {
+  font-family: 'DM Sans';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:dm-sans-latin-400-normal.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:dm-sans-latin-500-normal.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:dm-sans-latin-600-normal.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:dm-sans-latin-700-normal.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:instrument-serif-latin-400-normal.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url('__FONT:instrument-serif-latin-400-italic.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:ibm-plex-mono-latin-400-normal.woff2__') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('__FONT:ibm-plex-mono-latin-500-normal.woff2__') format('woff2');
+}

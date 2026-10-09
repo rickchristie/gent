@@ -87,8 +87,12 @@ func NewJSON[T any](name string) *JSON[T] {
 	}
 }
 
+func (t *JSON[T]) RegisterCodecs(registry *gent.CodecRegistry) error {
+	return registry.RegisterValueType(reflect.TypeFor[T]())
+}
+
 // WithGuidance sets the guidance text for this termination. The guidance appears at the
-// beginning of the section content when TextOutputFormat.DescribeStructure() generates
+// beginning of the section content when TextFormat.DescribeStructure() generates
 // the format prompt, followed by the JSON schema.
 //
 // This can be instructions (e.g., "Provide your final answer") or additional context.
@@ -184,6 +188,9 @@ func (t *JSON[T]) ShouldTerminate(
 	if execCtx == nil {
 		panic("termination: ShouldTerminate called with nil ExecutionContext")
 	}
+	if err := t.RegisterCodecs(execCtx.Codecs()); err != nil {
+		return &gent.TerminationResult{Error: err}
+	}
 
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -201,6 +208,9 @@ func (t *JSON[T]) ShouldTerminate(
 
 		// Publish validator called event
 		execCtx.PublishValidatorCalled(validatorName, result)
+		if err := execCtx.FlushProgress(); err != nil {
+			return &gent.TerminationResult{Error: err}
+		}
 
 		validationResult := t.validator.Validate(execCtx, result)
 		if !validationResult.Accepted {
@@ -227,7 +237,7 @@ func (t *JSON[T]) ShouldTerminate(
 	// Re-serialize to ensure consistent formatting
 	formatted, err := json.Marshal(result)
 	if err != nil {
-		return &gent.TerminationResult{Status: gent.TerminationContinue}
+		return &gent.TerminationResult{Error: err}
 	}
 
 	return &gent.TerminationResult{

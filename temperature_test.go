@@ -1,10 +1,10 @@
 package gent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // mockNamerModel implements both Model and ModelNamer.
@@ -15,8 +15,7 @@ type mockNamerModel struct {
 func (m *mockNamerModel) ModelName() string { return m.name }
 
 func (m *mockNamerModel) GenerateContentStream(
-	_ *ExecutionContext, _ string, _ string,
-	_ []llms.MessageContent, _ ...llms.CallOption,
+	_ context.Context, _ ModelCallRequest,
 ) (Stream, error) {
 	return NewCompletedStream(nil, nil), nil
 }
@@ -25,8 +24,7 @@ func (m *mockNamerModel) GenerateContentStream(
 type mockPlainModel struct{}
 
 func (m *mockPlainModel) GenerateContentStream(
-	_ *ExecutionContext, _ string, _ string,
-	_ []llms.MessageContent, _ ...llms.CallOption,
+	_ context.Context, _ ModelCallRequest,
 ) (Stream, error) {
 	return NewCompletedStream(nil, nil), nil
 }
@@ -279,48 +277,6 @@ func TestDefaultSamplingParams(t *testing.T) {
 				result.TopP.Directive, "top-p directive")
 			assert.InDelta(t, tc.expected.topP.value,
 				result.TopP.Value, 0.001, "top-p value")
-		})
-	}
-}
-
-// TestDefaultTemperature verifies the backward-compatible wrapper still works correctly.
-func TestDefaultTemperature(t *testing.T) {
-	type input struct {
-		model Model
-	}
-
-	type expected struct {
-		temperature float64
-		supported   bool
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name:     "generic model returns 0.2 true",
-			input:    input{model: &mockPlainModel{}},
-			expected: expected{temperature: 0.2, supported: true},
-		},
-		{
-			name:     "reasoning model returns 0 false",
-			input:    input{model: &mockNamerModel{name: "o3"}},
-			expected: expected{temperature: 0, supported: false},
-		},
-		{
-			name:     "gemini-3 returns 1.0 true",
-			input:    input{model: &mockNamerModel{name: "gemini-3"}},
-			expected: expected{temperature: 1.0, supported: true},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			temp, supported := DefaultTemperature(tc.input.model)
-			assert.InDelta(t, tc.expected.temperature, temp, 0.001)
-			assert.Equal(t, tc.expected.supported, supported)
 		})
 	}
 }

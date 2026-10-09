@@ -12,12 +12,7 @@ import (
 // testLoopData is a simple LoopData implementation for testing.
 type testLoopData struct{}
 
-func (d *testLoopData) GetTask() *Task                           { return nil }
-func (d *testLoopData) GetIterationHistory() []*Iteration        { return nil }
-func (d *testLoopData) AddIterationHistory(iter *Iteration)      {}
-func (d *testLoopData) GetScratchPad() []*Iteration              { return nil }
-func (d *testLoopData) SetScratchPad(iterations []*Iteration)    {}
-func (d *testLoopData) SetExecutionContext(ctx *ExecutionContext) {}
+func (d *testLoopData) GetTask() *Task { return nil }
 
 func TestExecutionContext_SubscribeAll(t *testing.T) {
 	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
@@ -400,130 +395,27 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 	assert.Equal(t, "hello", chunk2.Content)
 }
 
-func TestExecutionContext_NoListener_EmitDoesNotBlock(t *testing.T) {
+func TestExecutionContext_EmitChunkRecordsWithoutListeners(t *testing.T) {
 	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
-
-	const numChunks = 1000
-	start := time.Now()
-
-	for i := range numChunks {
-		ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
+	done := make(chan error, 1)
+	go func() {
+		for i := range 1000 {
+			if err := ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("recording 1000 chunks exceeded five seconds")
 	}
-
-	elapsed := time.Since(start)
 	ctx.CloseStreams()
-
-	assert.Less(t, elapsed, 100*time.Millisecond,
-		"EmitChunk blocked without listeners: took %v", elapsed)
-}
-
-func TestExecutionContext_SlowListener_DoesNotBlockEmitter(t *testing.T) {
-	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
-
-	ch, unsub := ctx.SubscribeAll()
-	defer unsub()
-
-	const numChunks = 100
-	emitDone := make(chan time.Duration, 1)
-
-	go func() {
-		start := time.Now()
-		for i := range numChunks {
-			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
-		}
-		emitDone <- time.Since(start)
-		ctx.CloseStreams()
-	}()
-
-	var received int
-	for range ch {
-		received++
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	assert.Equal(t, numChunks, received)
-
-	emitElapsed := <-emitDone
-	assert.Less(t, emitElapsed, 50*time.Millisecond,
-		"EmitChunk was blocked by slow listener: emit took %v", emitElapsed)
-}
-
-func TestExecutionContext_SlowListener_DoesNotAffectFastListener(t *testing.T) {
-	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
-
-	slowCh, slowUnsub := ctx.SubscribeAll()
-	fastCh, fastUnsub := ctx.SubscribeAll()
-	defer slowUnsub()
-	defer fastUnsub()
-
-	const numChunks = 50
-	fastDone := make(chan time.Duration, 1)
-	slowDone := make(chan int, 1)
-
-	go func() {
-		for i := range numChunks {
-			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
-		}
-		ctx.CloseStreams()
-	}()
-
-	go func() {
-		count := 0
-		for range slowCh {
-			count++
-			time.Sleep(20 * time.Millisecond)
-		}
-		slowDone <- count
-	}()
-
-	go func() {
-		start := time.Now()
-		for range fastCh {
-			// Process instantly
-		}
-		fastDone <- time.Since(start)
-	}()
-
-	fastElapsed := <-fastDone
-	assert.Less(t, fastElapsed, 50*time.Millisecond,
-		"fast listener was blocked by slow listener: took %v", fastElapsed)
-
-	slowReceived := <-slowDone
-	assert.Equal(t, numChunks, slowReceived)
-}
-
-func TestExecutionContext_SlowListener_ParentPropagation_DoesNotBlockChild(t *testing.T) {
-	parent := NewExecutionContext(context.Background(), "parent", &testLoopData{})
-	parent.IncrementIteration()
-
-	child := parent.SpawnChild("child", &testLoopData{})
-	child.IncrementIteration()
-
-	parentCh, parentUnsub := parent.SubscribeAll()
-	defer parentUnsub()
-
-	const numChunks = 100
-	emitDone := make(chan time.Duration, 1)
-
-	go func() {
-		start := time.Now()
-		for i := range numChunks {
-			child.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
-		}
-		emitDone <- time.Since(start)
-		parent.CloseStreams()
-		child.CloseStreams()
-	}()
-
-	var received int
-	for range parentCh {
-		received++
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	emitElapsed := <-emitDone
-	assert.Less(t, emitElapsed, 50*time.Millisecond,
-		"child EmitChunk was blocked by slow parent listener: took %v", emitElapsed)
-
-	assert.Equal(t, numChunks, received)
+	bundle, err := ctx.Export()
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(1000), bundle.LastAppliedEventNumber)
+	assert.NoError(t, ValidateBundle(bundle))
 }
