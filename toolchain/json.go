@@ -252,20 +252,25 @@ func (c *JSON) executeUnmanaged(
 		panic("textFormat must not be nil")
 	}
 
-	var ctx context.Context
-	if execCtx != nil {
-		ctx = execCtx.Context()
-	} else {
-		ctx = context.Background()
-	}
-
 	// ParseSection handles tracing of parse errors
 	parsed, err := c.ParseSection(execCtx, content)
 	if err != nil {
 		return nil, err
 	}
 
-	calls := parsed.([]*gent.ToolCall)
+	return c.executeParsed(execCtx, parsed.([]*gent.ToolCall), textFormat)
+}
+
+func (c *JSON) executeParsed(
+	execCtx *gent.ExecutionContext, calls []*gent.ToolCall, textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	if textFormat == nil {
+		panic("textFormat must not be nil")
+	}
+	ctx := context.Background()
+	if execCtx != nil {
+		ctx = execCtx.Context()
+	}
 	results := make([]*gent.ToolCallResult, len(calls))
 
 	for i, call := range calls {

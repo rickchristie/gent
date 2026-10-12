@@ -2,6 +2,13 @@
 //
 // # Overview
 //
+// NewNativeAgent uses API tool definitions, native tool calls, and plain final assistant content.
+// It uses the same tools, validators, limits, and saved history as NewAgent. It does not parse
+// response sections or request visible thoughts. JSON, YAML, SearchJSON, and JsToolChainWrapper
+// support this path through the optional gent.NativeToolChain interface.
+//
+// NewAgent keeps the text behavior described below for existing callers and custom formats.
+//
 // The ReAct pattern alternates between thinking (reasoning) and acting (tool execution)
 // to solve complex tasks. Each iteration follows the cycle: Think -> Act -> Observe -> Repeat.
 //
@@ -49,7 +56,7 @@
 //
 // The agent can be configured with:
 //   - WithBehaviorAndContext: Custom behavior instructions (formatted as "behavior" section)
-//   - WithCriticalRules: Critical rules the agent must follow (formatted as "critical_rules" section)
+//   - WithCriticalRules: Rules the agent must follow (formatted as "critical_rules" section)
 //   - WithFormat: Custom output format (default: XML)
 //   - WithToolChain: Custom tool chain (default: YAML)
 //   - WithTermination: Custom termination handler (default: Text)

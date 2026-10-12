@@ -2,6 +2,7 @@ package toolchain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -291,6 +292,16 @@ func (c *YAML) parseToolCallNode(node *yaml.Node) (*gent.ToolCall, error) {
 	var args map[string]any
 	if argsNode != nil {
 		args = c.decodeArgsNode(argsNode, propTypes)
+		// Plans used to normalize YAML values when they encoded and parsed a call again.
+		// Keep that conversion at the YAML boundary: nested dates become JSON strings before
+		// schema checks and saved history. YAML decoding preserves the existing number types.
+		data, err := json.Marshal(args)
+		if err != nil {
+			return nil, fmt.Errorf("%w: encode tool arguments: %w", gent.ErrInvalidYAML, err)
+		}
+		if err := yaml.Unmarshal(data, &args); err != nil {
+			return nil, fmt.Errorf("%w: decode tool arguments: %w", gent.ErrInvalidYAML, err)
+		}
 	}
 
 	return &gent.ToolCall{Name: toolName, Args: args}, nil
@@ -401,20 +412,25 @@ func (c *YAML) executeUnmanaged(
 		panic("textFormat must not be nil")
 	}
 
-	var ctx context.Context
-	if execCtx != nil {
-		ctx = execCtx.Context()
-	} else {
-		ctx = context.Background()
-	}
-
 	// ParseSection handles tracing of parse errors
 	parsed, err := c.ParseSection(execCtx, content)
 	if err != nil {
 		return nil, err
 	}
 
-	calls := parsed.([]*gent.ToolCall)
+	return c.executeParsed(execCtx, parsed.([]*gent.ToolCall), textFormat)
+}
+
+func (c *YAML) executeParsed(
+	execCtx *gent.ExecutionContext, calls []*gent.ToolCall, textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	if textFormat == nil {
+		panic("textFormat must not be nil")
+	}
+	ctx := context.Background()
+	if execCtx != nil {
+		ctx = execCtx.Context()
+	}
 	results := make([]*gent.ToolCallResult, len(calls))
 
 	for i, call := range calls {

@@ -310,13 +310,13 @@ func (m *LCGWrapper) GenerateContentStream(
 		defer cancel()
 		providerResponse, err := m.model.GenerateContent(
 			ctx,
-			request.Messages,
+			m.providerMessages(request.Messages),
 			llms.WithOptions(options),
 		)
 		duration := stream.Duration()
 		var response *gent.ContentResponse
 		if providerResponse != nil {
-			response = convertLCGResponse(providerResponse, duration)
+			response = convertLCGResponse(m.providerResponse(providerResponse), duration)
 		} else {
 			response = &gent.ContentResponse{Choices: []*gent.ContentChoice{{
 				Content:          stream.AccumulatedContent(),

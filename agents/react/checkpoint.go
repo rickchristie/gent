@@ -66,8 +66,16 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 	if ctx.Parent() != nil {
 		return nil
 	}
-	for _, section := range r.buildOutputSections() {
-		r.format.RegisterSection(section)
+	outputFormat := ""
+	if r.nativeToolCalls {
+		if _, err := r.nativeChain(); err != nil {
+			return err
+		}
+	} else {
+		for _, section := range r.buildOutputSections() {
+			r.format.RegisterSection(section)
+		}
+		outputFormat = r.format.DescribeStructure()
 	}
 	request := gent.NewModelCallRequest(nil, r.callOptions...)
 	options, err := ctx.Codecs().Encode(request.Options)
@@ -76,7 +84,7 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 	}
 	configuration := map[string]any{
 		"version": 1, "application": r.recoveryVersion, "behavior": r.behaviorAndContext,
-		"rules": r.criticalRules, "format": r.format.DescribeStructure(),
+		"rules": r.criticalRules, "format": outputFormat,
 		"formatType": fmt.Sprintf("%T", r.format), "tools": r.toolChain.AvailableToolsPrompt(),
 		"toolchainType": fmt.Sprintf("%T", r.toolChain), "termination": r.termination.Guidance(),
 		"terminationType": fmt.Sprintf(
@@ -89,6 +97,12 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 		"options": options, "maxResponseChars": r.maxResponseChars,
 		"tooLongMessage": r.responseTooLongMessage,
 		"repetition":     r.repetitionConfiguration(),
+	}
+	if r.nativeToolCalls {
+		configuration["nativeToolCalls"] = true
+		if configured, ok := r.toolChain.(gent.RecoveryConfig); ok {
+			configuration["nativeToolConfig"] = configured.RecoveryConfig()
+		}
 	}
 	if configured, ok := r.model.(gent.RecoveryConfig); ok {
 		configuration["modelConfig"] = configured.RecoveryConfig()
@@ -178,6 +192,19 @@ func (r *Agent) executeRecoverableToolContent(
 		}
 		return result, err
 	}
+	return r.executeToolPlan(ctx, frame, func() (*gent.ToolPlan, error) {
+		return chain.Prepare(ctx, content)
+	}, chain.ExecuteNext)
+}
+
+// executeToolPlan keeps one recovery path for text and native calls.
+func (r *Agent) executeToolPlan(
+	ctx *gent.ExecutionContext, frame *iterationFrame,
+	prepare func() (*gent.ToolPlan, error),
+	execute func(
+		*gent.ExecutionContext, *gent.ToolPlan, gent.TextFormat,
+	) (*gent.ToolCallResult, error),
+) (*gent.ToolChainResult, error) {
 	var plan *gent.ToolPlan
 	var err error
 	if frame.ToolPlanActive {
@@ -190,7 +217,7 @@ func (r *Agent) executeRecoverableToolContent(
 			return nil, errors.New("gent: ReAct frame has no tool plan")
 		}
 	} else {
-		plan, err = chain.Prepare(ctx, content)
+		plan, err = prepare()
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +230,7 @@ func (r *Agent) executeRecoverableToolContent(
 		}
 	}
 	for plan.NextCall < len(plan.Calls) {
-		if _, err := chain.ExecuteNext(ctx, plan, r.format); err != nil {
+		if _, err := execute(ctx, plan, r.format); err != nil {
 			return nil, err
 		}
 	}

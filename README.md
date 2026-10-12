@@ -14,7 +14,7 @@ Gent is built around a few design choices.
 - Library first. Your application owns the process, storage, models, tools, and deployment.
 - Custom loops are normal. ReAct is included, but `Loop` is the core abstraction.
 - Tools stay typed. Tools receive typed Go input and return typed Go output.
-- Formatting is separate. Toolchains decide how LLM text becomes typed tool calls.
+- Call transport is separate. Native API calls and text formats use the same typed tools.
 - Limits are first-class. Iterations, tokens, tool calls, parse errors, and validators are tracked.
 - Streaming is always on. Model chunks can be observed in real time.
 - Retrieval is local-friendly. Optional ONNX embedding support runs on CPU.
@@ -44,10 +44,11 @@ source ~/.bashrc
 shell profile once so future terminals can run `gent`. Use `~/.zshrc` instead of `~/.bashrc` if
 you use zsh.
 
-## Quick Start: ReAct Agent With A Typed Tool
+## Quick Start: Native Agent With A Typed Tool
 
 Create a provider model with LangChainGo, wrap it with Gent, register typed tools, and run the
-executor.
+executor. Use a model and provider adapter that support native tool calls. This example describes
+the current source; check the API in your installed release before changing an existing application.
 
 ```go
 package main
@@ -89,11 +90,11 @@ func runAgent(ctx context.Context, llm llms.Model) error {
         },
     )
 
-    tc := toolchain.NewYAML().RegisterTool(lookupOrder)
+    tc := toolchain.NewJSON().RegisterTool(lookupOrder)
     term := termination.NewText("answer").
         WithGuidance("Write a concise answer for the user.")
 
-    agent := react.NewAgent(model).
+    agent := react.NewNativeAgent(model).
         WithBehaviorAndContext("You are a careful customer support agent.").
         WithToolChain(tc).
         WithTermination(term)
@@ -126,6 +127,15 @@ func runAgent(ctx context.Context, llm llms.Model) error {
 The `llm` value can be any LangChainGo `llms.Model`, such as an OpenAI, Anthropic, Google,
 Ollama, or GitHub Models client. Gent's `models.LCGWrapper` adapts it to Gent's streaming model
 interface and normalizes model-call stats.
+
+`NewNativeAgent` sends tool schemas in the API request and uses the returned tool calls. It does
+not request THINK, ACTION, or ANSWER separators. It keeps Gent's validation, limits, history,
+recovery, and local tool execution. Model and adapter support can differ; see
+[native calls, local search, and local JavaScript](docs/native-tools.md) for details and limits.
+
+`react.NewAgent` keeps its existing XML/YAML defaults and all text-format options. Use it for
+existing applications or an explicit text-only fallback. Neither constructor changes a provider
+automatically after an API error.
 
 ## Main Concepts
 

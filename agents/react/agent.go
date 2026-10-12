@@ -24,12 +24,13 @@ import (
 // Flow: Think -> Act -> Observe -> Repeat until termination.
 //
 // The message construction follows this structure:
-//  1. System prompt(s) - from SystemPromptBuilder (default: behavior, re_act, critical_rules, tools, output_format)
+//  1. System prompt(s) - from SystemPromptBuilder (behavior, rules, tools, and output format)
 //  2. Task message (user) - formatted task text + media
 //  3. Scratchpad messages - interleaved AI responses and observations from previous iterations
 //  4. BEGIN!/CONTINUE! (user) - signals start or continuation of the loop
 //
 // System prompts can be customized via WithSystemPromptBuilder() for full control over prompting.
+// NewNativeAgent uses API tool calls and plain final content with the same execution loop.
 type Agent struct {
 	behaviorAndContext     string
 	criticalRules          string
@@ -46,6 +47,7 @@ type Agent struct {
 	maxResponseChars       int
 	responseTooLongMessage string
 	recoveryVersion        string
+	nativeToolCalls        bool
 }
 
 // NewAgent creates a new Agent with the given model and default settings.
@@ -92,7 +94,8 @@ func (r *Agent) WithSystemPromptBuilder(builder SystemPromptBuilder) *Agent {
 	return r
 }
 
-// WithFormat sets the text output format.
+// WithFormat sets the text output format. Native agents use it to render prompts and tool results;
+// they do not parse the assistant response with this format.
 func (r *Agent) WithFormat(f gent.TextFormat) *Agent {
 	r.format = f
 	return r
@@ -128,14 +131,17 @@ func (r *Agent) TimeProvider() gent.TimeProvider {
 	return r.timeProvider
 }
 
-// WithThinking enables the thinking section with the given guidance.
+// WithThinking enables the thinking section with the given guidance for NewAgent.
+// NewNativeAgent does not request or parse thought sections. Model reasoning controls remain
+// provider options, separate from visible text that asks the model to explain its work.
 func (r *Agent) WithThinking(guidance string) *Agent {
 	r.thinkingSection = section.NewText("thinking").
 		WithGuidance(guidance)
 	return r
 }
 
-// WithThinkingSection sets a custom thinking section.
+// WithThinkingSection sets a custom thinking section for NewAgent.
+// Native mode ignores this section.
 func (r *Agent) WithThinkingSection(s gent.TextSection) *Agent {
 	r.thinkingSection = s
 	return r
@@ -220,12 +226,15 @@ func (r *Agent) next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 		return nil, err
 	}
 
-	// Register output sections and generate prompts
-	for _, section := range r.buildOutputSections() {
-		r.format.RegisterSection(section)
+	outputPrompt, toolsPrompt := "", ""
+	if !r.nativeToolCalls {
+		// Text agents keep their configured section contract.
+		for _, section := range r.buildOutputSections() {
+			r.format.RegisterSection(section)
+		}
+		outputPrompt = r.format.DescribeStructure()
+		toolsPrompt = r.toolChain.AvailableToolsPrompt()
 	}
-	outputPrompt := r.format.DescribeStructure()
-	toolsPrompt := r.toolChain.AvailableToolsPrompt()
 
 	if frame.Response == nil {
 		messages, err := r.buildMessages(execCtx, data, outputPrompt, toolsPrompt)
@@ -250,6 +259,9 @@ func (r *Agent) next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 			return r.handleResponseTooLong(execCtx, data, response)
 		}
 		return r.handleRepetition(execCtx, data, response, repResult)
+	}
+	if r.nativeToolCalls {
+		return r.nextNative(execCtx, frame)
 	}
 
 	// Extract response content
@@ -644,6 +656,9 @@ func (r *Agent) buildMessages(
 	outputPrompt string,
 	toolsPrompt string,
 ) ([]llms.MessageContent, error) {
+	if r.nativeToolCalls {
+		return r.buildNativeMessages(execCtx)
+	}
 	var messages []llms.MessageContent
 
 	// 1. System prompt: build sections, publish event, format
@@ -870,6 +885,18 @@ func (r *Agent) callModel(
 	streamTopicId string, messages []llms.MessageContent,
 ) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
 	opts := r.effectiveCallOptions()
+	if r.nativeToolCalls {
+		chain, err := r.nativeChain()
+		if err != nil {
+			return nil, nil, err
+		}
+		tools, err := chain.NativeTools(execCtx)
+		if err != nil {
+			return nil, nil, err
+		}
+		// The registry owns the active catalog. Other caller options keep their current behavior.
+		opts = append(opts, llms.WithTools(tools))
+	}
 	r.warnRestrictiveSampling(execCtx, opts)
 	return r.callModelStreaming(execCtx, streamId, streamTopicId, messages, opts)
 }
@@ -1008,6 +1035,26 @@ func (r *Agent) callModelStreaming(
 	}
 	// The final response can include content or choice data that is absent from chunks.
 	// Use the accumulator only when repetition or size limits stop the stream early.
+	// Check final-only content too. Some adapters stream no text when they return tool calls.
+	if len(streamResponse.Choices) > 0 && streamResponse.Choices[0] != nil {
+		choice := streamResponse.Choices[0]
+		content := choice.Content
+		for _, call := range choice.ToolCalls {
+			if call.FunctionCall != nil {
+				content += call.FunctionCall.Arguments
+			}
+		}
+		finalDetector := agentutil.NewRepetitionDetector(r.repetitionConfig)
+		if repetition := finalDetector.Feed(content); repetition != nil {
+			return streamResponse, repetition, nil
+		}
+		if r.maxResponseChars > 0 && len(content) > r.maxResponseChars {
+			if repetition := finalDetector.CheckAccumulated(); repetition != nil {
+				return streamResponse, repetition, nil
+			}
+			return streamResponse, &agentutil.RepetitionResult{Err: agentutil.ErrMaxResponseSize}, nil
+		}
+	}
 	return streamResponse, nil, nil
 }
 

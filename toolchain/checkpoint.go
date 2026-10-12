@@ -1,7 +1,6 @@
 package toolchain
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -61,6 +60,12 @@ func prepareToolPlan(
 		return nil, err
 	}
 	calls := parsed.([]*gent.ToolCall)
+	return prepareParsedToolPlan(ctx, calls)
+}
+
+func prepareParsedToolPlan(
+	ctx *gent.ExecutionContext, calls []*gent.ToolCall,
+) (*gent.ToolPlan, error) {
 	plan := &gent.ToolPlan{Version: 1}
 	for _, call := range calls {
 		plan.Calls = append(plan.Calls, gent.PlannedToolCall{Id: ctx.NewToolCallId(),
@@ -84,7 +89,7 @@ func (c *SearchJSON) Prepare(ctx *gent.ExecutionContext, content string) (*gent.
 
 type rawToolExecutor func(
 	*gent.ExecutionContext,
-	string,
+	[]*gent.ToolCall,
 	gent.TextFormat,
 ) (*gent.ToolChainResult, error)
 
@@ -92,16 +97,7 @@ func executeNextTool(
 	ctx *gent.ExecutionContext, plan *gent.ToolPlan,
 	format gent.TextFormat, execute rawToolExecutor,
 ) (*gent.ToolCallResult, error) {
-	if plan == nil || plan.Version != 1 || plan.NextCall < 0 || plan.NextCall > len(plan.Calls) {
-		return nil, errors.New("gent: invalid tool plan")
-	}
-	if plan.NextCall == len(plan.Calls) {
-		return nil, gent.ErrToolPlanComplete
-	}
-	if err := ctx.RecordingError(); err != nil {
-		return nil, err
-	}
-	if err := ctx.Context().Err(); err != nil {
+	if err := checkToolPlan(ctx, plan); err != nil {
 		return nil, err
 	}
 	ctx.SelectToolCall(plan)
@@ -112,14 +108,11 @@ func executeNextTool(
 	}
 	call := plan.Calls[plan.NextCall]
 	if !completed {
-		content, err := json.Marshal([]map[string]any{{"tool": call.Name, "args": call.Args}})
-		if err != nil {
-			return nil, err
-		}
 		if err := ctx.SetToolPlan(plan); err != nil {
 			return nil, err
 		}
-		output, err := execute(ctx, string(content), format)
+		calls := []*gent.ToolCall{{Name: call.Name, Args: call.Args}}
+		output, err := execute(ctx, calls, format)
 		if recordErr := ctx.RecordingError(); recordErr != nil {
 			return nil, recordErr
 		}
@@ -138,6 +131,25 @@ func executeNextTool(
 		// The tool executor captured the summary before it saved the result. Keep that value,
 		// including an empty summary, so recovery and live execution use the same evidence.
 	}
+	return completePlannedTool(ctx, plan, result)
+}
+
+func checkToolPlan(ctx *gent.ExecutionContext, plan *gent.ToolPlan) error {
+	if plan == nil || plan.Version != 1 || plan.NextCall < 0 || plan.NextCall > len(plan.Calls) {
+		return errors.New("gent: invalid tool plan")
+	}
+	if plan.NextCall == len(plan.Calls) {
+		return gent.ErrToolPlanComplete
+	}
+	if err := ctx.RecordingError(); err != nil {
+		return err
+	}
+	return ctx.Context().Err()
+}
+
+func completePlannedTool(
+	ctx *gent.ExecutionContext, plan *gent.ToolPlan, result *gent.ToolCallResult,
+) (*gent.ToolCallResult, error) {
 	plan.Results = append(plan.Results, result)
 	plan.NextCall++
 	plan.ReadyCall = nil
@@ -157,7 +169,7 @@ func (c *YAML) ExecuteNext(
 ) (
 	*gent.ToolCallResult, error,
 ) {
-	return executeNextTool(ctx, plan, format, c.executeUnmanaged)
+	return executeNextTool(ctx, plan, format, c.executeParsed)
 }
 
 func (c *JSON) ExecuteNext(
@@ -167,7 +179,7 @@ func (c *JSON) ExecuteNext(
 ) (
 	*gent.ToolCallResult, error,
 ) {
-	return executeNextTool(ctx, plan, format, c.executeUnmanaged)
+	return executeNextTool(ctx, plan, format, c.executeParsed)
 }
 
 func (c *SearchJSON) ExecuteNext(
@@ -177,7 +189,7 @@ func (c *SearchJSON) ExecuteNext(
 ) (
 	*gent.ToolCallResult, error,
 ) {
-	return executeNextTool(ctx, plan, format, c.executeUnmanaged)
+	return executeNextTool(ctx, plan, format, c.executeParsed)
 }
 
 func executeToolPlan(ctx *gent.ExecutionContext, chain gent.RecoverableToolChain,

@@ -21,8 +21,12 @@ type ToolCall struct {
 // the raw fields (Input, Output) for programmatic access such as
 // deduplication.
 type ToolCallResult struct {
-	ToolCallId           string
-	AttemptId            string
+	ToolCallId string
+	AttemptId  string
+	// DiscoveredTools lists tools whose full definitions this result made available.
+	// SearchGet sets this only after get_tool_schema succeeds. Native requests use these names
+	// from active history so compaction and expiry also bound the active tool catalog.
+	DiscoveredTools      []string
 	Instructions         string
 	DeduplicationSummary string
 	SummaryCaptured      bool

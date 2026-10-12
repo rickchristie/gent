@@ -87,10 +87,10 @@ import (
 //
 // # Multi-Modal Handling
 //
-// Non-text content parts (images, audio, etc.) in non-pinned
-// entries are dropped during summarization. Only text
-// content is extracted and passed to the summarization model.
-// If multi-modal content is important, pin the entry.
+// Images, audio, and other media in non-pinned entries are dropped during summarization.
+// Text, tool call IDs, names, arguments, and result text are passed to the summary model.
+// Tool evidence must remain available even when an assistant turn has no text.
+// If media is important, pin the entry.
 //
 // # Model Usage
 //
@@ -816,14 +816,24 @@ func (s *SummarizationStrategy) Compact(
 		Compaction: &gent.CompactionRecord{SummaryIds: []gent.EntryId{entry.Id}}}, nil
 }
 
-// extractText extracts all text content from an entry,
-// dropping non-text content parts.
+// extractText keeps text and tool evidence in message order. Media stays in the original entry.
 func extractText(entry *gent.HistoryEntry) string {
 	var parts []string
 	for _, msg := range entry.Messages {
 		for _, part := range msg.Parts {
-			if tc, ok := part.(llms.TextContent); ok {
-				parts = append(parts, tc.Text)
+			switch value := part.(type) {
+			case llms.TextContent:
+				parts = append(parts, value.Text)
+			case llms.ToolCall:
+				text := fmt.Sprintf("Tool call %q (%s)", value.ID, value.Type)
+				if value.FunctionCall != nil {
+					text = fmt.Sprintf("Tool call %q: %s\nArguments: %s", value.ID,
+						value.FunctionCall.Name, value.FunctionCall.Arguments)
+				}
+				parts = append(parts, text)
+			case llms.ToolCallResponse:
+				parts = append(parts, fmt.Sprintf("Tool result %q: %s\n%s", value.ToolCallID,
+					value.Name, value.Content))
 			}
 		}
 	}

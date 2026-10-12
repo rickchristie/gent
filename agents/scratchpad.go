@@ -227,6 +227,16 @@ func rebuildObservation(
 	}
 
 	var parts []gent.ContentPart
+	// Native results must keep their call ID when their content is shortened. A text part in a
+	// tool message cannot replace ToolCallResponse: providers use the ID to pair calls and results.
+	for _, part := range msg.Parts {
+		if response, ok := part.(llms.ToolCallResponse); ok {
+			response.Content = strings.Join(sections, "\n")
+			parts = append(parts, response)
+			parts = append(parts, allMedia...)
+			return llms.MessageContent{Role: msg.Role, Parts: ToLLMParts(parts)}
+		}
+	}
 	if observation != "" {
 		parts = append(
 			parts,

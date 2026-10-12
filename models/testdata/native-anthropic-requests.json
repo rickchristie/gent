@@ -1,0 +1,115 @@
+[
+  {
+    "model": "wire-test",
+    "system": "<instructions>\nRead records.\n</instructions>",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Read two records."
+          }
+        ]
+      }
+    ],
+    "max_tokens": 100,
+    "temperature": 0.5,
+    "top_p": 1,
+    "tools": [
+      {
+        "name": "lookup",
+        "description": "Read a record",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
+    "stream": true
+  },
+  {
+    "model": "wire-test",
+    "system": "<instructions>\nRead records.\n</instructions>",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Read two records."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Checking."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call-a",
+            "name": "lookup",
+            "input": {
+              "id": 1
+            }
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call-b",
+            "name": "lookup",
+            "input": {
+              "id": 2
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-a",
+            "content": "<lookup>\nrecord\n</lookup>"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-b",
+            "content": "<lookup>\nrecord\n</lookup>"
+          }
+        ]
+      }
+    ],
+    "max_tokens": 100,
+    "temperature": 0.5,
+    "top_p": 1,
+    "tools": [
+      {
+        "name": "lookup",
+        "description": "Read a record",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
+    "stream": true
+  }
+]

@@ -9,12 +9,27 @@ import (
 	"testing"
 
 	"github.com/rickchristie/gent/common"
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 // ensureAllTestModels downloads all unique models from common.ModelRegistry using the shared
 // common.DownloadModel function. Called from TestMain. Models are stored at
 // ~/.gent/models/{modelName}/ — the same location used by the CLI.
 func ensureAllTestModels(_ *testing.M) {
+	// TestMain runs before the Go test timeout starts. Do not start model downloads when no
+	// runtime can use them. Individual ONNX tests still report the existing unavailable skip.
+	if path := resolveOnnxLibPath(""); path != "" {
+		ort.SetSharedLibraryPath(path)
+	}
+	if err := ort.InitializeEnvironment(); err != nil {
+		fmt.Fprintf(os.Stderr, "ONNX model setup unavailable: %v\n", err)
+		return
+	}
+	// Leave initialization to the embedder so its once-only state and custom options stay valid.
+	if err := ort.DestroyEnvironment(); err != nil {
+		fmt.Fprintf(os.Stderr, "ONNX model setup cleanup failed: %v\n", err)
+		return
+	}
 	for i := range common.ModelRegistry {
 		model := &common.ModelRegistry[i]
 		if common.ModelDownloaded(model) {

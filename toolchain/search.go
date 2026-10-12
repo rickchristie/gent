@@ -437,22 +437,26 @@ func (c *SearchJSON) executeUnmanaged(
 		panic("textFormat must not be nil")
 	}
 
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	var ctx context.Context
-	if execCtx != nil {
-		ctx = execCtx.Context()
-	} else {
-		ctx = context.Background()
-	}
-
 	parsed, err := c.ParseSection(execCtx, content)
 	if err != nil {
 		return nil, err
 	}
 
-	calls := parsed.([]*gent.ToolCall)
+	return c.executeParsed(execCtx, parsed.([]*gent.ToolCall), textFormat)
+}
+
+func (c *SearchJSON) executeParsed(
+	execCtx *gent.ExecutionContext, calls []*gent.ToolCall, textFormat gent.TextFormat,
+) (*gent.ToolChainResult, error) {
+	if textFormat == nil {
+		panic("textFormat must not be nil")
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ctx := context.Background()
+	if execCtx != nil {
+		ctx = execCtx.Context()
+	}
 	results := make([]*gent.ToolCallResult, len(calls))
 	for i, call := range calls {
 		results[i] = &gent.ToolCallResult{
@@ -651,6 +655,9 @@ func (c *SearchJSON) executeSearch(
 	}
 
 	pageNames := searchResults[startIdx:endIdx]
+	if c.searchType == Search {
+		result.DiscoveredTools = append([]string(nil), pageNames...)
+	}
 
 	// Split matched tools into new (full def) vs duplicate
 	// (abbreviated reference for tools already printed).
@@ -792,6 +799,7 @@ func (c *SearchJSON) executeGetSchema(
 	outputStr := formatToolDefinitions(
 		[]any{tool}, c.printOutputSchema,
 	)
+	result.DiscoveredTools = []string{toolName}
 
 	result.Output = outputStr
 	result.Text = formatSectionText(
@@ -887,6 +895,15 @@ func (c *SearchJSON) executeRegularTool(
 	result.Input = inputToUse
 	result.ToolCallId = toolCallId
 	if execCtx != nil {
+		// A before-call hook or a tool limit can stop the run. Do not start an external effect.
+		if err := execCtx.RecordingError(); err != nil {
+			result.Error = err
+			return
+		}
+		if err := execCtx.Context().Err(); err != nil {
+			result.Error = err
+			return
+		}
 		ctx = execCtx.ToolContext(toolCallId)
 		result.AttemptId = execCtx.AttemptId()
 	}
