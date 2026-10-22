@@ -133,7 +133,11 @@ func (s *streamBuffer) dequeue() (StreamChunk, bool) {
 
 	// Pop from front of queue
 	chunk := s.queue[0]
+	s.queue[0] = StreamChunk{} // Release metadata and content after delivery.
 	s.queue = s.queue[1:]
+	if len(s.queue) == 0 {
+		s.queue = nil
+	}
 	s.cond.Broadcast()
 
 	return chunk, true

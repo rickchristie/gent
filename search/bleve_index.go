@@ -138,6 +138,9 @@ func NewBleveIndex[Doc any](
 func (b *BleveIndex[Doc]) Search(
 	ctx context.Context, queryText string, topK int,
 ) ([]SearchResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	q, err := b.adapter.Query(queryText)
 	if err != nil {
 		return nil, fmt.Errorf("search: bleve query build failed: %w", err)
@@ -148,7 +151,7 @@ func (b *BleveIndex[Doc]) Search(
 
 	var theoreticalMax float64
 	b.mu.RLock()
-	bleveResults, err := b.index.Search(req)
+	bleveResults, err := b.index.SearchInContext(ctx, req)
 	if err == nil && b.config.theoreticalMaxNormalization {
 		if provider, ok := b.adapter.(BleveIDFProvider); ok {
 			theoreticalMax = b.computeTheoreticalMaxLocked(ctx, queryText, provider)

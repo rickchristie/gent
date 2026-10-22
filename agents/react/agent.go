@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -32,6 +33,7 @@ import (
 // System prompts can be customized via WithSystemPromptBuilder() for full control over prompting.
 // NewNativeAgent uses API tool calls and plain final content with the same execution loop.
 type Agent struct {
+	sectionsOnce           sync.Once
 	behaviorAndContext     string
 	criticalRules          string
 	systemPromptBuilder    SystemPromptBuilder
@@ -97,18 +99,21 @@ func (r *Agent) WithSystemPromptBuilder(builder SystemPromptBuilder) *Agent {
 // WithFormat sets the text output format. Native agents use it to render prompts and tool results;
 // they do not parse the assistant response with this format.
 func (r *Agent) WithFormat(f gent.TextFormat) *Agent {
+	r.sectionsOnce = sync.Once{}
 	r.format = f
 	return r
 }
 
 // WithToolChain sets the tool chain.
 func (r *Agent) WithToolChain(tc gent.ToolChain) *Agent {
+	r.sectionsOnce = sync.Once{}
 	r.toolChain = tc
 	return r
 }
 
 // WithTermination sets the termination handler.
 func (r *Agent) WithTermination(t gent.Termination) *Agent {
+	r.sectionsOnce = sync.Once{}
 	r.termination = t
 	return r
 }
@@ -135,6 +140,7 @@ func (r *Agent) TimeProvider() gent.TimeProvider {
 // NewNativeAgent does not request or parse thought sections. Model reasoning controls remain
 // provider options, separate from visible text that asks the model to explain its work.
 func (r *Agent) WithThinking(guidance string) *Agent {
+	r.sectionsOnce = sync.Once{}
 	r.thinkingSection = section.NewText("thinking").
 		WithGuidance(guidance)
 	return r
@@ -143,6 +149,7 @@ func (r *Agent) WithThinking(guidance string) *Agent {
 // WithThinkingSection sets a custom thinking section for NewAgent.
 // Native mode ignores this section.
 func (r *Agent) WithThinkingSection(s gent.TextSection) *Agent {
+	r.sectionsOnce = sync.Once{}
 	r.thinkingSection = s
 	return r
 }
@@ -208,6 +215,16 @@ func (r *Agent) RegisterTool(tool any) *Agent {
 	return r
 }
 
+// Configure agents before use. Runs share the section contract, but must never register it
+// while another run parses a response. Read prompts on each call to preserve current guidance.
+func (r *Agent) registerSections() {
+	r.sectionsOnce.Do(func() {
+		for _, section := range r.buildOutputSections() {
+			r.format.RegisterSection(section)
+		}
+	})
+}
+
 // Next executes one iteration of the ReAct loop.
 //
 // The method follows a specific order of operations:
@@ -229,9 +246,7 @@ func (r *Agent) next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, err
 	outputPrompt, toolsPrompt := "", ""
 	if !r.nativeToolCalls {
 		// Text agents keep their configured section contract.
-		for _, section := range r.buildOutputSections() {
-			r.format.RegisterSection(section)
-		}
+		r.registerSections()
 		outputPrompt = r.format.DescribeStructure()
 		toolsPrompt = r.toolChain.AvailableToolsPrompt()
 	}
@@ -1003,6 +1018,15 @@ func (r *Agent) callModelStreaming(
 
 	for chunk := range stream.Chunks() {
 		if chunk.Err != nil {
+			// Completion accepts final model evidence before the executor can end the run.
+			stream.Close()
+			_, completionErr := stream.Response()
+			if completionErr != nil {
+				if errors.Is(completionErr, chunk.Err) {
+					return nil, nil, completionErr
+				}
+				return nil, nil, errors.Join(chunk.Err, completionErr)
+			}
 			return nil, nil, chunk.Err
 		}
 		acc.Add(chunk)

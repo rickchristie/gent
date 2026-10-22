@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"sync"
 
 	"github.com/rickchristie/gent"
 )
@@ -19,6 +20,7 @@ import (
 // Invalid regex patterns return a descriptive error that is
 // surfaced to the LLM so it can fix the query.
 type RegexToolSearcher struct {
+	mu             sync.RWMutex
 	tools          []regexToolEntry
 	searchGuidance string
 }
@@ -78,15 +80,23 @@ func (e *RegexToolSearcher) IndexAll(
 			texts: texts,
 		}
 	}
+	e.mu.Lock()
 	e.tools = entries
+	e.mu.Unlock()
 	return nil
 }
 
 // Search finds tools matching the regex pattern.
 func (e *RegexToolSearcher) Search(
-	_ context.Context,
+	ctx context.Context,
 	query string,
 ) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	e.mu.RLock()
+	tools := e.tools // Published slices are immutable; concurrent IndexAll replaces the slice.
+	e.mu.RUnlock()
 	re, err := regexp.Compile("(?i)" + query)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -100,9 +110,12 @@ func (e *RegexToolSearcher) Search(
 	}
 
 	var results []scored
-	for _, entry := range e.tools {
+	for _, entry := range tools {
 		count := 0
 		for _, text := range entry.texts {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			matches := re.FindAllStringIndex(text, -1)
 			count += len(matches)
 		}

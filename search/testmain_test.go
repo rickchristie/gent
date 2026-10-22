@@ -8,6 +8,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	ensureAllTestModels(m)
+	// Keep downloads in explicit setup commands, outside normal test execution.
 	os.Exit(m.Run())
 }

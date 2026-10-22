@@ -1,18 +1,22 @@
 package common
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // DownloadModel downloads a model's ONNX file and tokenizer to its standard directory
 // (~/.gent/models/<name>/). Skips files that already exist. The onProgress callback is
 // called during the model download with bytes written and total bytes (0 if unknown).
-// Pass nil for silent downloads.
+// Pass nil for silent downloads. Each file has a 30-minute deadline and is published only after
+// the complete response is written and closed.
 func DownloadModel(model *ModelInfo, onProgress func(written, total int64)) error {
 	dir, err := ModelDir(model.Name)
 	if err != nil {
@@ -27,13 +31,11 @@ func DownloadModel(model *ModelInfo, onProgress func(written, total int64)) erro
 
 	if !fileExists(modelPath) {
 		if err := downloadFile(model.ModelURL, modelPath, onProgress); err != nil {
-			os.Remove(modelPath)
 			return fmt.Errorf("model download failed: %w", err)
 		}
 	}
 	if !fileExists(tokenizerPath) {
 		if err := downloadFile(model.TokenizerURL, tokenizerPath, nil); err != nil {
-			os.Remove(tokenizerPath)
 			return fmt.Errorf("tokenizer download failed: %w", err)
 		}
 	}
@@ -51,23 +53,58 @@ func ModelDownloaded(model *ModelInfo) bool {
 }
 
 func downloadFile(url, destPath string, onProgress func(written, total int64)) error {
-	resp, err := http.Get(url)
+	// Setup must end even if a server stops sending data. Keep partial files private so another
+	// caller cannot load them or remove a complete file published by a concurrent download.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	return downloadFileContext(ctx, url, destPath, onProgress)
+}
+
+func downloadFileContext(ctx context.Context, url, destPath string,
+	onProgress func(written, total int64),
+) (err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { err = errors.Join(err, resp.Body.Close()) }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
 	}
 
-	f, err := os.Create(destPath)
+	f, err := os.CreateTemp(filepath.Dir(destPath), ".gent-download-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	closed := false
+	defer func() {
+		// Progress callbacks are application code; release the file even if a callback panics.
+		if !closed {
+			err = errors.Join(err, f.Close())
+		}
+		if removeErr := os.Remove(f.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}()
+	copyErr := copyDownload(f, resp, onProgress)
+	closeErr := f.Close()
+	closed = true
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), destPath)
+}
 
+func copyDownload(f io.Writer, resp *http.Response, onProgress func(written, total int64)) error {
 	if onProgress == nil {
-		_, err = io.Copy(f, resp.Body)
+		_, err := io.Copy(f, resp.Body)
 		return err
 	}
 

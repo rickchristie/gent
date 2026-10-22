@@ -138,6 +138,7 @@ func (e *Runner) Continue(execCtx *gent.ExecutionContext) (*gent.ExecutionResult
 func (e *Runner) execute(
 	execCtx *gent.ExecutionContext, continuing bool,
 ) (*gent.ExecutionResult, error) {
+	defer execCtx.Release()
 	if execCtx.Phase() == gent.PhaseTerminal {
 		return execCtx.Result(), execCtx.Error()
 	}
@@ -154,7 +155,6 @@ func (e *Runner) execute(
 	} else if err := e.configureExecution(execCtx); err != nil {
 		return nil, err
 	}
-	defer execCtx.CloseStreams()
 	if !continuing {
 		execCtx.PublishBeforeExecution()
 		if err := execCtx.CommitCheckpoint(gent.PhaseInitial); err != nil {

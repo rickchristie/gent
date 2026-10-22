@@ -124,6 +124,8 @@ Gent assigns numbers and freezes the candidate before `Save`. Readers and accept
 continue seeing the old cursor while saving. A successful acknowledgment promotes the whole batch.
 Internal commits share already frozen payloads and calculate the digest once. Ownership copies are
 made at application boundaries, avoiding repeated serialization for each streamed token.
+The private event and batch indexes grow only after acceptance. `Export` copies those indexes under
+the run lock before copying payloads, so a caller can read or change its snapshot during recording.
 `PersistenceError` retains the exact failed or uncertain batch and stops further execution. No next
 model or tool effect starts after that failure. `ctx.RetrySave(worker)` retries the same batch and identity;
 do not manufacture a new batch ID after a lost acknowledgment. After recovery, load the store's
@@ -137,6 +139,12 @@ transaction as rejected just because a browser or message bus is unavailable.
 Already observed evidence can be saved after worker cancellation. Saves use an independent context
 with a 30-second timeout; the application must still reject a stale writer. This is why cancellation
 alone cannot replace storage fencing.
+
+Executors release their execution context on every return path, after final evidence is accepted
+when possible. Release cancels context-bound work and closes stream subscriptions for draining.
+`CompleteChild` also releases child work. Direct users of `NewExecutionContext` must defer
+`ctx.Release()`. Release is safe to repeat and does not change a saved outcome or mark a successful
+execution as interrupted. Explicit application cancellation still uses `CancelRun`.
 
 ## Exact model requests and tool evidence
 

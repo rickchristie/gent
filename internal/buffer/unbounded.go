@@ -95,7 +95,12 @@ func (b *Unbounded[T]) dequeue() (T, bool) {
 
 	// Pop from front of queue
 	item := b.items[0]
+	var zero T
+	b.items[0] = zero // A live queue must not retain values that its consumer has received.
 	b.items = b.items[1:]
+	if len(b.items) == 0 {
+		b.items = nil
+	}
 
 	return item, true
 }

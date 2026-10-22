@@ -75,7 +75,11 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 		return ctx.stopRecording(err)
 	}
 	run.mu.Lock()
+	clear(run.pending[:pendingCount])
 	run.pending = run.pending[pendingCount:]
+	if len(run.pending) == 0 {
+		run.pending = nil
+	}
 	if phase != "" {
 		ctx.phase = phase
 		if phase == PhaseIterationCompleted || phase == PhaseTerminal {
@@ -109,7 +113,11 @@ func (ctx *ExecutionContext) notifyCommitted() error {
 			return nil
 		}
 		notification := run.notifications[0]
+		run.notifications[0] = committedNotification{}
 		run.notifications = run.notifications[1:]
+		if len(run.notifications) == 0 {
+			run.notifications = nil
+		}
 		run.mu.Unlock()
 		if err := notification.ctx.dispatchCommitted(notification.events); err != nil {
 			run.notifyMu.Unlock()
@@ -244,7 +252,8 @@ func (ctx *ExecutionContext) IsWorkerInterrupted() bool {
 		ctx.goCtx.Err(),
 		context.DeadlineExceeded,
 	) &&
-		!ctx.runCanceled && ctx.exceededLimit == nil
+		!ctx.runCanceled && ctx.exceededLimit == nil &&
+		!errors.Is(context.Cause(ctx.goCtx), errExecutionReleased)
 	ctx.mu.RUnlock()
 	return interrupted && ctx.RecordingError() == nil
 }
@@ -254,7 +263,7 @@ func (ctx *ExecutionContext) IsWorkerInterrupted() bool {
 // have no resumable Go stack.
 func RestoreExecutionContext(
 	worker context.Context, bundle RunView, bindings RestoreBindings,
-) (*ExecutionContext, error) {
+) (restored *ExecutionContext, err error) {
 	if bundle.Checkpoint == nil {
 		return nil, errors.New("gent: run has no resumable checkpoint")
 	}
@@ -285,13 +294,18 @@ func RestoreExecutionContext(
 	}
 	// Use one worker context throughout configuration and continuation. Replacing its cancel
 	// function later would detach configuration work and leak the original cancellation scope.
+	var deadlineCancel context.CancelFunc
 	if state.Deadline != nil {
-		var cancel context.CancelFunc
-		worker, cancel = context.WithDeadline(worker, *state.Deadline)
-		context.AfterFunc(worker, cancel)
+		worker, deadlineCancel = context.WithDeadline(worker, *state.Deadline)
 	}
 	ctx := NewExecutionContext(worker, state.Name, data, WithCodecs(registry),
 		WithRunId(bundle.RunId), WithRecorder(bindings.Recorder))
+	ctx.deadlineCancel = deadlineCancel
+	defer func() {
+		if restored == nil {
+			ctx.Release()
+		}
+	}()
 	// RestoreBindings is caller-owned; binding components must not mutate its map on retries.
 	components := make(map[string]CheckpointState, len(bindings.Components))
 	for name, component := range bindings.Components {
@@ -441,6 +455,7 @@ func RestoreExecutionContext(
 		}
 		ctx.SetTermination(checkpoint.Outcome.Reason, result, savedErr)
 		ctx.endTime = checkpoint.Outcome.CompletedAt
+		ctx.Release()
 		return ctx, nil
 	}
 	if ctx.exceededLimit != nil {

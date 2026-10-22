@@ -64,6 +64,9 @@ func NewFlatIndex[Doc any](adapter ChunkAdapter[Doc], embedder Embedder) *FlatIn
 func (f *FlatIndex[Doc]) Search(
 	ctx context.Context, query string, topK int,
 ) ([]SearchResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	queryVec, err := f.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("search: query embedding failed: %w", err)
@@ -84,6 +87,10 @@ func (f *FlatIndex[Doc]) Search(
 
 	all := make([]scored, len(f.vectors))
 	for i, sv := range f.vectors {
+		if i%64 == 0 && ctx.Err() != nil {
+			f.mu.RUnlock()
+			return nil, ctx.Err()
+		}
 		score, err := cosineSimilarity(queryVec, sv.vector)
 		if err != nil {
 			f.mu.RUnlock()
@@ -99,10 +106,16 @@ func (f *FlatIndex[Doc]) Search(
 	}
 
 	f.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// Deduplicate: keep best chunk per document ID.
 	best := map[string]scored{}
-	for _, s := range all {
+	for i, s := range all {
+		if i%64 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if existing, ok := best[s.docID]; !ok || s.score > existing.score {
 			best[s.docID] = s
 		}
@@ -119,6 +132,9 @@ func (f *FlatIndex[Doc]) Search(
 	if topK > 0 && len(results) > topK {
 		results = results[:topK]
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return results, nil
 }
 
@@ -126,6 +142,9 @@ func (f *FlatIndex[Doc]) Search(
 // each chunk is embedded, and all resulting vectors are stored. If a document with the same
 // ID already exists, it is replaced.
 func (f *FlatIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	chunks, err := f.adapter.Chunks(doc, f.embedder, f.embedder.MaxTokens())
 	if err != nil {
 		return fmt.Errorf("search: chunk adapter failed: %w", err)
@@ -159,6 +178,9 @@ func (f *FlatIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	f.removeLocked(id)
 	f.vectors = append(f.vectors, newVectors...)
@@ -176,8 +198,14 @@ func (f *FlatIndex[Doc]) Remove(id string) error {
 // Swap atomically replaces the entire index. New vectors are built outside the lock, then
 // swapped in atomically.
 func (f *FlatIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var newVectors []storedVector
 	for id, doc := range docs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		chunks, err := f.adapter.Chunks(doc, f.embedder, f.embedder.MaxTokens())
 		if err != nil {
 			return fmt.Errorf("search: chunk adapter failed for %s: %w", id, err)
@@ -207,8 +235,11 @@ func (f *FlatIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
 	}
 
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.vectors = newVectors
-	f.mu.Unlock()
 	return nil
 }
 

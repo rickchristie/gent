@@ -27,10 +27,24 @@ func ApplyBatch(view RunView, batch *SaveBatch, registries ...*CodecRegistry) (R
 	return cloneOwned(registry, next)
 }
 
-// applyBatch shares prior immutable values inside the run. Public ApplyBatch clones its
-// result; the internal path avoids repeatedly serializing unchanged payloads for every token.
-// The digest was checked by the public replay boundary or just assigned by the private run owner.
+// applyBatch preserves the public replay contract: a rejected batch changes neither input.
 func applyBatch(view RunView, batch *SaveBatch, digest string) (RunView, error) {
+	next, err := prepareBatch(view, batch, digest)
+	if err != nil || next.LastAppliedEventNumber == view.LastAppliedEventNumber {
+		return next, err
+	}
+	next.Activity = append(append([]*RecordedEvent(nil), view.Activity...), batch.Events...)
+	next.Batches = make(map[string]string, len(view.Batches)+1)
+	for id, digest := range view.Batches {
+		next.Batches[id] = digest
+	}
+	next.Batches[batch.BatchId] = digest
+	return next, nil
+}
+
+// prepareBatch validates a candidate without copying the growing event and batch indexes.
+// All changed history, runtime, and checkpoint values remain separate from the accepted view.
+func prepareBatch(view RunView, batch *SaveBatch, digest string) (RunView, error) {
 	if batch == nil {
 		return RunView{}, errors.New("gent: nil save batch")
 	}
@@ -56,7 +70,6 @@ func applyBatch(view RunView, batch *SaveBatch, digest string) (RunView, error) 
 		return RunView{}, ErrEventGap
 	}
 	next := view
-	next.Activity = append([]*RecordedEvent(nil), view.Activity...)
 	for _, event := range batch.Events {
 		if event == nil {
 			return RunView{}, errors.New("gent: nil recorded event")
@@ -78,7 +91,6 @@ func applyBatch(view RunView, batch *SaveBatch, digest string) (RunView, error) 
 				return RunView{}, err
 			}
 		}
-		next.Activity = append(next.Activity, event)
 		next.LastAppliedEventNumber = event.EventNumber
 	}
 	if batch.Runtime.Allocation < next.Runtime.Allocation {
@@ -98,11 +110,6 @@ func applyBatch(view RunView, batch *SaveBatch, digest string) (RunView, error) 
 		}
 		next.Checkpoint = cloneWire(batch.Checkpoint)
 	}
-	next.Batches = make(map[string]string, len(view.Batches)+1)
-	for id, digest := range view.Batches {
-		next.Batches[id] = digest
-	}
-	next.Batches[batch.BatchId] = digest
 	return next, nil
 }
 

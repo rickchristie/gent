@@ -62,87 +62,63 @@ func TestYAML_Name(t *testing.T) {
 }
 
 func TestYAML_Prompt(t *testing.T) {
-	tests := []struct {
+	type input struct{ section gent.TextSection }
+	type expected struct{ guidance string }
+	type testCase struct {
 		name     string
-		input    func() gent.TextSection
-		expected struct {
-			containsSchema  bool
-			containsPrompt  bool
-			containsExample bool
-			promptPrefix    string
-		}
-	}{
-		{
-			name: "default prompt with schema",
-			input: func() gent.TextSection {
-				return NewYAML[YAMLSimpleStruct]("data")
-			},
-			expected: struct {
-				containsSchema  bool
-				containsPrompt  bool
-				containsExample bool
-				promptPrefix    string
-			}{
-				containsSchema:  true,
-				containsPrompt:  false,
-				containsExample: false,
-				promptPrefix:    "data content must be valid YAML matching this schema:",
-			},
-		},
-		{
-			name: "with custom prompt",
-			input: func() gent.TextSection {
-				return NewYAML[YAMLSimpleStruct]("data").WithGuidance("Create a plan.")
-			},
-			expected: struct {
-				containsSchema  bool
-				containsPrompt  bool
-				containsExample bool
-				promptPrefix    string
-			}{
-				containsSchema:  true,
-				containsPrompt:  true,
-				containsExample: false,
-				promptPrefix:    "Create a plan.",
-			},
-		},
-		{
-			name: "with example",
-			input: func() gent.TextSection {
-				return NewYAML[YAMLSimpleStruct]("data").WithExample(YAMLSimpleStruct{
-					Name:  "test",
-					Value: 42,
-				})
-			},
-			expected: struct {
-				containsSchema  bool
-				containsPrompt  bool
-				containsExample bool
-				promptPrefix    string
-			}{
-				containsSchema:  true,
-				containsPrompt:  false,
-				containsExample: true,
-				promptPrefix:    "data content must be valid YAML matching this schema:",
-			},
-		},
+		input    input
+		expected expected
 	}
+	tests := []testCase{
+		{"default prompt with schema",
+			input{NewYAML[YAMLSimpleStruct]("data")},
+			expected{`data content must be valid YAML matching this schema:
+properties:
+    Name:
+        type: string
+    Value:
+        type: integer
+required:
+    - Name
+    - Value
+type: object
+`}},
+		{"with custom prompt",
+			input{NewYAML[YAMLSimpleStruct]("data").WithGuidance("Create a plan.")},
+			expected{`Create a plan.
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			section := tt.input()
-			prompt := section.Guidance()
+data content must be valid YAML matching this schema:
+properties:
+    Name:
+        type: string
+    Value:
+        type: integer
+required:
+    - Name
+    - Value
+type: object
+`}},
+		{"with example",
+			input{NewYAML[YAMLSimpleStruct]("data").WithExample(YAMLSimpleStruct{Name: "test", Value: 42})},
+			expected{`data content must be valid YAML matching this schema:
+properties:
+    Name:
+        type: string
+    Value:
+        type: integer
+required:
+    - Name
+    - Value
+type: object
 
-			assert.Contains(t, prompt, tt.expected.promptPrefix)
-
-			if tt.expected.containsSchema {
-				assert.Contains(t, prompt, "type:")
-				assert.Contains(t, prompt, "properties:")
-			}
-
-			if tt.expected.containsExample {
-				assert.Contains(t, prompt, "Example:")
-			}
+Example:
+name: test
+value: 42
+`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, expected{guidance: tc.input.section.Guidance()})
 		})
 	}
 }
@@ -603,9 +579,23 @@ func TestYAML_MethodChaining(t *testing.T) {
 		WithExample(YAMLSimpleStruct{Name: "example", Value: 100})
 
 	assert.Equal(t, "plan", section.Name())
-	assert.Contains(t, section.Guidance(), "Create a plan.")
-	assert.Contains(t, section.Guidance(), "Example:")
-	assert.Contains(t, section.Guidance(), "example")
+	assert.Equal(t, `Create a plan.
+
+plan content must be valid YAML matching this schema:
+properties:
+    Name:
+        type: string
+    Value:
+        type: integer
+required:
+    - Name
+    - Value
+type: object
+
+Example:
+name: example
+value: 100
+`, section.Guidance())
 }
 
 func TestYAML_ImplementsTextSection(t *testing.T) {

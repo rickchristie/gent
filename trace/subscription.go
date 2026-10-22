@@ -66,12 +66,10 @@ func (s *Sequencer) SubscribeWithConfig(cfg SubscribeConfig) (<-chan *Event, gen
 
 	unsubscribe := func() {
 		s.mu.Lock()
-		removed := s.liveSubscribers[id]
 		delete(s.liveSubscribers, id)
 		s.mu.Unlock()
-		if removed != nil {
-			removed.discard()
-		}
+		// Close removes the map entry, but the consumer still owns its unsubscribe handle.
+		sub.discard()
 	}
 	return sub.receive(), unsubscribe
 }

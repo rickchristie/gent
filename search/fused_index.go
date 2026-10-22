@@ -3,7 +3,14 @@ package search
 import (
 	"context"
 	"fmt"
+	"math"
+
+	"golang.org/x/sync/semaphore"
 )
+
+// One permit allows a search; all permits exclude searches and other updates. The capacity is
+// a counter, not allocated storage. Queued updates block later readers to prevent starvation.
+const fusedIndexPermits = math.MaxInt64
 
 // FusedIndex combines multiple [SearchIndex] implementations using a [Fuser].
 //
@@ -16,8 +23,11 @@ import (
 // Search fans out to all sub-indices (each with its own topK for overfetching), collects
 // results, passes them to the Fuser, and returns the fused ranking.
 //
-// Safe for concurrent use (delegates to sub-index thread safety).
+// Updates hold one lock across all subindexes so searches cannot mix update generations.
+// Acquisition must observe cancellation: embedding can hold an update lock for a long time.
+// The semaphore removes canceled waiters without leaving a goroutine to acquire the lock later.
 type FusedIndex[Doc any] struct {
+	mu         *semaphore.Weighted
 	indexes    map[string]SearchIndex[Doc]
 	topKConfig map[string]int
 	fuser      Fuser
@@ -29,7 +39,8 @@ type FusedIndex[Doc any] struct {
 func NewFusedIndex[Doc any](
 	fuser Fuser, indexes map[string]SearchIndex[Doc], topKConfig map[string]int,
 ) *FusedIndex[Doc] {
-	return &FusedIndex[Doc]{indexes: indexes, topKConfig: topKConfig, fuser: fuser}
+	return &FusedIndex[Doc]{mu: semaphore.NewWeighted(fusedIndexPermits),
+		indexes: indexes, topKConfig: topKConfig, fuser: fuser}
 }
 
 // Search fans out to all sub-indices and fuses the results.
@@ -37,6 +48,13 @@ func NewFusedIndex[Doc any](
 func (f *FusedIndex[Doc]) Search(
 	ctx context.Context, query string, topK int,
 ) ([]SearchResult, error) {
+	if err := f.mu.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer f.mu.Release(1)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	results := make(map[string][]SearchResult, len(f.indexes))
 	for name, index := range f.indexes {
 		sourceTopK := f.topKConfig[name]
@@ -54,6 +72,13 @@ func (f *FusedIndex[Doc]) Search(
 
 // Add forwards the document to all sub-indices. Fails fast on first error.
 func (f *FusedIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
+	if err := f.mu.Acquire(ctx, fusedIndexPermits); err != nil {
+		return err
+	}
+	defer f.mu.Release(fusedIndexPermits)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for name, index := range f.indexes {
 		if err := index.Add(ctx, id, doc); err != nil {
 			return fmt.Errorf("search: add to %s failed: %w", name, err)
@@ -64,6 +89,11 @@ func (f *FusedIndex[Doc]) Add(ctx context.Context, id string, doc Doc) error {
 
 // Remove forwards the deletion to all sub-indices. Fails fast on first error.
 func (f *FusedIndex[Doc]) Remove(id string) error {
+	// Remove has no context parameter, so it waits until it owns the update lock.
+	if err := f.mu.Acquire(context.Background(), fusedIndexPermits); err != nil {
+		return err
+	}
+	defer f.mu.Release(fusedIndexPermits)
 	for name, index := range f.indexes {
 		if err := index.Remove(id); err != nil {
 			return fmt.Errorf("search: remove from %s failed: %w", name, err)
@@ -80,6 +110,13 @@ func (f *FusedIndex[Doc]) Remove(id string) error {
 // successful follow-up Swap restores consistency. Add/Remove have the same partial-
 // failure risk; Swap is the most reliable recovery mechanism.
 func (f *FusedIndex[Doc]) Swap(ctx context.Context, docs map[string]Doc) error {
+	if err := f.mu.Acquire(ctx, fusedIndexPermits); err != nil {
+		return err
+	}
+	defer f.mu.Release(fusedIndexPermits)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for name, index := range f.indexes {
 		if err := index.Swap(ctx, docs); err != nil {
 			return fmt.Errorf("search: swap on %s failed: %w", name, err)

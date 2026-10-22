@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 )
 
@@ -99,6 +101,9 @@ func (e *PersistenceError) Unwrap() error { return e.Cause }
 func (ctx *ExecutionContext) Export() (RunView, error) {
 	ctx.run.mu.RLock()
 	view := ctx.run.view
+	// Only these indexes grow in place. Payloads and other state are immutable after acceptance.
+	view.Activity = slices.Clone(view.Activity)
+	view.Batches = maps.Clone(view.Batches)
 	ctx.run.mu.RUnlock()
 	return cloneOwned(ctx.run.codecs, view)
 }
@@ -156,7 +161,7 @@ func (run *executionRun) accept(ctx context.Context, input *SaveBatch) (*SaveBat
 func (run *executionRun) save(
 	ctx context.Context, view RunView, batch *SaveBatch,
 ) (*SaveBatch, error) {
-	next, err := applyBatch(view, batch, batch.BatchId)
+	next, err := prepareBatch(view, batch, batch.BatchId)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +180,14 @@ func (run *executionRun) save(
 		}
 	}
 	run.mu.Lock()
+	if next.LastAppliedEventNumber != view.LastAppliedEventNumber {
+		// Commit only after Save succeeds. Export copies these indexes under the same lock.
+		next.Activity = append(view.Activity, batch.Events...)
+		if next.Batches == nil {
+			next.Batches = make(map[string]string)
+		}
+		next.Batches[batch.BatchId] = batch.BatchId
+	}
 	run.view = next
 	run.mu.Unlock()
 	run.failed = nil

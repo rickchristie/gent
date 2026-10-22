@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/rickchristie/gent"
 )
@@ -63,6 +64,7 @@ import (
 //	    WithToolChain(toolchain.NewYAML().RegisterTool(searchTool)).
 //	    WithTermination(termination.NewText("answer"))
 type Markdown struct {
+	mu            sync.RWMutex
 	sections      []gent.TextSection
 	knownSections map[string]string // lowercase key -> original name
 }
@@ -79,6 +81,8 @@ func NewMarkdown() *Markdown {
 // If a section with the same name already exists, it is not added again.
 // Returns self for chaining.
 func (f *Markdown) RegisterSection(section gent.TextSection) gent.TextFormat {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	lowerName := strings.ToLower(section.Name())
 	if _, exists := f.knownSections[lowerName]; exists {
 		return f // Already registered
@@ -135,14 +139,17 @@ func (f *Markdown) formatSectionAtDepth(section gent.FormattedSection, depth int
 // DescribeStructure generates the prompt explaining the output format structure.
 // It shows the header format with each section's prompt instructions.
 func (f *Markdown) DescribeStructure() string {
-	if len(f.sections) == 0 {
+	f.mu.RLock()
+	sections := append([]gent.TextSection(nil), f.sections...)
+	f.mu.RUnlock()
+	if len(sections) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
 	sb.WriteString("Format your response using markdown headers for each section:\n\n")
 
-	for _, section := range f.sections {
+	for _, section := range sections {
 		name := section.Name()
 		fmt.Fprintf(&sb, "# %s\n", name)
 		fmt.Fprintf(&sb, "%s\n\n", section.Guidance())
@@ -175,6 +182,8 @@ func (f *Markdown) Parse(
 
 // doParse performs the actual parsing logic.
 func (f *Markdown) doParse(output string) (map[string][]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	result := make(map[string][]string)
 
 	// Match markdown headers: # SectionName

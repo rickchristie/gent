@@ -1,6 +1,19 @@
 package search
 
-import "github.com/rickchristie/gent/common"
+import (
+	"errors"
+
+	"github.com/rickchristie/gent/common"
+)
+
+// ErrOnnxUnavailable identifies a missing native runtime or a build without CGo.
+// Model, tokenizer, and inference errors do not match this error.
+var ErrOnnxUnavailable = errors.New("search: ONNX runtime unavailable")
+
+type onnxUnavailableError struct{ error }
+
+func (e onnxUnavailableError) Unwrap() error        { return e.error }
+func (e onnxUnavailableError) Is(target error) bool { return target == ErrOnnxUnavailable }
 
 // Re-export pooling types from common so callers can use search.PoolingMean without importing
 // common directly.
@@ -55,5 +68,7 @@ type OnnxOptions struct {
 	NumThreads int
 
 	// MaxConcurrency limits concurrent ONNX inference calls via a semaphore. Default: 4.
+	// Calls share one CPU session and thread pool but use separate tensors and run options.
+	// Reduce this limit to bound the memory used by active calls on small hosts.
 	MaxConcurrency int
 }

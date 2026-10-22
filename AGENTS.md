@@ -23,6 +23,16 @@
 - **ALWAYS make main branch a single trunk line**. No merge commits, squash and rebase when needed.
 </critical_behavior>
 
+<critical_constraints>
+# Critical Constraints
+
+Apply these constraints in priority order:
+
+1. Ensure reliable repeated use. Prevent race conditions, data races, and memory leaks.
+2. Minimize CPU and memory use without reducing reliability or performance.
+3. Prevent unnecessary work and delay. Maintain good performance.
+</critical_constraints>
+
 <codebase_architecture>
 # Gent - Go LLM Agent Framework
 

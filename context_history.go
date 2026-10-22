@@ -280,22 +280,22 @@ func (ctx *ExecutionContext) AppendRecord(record *HistoryEntry, active bool) err
 }
 
 func (ctx *ExecutionContext) ExpireRecords(nextIteration int) error {
-	draft := ctx.ContextDraft()
-	records, err := ctx.Scratchpad()
+	// IDs and records must come from one revision, including during concurrent appends.
+	input, err := ctx.CompactionInput()
 	if err != nil {
 		return err
 	}
-	active := make([]EntryId, 0, len(draft.Active))
-	for i, record := range records {
+	active := make([]EntryId, 0, len(input.Entries))
+	for _, record := range input.Entries {
 		if record.ExpireAfterIteration > 0 && nextIteration >= record.ExpireAfterIteration {
 			continue
 		}
-		active = append(active, draft.Active[i])
+		active = append(active, record.Id)
 	}
-	if equalIds(active, draft.Active) {
+	if len(active) == len(input.Entries) {
 		return nil
 	}
-	return ctx.UpdateHistory(HistoryUpdate{ExpectedDraftRevision: draft.Revision,
+	return ctx.UpdateHistory(HistoryUpdate{ExpectedDraftRevision: input.Revision,
 		Active: active, Reason: ContextExpire})
 }
 

@@ -2,6 +2,7 @@ package gent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"strconv"
@@ -74,6 +75,8 @@ type ExecutionContext struct {
 	// Go context for cancellation (created via context.WithCancelCause)
 	goCtx  context.Context
 	cancel context.CancelCauseFunc
+	// deadlineCancel is set only when restore owns an added deadline context.
+	deadlineCancel context.CancelFunc
 
 	// Limits that trigger execution termination
 	limits        []Limit
@@ -204,6 +207,22 @@ func (ctx *ExecutionContext) SetEventPublisher(publisher EventPublisher) {
 // -----------------------------------------------------------------------------
 // Context and Limits
 // -----------------------------------------------------------------------------
+
+// Release stops execution work and closes its stream subscriptions after queued chunks drain.
+// It does not change the result or save an outcome. Executors call it on every return path;
+// callers that manage an ExecutionContext directly should defer it. Repeated calls are safe.
+func (ctx *ExecutionContext) Release() {
+	ctx.cancel(errExecutionReleased)
+	for _, child := range ctx.Children() {
+		child.Release()
+	}
+	ctx.CloseStreams()
+	if ctx.deadlineCancel != nil {
+		ctx.deadlineCancel()
+	}
+}
+
+var errExecutionReleased = errors.New("gent: execution resources released")
 
 // Context returns the underlying context.Context for this execution.
 // Use this when calling external APIs that require context.Context.
@@ -1484,9 +1503,10 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 // CompleteChild finalizes a child context and records completion.
 // This should be called via defer after SpawnChild.
 //
-// Note: Stats aggregation happens in real-time via parent reference,
-// so this method only records the completion event.
+// Stats aggregation happens in real time through the parent reference. Accept the completion
+// event before releasing child work and stream subscriptions.
 func (ctx *ExecutionContext) CompleteChild(child *ExecutionContext) error {
+	defer child.Release()
 	child.mu.Lock()
 	child.endTime = time.Now()
 	childDuration := child.endTime.Sub(child.startTime)

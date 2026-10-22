@@ -72,9 +72,7 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 			return err
 		}
 	} else {
-		for _, section := range r.buildOutputSections() {
-			r.format.RegisterSection(section)
-		}
+		r.registerSections()
 		outputFormat = r.format.DescribeStructure()
 	}
 	request := gent.NewModelCallRequest(nil, r.callOptions...)

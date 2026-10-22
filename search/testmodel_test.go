@@ -3,48 +3,17 @@
 package search
 
 import (
-	"fmt"
-	"os"
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"github.com/rickchristie/gent/common"
-	ort "github.com/yalue/onnxruntime_go"
+	"github.com/stretchr/testify/assert"
 )
-
-// ensureAllTestModels downloads all unique models from common.ModelRegistry using the shared
-// common.DownloadModel function. Called from TestMain. Models are stored at
-// ~/.gent/models/{modelName}/ — the same location used by the CLI.
-func ensureAllTestModels(_ *testing.M) {
-	// TestMain runs before the Go test timeout starts. Do not start model downloads when no
-	// runtime can use them. Individual ONNX tests still report the existing unavailable skip.
-	if path := resolveOnnxLibPath(""); path != "" {
-		ort.SetSharedLibraryPath(path)
-	}
-	if err := ort.InitializeEnvironment(); err != nil {
-		fmt.Fprintf(os.Stderr, "ONNX model setup unavailable: %v\n", err)
-		return
-	}
-	// Leave initialization to the embedder so its once-only state and custom options stay valid.
-	if err := ort.DestroyEnvironment(); err != nil {
-		fmt.Fprintf(os.Stderr, "ONNX model setup cleanup failed: %v\n", err)
-		return
-	}
-	for i := range common.ModelRegistry {
-		model := &common.ModelRegistry[i]
-		if common.ModelDownloaded(model) {
-			continue
-		}
-		fmt.Printf("Downloading test model %s...\n", model.Name)
-		if err := common.DownloadModel(model, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", model.Name, err)
-		}
-	}
-}
 
 // testEmbedderForConfig creates an Embedder for a ModelConfig. Skips the test if the model
 // files are missing or ORT is unavailable.
-func testEmbedderForConfig(t *testing.T, cfg common.ModelConfig) Embedder {
+func testEmbedderForConfig(t testing.TB, cfg common.ModelConfig) Embedder {
 	t.Helper()
 
 	if !common.ModelDownloaded(&cfg.Model) {
@@ -53,7 +22,7 @@ func testEmbedderForConfig(t *testing.T, cfg common.ModelConfig) Embedder {
 
 	dir, err := common.ModelDir(cfg.Model.Name)
 	if err != nil {
-		t.Skipf("cannot determine model dir: %v", err)
+		t.Fatalf("cannot determine model dir: %v", err)
 	}
 
 	embedder, err := NewOnnxEmbedder(cfg, OnnxOptions{
@@ -62,9 +31,12 @@ func testEmbedderForConfig(t *testing.T, cfg common.ModelConfig) Embedder {
 		NumThreads:     2,
 		MaxConcurrency: 2,
 	})
-	if err != nil {
+	if errors.Is(err, ErrOnnxUnavailable) {
 		t.Skipf("ONNX embedder not available for %s (run gent setup onnx): %v",
 			cfg.ConfigName, err)
+	}
+	if !assert.NoError(t, err) {
+		t.FailNow()
 	}
 	return embedder
 }

@@ -4,6 +4,7 @@ package toolchain
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func testFusedSearcher(t *testing.T) *IndexToolSearcher {
 	}
 	dir, err := common.ModelDir(cfg.Model.Name)
 	if err != nil {
-		t.Skipf("cannot determine model dir: %v", err)
+		t.Fatalf("cannot determine model dir: %v", err)
 	}
 
 	embedder, err := search.NewOnnxEmbedder(cfg, search.OnnxOptions{
@@ -33,10 +34,13 @@ func testFusedSearcher(t *testing.T) *IndexToolSearcher {
 		NumThreads:     2,
 		MaxConcurrency: 2,
 	})
-	if err != nil {
+	if errors.Is(err, search.ErrOnnxUnavailable) {
 		t.Skipf("ONNX embedder not available (run gent setup onnx): %v", err)
 	}
-	t.Cleanup(func() { embedder.Close() })
+	if !assert.NoError(t, err) {
+		t.FailNow()
+	}
+	t.Cleanup(func() { assert.NoError(t, embedder.Close()) })
 
 	return NewFusedToolSearcher(embedder)
 }

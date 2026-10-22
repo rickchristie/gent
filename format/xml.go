@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/rickchristie/gent"
 )
+
+var xmlOpeningTag = regexp.MustCompile(`<(\w+)>`)
 
 // ErrAmbiguousTags is returned in strict mode when section tags appear inside other sections.
 var ErrAmbiguousTags = gent.ErrAmbiguousTags
@@ -100,6 +103,7 @@ var ErrUnclosedTag = gent.ErrUnclosedTag
 //	    WithToolChain(toolchain.NewYAML().RegisterTool(searchTool)).
 //	    WithTermination(termination.NewText("answer"))
 type XML struct {
+	mu            sync.RWMutex
 	sections      []gent.TextSection
 	knownSections map[string]string // lowercase key -> original name
 	strict        bool
@@ -117,6 +121,8 @@ func NewXML() *XML {
 // In strict mode, Parse returns an error if there are parsing ambiguities,
 // such as section tags appearing inside other sections' content.
 func (f *XML) WithStrict(strict bool) *XML {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.strict = strict
 	return f
 }
@@ -125,6 +131,8 @@ func (f *XML) WithStrict(strict bool) *XML {
 // If a section with the same name already exists, it is not added again.
 // Returns self for chaining.
 func (f *XML) RegisterSection(section gent.TextSection) gent.TextFormat {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	lowerName := strings.ToLower(section.Name())
 	if _, exists := f.knownSections[lowerName]; exists {
 		return f // Already registered
@@ -173,7 +181,10 @@ func (f *XML) formatSection(section gent.FormattedSection) string {
 // DescribeStructure generates the prompt explaining the output format structure.
 // It shows the tag format with each section's prompt instructions.
 func (f *XML) DescribeStructure() string {
-	if len(f.sections) == 0 {
+	f.mu.RLock()
+	sections := append([]gent.TextSection(nil), f.sections...)
+	f.mu.RUnlock()
+	if len(sections) == 0 {
 		return ""
 	}
 
@@ -181,7 +192,7 @@ func (f *XML) DescribeStructure() string {
 	sb.WriteString("Format your response using XML-style tags for each section:\n")
 	sb.WriteString("**CRITICAL!**: Your output MUST be valid XML with matched opening and closing tags.\n\n")
 
-	for _, section := range f.sections {
+	for _, section := range sections {
 		name := section.Name()
 		fmt.Fprintf(&sb, "<%s>\n", name)
 		fmt.Fprintf(&sb, "%s\n", section.Guidance())
@@ -212,6 +223,8 @@ func (f *XML) Parse(execCtx *gent.ExecutionContext, output string) (map[string][
 
 // doParse performs the actual parsing logic.
 func (f *XML) doParse(output string) (map[string][]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	result := make(map[string][]string)
 
 	// For each known section, find matches by pairing closing tags with their nearest
@@ -225,19 +238,18 @@ func (f *XML) doParse(output string) (map[string][]string, error) {
 		allRanges = append(allRanges, ranges...)
 	}
 
-	// If no known sections, try to find any XML-style tags
+	// Discover names locally. Use the same tag pairing rules without changing shared configuration.
 	if len(f.knownSections) == 0 {
-		pattern := `(?si)<(\w+)>(.*?)</\1>`
-		re := regexp.MustCompile(pattern)
-		matches := re.FindAllStringSubmatch(output, -1)
-
-		for _, match := range matches {
-			if len(match) >= 3 {
-				sectionName := strings.ToLower(match[1])
-				content := strings.TrimSpace(match[2])
-				result[sectionName] = append(result[sectionName], content)
-			}
+		names := map[string]string{}
+		for _, match := range xmlOpeningTag.FindAllStringSubmatch(output, -1) {
+			name := strings.ToLower(match[1])
+			names[name] = name
 		}
+		if len(names) == 0 {
+			return nil, gent.ErrNoSectionsFound
+		}
+		parser := XML{knownSections: names, strict: f.strict}
+		return parser.doParse(output)
 	}
 
 	// Check for unclosed tags — opening tags that appear outside all matched
@@ -280,9 +292,9 @@ func (f *XML) findUnclosedTags(
 ) []string {
 	var unclosed []string
 	for lowerName, originalName := range f.knownSections {
-		openPattern := fmt.Sprintf(`(?i)<%s>`, lowerName)
+		openPattern := fmt.Sprintf(`(?i)<%s>`, regexp.QuoteMeta(lowerName))
 		openRe := regexp.MustCompile(openPattern)
-		closePattern := fmt.Sprintf(`(?i)</%s>`, lowerName)
+		closePattern := fmt.Sprintf(`(?i)</%s>`, regexp.QuoteMeta(lowerName))
 		closeRe := regexp.MustCompile(closePattern)
 
 		opens := openRe.FindAllStringIndex(output, -1)
@@ -356,7 +368,7 @@ func (f *XML) findSectionMatches(
 	var ranges []sectionRange
 
 	// Find all closing tags
-	closePattern := fmt.Sprintf(`(?i)</%s>`, sectionName)
+	closePattern := fmt.Sprintf(`(?i)</%s>`, regexp.QuoteMeta(sectionName))
 	closeRe := regexp.MustCompile(closePattern)
 	closeMatches := closeRe.FindAllStringIndex(output, -1)
 
@@ -365,7 +377,7 @@ func (f *XML) findSectionMatches(
 	}
 
 	// Find all opening tags
-	openPattern := fmt.Sprintf(`(?i)<%s>`, sectionName)
+	openPattern := fmt.Sprintf(`(?i)<%s>`, regexp.QuoteMeta(sectionName))
 	openRe := regexp.MustCompile(openPattern)
 	openMatches := openRe.FindAllStringIndex(output, -1)
 
@@ -416,8 +428,8 @@ func (f *XML) validateNoAmbiguities(output string, result map[string][]string) e
 					continue
 				}
 				// Check if content contains another section's opening or closing tag
-				openPattern := fmt.Sprintf(`(?i)<%s>`, otherSection)
-				closePattern := fmt.Sprintf(`(?i)</%s>`, otherSection)
+				openPattern := fmt.Sprintf(`(?i)<%s>`, regexp.QuoteMeta(otherSection))
+				closePattern := fmt.Sprintf(`(?i)</%s>`, regexp.QuoteMeta(otherSection))
 				if matched, _ := regexp.MatchString(openPattern, content); matched {
 					return fmt.Errorf("%w: <%s> found inside <%s> content",
 						ErrAmbiguousTags, otherSection, sectionName)

@@ -5,12 +5,12 @@ package search
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"math"
 	"testing"
 
 	"github.com/rickchristie/gent/common"
 	"github.com/stretchr/testify/assert"
-	ort "github.com/yalue/onnxruntime_go"
 )
 
 //go:generate go run ./testdata/generate_quantized_matmul.go ./testdata/quantized_matmul.onnx
@@ -37,7 +37,7 @@ func TestOnnxEmbedder_QuantizedMatMul(t *testing.T) {
   "pre_tokenizer": {"type": "Whitespace"}
 }`),
 	})
-	if err != nil && !ort.IsInitialized() {
+	if errors.Is(err, ErrOnnxUnavailable) {
 		t.Skipf("ONNX Runtime unavailable (run gent setup onnx): %v", err)
 	}
 	if !assert.NoError(t, err) {

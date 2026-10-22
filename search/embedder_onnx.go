@@ -14,6 +14,7 @@ import (
 	"github.com/daulet/tokenizers"
 	"github.com/rickchristie/gent/common"
 	ort "github.com/yalue/onnxruntime_go"
+	"golang.org/x/sync/semaphore"
 )
 
 // onnxEmbedder implements [Embedder] using ONNX Runtime for inference and daulet/tokenizers
@@ -29,19 +30,23 @@ import (
 // L2 normalize. Prefixes are prepended internally based on whether EmbedQuery or
 // EmbedText is called.
 type onnxEmbedder struct {
-	tokenizer     *tokenizers.Tokenizer
-	modelData     []byte // kept alive for ONNX session lifetime
-	queryPrefix   string
-	passagePrefix string
-	maxSeqLen     int
-	hiddenDim     int // final output dimensionality (what Dimensions() returns)
-	modelDim      int // ONNX model's native hidden dim (for output tensor shape)
-	pooling       PoolingStrategy
-	inputNames    []string
-	outputName    string
-	postProcess   func([]float32) []float32
-	sem           chan struct{}
-	mu            sync.Mutex
+	tokenizer      *tokenizers.Tokenizer
+	queryPrefix    string
+	passagePrefix  string
+	maxSeqLen      int
+	hiddenDim      int // final output dimensionality (what Dimensions() returns)
+	modelDim       int // ONNX model's native hidden dim (for output tensor shape)
+	pooling        PoolingStrategy
+	inputNames     []string
+	outputName     string
+	postProcess    func([]float32) []float32
+	sem            *semaphore.Weighted
+	maxConcurrency int64
+	session        *ort.DynamicAdvancedSession
+	numThreads     int
+	mu             sync.RWMutex
+	closed         bool
+	closeErr       error
 }
 
 // ortInitOnce ensures ONNX Runtime environment is initialized exactly once.
@@ -67,6 +72,10 @@ func NewOnnxEmbedder(cfg common.ModelConfig, opts OnnxOptions) (Embedder, error)
 		opts.MaxConcurrency = 4
 	}
 
+	if opts.NumThreads < 1 || opts.MaxConcurrency < 1 {
+		return nil, errors.New("search: NumThreads and MaxConcurrency must be positive")
+	}
+
 	// Load model: file path takes precedence over raw bytes.
 	modelData, err := loadData(opts.ModelPath, opts.ModelData, "model")
 	if err != nil {
@@ -87,8 +96,8 @@ func NewOnnxEmbedder(cfg common.ModelConfig, opts OnnxOptions) (Embedder, error)
 		ortInitErr = ort.InitializeEnvironment()
 	})
 	if ortInitErr != nil {
-		return nil, fmt.Errorf("search: ONNX Runtime init failed: %w\n"+
-			"Run 'gent setup onnx' to install native libraries", ortInitErr)
+		return nil, onnxUnavailableError{fmt.Errorf("search: ONNX Runtime init failed: %w\n"+
+			"Run 'gent setup onnx' to install native libraries", ortInitErr)}
 	}
 
 	// Load tokenizer from bytes.
@@ -104,26 +113,32 @@ func NewOnnxEmbedder(cfg common.ModelConfig, opts OnnxOptions) (Embedder, error)
 	}
 
 	e := &onnxEmbedder{
-		tokenizer:     tk,
-		modelData:     modelData,
-		queryPrefix:   cfg.QueryPrefix,
-		passagePrefix: cfg.PassagePrefix,
-		maxSeqLen:     maxSeqLen,
-		hiddenDim:     cfg.Dimensions,
-		modelDim:      modelDim,
-		pooling:       cfg.Pooling,
-		inputNames:    cfg.InputNames,
-		outputName:    cfg.OutputName,
-		postProcess:   cfg.PostProcess,
-		sem:           make(chan struct{}, opts.MaxConcurrency),
+		tokenizer:      tk,
+		queryPrefix:    cfg.QueryPrefix,
+		passagePrefix:  cfg.PassagePrefix,
+		maxSeqLen:      maxSeqLen,
+		hiddenDim:      cfg.Dimensions,
+		modelDim:       modelDim,
+		pooling:        cfg.Pooling,
+		inputNames:     append([]string(nil), cfg.InputNames...),
+		outputName:     cfg.OutputName,
+		postProcess:    cfg.PostProcess,
+		sem:            semaphore.NewWeighted(int64(opts.MaxConcurrency)),
+		maxConcurrency: int64(opts.MaxConcurrency),
+		numThreads:     opts.NumThreads,
 	}
 
-	// Warm-up: run a dummy inference to trigger ONNX Runtime JIT compilation and memory
-	// allocation. The first inference call is 5-10x slower than subsequent calls — this
-	// prevents a latency spike on the first real user request.
+	// The CPU provider supports concurrent Run calls on one session. Each call owns its tensors
+	// and run options, so sharing the graph avoids extra model copies and native thread pools.
+	// https://github.com/microsoft/onnxruntime/discussions/10107
+	e.session, err = e.newSession(modelData)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("search: ONNX session creation failed: %w", err), e.Close())
+	}
+
+	// Keep the warm session alive. Later calls reuse the same optimized graph.
 	if _, err = e.embed(context.Background(), "warmup"); err != nil {
-		tk.Close()
-		return nil, fmt.Errorf("search: warm-up inference failed: %w", err)
+		return nil, errors.Join(fmt.Errorf("search: warm-up inference failed: %w", err), e.Close())
 	}
 
 	return e, nil
@@ -173,27 +188,116 @@ func (e *onnxEmbedder) MaxTokens() int  { return e.maxSeqLen }
 // TokenCount returns the number of tokens the text produces when tokenized. This only runs
 // the tokenizer (~12μs), not ONNX inference (~15-200ms).
 func (e *onnxEmbedder) TokenCount(text string) int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
+		return 0
+	}
 	ids, _ := e.tokenizer.Encode(text, true)
 	return len(ids)
 }
 
 func (e *onnxEmbedder) Close() error {
-	if e.tokenizer != nil {
-		e.tokenizer.Close()
+	// Take all inference permits before the lifetime lock. Later embeddings then wait on the
+	// context-aware semaphore, not on RLock behind a pending close. TokenCount still uses mu
+	// because it has no context or inference limit. Always acquire permits before mu.
+	if err := e.sem.Acquire(context.Background(), e.maxConcurrency); err != nil {
+		return err
 	}
-	return nil
+	defer e.sem.Release(e.maxConcurrency)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return e.closeErr
+	}
+	e.closed = true
+	e.tokenizer.Close()
+	if e.session != nil {
+		releaseOnnx(e.session, &e.closeErr)
+		e.session = nil
+	}
+	return e.closeErr
+}
+
+// releaseOnnx reports cleanup failures along with the original operation error.
+func releaseOnnx(value interface{ Destroy() error }, result *error) {
+	if err := value.Destroy(); err != nil {
+		*result = errors.Join(*result, fmt.Errorf("search: release ONNX resource: %w", err))
+	}
+}
+
+func (e *onnxEmbedder) newSession(
+	modelData []byte,
+) (session *ort.DynamicAdvancedSession, err error) {
+	options, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseOnnx(options, &err)
+	if err := options.SetIntraOpNumThreads(e.numThreads); err != nil {
+		return nil, err
+	}
+	// Stop spinning when no inference is active. Keep parallel kernels available during a run.
+	if err := options.AddSessionConfigEntry("session.force_spinning_stop", "1"); err != nil {
+		return nil, fmt.Errorf("search: stop idle ONNX threads: %w", err)
+	}
+	// Full-range INT8 weights can overflow ORT's U8S8 AVX2 kernels without VNNI. Preserve
+	// integer precision so reuse and thread settings do not change embeddings or rankings.
+	// https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html
+	if err := options.AddSessionConfigEntry("session.x64quantprecision", "1"); err != nil {
+		return nil, fmt.Errorf("search: enable ONNX quantization precision: %w", err)
+	}
+	// Default session loading copies model bytes; do not retain a second model in the Go heap.
+	return ort.NewDynamicAdvancedSessionWithONNXData(modelData, e.inputNames,
+		[]string{e.outputName}, options)
+}
+
+func runOnnx(ctx context.Context, session *ort.DynamicAdvancedSession,
+	inputs, outputs []ort.Value,
+) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if ctx.Done() == nil {
+		return session.Run(inputs, outputs)
+	}
+	options, err := ort.NewRunOptions()
+	if err != nil {
+		return err
+	}
+	defer releaseOnnx(options, &err)
+	stopped := make(chan error, 1)
+	stop := context.AfterFunc(ctx, func() { stopped <- options.Terminate() })
+	defer func() {
+		// Terminate must finish before its native run options can be released.
+		if !stop() {
+			err = errors.Join(err, <-stopped)
+		}
+	}()
+	err = session.RunWithOptions(inputs, outputs, options)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 // embed runs the full pipeline: tokenize → pad → inference → mean pool → L2 normalize.
 func (e *onnxEmbedder) embed(ctx context.Context, text string) (embedding []float32, err error) {
-	// Acquire semaphore.
-	select {
-	case e.sem <- struct{}{}:
-		defer func() { <-e.sem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
+	if err := e.sem.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer e.sem.Release(1)
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if e.closed {
+		return nil, errors.New("search: embedder is closed")
+	}
 	// Tokenize.
 	enc := e.tokenizer.EncodeWithOptions(text, true,
 		tokenizers.WithReturnAttentionMask(), tokenizers.WithReturnTypeIDs(),
@@ -227,27 +331,22 @@ func (e *onnxEmbedder) embed(ctx context.Context, text string) (embedding []floa
 	}
 
 	var inputs []ort.Value
-	var tensorsToDestroy []*ort.Tensor[int64]
+	defer func() {
+		for _, tensor := range inputs {
+			releaseOnnx(tensor, &err)
+		}
+	}()
 	for _, name := range e.inputNames {
 		create, ok := tensorMap[name]
 		if !ok {
 			return nil, fmt.Errorf("search: unknown input name %q", name)
 		}
-		tensor, err := create()
-		if err != nil {
-			for _, t := range tensorsToDestroy {
-				t.Destroy()
-			}
-			return nil, fmt.Errorf("search: %s tensor: %w", name, err)
+		tensor, createErr := create()
+		if createErr != nil {
+			return nil, fmt.Errorf("search: %s tensor: %w", name, createErr)
 		}
-		tensorsToDestroy = append(tensorsToDestroy, tensor)
 		inputs = append(inputs, tensor)
 	}
-	defer func() {
-		for _, t := range tensorsToDestroy {
-			t.Destroy()
-		}
-	}()
 
 	// Create output tensor. Shape: [1, seqLen, modelDim]. Uses the model's native hidden dim,
 	// not the final output dim (which may be smaller after PostProcess truncation).
@@ -256,37 +355,8 @@ func (e *onnxEmbedder) embed(ctx context.Context, text string) (embedding []floa
 	if err != nil {
 		return nil, fmt.Errorf("search: output tensor: %w", err)
 	}
-	defer outputTensor.Destroy()
-
-	sessionOptions, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, fmt.Errorf("search: ONNX session options: %w", err)
-	}
-	defer func() {
-		if destroyErr := sessionOptions.Destroy(); destroyErr != nil {
-			err = errors.Join(err, fmt.Errorf("search: destroy ONNX session options: %w", destroyErr))
-		}
-	}()
-
-	// Full-range INT8 weights can overflow ONNX Runtime's U8S8 AVX2 kernels on CPUs
-	// without VNNI, changing embeddings and search rankings. Let ORT convert affected
-	// weights to U8U8 without changing their values; it leaves unaffected CPUs alone.
-	// https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html
-	if err := sessionOptions.AddSessionConfigEntry("session.x64quantprecision", "1"); err != nil {
-		return nil, fmt.Errorf("search: enable ONNX quantization precision: %w", err)
-	}
-
-	// Run inference.
-	session, err := ort.NewAdvancedSessionWithONNXData(
-		e.modelData, e.inputNames, []string{e.outputName},
-		inputs, []ort.Value{outputTensor}, sessionOptions,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("search: ONNX session creation failed: %w", err)
-	}
-	defer session.Destroy()
-
-	if err := session.Run(); err != nil {
+	defer releaseOnnx(outputTensor, &err)
+	if err := runOnnx(ctx, e.session, inputs, []ort.Value{outputTensor}); err != nil {
 		return nil, fmt.Errorf("search: ONNX inference failed: %w", err)
 	}
 

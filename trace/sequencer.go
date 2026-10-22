@@ -316,13 +316,14 @@ func (s *liveSubscriber) close() {
 }
 
 func (s *liveSubscriber) discard() {
-	s.closeOnce.Do(func() {
-		if s.unbounded != nil {
-			s.unbounded.Discard()
-			return
-		}
-		close(s.bounded)
-	})
+	// A consumer can leave after graceful close has started draining.
+	if s.unbounded != nil {
+		s.unbounded.Discard()
+		return
+	}
+	s.close()
+	for range s.bounded {
+	}
 }
 
 func eventNumber(event *Event) uint64 {
