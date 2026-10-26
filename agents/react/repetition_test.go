@@ -28,23 +28,22 @@ func TestAgent_RepetitionDetection_Recovery(t *testing.T) {
 	}
 	loopingResponse := strings.Repeat(loopBlock, 5)
 
-	validResponse := "<thought>\nLet me try a different approach.\n</thought>\n" +
-		"<answer>\nThe issue has been resolved.\n</answer>"
+	validResponse := "Done."
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: loopingResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: validResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: validResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
 
 	agent := NewAgent(model).
 		WithRepetitionConfig(cfg).
-		WithToolChain(&mockToolChain{name: "action", guidance: "test"})
+		WithToolChain(newMockToolChain())
 
 	data := gent.NewBasicLoopData(&gent.Task{Text: "test task"})
 	execCtx := gent.NewExecutionContext(context.Background(), "repetition-test", data)
@@ -85,13 +84,13 @@ func TestAgent_RepetitionDetection_TerminateImmediately(t *testing.T) {
 	loopingResponse := strings.Repeat(loopBlock, 5)
 
 	model := newMockModel(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: loopingResponse}},
+		Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
 		Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 	})
 
 	agent := NewAgent(model).
 		WithRepetitionConfig(cfg).
-		WithToolChain(&mockToolChain{name: "action", guidance: "test"})
+		WithToolChain(newMockToolChain())
 
 	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
 	execCtx := gent.NewExecutionContext(context.Background(), "term-test", data)
@@ -114,26 +113,23 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 
 	// Call 1: loop detected (gauge -> 1)
 	// Call 2: valid tool call (gauge -> 0)
-	toolCallResponse := "<thought>\nLet me try.\n</thought>\n" +
-		"<action>\ntool_name: test_tool\nargs: {}\n</action>"
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: loopingResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: toolCallResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
+			Choices: []*gent.ContentChoice{{ToolCalls: []gent.ModelToolCall{
+				nativeTestCall("work", "test_tool", "{}"),
+			}}},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
 
 	tc := newMockToolChain()
-	tc.WithResults(&gent.ToolChainResult{
-		Results: []*gent.ToolCallResult{
-			{Text: "<observation>tool result</observation>"},
-		},
-	})
+	tc.RegisterTool(gent.NewToolFunc("test_tool", "Read a result", nil,
+		func(context.Context, map[string]any) (string, error) { return "tool result", nil }))
 
 	agent := NewAgent(model).WithRepetitionConfig(cfg).WithToolChain(tc)
 
@@ -177,22 +173,22 @@ func TestAgent_MaxResponseChars_TooLongButNotLooping(t *testing.T) {
 	}
 	longResponse := sb.String()
 
-	validResponse := "<thought>\nBe concise.\n</thought>\n<answer>\nDone.\n</answer>"
+	validResponse := "Done."
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: longResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: longResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 3000},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: validResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: validResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
 
 	agent := NewAgent(model).
 		WithMaxResponseChars(500). // Very low limit to trigger truncation.
-		WithToolChain(&mockToolChain{name: "action", guidance: "test"})
+		WithToolChain(newMockToolChain())
 
 	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
 	execCtx := gent.NewExecutionContext(context.Background(), "too-long-test", data)
@@ -233,15 +229,15 @@ func TestAgent_MaxResponseChars_TooLongAndLooping(t *testing.T) {
 	// check finds the repetition.
 	loopingResponse := strings.Repeat(loopBlock, 2) + strings.Repeat("padding text ", 10)
 
-	validResponse := "<thought>\nDifferent approach.\n</thought>\n<answer>\nResolved.\n</answer>"
+	validResponse := "Done."
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: loopingResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 200},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: validResponse}},
+			Choices: []*gent.ContentChoice{{CandidateContent: validResponse}},
 			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
@@ -249,7 +245,7 @@ func TestAgent_MaxResponseChars_TooLongAndLooping(t *testing.T) {
 	agent := NewAgent(model).
 		WithRepetitionConfig(cfg).
 		WithMaxResponseChars(len(loopingResponse) - 10). // Just under total, forces truncation.
-		WithToolChain(&mockToolChain{name: "action", guidance: "test"})
+		WithToolChain(newMockToolChain())
 
 	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
 	execCtx := gent.NewExecutionContext(context.Background(), "long-loop-test", data)

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type historyRecorder struct {
@@ -48,13 +47,13 @@ func TestOwnedHistoryAndSelectionChanges(t *testing.T) {
 	)
 	task.Text = "changed task"
 	original := &HistoryEntry{Origin: RecordOriginal, ExpireAfterIteration: 3,
-		Messages: []*MessageContent{{Role: llms.ChatMessageTypeHuman,
-			Parts: []ContentPart{llms.TextContent{Text: "original policy"}}}}}
+		Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
+			Parts: []ContentPart{TextContent{Text: "original policy"}}}}}
 	want := &HistoryEntry{Origin: RecordOriginal, ExpireAfterIteration: 3,
-		Messages: []*MessageContent{{Role: llms.ChatMessageTypeHuman,
-			Parts: []ContentPart{llms.TextContent{Text: "original policy"}}}}}
+		Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
+			Parts: []ContentPart{TextContent{Text: "original policy"}}}}}
 	assert.NoError(t, ctx.AppendRecord(original, true))
-	original.Messages[0].Parts[0] = llms.TextContent{Text: "edited policy"}
+	original.Messages[0].Parts[0] = TextContent{Text: "edited policy"}
 	assert.Equal(t, HistorySnapshot{}, ctx.History())
 	assert.NoError(t, ctx.CommitCheckpoint(PhaseInitial))
 	actualTask, err := ctx.Task()
@@ -63,7 +62,7 @@ func TestOwnedHistoryAndSelectionChanges(t *testing.T) {
 	records, err := ctx.Scratchpad()
 	assert.NoError(t, err)
 	assert.Equal(t, want, recordContent(records[0]))
-	records[0].Messages[0].Parts[0] = llms.TextContent{Text: "viewer changed value"}
+	records[0].Messages[0].Parts[0] = TextContent{Text: "viewer changed value"}
 	again, err := ctx.Scratchpad()
 	assert.NoError(t, err)
 	assert.Equal(t, want, recordContent(again[0]))

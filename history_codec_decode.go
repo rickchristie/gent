@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 func sortEncodedItems(items []encodedMapItem) {
@@ -32,8 +30,6 @@ func (r *CodecRegistry) resolveType(name string, depth int) (reflect.Type, error
 		return reflect.TypeFor[any](), nil
 	case "content":
 		return reflect.TypeFor[ContentPart](), nil
-	case "llms-content":
-		return reflect.TypeFor[llms.ContentPart](), nil
 	case "error-interface":
 		return reflect.TypeFor[error](), nil
 	}
@@ -117,8 +113,15 @@ func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, er
 		var saved EncodedValue
 		err := json.Unmarshal(value.Data, &saved)
 		return reflect.ValueOf(saved), err
-	case "raw-json":
-		return reflect.ValueOf(append(json.RawMessage(nil), value.Data...)), nil
+	case "raw-json-bytes":
+		var data []byte
+		if err := json.Unmarshal(value.Data, &data); err != nil {
+			return reflect.Value{}, err
+		}
+		if !json.Valid(data) {
+			return reflect.Value{}, errors.New("gent: invalid raw JSON")
+		}
+		return reflect.ValueOf(json.RawMessage(data)), nil
 	case "raw-json-nil":
 		if string(value.Data) != "null" {
 			return reflect.Value{}, errors.New("gent: invalid nil JSON encoding")

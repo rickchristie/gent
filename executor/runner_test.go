@@ -7,7 +7,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/executor"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestRunnerContinuesAcrossConstructorChange(t *testing.T) {
@@ -35,7 +34,7 @@ func TestRunnerContinuesAcrossConstructorChange(t *testing.T) {
 		return executor.NewRunner(loop, cfg)
 	}
 	want := expected{result: &gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
-		Output: []gent.ContentPart{llms.TextContent{Text: "saved task:2"}}},
+		Output: []gent.ContentPart{gent.TextContent{Text: "saved task:2"}}},
 		configured: 1, calls: 1, step: 2}
 	cases := []testCase{
 		{"generic executor to runner", input{old, current}, want},

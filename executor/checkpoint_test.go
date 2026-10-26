@@ -8,7 +8,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/executor"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type resumeLoop struct {
@@ -33,7 +32,7 @@ func (loop *resumeLoop) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopResult,
 	}
 	text := fmt.Sprintf("%s:%d", loop.task, loop.step)
 	return &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{llms.TextContent{Text: text}}}, nil
+		Result: []gent.ContentPart{gent.TextContent{Text: text}}}, nil
 }
 
 func (*resumeLoop) CheckpointType() string { return "test/resume-loop" }
@@ -91,7 +90,7 @@ func TestExecutorResume_ConfiguresBeforeRestoringState(t *testing.T) {
 		expected expected
 	}
 	result := &gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
-		Output: []gent.ContentPart{llms.TextContent{Text: "original task:2"}}}
+		Output: []gent.ContentPart{gent.TextContent{Text: "original task:2"}}}
 	cases := []testCase{
 		{"continue custom state", input{gent.PhaseIterationCompleted, "v1", false},
 			expected{1, 1, 2, result, nil}},

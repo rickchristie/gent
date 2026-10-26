@@ -7,32 +7,11 @@ import (
 
 	"github.com/rickchristie/gent"
 	agentutil "github.com/rickchristie/gent/agents"
-	"github.com/rickchristie/gent/toolchain"
-	"github.com/tmc/langchaingo/llms"
 )
 
-// NewNativeAgent uses native tool calls and plain final assistant content.
-// It shares execution, history, limits, and validation with NewAgent. The text constructor keeps
-// its existing defaults. Native mode uses TextFormat only to render prompts and tool results.
-func NewNativeAgent(model gent.Model) *Agent {
-	agent := NewAgent(model)
-	agent.nativeToolCalls = true
-	agent.toolChain = toolchain.NewJSON()
-	agent.systemPromptBuilder = NativeSystemPromptBuilder
-	return agent
-}
-
-func (r *Agent) nativeChain() (gent.NativeToolChain, error) {
-	chain, ok := r.toolChain.(gent.NativeToolChain)
-	if !ok {
-		return nil, fmt.Errorf("tool chain %T does not support native calls", r.toolChain)
-	}
-	return chain, nil
-}
-
-// NativeSystemPromptBuilder leaves call syntax to the model API. It does not require a thought
+// DefaultSystemPromptBuilder leaves call syntax to the model API. It does not require a thought
 // transcript or output sections. Custom builders and prompt hooks use the existing contract.
-func NativeSystemPromptBuilder(ctx SystemPromptContext) []gent.FormattedSection {
+func DefaultSystemPromptBuilder(ctx *SystemPromptContext) []gent.FormattedSection {
 	var sections []gent.FormattedSection
 	if ctx.BehaviorAndContext != "" {
 		sections = append(sections, gent.FormattedSection{
@@ -58,13 +37,13 @@ Give the final answer when you have enough information.`,
 	return sections
 }
 
-func (r *Agent) buildNativeMessages(ctx *gent.ExecutionContext) ([]llms.MessageContent, error) {
-	sections := r.systemPromptBuilder(SystemPromptContext{
+func (r *Agent) buildMessages(ctx *gent.ExecutionContext) ([]gent.ModelMessage, error) {
+	sections := r.systemPromptBuilder(&SystemPromptContext{
 		Format: r.format, BehaviorAndContext: r.behaviorAndContext,
 		CriticalRules: r.criticalRules, OutputPrompt: r.termination.Guidance(), Time: r.timeProvider,
 	})
 	event := ctx.PublishBeforeSystemPrompt(sections)
-	messages := []llms.MessageContent{llms.TextParts(llms.ChatMessageTypeSystem,
+	messages := []gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeSystem,
 		r.format.FormatSections(event.Sections))}
 	task, err := ctx.Task()
 	if err != nil {
@@ -73,8 +52,8 @@ func (r *Agent) buildNativeMessages(ctx *gent.ExecutionContext) ([]llms.MessageC
 	if task == nil || (task.Text == "" && len(task.Media) == 0) {
 		panic("task must have either text or media content")
 	}
-	messages = append(messages, llms.MessageContent{
-		Role: llms.ChatMessageTypeHuman, Parts: agentutil.ToLLMParts(task.AsContentParts()),
+	messages = append(messages, gent.ModelMessage{
+		Role: gent.ChatMessageTypeHuman, Parts: task.AsContentParts(),
 	})
 	records, err := ctx.Scratchpad()
 	if err != nil {
@@ -87,26 +66,26 @@ func (r *Agent) buildNativeMessages(ctx *gent.ExecutionContext) ([]llms.MessageC
 
 // The current provider adapters accept one ToolCallResponse per tool message. Keep media in
 // history with its result for deduplication, then send it after the complete tool response group.
-func nativeHistoryMessages(history []llms.MessageContent) []llms.MessageContent {
-	var messages []llms.MessageContent
-	var media []llms.ContentPart
+func nativeHistoryMessages(history []gent.ModelMessage) []gent.ModelMessage {
+	var messages []gent.ModelMessage
+	var media []gent.ContentPart
 	flushMedia := func() {
 		if len(media) > 0 {
-			messages = append(messages, llms.MessageContent{
-				Role: llms.ChatMessageTypeHuman, Parts: media,
+			messages = append(messages, gent.ModelMessage{
+				Role: gent.ChatMessageTypeHuman, Parts: media,
 			})
 			media = nil
 		}
 	}
 	for _, message := range history {
-		if message.Role != llms.ChatMessageTypeTool {
+		if message.Role != gent.ChatMessageTypeTool {
 			flushMedia()
 			messages = append(messages, message)
 			continue
 		}
 		if len(message.Parts) > 1 {
-			if call, ok := message.Parts[0].(llms.ToolCallResponse); ok {
-				media = append(media, llms.TextContent{Text: fmt.Sprintf(
+			if call, ok := message.Parts[0].(gent.ToolCallResponse); ok {
+				media = append(media, gent.TextContent{Text: fmt.Sprintf(
 					"Media from %s (call %s):", call.Name, call.ToolCallID)})
 				media = append(media, message.Parts[1:]...)
 				message.Parts = message.Parts[:1]
@@ -125,42 +104,37 @@ func (r *Agent) nextNative(
 		return r.nativeRetry(ctx, "", "The model returned no response. Please try again.")
 	}
 	choice := frame.Response.Choices[0]
-	if nativeResponseTruncated(choice.StopReason) {
-		return r.nativeRetry(ctx, choice.Content,
+	if choice.State() == gent.ModelIncomplete {
+		return r.nativeRetry(ctx, choice.CandidateContent,
 			"The response was incomplete. Use a shorter answer or fewer tool calls.")
+	}
+	if choice.State() == gent.ModelFailed {
+		return nil, fmt.Errorf("model stopped without a usable response: %q", choice.StopReason)
+	}
+	if choice.State() == gent.ModelContinue {
+		if choice.Continuation == nil {
+			return nil, fmt.Errorf("model continuation %q requires a lossless adapter", choice.StopReason)
+		}
+		if err := ctx.AppendRecord(r.answerEntry(choice, ""), true); err != nil {
+			return nil, err
+		}
+		return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 	}
 	if len(choice.ToolCalls) > 0 {
 		return r.nextNativeTools(ctx, frame, choice)
 	}
-	if choice.FuncCall != nil {
-		return nil, errors.New("native agents require ToolCalls, not the legacy FuncCall field")
-	}
-	return r.nextNativeAnswer(ctx, choice.Content)
-}
 
-// Adapters retain provider stop reasons. Check both Google API and SDK forms, and the
-// Anthropic context limit, before tool execution or answer validation can accept partial data.
-func nativeResponseTruncated(reason string) bool {
-	switch reason {
-	case "length", "max_tokens", "model_context_window_exceeded", "MAX_TOKENS",
-		"FinishReasonMaxTokens":
-		return true
-	default:
-		return false
-	}
+	return r.nextNativeAnswer(ctx, choice)
 }
 
 func (r *Agent) nextNativeTools(
 	ctx *gent.ExecutionContext, frame *iterationFrame, choice *gent.ContentChoice,
 ) (*gent.AgentLoopResult, error) {
-	chain, err := r.nativeChain()
-	if err != nil {
-		return nil, err
-	}
+	chain := r.toolChain
 	if !frame.ToolPlanActive {
 		if err := normalizeCallIDs(ctx, choice.ToolCalls); err != nil {
-			ctx.PublishParseError(gent.ParseErrorTypeToolchain, choice.Content, err)
-			return r.nativeRetry(ctx, choice.Content, err.Error())
+			ctx.PublishParseError(gent.ParseErrorTypeToolchain, choice.CandidateContent, err)
+			return r.nativeRetry(ctx, choice.CandidateContent, err.Error())
 		}
 	}
 	result, err := r.executeToolPlan(ctx, frame, func() (*gent.ToolPlan, error) {
@@ -180,7 +154,7 @@ func (r *Agent) nextNativeTools(
 			// A failed saved plan can contain effects. Keep it for explicit recovery.
 			return nil, err
 		}
-		return r.nativeRetry(ctx, choice.Content, err.Error())
+		return r.nativeRetry(ctx, choice.CandidateContent, err.Error())
 	}
 	entry := nativeToolEntry(choice, result)
 	if err := ctx.AppendRecord(entry, true); err != nil {
@@ -194,7 +168,7 @@ func (r *Agent) nextNativeTools(
 	return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: strings.Join(text, "\n")}, nil
 }
 
-func normalizeCallIDs(ctx *gent.ExecutionContext, calls []llms.ToolCall) error {
+func normalizeCallIDs(ctx *gent.ExecutionContext, calls []gent.ModelToolCall) error {
 	seen := map[string]bool{}
 	for i := range calls {
 		if calls[i].ID == "" {
@@ -214,9 +188,9 @@ func normalizeCallIDs(ctx *gent.ExecutionContext, calls []llms.ToolCall) error {
 func nativeToolEntry(
 	choice *gent.ContentChoice, result *gent.ToolChainResult,
 ) *gent.HistoryEntry {
-	ai := &gent.MessageContent{Role: llms.ChatMessageTypeAI}
-	if choice.Content != "" {
-		ai.Parts = append(ai.Parts, llms.TextContent{Text: choice.Content})
+	ai := &gent.MessageContent{Role: gent.ChatMessageTypeAI, Continuation: choice.Continuation}
+	if choice.CandidateContent != "" {
+		ai.Parts = append(ai.Parts, gent.TextContent{Text: choice.CandidateContent})
 	}
 	for _, call := range choice.ToolCalls {
 		ai.Parts = append(ai.Parts, call)
@@ -224,8 +198,8 @@ func nativeToolEntry(
 	entry := &gent.HistoryEntry{Messages: []*gent.MessageContent{ai}}
 	for i, call := range choice.ToolCalls {
 		output := result.Results[i]
-		message := &gent.MessageContent{Role: llms.ChatMessageTypeTool,
-			Parts: []gent.ContentPart{llms.ToolCallResponse{ToolCallID: call.ID,
+		message := &gent.MessageContent{Role: gent.ChatMessageTypeTool,
+			Parts: []gent.ContentPart{gent.ToolCallResponse{ToolCallID: call.ID,
 				Name: call.FunctionCall.Name, Content: output.Text}}}
 		message.Parts = append(message.Parts, output.Media...)
 		metadata := &gent.ToolChainResult{Results: []*gent.ToolCallResult{output}}
@@ -239,10 +213,11 @@ func nativeToolEntry(
 }
 
 func (r *Agent) nextNativeAnswer(
-	ctx *gent.ExecutionContext, content string,
+	ctx *gent.ExecutionContext, choice *gent.ContentChoice,
 ) (*gent.AgentLoopResult, error) {
+	content := choice.CandidateContent
 	if _, err := r.termination.ParseSection(ctx, content); err != nil {
-		return r.nativeFeedback(ctx, content, fmt.Sprintf("Invalid answer: %v", err))
+		return r.nativeFeedback(ctx, choice, fmt.Sprintf("Invalid answer: %v", err))
 	}
 	result := r.termination.ShouldTerminate(ctx, content)
 	if result.Error != nil {
@@ -251,14 +226,15 @@ func (r *Agent) nextNativeAnswer(
 	switch result.Status {
 	case gent.TerminationAnswerAccepted:
 		ctx.Stats().ResetGauge(gent.SGRepetitionLoopConsecutive)
-		if err := ctx.AppendRecord(r.buildIteration(content, ""), false); err != nil {
+		if err := ctx.AppendRecord(r.answerEntry(choice, ""), false); err != nil {
 			return nil, err
 		}
-		return &gent.AgentLoopResult{Action: gent.LATerminate, Result: result.Content}, nil
+		return &gent.AgentLoopResult{Action: gent.LATerminate, Result: result.Content,
+			ContentSource: choice.CandidateSource}, nil
 	case gent.TerminationAnswerRejected:
 		var feedback []string
 		for _, part := range result.Content {
-			if text, ok := part.(llms.TextContent); ok {
+			if text, ok := part.(gent.TextContent); ok {
 				feedback = append(feedback, text.Text)
 			}
 		}
@@ -266,19 +242,26 @@ func (r *Agent) nextNativeAnswer(
 		if message == "" {
 			message = "Answer validation failed. Please try again."
 		}
-		return r.nativeFeedback(ctx, content, message)
+		return r.nativeFeedback(ctx, choice, message)
 	default:
-		return r.nativeFeedback(ctx, content, "Use a tool or give a final answer.")
+		return r.nativeFeedback(ctx, choice, "Use a tool or give a final answer.")
 	}
 }
 
 func (r *Agent) nativeFeedback(
-	ctx *gent.ExecutionContext, content, feedback string,
+	ctx *gent.ExecutionContext, choice *gent.ContentChoice, feedback string,
 ) (*gent.AgentLoopResult, error) {
-	if err := ctx.AppendRecord(r.buildIteration(content, feedback), true); err != nil {
+	if err := ctx.AppendRecord(r.answerEntry(choice, feedback), true); err != nil {
 		return nil, err
 	}
 	return &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: feedback}, nil
+}
+
+// Answer feedback can cause another request. Keep the provider items for that turn too.
+func (r *Agent) answerEntry(choice *gent.ContentChoice, feedback string) *gent.HistoryEntry {
+	entry := r.buildIteration(choice.CandidateContent, feedback)
+	entry.Messages[0].Continuation = choice.Continuation
+	return entry
 }
 
 func (r *Agent) nativeRetry(
@@ -291,8 +274,8 @@ func (r *Agent) nativeRetry(
 		return nil, err
 	}
 	reminder := &gent.HistoryEntry{Origin: gent.RecordSystemInjected,
-		Messages: []*gent.MessageContent{{Role: llms.ChatMessageTypeHuman,
-			Parts: []gent.ContentPart{llms.TextContent{Text: feedback}}}}}
+		Messages: []*gent.MessageContent{{Role: gent.ChatMessageTypeHuman,
+			Parts: []gent.ContentPart{gent.TextContent{Text: feedback}}}}}
 	if err := ctx.AppendRecord(reminder, true); err != nil {
 		return nil, err
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type batchCollector struct{ batches []*gent.SaveBatch }
@@ -77,7 +76,13 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 	}
 	assert.NoError(t, ctx.CommitCheckpoint(gent.PhaseInitial))
 	for i := 0; i < 8; i++ {
-		assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{StreamId: "partial", Content: "x"}))
+		assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
+			StreamId: "partial", MetaContent: []*gent.MetaContent{
+				{
+					Type: gent.MetaContentIntermediary, Text: "x",
+				},
+			},
+		}))
 	}
 	bundle, err := ctx.Export()
 	assert.NoError(t, err)
@@ -105,7 +110,13 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 	}
 	assert.NoError(t, restored.FlushProgress())
 	assert.Equal(t, uint64(129), fresh.Snapshot().LastEventNumber)
-	assert.NoError(t, restored.EmitChunk(gent.StreamChunk{StreamId: "partial", Content: "y"}))
+	assert.NoError(t, restored.EmitChunk(gent.StreamChunk{
+		StreamId: "partial", MetaContent: []*gent.MetaContent{
+			{
+				Type: gent.MetaContentIntermediary, Text: "y",
+			},
+		},
+	}))
 	events, err := fresh.EventsAfter(129)
 	assert.NoError(t, err)
 	assert.Equal(t, StitchStatusGap, ValidateStitch(128, events).Status)
@@ -113,21 +124,27 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(130), reloaded.LastAppliedEventNumber)
 	assert.Equal(t, uint64(129), reloaded.Activity[128].EventNumber)
-	assert.NoError(t, restored.EmitChunk(gent.StreamChunk{StreamId: "partial", Content: "z"}))
+	assert.NoError(t, restored.EmitChunk(gent.StreamChunk{
+		StreamId: "partial", MetaContent: []*gent.MetaContent{
+			{
+				Type: gent.MetaContentIntermediary, Text: "z",
+			},
+		},
+	}))
 	events, err = fresh.EventsAfter(reloaded.LastAppliedEventNumber)
 	assert.NoError(t, err)
 	assert.Equal(t, StitchStatusOK, ValidateStitch(130, events).Status)
 	assert.Equal(t, uint64(131), events[0].EventNumber)
 	// Simulate a lost final publication: a periodic full read discovers completion without
 	// requiring another event to expose a gap.
-	output := []gent.ContentPart{llms.TextContent{Text: "saved answer"}}
+	output := []gent.ContentPart{gent.TextContent{Text: "saved answer"}}
 	restored.SetTermination(gent.TerminationSuccess, output, nil)
 	restored.PublishAfterExecution(gent.TerminationSuccess, nil)
 	assert.NoError(t, restored.CommitCheckpoint(gent.PhaseTerminal))
 	terminal, err := restored.Export()
 	assert.NoError(t, err)
 	assert.Equal(t, gent.PhaseTerminal, terminal.Checkpoint.Phase)
-	assert.Equal(t, uint64(132), terminal.LastAppliedEventNumber)
+	assert.Equal(t, uint64(133), terminal.LastAppliedEventNumber)
 	assert.NoError(t, gent.ValidateBundle(terminal))
 	late, err := RestoreSequencer(terminal, config)
 	assert.NoError(t, err)
@@ -143,11 +160,13 @@ func (m *interruptedProvider) GenerateContentStream(ctx context.Context, _ gent.
 ) {
 	stream := gent.NewStreamWithDuration()
 	go func() {
-		stream.SendContent("partial policy evidence")
+		stream.SendMeta(&gent.MetaContent{
+			Type: gent.MetaContentIntermediary, Text: "partial policy evidence",
+		})
 		close(m.started)
 		<-ctx.Done()
 		stream.Complete(&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{Content: "partial policy evidence"}},
+			Choices: []*gent.ContentChoice{{CandidateContent: "partial policy evidence"}},
 			Info:    &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
 		}, ctx.Err())
 	}()
@@ -161,7 +180,7 @@ func (m *completedProvider) GenerateContentStream(context.Context, gent.ModelCal
 ) {
 	m.calls++
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: "complete answer"}},
+		Choices: []*gent.ContentChoice{{CandidateContent: "complete answer"}},
 		Info:    &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
 	}, nil), nil
 }
@@ -182,8 +201,8 @@ func TestHistoryReplay_ModelAttemptsAndKnownUsage(t *testing.T) {
 	ctx.IncrementIteration()
 	ctx.PublishBeforeIteration()
 	assert.NoError(t, ctx.CommitCheckpoint(gent.PhaseIterationReady))
-	request := gent.NewModelCallRequest([]llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeHuman, "policy question"),
+	request := gent.NewModelCallRequest([]gent.ModelMessage{
+		gent.TextParts(gent.ChatMessageTypeHuman, "policy question"),
 	})
 	model := &interruptedProvider{started: make(chan struct{})}
 	stream, err := ctx.GenerateContentStream(model, gent.ModelCall{StreamId: "answer"}, request)
@@ -192,7 +211,8 @@ func TestHistoryReplay_ModelAttemptsAndKnownUsage(t *testing.T) {
 	}
 	<-model.started
 	chunk := <-stream.Chunks()
-	assert.Equal(t, "partial policy evidence", chunk.Content)
+	assert.Equal(t, "partial policy evidence",
+		gent.MetaText(chunk.MetaContent, gent.MetaContentIntermediary))
 	cancel()
 	for range stream.Chunks() {
 	}
@@ -230,8 +250,10 @@ func TestHistoryReplay_ModelAttemptsAndKnownUsage(t *testing.T) {
 		assert.NotEqual(t, first.AttemptId, second.AttemptId)
 		assert.NotEqual(t, StepStatusSucceeded, first.Status)
 		assert.Equal(t, StepStatusSucceeded, second.Status)
-		assert.Equal(t, "partial policy evidence", first.Stream.Content)
-		assert.Equal(t, "complete answer", second.Stream.Content)
+		assert.Equal(t, "partial policy evidence",
+			gent.MetaText(first.Stream.MetaContent, gent.MetaContentIntermediary))
+		assert.Equal(t, "complete answer",
+			gent.MetaText(second.Stream.MetaContent, gent.MetaContentIntermediary))
 	}
 	assert.Equal(t, 40, snapshot.Stats.TotalTokens)
 	assert.True(t, errors.Is(ctx.Context().Err(), context.Canceled))

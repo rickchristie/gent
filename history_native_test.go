@@ -9,7 +9,6 @@ import (
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type nativeRecoveryModel struct {
@@ -21,16 +20,16 @@ type nativeRecoveryModel struct {
 func (model *nativeRecoveryModel) GenerateContentStream(_ context.Context,
 	request gent.ModelCallRequest) (gent.Stream, error) {
 	model.requests = append(model.requests, request)
-	choice := &gent.ContentChoice{Content: "Policy P10 permits it."}
+	choice := &gent.ContentChoice{CandidateContent: "Policy P10 permits it."}
 	if !model.answer && len(model.requests) == 1 {
-		choice.Content = "Read the policy."
+		choice.CandidateContent = "Read the policy."
 		for _, id := range []string{"provider-a", "provider-b"} {
-			choice.ToolCalls = append(choice.ToolCalls, llms.ToolCall{ID: id, Type: "function",
-				FunctionCall: &llms.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}})
+			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: id, Type: "function",
+				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}})
 		}
 		if model.code {
-			choice.ToolCalls = []llms.ToolCall{{ID: "provider-code", Type: "function",
-				FunctionCall: &llms.FunctionCall{Name: "run_code",
+			choice.ToolCalls = []gent.ModelToolCall{{ID: "provider-code", Type: "function",
+				FunctionCall: &gent.FunctionCall{Name: "run_code",
 					Arguments: `{"code":"tool.call({tool:'policy',args:{id:'P10'}});"}`}}}
 		}
 	}
@@ -39,7 +38,7 @@ func (model *nativeRecoveryModel) GenerateContentStream(_ context.Context,
 }
 
 func newNativeRecoveryAgent(model *nativeRecoveryModel, calls *[]gent.ToolIdentity) *react.Agent {
-	chain := toolchain.NewJSON().RegisterTool(gent.NewToolFunc("policy", "Read the policy", nil,
+	chain := toolchain.New().RegisterTool(gent.NewToolFunc("policy", "Read the policy", nil,
 		func(ctx context.Context, input recoveryInput) (string, error) {
 			identity, _ := gent.ToolIdentityFromContext(ctx)
 			*calls = append(*calls, identity)
@@ -48,7 +47,7 @@ func newNativeRecoveryAgent(model *nativeRecoveryModel, calls *[]gent.ToolIdenti
 	if model.code {
 		chain = toolchain.NewJsToolChainWrapper(chain)
 	}
-	return react.NewNativeAgent(model).WithToolChain(chain).
+	return react.NewAgent(model).WithToolChain(chain).
 		WithRecoveryVersion("native-recovery/v1")
 }
 
@@ -71,7 +70,7 @@ func TestNativeHistory_Recovery(t *testing.T) {
 		{"saved response", input{event: "model_call_finished"}, expected{1, 1, 0, 2, nil}},
 		{"decision", input{phase: gent.PhaseDecisionReady}, expected{1, 1, 0, 2, nil}},
 		{"uncertain call", input{phase: gent.PhaseToolReady},
-			expected{1, 0, 0, 0, gent.ErrUncertainTool}},
+			expected{1, 1, 0, 0, nil}},
 		{"first result", input{phase: gent.PhaseToolCompleted}, expected{1, 1, 1, 1, nil}},
 		{"saved iteration", input{phase: gent.PhaseIterationCompleted}, expected{1, 1, 2, 0, nil}},
 	}
@@ -105,17 +104,21 @@ func TestNativeHistory_Recovery(t *testing.T) {
 			if test.expected.failure != nil {
 				assert.ErrorIs(t, err, test.expected.failure)
 			} else if assert.NoError(t, err) {
-				assert.Equal(t, []gent.ContentPart{llms.TextContent{Text: "Policy P10 permits it."}},
+				assert.Equal(t, []gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
 					result.Output)
 				assert.Equal(t, int64(40), restored.Stats().GetCounter(gent.SCTotalTokens))
-				assert.Equal(t, int64(2), restored.Stats().GetCounter(gent.SCToolCalls))
+				expectedCalls := int64(2)
+				if test.name == "uncertain call" {
+					expectedCalls = 1
+				}
+				assert.Equal(t, expectedCalls, restored.Stats().GetCounter(gent.SCToolCalls))
 				last := nextModel.requests[len(nextModel.requests)-1]
-				assert.Equal(t, llms.MessageContent{Role: llms.ChatMessageTypeAI,
-					Parts: []llms.ContentPart{llms.TextContent{Text: "Read the policy."},
-						llms.ToolCall{ID: "provider-a", Type: "function", FunctionCall: &llms.FunctionCall{
+				assert.Equal(t, gent.ModelMessage{Role: gent.ChatMessageTypeAI,
+					Parts: []gent.ContentPart{gent.TextContent{Text: "Read the policy."},
+						gent.ModelToolCall{ID: "provider-a", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "policy", Arguments: `{"id":"P10"}`,
 						}},
-						llms.ToolCall{ID: "provider-b", Type: "function", FunctionCall: &llms.FunctionCall{
+						gent.ModelToolCall{ID: "provider-b", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "policy", Arguments: `{"id":"P10"}`,
 						}}}},
 					last.Messages[2])
@@ -138,7 +141,7 @@ func TestNativeHistory_JavaScriptRecoveryBoundary(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"inside program", input{1}, expected{gent.ErrUnsupportedRecovery, 0}},
+		{"inside program", input{1}, expected{nil, 1}},
 		{"complete program", input{2}, expected{nil, 1}},
 	}
 	for _, test := range cases {
@@ -165,7 +168,7 @@ func TestNativeHistory_JavaScriptRecoveryBoundary(t *testing.T) {
 			if test.expected.failure != nil {
 				assert.ErrorIs(t, err, test.expected.failure)
 			} else if assert.NoError(t, err) {
-				assert.Equal(t, []gent.ContentPart{llms.TextContent{Text: "Policy P10 permits it."}},
+				assert.Equal(t, []gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
 					result.Output)
 			}
 			assert.Len(t, effects, 1)

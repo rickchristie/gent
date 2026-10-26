@@ -65,7 +65,7 @@ const (
 	// ParseErrorTypeFormat indicates TextFormat failed to parse LLM output into sections.
 	ParseErrorTypeFormat ParseErrorType = "format"
 
-	// ParseErrorTypeToolchain indicates ToolChain failed to parse the action section.
+	// ParseErrorTypeToolchain indicates ToolChain failed to decode native tool arguments.
 	ParseErrorTypeToolchain ParseErrorType = "toolchain"
 
 	// ParseErrorTypeTermination indicates Termination failed to parse the answer section.

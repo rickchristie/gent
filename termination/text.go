@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // Text implements [gent.Termination] for plain text answers.
@@ -122,7 +121,7 @@ func (t *Text) ShouldTerminate(
 			var feedback []gent.ContentPart
 			for _, section := range result.Feedback {
 				formatted := "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
-				feedback = append(feedback, llms.TextContent{Text: formatted})
+				feedback = append(feedback, gent.TextContent{Text: formatted})
 			}
 
 			return &gent.TerminationResult{
@@ -137,6 +136,6 @@ func (t *Text) ShouldTerminate(
 
 	return &gent.TerminationResult{
 		Status:  gent.TerminationAnswerAccepted,
-		Content: []gent.ContentPart{llms.TextContent{Text: trimmed}},
+		Content: []gent.ContentPart{gent.TextContent{Text: trimmed}},
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
+
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
@@ -35,9 +35,9 @@ func TestHelloGrok(t *testing.T) {
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"Hello Grok! Nice to meet you!",
 			),
 		}),
@@ -54,5 +54,5 @@ func TestHelloGrok(t *testing.T) {
 	}
 
 	assert.NotEmpty(t, response.Choices, "expected non-empty choices")
-	assert.NotEmpty(t, response.Choices[0].Content, "expected non-empty response content")
+	assert.NotEmpty(t, response.Choices[0].CandidateContent, "expected non-empty response content")
 }

@@ -166,7 +166,7 @@ type ValidationResult struct {
 //
 //	    return &TerminationResult{
 //	        Status:  TerminationAnswerAccepted,
-//	        Content: []ContentPart{llms.TextContent{Text: content}},
+//	        Content: []ContentPart{TextContent{Text: content}},
 //	    }
 //	}
 //

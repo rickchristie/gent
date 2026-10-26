@@ -69,7 +69,7 @@ try {
       await page.keyboard.press('Escape');
     }
   }
-  console.log('PASS all 47 contracts wrap, scroll, and retain their names on mobile and desktop');
+  console.log('PASS all 46 contracts wrap, scroll, and retain their names on mobile and desktop');
 
   await page.locator('#history-reset').click();
   const selected = () => page.locator('.history-entry.in-context .entry-id').allTextContents();

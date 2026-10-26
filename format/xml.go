@@ -33,24 +33,21 @@ var ErrUnclosedTag = gent.ErrUnclosedTag
 //
 // # Registering Sections
 //
-// Sections are typically registered automatically by the agent when you configure
-// toolchains and terminations. You can also register sections manually:
+// Register sections explicitly when using the parser in a custom text workflow:
 //
 //	textFormat := format.NewXML().
-//	    RegisterSection(toolchain).
-//	    RegisterSection(termination)
+//	    RegisterSection(section.NewText("notes")).
+//	    RegisterSection(section.NewText("answer"))
 //
 // # Example LLM Output
 //
-//	<thinking>
+//	<notes>
 //	I need to search for the weather in Tokyo to answer this question.
-//	</thinking>
+//	</notes>
 //
-//	<action>
-//	tool: search
-//	args:
-//	  query: weather in tokyo
-//	</action>
+//	<answer>
+//	The weather report says it is sunny.
+//	</answer>
 //
 // # Parsing Behavior
 //
@@ -58,22 +55,22 @@ var ErrUnclosedTag = gent.ErrUnclosedTag
 // during parsing but the original registered name is used in the result map:
 //
 //	sections, _ := textFormat.Parse(execCtx, llmOutput)
-//	// sections["thinking"] = ["I need to search..."]
-//	// sections["action"] = ["tool: search..."]
+//	// sections["notes"] = ["I need to search..."]
+//	// sections["answer"] = ["The weather report..."]
 //
 // # Handling Literal Tags in Content
 //
 // The parser correctly handles cases where the model mentions tag names literally:
 //
-//	<thinking>
+//	<notes>
 //	I should provide the answer in the <answer> section.
-//	</thinking>
+//	</notes>
 //	<answer>
 //	The weather is sunny.
 //	</answer>
 //
 // The parser pairs each closing tag with its nearest preceding opening tag,
-// correctly extracting both sections even when `<answer>` appears in thinking.
+// correctly extracting both sections even when `<answer>` appears in notes.
 //
 // # Strict Mode
 //
@@ -96,11 +93,11 @@ var ErrUnclosedTag = gent.ErrUnclosedTag
 //
 // # Using with Agent
 //
-// The agent handles format registration automatically:
+// The standard ReAct agent uses the format for prompts and tool results:
 //
 //	agent := react.NewAgent(model).
-//	    WithTextFormat(format.NewXML()).
-//	    WithToolChain(toolchain.NewYAML().RegisterTool(searchTool)).
+//	    WithFormat(format.NewXML()).
+//	    WithToolChain(toolchain.New().RegisterTool(searchTool)).
 //	    WithTermination(termination.NewText("answer"))
 type XML struct {
 	mu            sync.RWMutex

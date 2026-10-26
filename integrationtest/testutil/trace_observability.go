@@ -104,11 +104,8 @@ type traceStreamRenderer struct {
 	w     io.Writer
 	topic string
 
-	currentIter     int
-	lastChunkIter   int
-	iterHeaderShown bool
-	hasContent      bool
-	toolArgs        map[string]any
+	hasContent bool
+	toolArgs   map[string]any
 }
 
 func newTraceStreamRenderer(w io.Writer, topic string) *traceStreamRenderer {
@@ -127,8 +124,9 @@ func (r *traceStreamRenderer) Consume(events <-chan *genttrace.Event) {
 func (r *traceStreamRenderer) ConsumeEvent(event *genttrace.Event) {
 	switch event.Type {
 	case genttrace.EventTypeIterationStarted:
-		r.currentIter = event.Iteration
-		r.iterHeaderShown = false
+		// A model can return only tool calls. Show the heading even when no text follows.
+		r.finishContentLine()
+		fmt.Fprintf(r.w, "\n--- Iteration %d ---\n", event.Iteration)
 	case genttrace.EventTypeModelStreamChunk:
 		r.writeModelChunk(event)
 	case genttrace.EventTypeToolCallStarted:
@@ -150,44 +148,25 @@ func (r *traceStreamRenderer) writeModelChunk(event *genttrace.Event) {
 	}
 	payload := tracePayload(event)
 	content := traceString(payload, "content")
-	reasoning := traceString(payload, "reasoningContent")
-	if content == "" && reasoning == "" && event.Error == nil {
-		return
+	if items, ok := payload["metaContent"].([]any); ok {
+		for _, value := range items {
+			item, ok := value.(map[string]any)
+			if ok {
+				content += traceString(item, "text")
+			}
+		}
 	}
-	r.ensureChunkHeader(event)
 	if content != "" {
+		if !r.hasContent {
+			fmt.Fprint(r.w, "  LLM: ")
+		}
 		fmt.Fprint(r.w, content)
-		r.hasContent = true
-	}
-	if reasoning != "" {
-		fmt.Fprint(r.w, reasoning)
 		r.hasContent = true
 	}
 	if event.Error != nil {
 		r.finishContentLine()
 		fmt.Fprintf(r.w, "  [Stream Error: %s]\n", event.Error.Message)
 	}
-}
-
-func (r *traceStreamRenderer) ensureChunkHeader(event *genttrace.Event) {
-	iteration := event.Iteration
-	if iteration == 0 {
-		iteration = r.currentIter
-	}
-	if iteration == 0 {
-		return
-	}
-	if iteration == r.lastChunkIter && r.iterHeaderShown {
-		return
-	}
-	if r.hasContent {
-		fmt.Fprintln(r.w)
-		r.hasContent = false
-	}
-	fmt.Fprintf(r.w, "\n--- Iteration %d ---\n", iteration)
-	fmt.Fprint(r.w, "  LLM: ")
-	r.lastChunkIter = iteration
-	r.iterHeaderShown = true
 }
 
 func (r *traceStreamRenderer) captureToolArgs(event *genttrace.Event) {

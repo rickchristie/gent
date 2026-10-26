@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // JSON implements [gent.Termination] for structured JSON answers.
@@ -221,7 +220,7 @@ func (t *JSON[T]) ShouldTerminate(
 			var feedback []gent.ContentPart
 			for _, section := range validationResult.Feedback {
 				formatted := "<" + section.Name + ">\n" + section.Content + "\n</" + section.Name + ">"
-				feedback = append(feedback, llms.TextContent{Text: formatted})
+				feedback = append(feedback, gent.TextContent{Text: formatted})
 			}
 
 			return &gent.TerminationResult{
@@ -242,7 +241,7 @@ func (t *JSON[T]) ShouldTerminate(
 
 	return &gent.TerminationResult{
 		Status:  gent.TerminationAnswerAccepted,
-		Content: []gent.ContentPart{llms.TextContent{Text: string(formatted)}},
+		Content: []gent.ContentPart{gent.TextContent{Text: string(formatted)}},
 	}
 }
 

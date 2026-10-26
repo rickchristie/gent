@@ -27,8 +27,8 @@ func TestHistoryRecovery_UncertainTool(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"no recovery adapter", input{}, expected{gent.ErrUncertainTool, 0, 0}},
-		{"unresolved", input{gent.ToolRecoveryUnresolved}, expected{gent.ErrUncertainTool, 0, 0}},
+		{"no recovery adapter", input{}, expected{nil, 0, 1}},
+		{"unresolved", input{gent.ToolRecoveryUnresolved}, expected{nil, 0, 1}},
 		{"retry authorized", input{gent.ToolRecoveryRetryAllowed}, expected{nil, 2, 1}},
 		{"completed externally", input{gent.ToolRecoveryCompleted}, expected{nil, 1, 1}},
 	}
@@ -40,16 +40,16 @@ func TestHistoryRecovery_UncertainTool(t *testing.T) {
 			var calls []gent.ToolIdentity
 			agent := newRecoveryAgent(model, &calls)
 			bindings := recoveryBindings(t, agent)
-			var recovered gent.ToolRecoveryRequest
+			var recovered *gent.ToolRecoveryRequest
 			if test.input.decision != "" {
 				bindings.ToolRecovery = gent.ToolRecoveryFunc(func(_ context.Context,
-					request gent.ToolRecoveryRequest,
-				) (gent.ToolRecoveryResult, error) {
+					request *gent.ToolRecoveryRequest,
+				) (*gent.ToolRecoveryResult, error) {
 					recovered = request
 					input, err := bindings.Codecs.Decode(request.Input)
 					assert.NoError(t, err)
 					assert.Equal(t, recoveryInput{Id: "P10"}, input)
-					return gent.ToolRecoveryResult{Status: test.input.decision,
+					return &gent.ToolRecoveryResult{Status: test.input.decision,
 						Result: &gent.ToolCallResult{Name: "policy", Args: request.Args,
 							Input: input, Output: "P10: exact original text", SummaryCaptured: true,
 							Text: "<policy>P10: exact original text</policy>"}}, nil
@@ -160,8 +160,8 @@ func TestToolRecovery_ReusesEffectiveInput(t *testing.T) {
 		phase:  gent.PhaseToolReady,
 	}
 	var got []recoveryInput
-	newChain := func() *toolchain.YAML {
-		chain := toolchain.NewYAML()
+	newChain := func() *toolchain.Registry {
+		chain := toolchain.New()
 		chain.RegisterTool(gent.NewToolFunc("policy", "lookup", nil,
 			func(_ context.Context, input recoveryInput) (string, error) {
 				got = append(got, input)
@@ -174,9 +174,8 @@ func TestToolRecovery_ReusesEffectiveInput(t *testing.T) {
 	hook := &toolInputHook{value: "effective"}
 	ctx.SetEventPublisher(events.NewRegistry().Subscribe(hook))
 	chain := newChain()
-	plan, err := chain.Prepare(ctx, `- tool: policy
-  args:
-    id: original`)
+	plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{{Type: "function",
+		FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"original"}`}}})
 	assert.NoError(t, err)
 	_, err = chain.ExecuteNext(ctx, plan, format.NewXML())
 	assert.ErrorIs(t, err, context.Canceled)
@@ -188,10 +187,10 @@ func TestToolRecovery_ReusesEffectiveInput(t *testing.T) {
 	assert.NoError(t, freshChain.RegisterCodecs(codecs))
 	fresh, err := gent.RestoreExecutionContext(context.Background(), bundle, gent.RestoreBindings{
 		Codecs: codecs, ToolRecovery: gent.ToolRecoveryFunc(
-			func(context.Context, gent.ToolRecoveryRequest) (
-				gent.ToolRecoveryResult, error,
+			func(context.Context, *gent.ToolRecoveryRequest) (
+				*gent.ToolRecoveryResult, error,
 			) {
-				return gent.ToolRecoveryResult{Status: gent.ToolRecoveryRetryAllowed}, nil
+				return &gent.ToolRecoveryResult{Status: gent.ToolRecoveryRetryAllowed}, nil
 			},
 		),
 	})

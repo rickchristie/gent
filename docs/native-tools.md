@@ -1,233 +1,287 @@
-# Native tool calls
+# Native tools
 
-## Review after the history refactor
+Gent uses native tool calls throughout. `react.NewAgent` sends tool definitions through
+`gent.CallOptions.Tools`, executes structured calls, and validates plain final assistant content.
+There is no text action parser, fallback mode, or separate native agent constructor.
 
-Reviewed on 9 October 2026 at `ad01bf7`. The working tree was clean at the start of this work.
-The provider research is dated 8 October 2026. This review updates the Gent findings.
+## Why this contract
 
-The history refactor changed the implementation plan:
+The provider documentation checked on 24 October 2026 supports this choice:
 
-- `gent.Loop` removes the need for a generic agent type. Models receive a resolved request.
-- The normal ReAct stream path now returns the complete response, including native tool calls.
-  The earlier report that the normal path lost these calls is no longer correct.
-- `StreamAccumulator.ResponseWithInfo` builds a text-only response. ReAct uses it after an early
-  repetition or size stop. A partial response must not execute tools.
-- Requests, responses, tool results, and loop decisions now have saved history and checkpoints.
-- `ToolPlan` records the next call and its result. Native calls must use the same recovery path.
-- JSON, YAML, and search chains encoded a saved call as JSON and then parsed it again. Both text
-  and native calls now use shared execution of parsed calls. YAML normalizes its argument values
-  before it saves the plan, so nested dates still reach schema checks as JSON strings.
-- Result summaries are captured at execution time. Native messages must keep that evidence,
-  provider call IDs, instructions, and media when duplicate results are shortened.
-- An interrupted JavaScript program cannot safely restart without saved program state and
-  known external effects. That recovery limit remains in place.
-
-## What changed
-
-Use `react.NewNativeAgent(model)` for native tool calls. `react.NewAgent(model)` keeps its
-existing behavior. Both return `*react.Agent` and use the same executor, history, tool plans,
-statistics, limits, stream controls, and termination validators.
-
-| Decision | Current implementation |
+| Provider | Documented interface |
 | --- | --- |
-| Replace required thought text | Native prompts do not request a thought transcript. |
-| Replace response section parsing | Native mode reads `ToolCalls` and final `Content`. |
-| Replace the tool catalog in the system prompt | Native definitions come from the tool registry. |
-| Replace code envelopes | Native `run_code({code: ...})` calls the local JavaScript runtime. |
-| Keep execution controls | Typed inputs, schema checks, hooks, limits, and errors share one path. |
-| Keep local search | Search selects definitions for the next request from active history. |
-| Keep local PTC | Sobek, the tool bridge, logs, media, timeouts, and tool statistics remain. |
-| Keep history and recovery | Native and text calls use saved `ToolPlan` decisions. |
-| Keep answer checks | Text/JSON termination and business validators still run. |
+| [OpenAI][openai] | Function definitions, call IDs, arguments, and tool results. |
+| [Grok][grok] | Native function calls, including Responses API calls. |
+| [Anthropic][anthropic] | Tool definitions and `tool_use` / `tool_result` blocks. |
+| [DeepSeek][deepseek] | Structured tool calls in thinking and non-thinking modes. |
+| [Qwen][qwen] | Function calling through supported serving APIs and model templates. |
 
-No methods were added to the required `Model` or `ToolChain` contracts. The optional
-`gent.NativeToolChain` interface exposes definitions, prepares calls, and executes the next
-saved call. JSON, YAML, SearchJSON, and JsToolChainWrapper implement it. A custom chain must
-implement this interface to use `NewNativeAgent`. The native agent reports unsupported chains;
-it does not silently switch to a text protocol.
+[openai]: https://developers.openai.com/api/docs/guides/function-calling
+[grok]: https://docs.x.ai/developers/tools/function-calling
+[anthropic]: https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview
+[deepseek]: https://api-docs.deepseek.com/guides/tool_calls/
+[qwen]: https://qwen.readthedocs.io/en/latest/framework/function_call.html
 
-Text formats still render prompts and tool results in native mode. Their response parsers and
-`WithThinking` sections are not used. Existing text callers keep their formats, sections, and
-custom prompts. These interfaces remain in use, so removing them would break those callers.
+These interfaces support a native-only application contract. They do not prove that every model,
+server, or template supports every tool feature. Open-weight models can still emit special text
+that their serving layer parses. Gent requires the serving layer to expose structured calls.
+Provider support also does not imply identical schemas, reasoning fields, or replay rules.
 
-## Direct calls
+## Models and saved provider state
 
 ```go
-agent := react.NewNativeAgent(model).
-    RegisterTool(lookupOrder).
-    WithBehaviorAndContext("You are a customer support agent.")
+model := models.NewOpenAI(apiKey, modelName)
+// Or: model := models.NewGrok(apiKey, modelName)
+agent := react.NewAgent(model).WithRecoveryVersion("support/v1")
 ```
 
-A request has `Options.Tools` with the active definitions. The model response has
-`ContentChoice.ToolCalls`. Gent decodes each argument object, checks the registered schema,
-converts it to the tool's Go input, runs hooks, and executes it through the saved plan.
-The next request has the assistant calls and one `ToolCallResponse` for each call.
+Both constructors use the streaming Responses API. Gent saves the exact ordered output items in
+`ProviderContinuation`, including opaque reasoning data. The next request replays these items with
+the matching function outputs. Requests use `store: false`; saved runs do not depend on a provider
+retaining the original response. Both adapters request encrypted reasoning content.
+Grok's [stateless history guidance][grok-history] also requires replaying these opaque items.
 
-Compaction includes native call IDs, names, arguments, and result text in the summary request.
-This keeps tool evidence available when a turn has no assistant text. Summaries select new active
-history; the original structured calls and results remain in saved history. Images and other
-media keep the existing compaction rule: pin the entry if the next model needs that media.
+[grok-history]: https://docs.x.ai/developers/model-capabilities/text/generate-text
 
-Provider IDs pair messages on the wire. Gent IDs identify durable tool effects. They stay
-separate. Missing provider IDs receive stable replacements in the saved decision. Duplicate
-IDs and malformed argument objects cause retry feedback before any call in that group runs.
+`models.NewResponses` accepts an endpoint and optional HTTP client. Its provider name identifies
+compatible continuation data. Replay through a different provider returns an error. Unsupported
+content and options also return errors; the adapter must not silently discard required data.
+Temperature and top-p use optional pointers, so zero differs from omission.
+Each managed call copies its request before mutable hooks run. A hook can change sampling values,
+tool definitions, and messages without changing settings used by another run.
 
-Tool calls take priority over text in the same response. Final assistant content goes to the
-configured termination handler. A JSON handler still parses and validates the answer and can
-reject it with feedback. This is application validation, not provider schema enforcement.
+Responses metadata merges `thinking_config` with `responses.reasoning`. Fields such as reasoning
+effort and summary can be set together. An explicit field in `responses.reasoning` overrides the
+same field from `thinking_config`. The final choice exposes provider-visible summaries through
+`MetaContent` entries with type `reasoning`. Opaque and encrypted items remain unchanged in
+`ProviderContinuation`.
 
-Tool definitions come from the registered chain. `WithCallOptions` still configures model
-options, but its `Tools` list is replaced by the active registry. Request hooks can modify the
-resolved request. Configure chains before execution, as with the existing text path.
+`models.NewLCGWrapper` remains available for lossless LangChainGo conversions. It rejects opaque
+continuation items and reasoning-plus-tool responses that it cannot replay. The existing Anthropic
+adapter repairs still preserve text and ordinary tool blocks. This does not certify signed thinking
+replay for Anthropic, DeepSeek reasoning replay, or every Qwen server. Use a provider adapter that
+preserves the required fields before enabling those features.
 
-## Local search, step by step
+## Reasoning, commentary, and answers
+
+Gent separates provider candidates from accepted execution output:
+
+| Value | Meaning |
+| --- | --- |
+| `ContentChoice.CandidateContent` | Provider text that the agent must check. |
+| `MetaContent{Type: "intermediary"}` | Ordinary text whose role is not yet certain. |
+| `MetaContent{Type: "reasoning"}` | Visible reasoning or a visible reasoning summary. |
+| `MetaContent{Type: "commentary"}` | An assistant update with an explicit provider label. |
+| `StreamChunk.Content` | The complete accepted answer, published once at terminal acceptance. |
+
+`MetaContent` is an ordered slice of pointers. Its `Type` is a string. Constants cover the three
+known types; unknown provider labels remain metadata. `Text` is display text. `MessageId` identifies
+its message. Encrypted or signed continuation data must not be used as display text.
+
+The Responses adapter uses the assistant message `phase` from `response.output_item.added` for text
+deltas. Both unlabelled text and `final_answer` stream as `intermediary`: a provider cannot know
+whether an application validator will accept the answer. Unknown phases remain metadata and do not
+become answer candidates. Only the last assistant message can supply a candidate. Earlier messages
+remain previews. Raw items retain their phases for provider replay.
+See [OpenAI's phase contract][openai-phase].
+
+[openai-phase]: https://developers.openai.com/api/docs/guides/reasoning#phase-parameter
+
+A provider completion ends one request. ReAct checks the stop reason, executes native calls, and
+passes a candidate with no tool calls to the termination handler and validator. Truncated responses
+retry. A provider continuation such as `pause_turn` requires lossless continuation data and another
+request. Unknown or failed completion states return an error. Commentary alone continues the loop.
+
+Anthropic's wire-level `content` is an array of typed blocks. The LangChainGo adapter maps visible
+thinking to reasoning metadata and ordinary text to intermediary metadata. Literal `<thinking>`
+tags remain ordinary text. Signed thinking replay still has the adapter limits stated above.
+The final LangChainGo response keeps callback order and adds text that appears only in final SDK
+fields. A matching streamed prefix is not repeated. The position of final-only text is unknown,
+so it follows the streamed entries. If a final field differs, both versions remain as evidence.
+
+### Frontend and storage contract
+
+Use `ExecutionContext.SubscribeAll()` for accepted live chunks, or `RecordedEventObserver` for
+accepted events. The same stream carries provisional metadata and the accepted answer. The provider
+`Stream` carries provisional chunks and a candidate response; it never accepts an execution answer.
+
+1. Append each metadata delta to the preview identified by its `MessageId` and type. Keep entry
+order.
+2. On `execution_content`, replace the final answer with `Content`. This is a full text snapshot.
+   Hide or replace previews whose IDs occur in `SourceMessageIds`. Other updates can remain visible.
+3. Identify an answer by its `ContextId` and final `MessageId`. Child contexts have separate
+answers.
+4. Deduplicate delivery by `(RunId, EventNumber)`. On reconnect, decode saved events with
+   `CodecRegistry.DecodeEvent`, which fills these cursor fields from the accepted envelope.
+
+For example, a model can stream ` { "status" : "done" } ` as intermediary text. If the JSON
+termination handler accepts it, the final event contains `{"status":"done"}`. The final snapshot
+uses the actual termination result, so it can differ from the preview. A frontend must replace it,
+not append it. This sends the final text twice over the display transport, with no extra model call,
+model tokens, or history message.
+
+Each managed provider request scopes local message IDs to a new physical call. A retry gets new
+IDs, including when it uses the same logical call ID in the same worker. Saved replay keeps the
+original IDs. IDs are opaque; do not parse their format. Adapters with multiple messages must give
+them distinct local IDs and set `CandidateSource.MessageIds` for the selected candidate. A single
+message adapter can omit both. A custom loop can return `AgentLoopResult.ContentSource`; it is
+optional for output that does not come from a model. A custom caller of `EmitChunk` must supply
+its own message IDs. It can emit metadata but cannot publish `Content` through that method.
+
+The executor saves the final event with the successful terminal checkpoint before any recorded
+observer or stream subscriber receives it. A child saves its final event with its runtime evidence;
+that save does not move the parent's control checkpoint. Failed saves do not publish the final
+answer. A lost acknowledgment is reconciled with `RetrySave`, then restored from saved evidence.
+Restoring a terminal run returns its saved result without another model request or another final
+event. Reconnect replays the existing event. Delivery can repeat; the logical answer does not.
+
+Failed, canceled, limited, truncated, or rejected attempts do not publish final `Content`. A custom
+successful result with no text still has a final event and `MessageId`, with empty `Content`.
+Opaque state, tools, and media retain their structured representations.
+
+Trace snapshots retain provisional entries in `ModelStream.MetaContent` and the accepted text in
+`Context.Content`. `MaxMetaContentBytes` bounds total retained metadata per model call;
+`MaxContentBytes` bounds accepted text per context. `IncludeChunkText` controls metadata, and
+`IncludeRunOutput` controls final text. The chunk redactor applies to both; the run-output redactor
+also applies to final text. A non-text replacement from that redactor hides the final text.
+
+`StreamAccumulator` keeps metadata separate from `Content`; use one accumulator per context.
+Stream helpers copy responses and metadata. Provider metadata uses built-in wire types such as
+maps, slices, scalars, time values, and raw JSON. Convert SDK objects to these types before completion.
+Provider callback options such as `WithStreamingFunc` expose raw intermediary deltas before Gent's
+save barrier. Use accepted events or context subscriptions for database and WebSocket delivery.
+
+## ToolChain contract
+
+`ToolChain` requires native definitions, preparation, step execution, recovery guidance, codec
+registration, and compatibility configuration. All built-in chains implement the same contract:
+
+- `toolchain.New()` creates a `Registry` of typed tools.
+- `toolchain.NewSearch(...)` creates a `SearchChain` with dynamic definitions.
+- `toolchain.NewJsToolChainWrapper(chain)` adds local JavaScript execution.
+
+Preparation decodes native JSON arguments and saves distinct logical call IDs. Execution validates
+schemas, converts typed inputs, runs before-tool hooks, saves effective input before an effect, and
+saves results before the next step. Events, limits, summaries, instructions, and media use this
+path.
+Provider call IDs pair API messages. Gent call IDs identify operations across worker attempts.
+
+Custom chains can embed the registry and override selection:
 
 ```go
-chain := toolchain.NewSearchJSON(toolchain.SearchHintDomainCategories).
-    RegisterEngine(toolchain.NewBM25ToolSearcher())
-chain.RegisterTool(lookupOrder) // Must also implement gent.IndexableTool.
+type SelectedTools struct {
+    *toolchain.Registry
+    Select func(*gent.ExecutionContext, []gent.ToolDefinition) ([]gent.ToolDefinition, error)
+}
+
+func (c *SelectedTools) NativeTools(ctx *gent.ExecutionContext) ([]gent.ToolDefinition, error) {
+    tools, err := c.Registry.NativeTools(ctx)
+    if err != nil {
+        return nil, err
+    }
+    return c.Select(ctx, tools)
+}
+```
+
+This retains shared execution, hooks, and recovery. A selection callback changes visibility;
+application access checks must still control permission to execute. Include declarative settings
+in `RecoveryConfig`, identify callback behavior with the agent's `WithRecoveryVersion`, and save
+mutable run state through `ExecutionContext.SetCheckpointState`. Configure chains before concurrent
+use. Register each chain's types before decoding saved runs.
+
+## Search
+
+```go
+chain := toolchain.NewSearch(toolchain.SearchHintDomainCategories).
+    RegisterEngine(toolchain.NewRegexToolSearcher())
+chain.RegisterTool(lookupOrder) // Also implements gent.IndexableTool.
+chain.Pin("lookup_order")      // Optional.
 if err := chain.Initialize(); err != nil {
     return err
 }
-agent := react.NewNativeAgent(model).WithToolChain(chain)
+agent := react.NewAgent(model).WithToolChain(chain)
 ```
 
-1. The first request contains `tool_registry_search` and any pinned tools. It includes a short
-   registry hint and the search engine guidance. It does not include all business schemas.
-2. The model calls the search function. Gent runs the registered local search engine.
-3. The result records `DiscoveredTools`. In `Search` mode, these are the tools on that page.
-4. Gent adds those definitions to `Options.Tools` in the next model request.
-5. The model can now call a discovered tool with its native argument schema.
+The first request contains search tools and pinned tools. In `Search` mode, a successful search
+records the full definitions it returned as `DiscoveredTools`. The next request includes those
+definitions. `SearchGet` returns brief search results and exposes a separate `get_tool_schema` call;
+only a successful schema lookup adds that definition.
 
-`SearchGet` returns brief search results first. Only a successful `get_tool_schema` call makes
-that tool's definition available. Pagination, multiple engines, policies, output schemas, and
-pinned tools retain their current behavior.
+Discovery comes from active history, including results inside JavaScript. Saved runs retain it.
+Expiry and compaction can remove discovery from the active context, after which the model can search
+again. Runs do not share mutable discovery state. Search controls context size, not access rights.
 
-Discovery is derived from active history, including search calls inside JavaScript. Separate
-runs do not share mutable discovery state. When compaction or expiry removes the discovery
-entry from active history, the definition leaves later requests. The model can search again.
-Search controls prompt size; it is not an authorization boundary. Registered tool execution
-and application access checks remain responsible for authorization.
-
-## Local programmatic tool calling
+## Programmatic tool calling
 
 ```go
-chain := toolchain.NewJsToolChainWrapper(toolchain.NewJSON().RegisterTool(lookupOrder))
-agent := react.NewNativeAgent(model).WithToolChain(chain)
+chain := toolchain.NewJsToolChainWrapper(toolchain.New().RegisterTool(lookupOrder))
+agent := react.NewAgent(model).WithToolChain(chain)
 ```
 
-The model calls the native `run_code` function with a `code` string. For example:
+The native `run_code` tool accepts `{ "code": "..." }`. Its description teaches `tool.call`,
+`tool.parallelCall`, error checks, and return values. Direct mode exposes the business definitions
+beside `run_code`. `WithDirectCallDisabled()` exposes only `run_code` and includes the currently
+available function definitions in its description. Input schemas and output schemas tell the model
+which fields to pass and which returned fields to read.
 
 ```javascript
 (function() {
   const order = tool.call({tool: "lookup_order", args: {order_id: "ORD-123"}});
   if (order.error) return;
-  console.log(order.output.status);
+  tool.call({tool: "read_shipment", args: {shipment_id: order.output.shipment_id}});
 })();
 ```
 
-Gent runs the code locally. It does not enable a provider-hosted runtime or a provider PTC
-service. The inner calls use the existing tool bridge, schema checks, hooks, limits, and
-recovery evidence. Model inference and your server resources still have their normal costs.
+The runtime runs on the application's server. It does not use a provider-hosted code service.
+Inner calls use the same native preparation and execution path. Search inside a program updates
+later tool definitions. Each program increments code statistics; its inner calls increment tool
+statistics. `run_code` does not add an extra business-tool count.
 
-The default mode exposes direct tools and `run_code`. `WithDirectCallDisabled()` exposes only
-`run_code` and places the currently available tool definitions in its description. It rejects
-direct native calls. A SearchJSON chain can be wrapped in the same way.
+## Recovery guidance
 
-`run_code` is reserved in a native JavaScript wrapper. Existing JavaScript options, custom code
-instructions, console output, complete call logs, and media remain available. The program
-increments code statistics; inner business/search calls increment tool statistics. The
-wrapper does not add an extra business-tool count for `run_code`.
+```go
+chain.RegisterTool(bookFlight, gent.WithRecoveryMessage(func(info *gent.RecoveryInfo) string {
+    return "Check the booking service with the saved request ID before booking again."
+}))
+program := toolchain.NewJsToolChainWrapper(chain).
+    WithRecoveryMessage(func(info *gent.RecoveryInfo) string {
+        return "Keep completed results. Resolve uncertain bookings before making a new plan."
+    })
+```
 
-A completed program result can be recovered without repeating its effects. An interruption
-inside a program still returns `ErrUnsupportedRecovery` when a worker tries to restore it.
-Direct calls keep normal per-tool recovery. Use `WithRecoveryVersion` as described in
-[history and recovery](history.md). Changing between text and native mode changes compatibility.
+`RecoveryMessageProvider` is `func(*RecoveryInfo) string`. Gent supplies a non-nil owned snapshot.
+It includes stable IDs, the prior attempt, raw arguments, and effective typed input. Program
+recovery also supplies the script, completed inner results, and uncertain inner calls. Callbacks
+produce guidance. Use the separate context-aware `ToolRecoveryFunc` for external reconciliation
+that can fail.
 
-## Adapter repairs and limits
+Recovery first uses saved results, then an optional `ToolRecovery` decision. An unresolved operation
+produces an explicit `unknown` outcome with standard facts and custom guidance. Later unstarted
+calls in that batch receive `not_started` results. The next model request can make a new plan.
+A normal known error remains distinct from an unknown outcome.
 
-The installed LangChainGo v0.1.14 Anthropic adapter exposes content blocks as separate choices
-and reads only the first part of an assistant message. `LCGWrapper` now merges those response
-blocks and splits outgoing assistant parts for that concrete adapter. The Messages API combines
-[consecutive messages with the same role](https://platform.claude.com/docs/en/api/messages/create).
-This keeps text plus multiple tool calls in one logical Gent turn. Other adapters retain their
-choice semantics. A custom wrapper around an Anthropic client must preserve these semantics too.
+An interrupted program never restarts its script or restores a JavaScript stack. Gent returns the
+saved completed and uncertain inner results through the original `run_code` call ID. It saves this
+transition before another model request. If the save acknowledgment is lost, a new worker reuses the
+accepted result without repeating the callback or effects.
 
-Current OpenAI and Anthropic adapters do not accept media beside a tool response part. Gent keeps
-media with its saved result, then sends a separate user message after the complete tool-result
-group. Each media group names its source tool and provider call ID. Duplicate-result processing
-retains the IDs and removes media only when that result is abbreviated.
+The application recorder must check its worker lease in each atomic save. A rejected save stops an
+old worker before it can start another call. An already running external effect can still finish.
+Gent supplies evidence and hooks; the application owns duplicate-effect policy and reconciliation.
+See [history and recovery](history.md) for storage and compatibility rules.
 
-The response-size and repetition checks also inspect completed content and tool arguments that
-were absent from display chunks. A size stop, repetition stop, or incomplete native response
-cannot execute its tool calls. Search now also checks cancellation after its before-tool hook,
-so a cancelled call cannot start an external effect.
+## Tests
 
-The native agent also rejects incomplete final answers. It handles `length`, `max_tokens`,
-`model_context_window_exceeded`, `MAX_TOKENS`, and the Google SDK form `FinishReasonMaxTokens`
-before it executes tools or validates an answer. The context-window stop reason is incomplete
-even when its text or tool arguments can be parsed.
+Unit and fixture tests cover typed calls, provider IDs, output schemas, hooks, limits, dynamic
+search, dependent JavaScript calls, saved provider items, cancellation, and fresh-worker recovery.
+Recovery cases include interruption before an effect, an effect with a lost result, partial program
+completion, lost recovery acknowledgments, and worker takeover.
 
-The model adapter must return complete native calls in `ToolCalls`. The old `FuncCall` field
-alone is not the native contract. This work does not certify every model or serving template.
-Use the same task and tool tests when changing providers or local models.
-
-## Deferred: Strengthen
-
-This change does not add strict provider output schemas, reasoning-effort controls, a capability
-registry, tool-argument stream events, or replay of opaque provider state. Reasoning text that
-the current adapter supplies remains in stream events and recorded model responses. It is not
-inserted into the conversation as a required thought transcript.
-
-Signed thinking blocks and other opaque continuation items need a richer adapter contract.
-Do not assume that enabling an extended-thinking provider option makes native multi-turn tool
-use correct with the current common message types. That support remains part of Strengthen.
-
-## Verification
-
-The tests keep the existing text suite and add native call/result checks, JSON answer validation,
-malformed-call retries, limits, final-only response checks, media, result deduplication, search
-selection and expiry, local JavaScript, and saved-plan recovery. HTTP fixtures test full requests
-and streamed responses with the real OpenAI-compatible and Anthropic adapters. They run against
-local test servers and do not use paid model APIs.
-
-The full native, CGO-disabled, and race suites passed with `-count=1 -timeout 300s`.
-`go vet ./...` and `git diff --check` also passed. No existing test was removed.
-The native tests cover parsing, limits, recovery, compaction evidence, nested YAML dates, and
-provider stop reasons. The stop-reason tests include the real Anthropic stream decoder and both
-tool calls and final answers.
-
-Portable statement coverage, with the same package set and coverage options:
-
-| Scope | Before | After |
-| --- | ---: | ---: |
-| Entire repository | 66.1% | 67.3% |
-| ReAct | 80.6% | 85.4% |
-| Shared agent utilities | 95.7% | 96.8% |
-| Tool chains | 84.5% | 85.0% |
-| Model adapters | 21.1% | 27.9% |
-
-The repository's `gent setup onnx` command installed ONNX Runtime 1.24.4 and tokenizers 1.26.0
-to `~/.gent/lib/`. It also added the library paths to `.bashrc`. The `gent model download`
-command installed all ten model files and their tokenizers to `~/.gent/models/` (893 MiB).
-These files support all eleven registered model configurations.
-
-The native and race runs now pass all eleven model configurations, the quantized matrix
-multiplication regression test, and the search and policy integration tests. No ONNX test skips
-because of a missing runtime or model. Two `query_vs_document_prefixes` subtests still skip for
-`all-MiniLM-L6-v2` and `bge-micro-v2`, because those models have no prefixes. Twenty live-provider
-tests still skip because their credentials or opt-in settings are absent.
-
-Native and race runs use `CGO_ENABLED=1`, `CGO_LDFLAGS=-L/home/ricky/.gent/lib`, and `-p 1`.
-Running one test package at a time limits memory use while loading large ONNX models. `GOCACHE`
-points to `/tmp/gent-review-gocache` because the normal cache is not writable in this sandbox.
-Local HTTP test servers require permission to bind a socket. Test output uses `-json` to record
-individual passes and skips as well as the package results.
-
-Test setup checks the runtime before downloading model files. A stack dump confirmed that the
-old setup could wait in a download before `testing.M.Run`, outside the Go test timeout. The
-partial model from that interrupted check was moved to `/tmp`, so it cannot be used as a valid
-cache entry. The later setup downloaded the complete model before the ONNX checks ran.
-
-The interactive analysis passed 432 cell-detail checks, filters, CSV/JSON exports, and desktop
-and mobile layouts. The browser reported no console errors or external network requests.
+`TestNativeLive` runs actual OpenAI and Grok calls. Each provider has a code-only case and a search
+then JavaScript case. These assert actual dependent tool inputs, code execution, and changing
+native definitions. Saved inner results must show both business calls inside the same `run_code`
+result. An initial script error without business effects can be corrected within the iteration
+limit. A no-op program followed by direct business calls does not pass this check.
+Set `GENT_TEST_OPENAI_KEY` / `GENT_TEST_XAI_KEY` or `OPENAI_API_KEY` /
+`XAI_API_KEY`. Optional `GENT_TEST_OPENAI_MODEL` / `GENT_TEST_XAI_MODEL` select models. Cases skip
+when credentials are absent. A fixture pass is not a live-provider pass.

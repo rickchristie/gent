@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type ownershipMetadata struct {
@@ -67,8 +66,8 @@ func TestHistoryEntryOwnershipAndTypedReplay(t *testing.T) {
 			observer := &ownershipObserver{}
 			ctx := NewExecutionContext(context.Background(), "root", nil, WithRunId("ownership"),
 				WithCodecs(registry), WithRecorder(recorder), WithObserver(observer))
-			caller := &HistoryEntry{Messages: []*MessageContent{{Role: llms.ChatMessageTypeAI,
-				Parts: []ContentPart{llms.TextContent{Text: "original policy"}}}},
+			caller := &HistoryEntry{Messages: []*MessageContent{{Role: ChatMessageTypeAI,
+				Parts: []ContentPart{TextContent{Text: "original policy"}}}},
 				Metadata: map[RecordMetadataKey]any{"custom": &ownershipMetadata{
 					Id: 1<<63 + 19, Values: []string{"original"}}}}
 			started := time.Now()
@@ -89,8 +88,8 @@ func TestHistoryEntryOwnershipAndTypedReplay(t *testing.T) {
 			assert.GreaterOrEqual(t, entry.CreatedAt, started)
 			assert.Equal(t, &HistoryEntry{Id: proposal.Id, Order: 1, RunId: ctx.RunId(),
 				ContextId: ctx.ContextId(), AttemptId: ctx.AttemptId(), Kind: HistoryMessages,
-				CreatedAt: entry.CreatedAt, Messages: []*MessageContent{{Role: llms.ChatMessageTypeAI,
-					Parts: []ContentPart{llms.TextContent{Text: test.expected.message}}}},
+				CreatedAt: entry.CreatedAt, Messages: []*MessageContent{{Role: ChatMessageTypeAI,
+					Parts: []ContentPart{TextContent{Text: test.expected.message}}}},
 				Metadata: map[RecordMetadataKey]any{"custom": test.expected.metadata}}, entry)
 			var target *HistoryEntry
 			switch test.input.source {
@@ -111,7 +110,7 @@ func TestHistoryEntryOwnershipAndTypedReplay(t *testing.T) {
 			case "observer":
 				target = observer.events[0].Change.AppendedEntries[0]
 			}
-			target.Messages[0].Parts[0] = llms.TextContent{Text: "changed"}
+			target.Messages[0].Parts[0] = TextContent{Text: "changed"}
 			target.Metadata["custom"].(*ownershipMetadata).Values[0] = "changed"
 			after, err := ctx.Export()
 			assert.ErrorIs(t, err, test.expected.err)

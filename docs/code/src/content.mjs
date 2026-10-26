@@ -121,13 +121,14 @@ GenerateContentStream(model Model, call ModelCall, request ModelCallRequest) (St
     name: 'Stream',
     kind: 'Interface',
     layer: 'Model & tools',
-    label: 'Delivers chunks and final output',
+    label: 'Delivers previews and provider completion',
     source: 'model.go',
     symbol: 'Stream',
-    job: `Exposes Chunks, a final Response, and Close. Emitted reasoning can be recorded;
-      undisclosed provider reasoning cannot.`,
+    job: `Exposes Chunks, a complete Response, and Close. Ordered MetaContent carries intermediary,
+      commentary, reasoning, or new string types. Response contains candidate text.`,
     why: `Close requests cancellation. Response waits for producer completion, so the last chunk and
-      known usage cannot arrive after a supposedly completed step.`,
+      known usage cannot arrive after a supposedly completed step. The executor publishes one full
+      Content event after validation and terminal save; source IDs link it to the preview.`,
     implementations: 'NewBoundedStreamWithDuration supports backpressure; producers must Complete.',
     links: ['model', 'context', 'trace'],
   },
@@ -155,8 +156,7 @@ GenerateContentStream(model Model, call ModelCall, request ModelCallRequest) (St
     symbol: 'TextSection',
     job: 'Names a section, describes its syntax, and parses its content into a useful value.',
     why: 'A section can contain text, JSON, or YAML regardless of its outer envelope.',
-    implementations:
-      'section.Text, section.JSON[T], section.YAML[T]; ToolChain and Termination embed it.',
+    implementations: 'section.Text, section.JSON[T], section.YAML[T]; Termination embeds it.',
     links: ['format', 'tools', 'termination'],
   },
   {
@@ -167,12 +167,12 @@ GenerateContentStream(model Model, call ModelCall, request ModelCallRequest) (St
     label: 'Turns proposed actions into tool calls',
     source: 'toolchain.go',
     symbol: 'ToolChain',
-    job: `Publishes a tool catalog, parses calls, checks schemas, transforms typed arguments,
+    job: `Publishes native definitions, prepares saved calls, checks schemas, transforms typed arguments,
       executes tools, and formats observations.`,
-    why: `The model proposes an action as text. The chain provides the structured route to a Go
+    why: `The model proposes a native call. The chain provides the checked route to a Go
       tool.`,
     implementations:
-      'toolchain.YAML, JSON, SearchJSON; JsToolChainWrapper adds JavaScript execution.',
+      'toolchain.Registry, SearchChain; JsToolChainWrapper adds JavaScript execution.',
     links: ['section', 'tool', 'toolplan', 'searchtools', 'toolresult'],
   },
   {
@@ -201,22 +201,9 @@ GenerateContentStream(model Model, call ModelCall, request ModelCallRequest) (St
       media, instructions, and the captured abbreviation.`,
     why: `A later policy edit or changed tool summary must not rewrite the evidence behind an
       answer.`,
-    implementations: 'ToolChainResult groups results and converts them with ToHistoryEntry.',
+    implementations:
+      'ToolChainResult groups results; native history pairs them with provider call IDs.',
     links: ['tool', 'record', 'toolplan', 'history'],
-  },
-  {
-    id: 'recoverabletools',
-    name: 'RecoverableToolChain',
-    kind: 'Interface',
-    layer: 'Recovery',
-    label: 'Makes tool execution stepwise',
-    source: 'tool_plan.go',
-    symbol: 'RecoverableToolChain',
-    job: 'Separates Prepare from ExecuteNext so a tool list has explicit continuation boundaries.',
-    why: `If the worker exits between two tools, the completed result can be reused in its
-      position.`,
-    implementations: 'YAML, JSON, and SearchJSON implement this contract.',
-    links: ['tools', 'toolplan', 'checkpoint'],
   },
   {
     id: 'toolplan',
@@ -231,8 +218,8 @@ GenerateContentStream(model Model, call ModelCall, request ModelCallRequest) (St
     why: `Equal arguments in two intentional list positions are still two separate calls. Arguments
       alone cannot identify work during recovery.`,
     implementations:
-      'Saved with SetToolPlan and read with SavedToolPlan; SearchJSON also saves seen tools.',
-    links: ['recoverabletools', 'toolrecovery', 'checkpoint'],
+      'Saved with SetToolPlan and read with SavedToolPlan; SearchChain also saves seen tools.',
+    links: ['tools', 'toolrecovery', 'checkpoint'],
   },
   {
     id: 'termination',
@@ -670,7 +657,7 @@ if err != nil {
     job: `Identifies the run, context, iteration, attempt, related model/tool call, and typed
       payload or structured history change.`,
     why: `trace.Event is a display projection with the same number, not an interchangeable recovery
-      record. Both current schemas are version 3.`,
+      record. The run schema is version 5; trace views use the run schema version.`,
     implementations:
       'Events are retained in RunView.Activity, including progress after the checkpoint.',
     links: ['trace', 'bundle', 'codecs'],
@@ -683,7 +670,7 @@ if err != nil {
     label: 'Discovers tools on demand',
     source: 'tool_search.go',
     symbol: 'ToolSearcher',
-    job: `Indexes tool metadata and searches for relevant tool names. SearchJSON exposes search and
+    job: `Indexes tool metadata and searches for relevant tool names. SearchChain exposes search and
       optionally a separate schema lookup to the model.`,
     why: `Large tool catalogs can be discovered in pages. Recovery preserves completed results and
       which tool definitions were already shown within a plan.`,
@@ -807,13 +794,13 @@ export const steps = [
     tools: 0,
   },
   {
-    title: 'Read the proposed action.',
-    active: 'format',
+    title: 'Read the native tool call.',
+    active: 'tools',
     phase: 'decision_ready',
     iteration: 1,
-    text: `TextFormat extracts the action section. ReAct saves its decision state so a replacement
+    text: `ReAct reads the structured tool calls and saves its decision state so a replacement
       worker can use this completed response without asking the model again.`,
-    note: 'The toolchain parses the action contents and creates an ordered tool plan.',
+    note: 'The toolchain decodes JSON arguments and creates an ordered tool plan.',
     entries: ['Model: look up policy P10'],
     activity: 'Decision and tool plan saved',
     tokens: 24,
@@ -892,8 +879,8 @@ export const steps = [
     phase: 'terminal',
     iteration: 2,
     text: `ReAct records the accepted answer in history without adding it to another working
-      context. The executor saves the final outcome and terminal checkpoint.`,
-    note: 'Restoring this bundle returns the saved result. No model or tool is called again.',
+      context. The executor saves the final Content event, outcome, and terminal checkpoint together.`,
+    note: 'After the save, replace the preview using SourceMessageIds. Restore reuses this answer.',
     entries: ['Model: look up policy P10', 'Tool: P10 · refunds within 14 days'],
     activity: 'Answer in history → execution finished → terminal checkpoint',
     tokens: 56,

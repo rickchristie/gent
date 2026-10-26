@@ -12,7 +12,15 @@ export const groups = [
 
 export const descriptions = {};
 function describe(id, group, purpose, why, rules, implementations, related, question) {
-  descriptions[id] = { group, purpose, why, rules, implementations, related, question };
+  descriptions[id] = {
+    group,
+    purpose,
+    why,
+    rules,
+    implementations,
+    related,
+    question,
+  };
 }
 
 describe(
@@ -29,7 +37,6 @@ describe(
   ['gent.LoopData', 'gent.ExecutionContext', 'executor.Runner', 'gent.CheckpointState'],
   'Which continuation state does a custom loop need to save?',
 );
-
 
 describe(
   'gent.AgentLoop',
@@ -98,7 +105,9 @@ describe(
   'Deliver streaming chunks and the final provider result.',
   'Cancellation and producer completion are different events; final evidence must not arrive late.',
   [
-    'Chunks closes when streaming finishes. Response waits and returns the final output or error.',
+    'Chunks carries MetaContent; Response returns candidate text, stop state, tools, and usage.',
+    'The executor publishes one full Content event after validation and terminal save.',
+    'SourceMessageIds link the final answer to previews; saved replay keeps message IDs.',
     'Close requests cancellation and is safe to repeat.',
     'Built-in stream producers must Complete after stopping, including on cancellation.',
     'The managed boundary accepts each chunk before delivering it to live consumers.',
@@ -126,13 +135,13 @@ describe(
   'gent.ContentPart',
   'Model & content',
   'Carry typed text, media, or provider content.',
-  'Gent wraps LangChainGo content behind its own named interface.',
+  'Gent owns content values so adapters cannot silently lose provider data.',
   [
-    'Embeds llms.ContentPart; the dependency owns the embedded method contract.',
-    'Register custom content types before constructing a context or decoding a saved run.',
+    'Gent supplies sealed text, media, native call, and result values.',
+    'Opaque assistant continuation items travel with their provider identity.',
     'Owned history copies include nested parts, not just the surrounding slice.',
   ],
-  ['LangChainGo content values'],
+  ['Gent content values'],
   ['gent.ValueCodec', 'gent.CodecRegistry', 'gent.HistoryEntry'],
   'Are all application content parts registered for durable encoding?',
 );
@@ -186,33 +195,17 @@ describe(
 describe(
   'gent.ToolChain',
   'Tools & answers',
-  'Turn action text into validated tool results.',
+  'Expose native definitions and execute saved calls.',
   'Tool registration, prompt catalogs, typed conversion, and result formatting share one boundary.',
   [
-    'Embeds TextSection. Execute parses and runs calls; textFormat must be non-nil.',
+    'NativeTools selects definitions. PrepareCalls saves a plan; ExecuteNext runs one step.',
     'RegisterTool accepts heterogeneous generic tools and panics on invalid or duplicate entries.',
-    'ToolChainResult.ToHistoryEntry builds the observation the caller can append.',
-    'Implement RecoverableToolChain for explicit per-tool continuation boundaries.',
+    'Native assistant calls and tool result messages retain provider call IDs.',
+    'RegisterCodecs and RecoveryConfig support fresh-worker continuation.',
   ],
-  ['toolchain.YAML', 'toolchain.JSON', 'toolchain.SearchJSON', 'toolchain.JsToolChainWrapper'],
-  ['gent.Tool', 'gent.TextSection', 'gent.RecoverableToolChain', 'gent.ToolCallResult'],
+  ['toolchain.Registry', 'toolchain.SearchChain', 'toolchain.JsToolChainWrapper'],
+  ['gent.Tool', 'gent.CheckpointState', 'gent.ToolRecovery', 'gent.ToolCallResult'],
   'Does the selected chain support the recovery guarantees the application expects?',
-);
-
-describe(
-  'gent.RecoverableToolChain',
-  'Tools & answers',
-  'Prepare an ordered plan, then execute one step.',
-  'A saved cursor and results let takeover reuse completed tool work in its original position.',
-  [
-    'Embeds the complete ToolChain contract and adds Prepare and ExecuteNext.',
-    'Each planned position gets a logical call ID, even when arguments are identical.',
-    'Built-in chains save effective input before calling the tool and results after completion.',
-    'SearchJSON also saves its discovered-tool state. An active JavaScript frame cannot resume.',
-  ],
-  ['toolchain.YAML', 'toolchain.JSON', 'toolchain.SearchJSON'],
-  ['gent.ToolChain', 'gent.ToolPlan', 'gent.ToolRecovery', 'gent.Checkpoint'],
-  'Are custom chains saving both the cursor and results?',
 );
 
 describe(
@@ -320,12 +313,12 @@ describe(
   [
     'Recover gets the stable logical call ID, previous attempt, arguments, and effective input.',
     'Return completed with a full result, retry_allowed, or unresolved.',
-    'A durable completed result takes precedence. Unresolved work returns ErrUncertainTool.',
+    'A durable result takes precedence. Unresolved work becomes guidance for a new model plan.',
     'An allowed retry preserves logical identity and input; it uses a new worker attempt.',
     'Gent does not guarantee exactly-once external effects.',
   ],
   ['gent.ToolRecoveryFunc'],
-  ['gent.RecoverableToolChain', 'gent.ToolPlan', 'gent.RestoreBindings', 'gent.ToolCallResult'],
+  ['gent.ToolChain', 'gent.ToolPlan', 'gent.RestoreBindings', 'gent.ToolCallResult'],
   'What external evidence makes a retry safe for each mutating tool?',
 );
 
@@ -786,14 +779,14 @@ export const phases = [
     'Accept effective tool input',
     'A plan position and its final typed input are saved before an external tool call.',
     'After a crash the outcome may be uncertain. Reconcile it before retrying.',
-    ['gent.RecoverableToolChain', 'gent.ToolRecovery', 'gent.ToolPlan'],
+    ['gent.ToolChain', 'gent.ToolRecovery', 'gent.ToolPlan'],
   ],
   [
     'tool_completed',
     'Keep the tool result',
     'The completed result and plan cursor can be reused in order.',
     'The next planned tool has its own logical ID, even if its name and arguments are identical.',
-    ['gent.ToolCallResult', 'gent.RecoverableToolChain'],
+    ['gent.ToolCallResult', 'gent.ToolChain'],
   ],
   [
     'iteration_completed',
@@ -849,7 +842,7 @@ export const boundaries = [
     'Logical call ID ≠ worker attempt ID',
     'Call identity survives takeover; the attempt changes. Tool-ready cannot prove a side effect.',
     'ToolRecovery returns a completed result, permits a retry, or leaves the operation unresolved.',
-    ['gent.ToolRecovery', 'gent.RecoverableToolChain', 'gent.ToolPlan'],
+    ['gent.ToolRecovery', 'gent.ToolChain', 'gent.ToolPlan'],
   ],
   [
     'Display is a projection',
@@ -861,7 +854,7 @@ export const boundaries = [
   [
     'Recovery has declared limits',
     'Fresh bindings + compatible state',
-    'Custom loops need state and versions to resume. Active child and JavaScript frames cannot.',
+    'Custom loops need state and versions. Active children cannot resume. JavaScript returns partial evidence.',
     'Worker cancellation keeps a recovery boundary. CancelRun means terminal cancellation.',
     ['gent.CheckpointState', 'gent.RecoveryConfig', 'gent.RestoreBindings'],
   ],

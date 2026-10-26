@@ -2,7 +2,7 @@ package toolchain
 
 import (
 	"context"
-	"encoding/json"
+
 	"errors"
 	"fmt"
 	"strings"
@@ -14,7 +14,7 @@ import (
 )
 
 // SearchHintType controls how the tool registry summary
-// is presented in the system prompt.
+// is presented in the native search definition.
 type SearchHintType int
 
 const (
@@ -28,18 +28,16 @@ const (
 	SearchHintSimpleList
 )
 
-// SearchJSON implements [gent.ToolChain] for dynamic tool
+// SearchChain implements [gent.ToolChain] for dynamic tool
 // discovery. Instead of showing all tools upfront, it exposes
 // a single "Tool Registry Search" tool that the LLM uses to
 // discover tools on demand.
 //
-// This follows Anthropic's Tool Search Tool pattern, which
-// reduces token usage by ~85% and improves accuracy from 49%
-// to 74% when dealing with 20+ tools.
+// Definitions are selected from active history, so separate runs do not share discovery state.
 //
 // # Creating and Configuring
 //
-//	tc := toolchain.NewSearchJSON(
+//	tc := toolchain.NewSearch(
 //	    toolchain.SearchHintDomainCategories,
 //	).
 //	    WithPageSize(5).
@@ -67,13 +65,10 @@ const (
 //
 //	agent := react.NewAgent(model).
 //	    WithToolChain(tc)
-type SearchJSON struct {
+type SearchChain struct {
 	mu sync.RWMutex
 
-	// TextSection
-	sectionName string // default "action"
-
-	// Tool registry (same pattern as JSON toolchain)
+	// Tool registry (same pattern as Registry toolchain)
 	tools     []any
 	toolMap   map[string]any
 	schemaMap map[string]*schema.Schema
@@ -91,65 +86,58 @@ type SearchJSON struct {
 	pinnedToolNames   []string
 	pageSize          int
 	noResultsMessage  string
+	recovery          map[string]gent.RecoveryMessageProvider
 	printOutputSchema bool
 
 	// Computed by Initialize()
 	initialized          bool
-	searchToolPrompt     string
 	searchToolSchema     map[string]any
 	compiledSearchSchema *schema.Schema
 }
 
-// NewSearchJSON creates a new SearchJSON toolchain with
+// NewSearch creates a new SearchChain toolchain with
 // the given hint type and default settings.
-func NewSearchJSON(
+func NewSearch(
 	hintType SearchHintType,
-) *SearchJSON {
-	return &SearchJSON{
-		sectionName: "action",
-		hintType:    hintType,
-		tools:       make([]any, 0),
-		toolMap:     make(map[string]any),
-		schemaMap:   make(map[string]*schema.Schema),
-		engines:     make([]gent.ToolSearcher, 0),
-		engineMap:   make(map[string]gent.ToolSearcher),
-		pageSize:    3,
+) *SearchChain {
+	return &SearchChain{
+		printOutputSchema: true,
+		recovery:          make(map[string]gent.RecoveryMessageProvider),
+		hintType:          hintType,
+		tools:             make([]any, 0),
+		toolMap:           make(map[string]any),
+		schemaMap:         make(map[string]*schema.Schema),
+		engines:           make([]gent.ToolSearcher, 0),
+		engineMap:         make(map[string]gent.ToolSearcher),
+		pageSize:          3,
 		noResultsMessage: "No tools found matching " +
 			"your query. Try different keywords or " +
 			"a broader search.",
 	}
 }
 
-// WithSectionName sets the section name.
-func (c *SearchJSON) WithSectionName(
-	name string,
-) *SearchJSON {
-	c.sectionName = name
-	return c
-}
-
 // WithPageSize sets the number of tools per search page.
-func (c *SearchJSON) WithPageSize(
+func (c *SearchChain) WithPageSize(
 	size int,
-) *SearchJSON {
+) *SearchChain {
 	c.pageSize = size
 	return c
 }
 
 // WithNoResultsMessage sets the message returned when no
 // tools match a search query.
-func (c *SearchJSON) WithNoResultsMessage(
+func (c *SearchChain) WithNoResultsMessage(
 	msg string,
-) *SearchJSON {
+) *SearchChain {
 	c.noResultsMessage = msg
 	return c
 }
 
 // WithOutputSchema enables printing output schemas alongside
 // input schemas in tool definitions.
-func (c *SearchJSON) WithOutputSchema(
+func (c *SearchChain) WithOutputSchema(
 	enabled bool,
-) *SearchJSON {
+) *SearchChain {
 	c.printOutputSchema = enabled
 	return c
 }
@@ -158,58 +146,36 @@ func (c *SearchJSON) WithOutputSchema(
 // [SearchGet] returns only name + description in search results
 // and provides a separate get_tool_schema tool for fetching
 // full schemas.
-func (c *SearchJSON) WithSearchType(
+func (c *SearchChain) WithSearchType(
 	st SearchType,
-) *SearchJSON {
+) *SearchChain {
 	c.searchType = st
 	return c
 }
 
 // RegisterEngine adds a search engine. Call before
 // Initialize().
-func (c *SearchJSON) RegisterEngine(
+func (c *SearchChain) RegisterEngine(
 	engine gent.ToolSearcher,
-) *SearchJSON {
+) *SearchChain {
 	c.engines = append(c.engines, engine)
 	c.engineMap[engine.Id()] = engine
 	return c
 }
 
 // Pin marks a tool to always be displayed in the
-// available tools prompt with its full definition.
+// native tool list with its full definition.
 // The tool must be registered before Initialize() is
 // called; validation happens at Initialize() time.
 //
 // Pinned tools are still indexed by search engines.
-func (c *SearchJSON) Pin(
+func (c *SearchChain) Pin(
 	toolName string,
-) *SearchJSON {
+) *SearchChain {
 	c.pinnedToolNames = append(
 		c.pinnedToolNames, toolName,
 	)
 	return c
-}
-
-// Name returns the section identifier.
-func (c *SearchJSON) Name() string {
-	return c.sectionName
-}
-
-// Guidance returns format instructions for JSON tool calls.
-func (c *SearchJSON) Guidance() string {
-	var sb strings.Builder
-	sb.WriteString("Call tools using JSON format:\n")
-	sb.WriteString(
-		`{"tool": "tool_name", "args": {...}}`,
-	)
-	sb.WriteString(
-		"\n\nFor multiple parallel calls, use an array:\n",
-	)
-	sb.WriteString(
-		`[{"tool": "tool1", "args": {...}}, ` +
-			`{"tool": "tool2", "args": {...}}]`,
-	)
-	return sb.String()
 }
 
 // RegisterTool adds a tool to the chain. The tool must
@@ -219,13 +185,13 @@ func (c *SearchJSON) Guidance() string {
 //   - tool doesn't implement Tool[I, O] (invalid type)
 //   - tool doesn't implement IndexableTool
 //   - a tool with the same name is already registered
-func (c *SearchJSON) RegisterTool(
-	tool any,
+func (c *SearchChain) RegisterTool(
+	tool any, options ...gent.ToolOption,
 ) gent.ToolChain {
 	meta, err := GetToolMeta(tool)
 	if err != nil {
 		panic(fmt.Sprintf(
-			"SearchJSON.RegisterTool: "+
+			"SearchChain.RegisterTool: "+
 				"invalid tool type: %v", err,
 		))
 	}
@@ -234,7 +200,7 @@ func (c *SearchJSON) RegisterTool(
 	indexable, ok := tool.(gent.IndexableTool)
 	if !ok {
 		panic(fmt.Sprintf(
-			"SearchJSON.RegisterTool: tool %q "+
+			"SearchChain.RegisterTool: tool %q "+
 				"must implement IndexableTool",
 			meta.Name(),
 		))
@@ -243,12 +209,17 @@ func (c *SearchJSON) RegisterTool(
 	// Check duplicate
 	if _, exists := c.toolMap[meta.Name()]; exists {
 		panic(fmt.Sprintf(
-			"SearchJSON.RegisterTool: "+
+			"SearchChain.RegisterTool: "+
 				"duplicate tool name %q",
 			meta.Name(),
 		))
 	}
 
+	config := gent.ToolOptions{}
+	for _, option := range options {
+		option(&config)
+	}
+	c.recovery[meta.Name()] = config.RecoveryMessage
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
 	c.indexableTools = append(c.indexableTools, indexable)
@@ -256,7 +227,10 @@ func (c *SearchJSON) RegisterTool(
 	// Compile schema for validation
 	if rawSchema := meta.Schema(); rawSchema != nil {
 		compiled, err := schema.Compile(rawSchema)
-		if err == nil && compiled != nil {
+		if err != nil {
+			panic(fmt.Errorf("register tool %q schema: %w", meta.Name(), err))
+		}
+		if compiled != nil {
 			c.schemaMap[meta.Name()] = compiled
 		}
 	}
@@ -269,13 +243,13 @@ func (c *SearchJSON) RegisterTool(
 // are registered.
 //
 // Can be called multiple times to re-index.
-func (c *SearchJSON) Initialize() error {
+func (c *SearchChain) Initialize() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if len(c.engines) == 0 {
 		return errors.New(
-			"SearchJSON.Initialize: " +
+			"SearchChain.Initialize: " +
 				"at least one search engine is required",
 		)
 	}
@@ -284,7 +258,7 @@ func (c *SearchJSON) Initialize() error {
 	for _, eng := range c.engines {
 		if err := eng.IndexAll(c.indexableTools); err != nil {
 			return fmt.Errorf(
-				"SearchJSON.Initialize: engine %q "+
+				"SearchChain.Initialize: engine %q "+
 					"IndexAll failed: %w",
 				eng.Id(), err,
 			)
@@ -298,165 +272,31 @@ func (c *SearchJSON) Initialize() error {
 	compiled, err := schema.Compile(c.searchToolSchema)
 	if err != nil {
 		return fmt.Errorf(
-			"SearchJSON.Initialize: failed to "+
+			"SearchChain.Initialize: failed to "+
 				"compile search schema: %w", err,
 		)
 	}
 	c.compiledSearchSchema = compiled
 
-	// Validate and collect pinned tools
-	var pinnedTools []any
 	for _, name := range c.pinnedToolNames {
-		tool, exists := c.toolMap[name]
-		if !exists {
-			return fmt.Errorf(
-				"SearchJSON.Initialize: pinned "+
-					"tool %q is not registered",
-				name,
-			)
+		if _, exists := c.toolMap[name]; !exists {
+			return fmt.Errorf("pinned tool %q is not registered", name)
 		}
-		pinnedTools = append(pinnedTools, tool)
 	}
-
-	// Build the prompt
-	c.searchToolPrompt = buildSearchToolPrompt(
-		c.indexableTools,
-		c.engines,
-		c.searchToolSchema,
-		c.hintType,
-		pinnedTools,
-		c.printOutputSchema,
-		c.searchType,
-	)
 
 	c.initialized = true
 	return nil
 }
 
-// AvailableToolsPrompt returns the pre-computed search tool
-// prompt. Shows only the "Tool Registry Search" tool, not
-// individual registered tools.
-func (c *SearchJSON) AvailableToolsPrompt() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.searchToolPrompt
-}
-
-// ParseSection parses raw text content and returns
-// []*gent.ToolCall. Identical logic to JSON.ParseSection.
-func (c *SearchJSON) ParseSection(
-	execCtx *gent.ExecutionContext,
-	content string,
-) (any, error) {
-	result, err := c.doParse(content)
-	if err != nil {
-		if execCtx != nil {
-			execCtx.PublishParseError(
-				gent.ParseErrorTypeToolchain,
-				content,
-				err,
-			)
-		}
-		return nil, err
-	}
-
-	if execCtx != nil {
-		execCtx.Stats().ResetGauge(
-			gent.SGToolchainParseErrorConsecutive,
-		)
-	}
-
-	return result, nil
-}
-
-// doParse performs the actual JSON parsing logic. Identical
-// to JSON.doParse.
-func (c *SearchJSON) doParse(
-	content string,
-) ([]*gent.ToolCall, error) {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return []*gent.ToolCall{}, nil
-	}
-
-	var calls []*gent.ToolCall
-
-	if strings.HasPrefix(content, "[") {
-		var rawCalls []struct {
-			Tool string         `json:"tool"`
-			Args map[string]any `json:"args"`
-		}
-		if err := json.Unmarshal(
-			[]byte(content), &rawCalls,
-		); err != nil {
-			return nil, fmt.Errorf(
-				"%w: %v", gent.ErrInvalidJSON, err,
-			)
-		}
-		for _, rc := range rawCalls {
-			if rc.Tool == "" {
-				return nil, gent.ErrMissingToolName
-			}
-			calls = append(calls, &gent.ToolCall{
-				Name: rc.Tool, Args: rc.Args,
-			})
-		}
-	} else {
-		var rawCall struct {
-			Tool string         `json:"tool"`
-			Args map[string]any `json:"args"`
-		}
-		if err := json.Unmarshal(
-			[]byte(content), &rawCall,
-		); err != nil {
-			return nil, fmt.Errorf(
-				"%w: %v", gent.ErrInvalidJSON, err,
-			)
-		}
-		if rawCall.Tool == "" {
-			return nil, gent.ErrMissingToolName
-		}
-		calls = append(calls, &gent.ToolCall{
-			Name: rawCall.Tool, Args: rawCall.Args,
-		})
-	}
-
-	return calls, nil
-}
-
-// Execute parses tool calls and executes them.
-// Handles both the built-in search tool and regular tools.
-//
-// Panics if textFormat is nil.
-func (c *SearchJSON) executeUnmanaged(
-	execCtx *gent.ExecutionContext,
-	content string,
-	textFormat gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	if textFormat == nil {
-		panic("textFormat must not be nil")
-	}
-
-	parsed, err := c.ParseSection(execCtx, content)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.executeParsed(execCtx, parsed.([]*gent.ToolCall), textFormat)
-}
-
-func (c *SearchJSON) executeParsed(
-	execCtx *gent.ExecutionContext, calls []*gent.ToolCall, textFormat gent.TextFormat,
+func (c *SearchChain) executeParsed(
+	execCtx *gent.ExecutionContext, calls []*parsedCall, textFormat gent.TextFormat,
 ) (*gent.ToolChainResult, error) {
 	if textFormat == nil {
 		panic("textFormat must not be nil")
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	ctx := context.Background()
-	if execCtx != nil {
-		ctx = execCtx.Context()
-	}
+	ctx := execCtx.Context()
 	results := make([]*gent.ToolCallResult, len(calls))
 	for i, call := range calls {
 		results[i] = &gent.ToolCallResult{
@@ -467,17 +307,16 @@ func (c *SearchJSON) executeParsed(
 	}
 
 	seenTools := make(map[string]bool)
-	if execCtx != nil {
-		saved, ok, err := execCtx.CheckpointState("gent:search_seen")
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			var valid bool
-			seenTools, valid = saved.(map[string]bool)
-			if !valid {
-				return nil, fmt.Errorf("invalid SearchJSON checkpoint state %T", saved)
-			}
+
+	saved, ok, err := execCtx.CheckpointState("gent:search_seen")
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		var valid bool
+		seenTools, valid = saved.(map[string]bool)
+		if !valid {
+			return nil, fmt.Errorf("invalid SearchChain checkpoint state %T", saved)
 		}
 	}
 
@@ -493,18 +332,19 @@ func (c *SearchJSON) executeParsed(
 				execCtx, call, results[i], textFormat,
 			)
 		} else {
-			c.executeRegularTool(
-				ctx, execCtx, call, results[i],
-				textFormat,
-			)
+			registry := &Registry{tools: c.tools, toolMap: c.toolMap, schemaMap: c.schemaMap}
+			output, err := registry.executeParsed(execCtx, []*parsedCall{call}, textFormat)
+			if err != nil {
+				return nil, err
+			}
+			results[i] = output.Results[0]
 		}
 	}
 
-	if execCtx != nil {
-		if err := execCtx.SetCheckpointState("gent:search_seen", seenTools); err != nil {
-			return nil, err
-		}
+	if err := execCtx.SetCheckpointState("gent:search_seen", seenTools); err != nil {
+		return nil, err
 	}
+
 	return &gent.ToolChainResult{Results: results}, nil
 }
 
@@ -512,10 +352,10 @@ func (c *SearchJSON) executeParsed(
 // seenTools tracks tool names that have already had their
 // full definition printed in a prior search within the same
 // Execute call. Duplicate tools get an abbreviated reference.
-func (c *SearchJSON) executeSearch(
+func (c *SearchChain) executeSearch(
 	ctx context.Context,
 	execCtx *gent.ExecutionContext,
-	call *gent.ToolCall,
+	call *parsedCall,
 	result *gent.ToolCallResult,
 	textFormat gent.TextFormat,
 	seenTools map[string]bool,
@@ -546,33 +386,32 @@ func (c *SearchJSON) executeSearch(
 	argsToUse := call.Args
 	var toolCallId string
 	var toolCallSource string
-	if execCtx != nil {
-		beforeEvent := execCtx.PublishBeforeToolCall(
-			call.Name, call.Args,
-		)
-		toolCallId = beforeEvent.ToolCallId
-		toolCallSource = beforeEvent.Source
-		result.ToolCallId = toolCallId
-		result.AttemptId = execCtx.AttemptId()
-		result.Input = beforeEvent.Args
-		result.SummaryCaptured = true
-		if err := execCtx.RecordingError(); err != nil {
-			result.Error = err
-			return
-		}
-		if err := execCtx.Context().Err(); err != nil {
-			result.Error = err
-			return
-		}
-		if beforeArgs, ok :=
-			beforeEvent.Args.(map[string]any); ok {
-			argsToUse = beforeArgs
-			query, _ = argsToUse["query"].(string)
-			queryType, _ = argsToUse["query_type"].(string)
-			if p, ok :=
-				argsToUse["page"].(float64); ok && p > 1 {
-				page = int(p)
-			}
+
+	beforeEvent := execCtx.PublishBeforeToolCall(
+		call.Name, call.Args,
+	)
+	toolCallId = beforeEvent.ToolCallId
+	toolCallSource = beforeEvent.Source
+	result.ToolCallId = toolCallId
+	result.AttemptId = execCtx.AttemptId()
+	result.Input = beforeEvent.Args
+	result.SummaryCaptured = true
+	if err := execCtx.RecordingError(); err != nil {
+		result.Error = err
+		return
+	}
+	if err := execCtx.Context().Err(); err != nil {
+		result.Error = err
+		return
+	}
+	if beforeArgs, ok :=
+		beforeEvent.Args.(map[string]any); ok {
+		argsToUse = beforeArgs
+		query, _ = argsToUse["query"].(string)
+		queryType, _ = argsToUse["query_type"].(string)
+		if p, ok :=
+			argsToUse["page"].(float64); ok && p > 1 {
+			page = int(p)
 		}
 	}
 
@@ -590,14 +429,14 @@ func (c *SearchJSON) executeSearch(
 			fmt.Sprintf("Error: %v", err),
 		)
 		duration := time.Since(startTime)
-		if execCtx != nil {
-			execCtx.PublishAfterToolCall(
-				call.Name, argsToUse,
-				result, duration, err,
-				gent.WithToolCallId(toolCallId),
-				gent.WithToolCallSource(toolCallSource),
-			)
-		}
+
+		execCtx.PublishAfterToolCall(
+			call.Name, argsToUse,
+			result, duration, err,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
+		)
+
 		return
 	}
 
@@ -611,14 +450,14 @@ func (c *SearchJSON) executeSearch(
 			textFormat, call.Name,
 			fmt.Sprintf("Error: %v", err),
 		)
-		if execCtx != nil {
-			execCtx.PublishAfterToolCall(
-				call.Name, argsToUse,
-				result, duration, err,
-				gent.WithToolCallId(toolCallId),
-				gent.WithToolCallSource(toolCallSource),
-			)
-		}
+
+		execCtx.PublishAfterToolCall(
+			call.Name, argsToUse,
+			result, duration, err,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
+		)
+
 		return
 	}
 
@@ -633,21 +472,21 @@ func (c *SearchJSON) executeSearch(
 			textFormat, call.Name,
 			c.noResultsMessage,
 		)
-		if execCtx != nil {
-			execCtx.Stats().ResetGauge(
-				gent.SGToolCallsErrorConsecutive,
-			)
-			execCtx.Stats().ResetGauge(
-				gent.SGToolCallsErrorConsecutiveFor +
-					gent.StatKey(call.Name),
-			)
-			execCtx.PublishAfterToolCall(
-				call.Name, argsToUse,
-				result, duration, nil,
-				gent.WithToolCallId(toolCallId),
-				gent.WithToolCallSource(toolCallSource),
-			)
-		}
+
+		execCtx.Stats().ResetGauge(
+			gent.SGToolCallsErrorConsecutive,
+		)
+		execCtx.Stats().ResetGauge(
+			gent.SGToolCallsErrorConsecutiveFor +
+				gent.StatKey(call.Name),
+		)
+		execCtx.PublishAfterToolCall(
+			call.Name, argsToUse,
+			result, duration, nil,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
+		)
+
 		return
 	}
 	if endIdx > totalResults {
@@ -707,29 +546,29 @@ func (c *SearchJSON) executeSearch(
 	)
 
 	// Reset consecutive error gauges on success
-	if execCtx != nil {
-		execCtx.Stats().ResetGauge(
-			gent.SGToolCallsErrorConsecutive,
-		)
-		execCtx.Stats().ResetGauge(
-			gent.SGToolCallsErrorConsecutiveFor +
-				gent.StatKey(call.Name),
-		)
-		execCtx.PublishAfterToolCall(
-			call.Name, argsToUse,
-			result, duration, nil,
-			gent.WithToolCallId(toolCallId),
-			gent.WithToolCallSource(toolCallSource),
-		)
-	}
+
+	execCtx.Stats().ResetGauge(
+		gent.SGToolCallsErrorConsecutive,
+	)
+	execCtx.Stats().ResetGauge(
+		gent.SGToolCallsErrorConsecutiveFor +
+			gent.StatKey(call.Name),
+	)
+	execCtx.PublishAfterToolCall(
+		call.Name, argsToUse,
+		result, duration, nil,
+		gent.WithToolCallId(toolCallId),
+		gent.WithToolCallSource(toolCallSource),
+	)
+
 }
 
 // executeGetSchema handles the built-in get_tool_schema tool.
 // Returns the full definition (schema, policy, output schema)
 // for a single tool by name.
-func (c *SearchJSON) executeGetSchema(
+func (c *SearchChain) executeGetSchema(
 	execCtx *gent.ExecutionContext,
-	call *gent.ToolCall,
+	call *parsedCall,
 	result *gent.ToolCallResult,
 	textFormat gent.TextFormat,
 ) {
@@ -738,26 +577,24 @@ func (c *SearchJSON) executeGetSchema(
 	var toolCallId string
 	var toolCallSource string
 
-	if execCtx != nil {
-		beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args)
-		toolCallId = beforeEvent.ToolCallId
-		toolCallSource = beforeEvent.Source
-		result.ToolCallId = toolCallId
-		result.AttemptId = execCtx.AttemptId()
-		result.Input = beforeEvent.Args
-		if args, ok := beforeEvent.Args.(map[string]any); ok {
-			call.Args = args
-			toolName, _ = args["tool_name"].(string)
-		}
-		result.SummaryCaptured = true
-		if err := execCtx.RecordingError(); err != nil {
-			result.Error = err
-			return
-		}
-		if err := execCtx.Context().Err(); err != nil {
-			result.Error = err
-			return
-		}
+	beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args)
+	toolCallId = beforeEvent.ToolCallId
+	toolCallSource = beforeEvent.Source
+	result.ToolCallId = toolCallId
+	result.AttemptId = execCtx.AttemptId()
+	result.Input = beforeEvent.Args
+	if args, ok := beforeEvent.Args.(map[string]any); ok {
+		call.Args = args
+		toolName, _ = args["tool_name"].(string)
+	}
+	result.SummaryCaptured = true
+	if err := execCtx.RecordingError(); err != nil {
+		result.Error = err
+		return
+	}
+	if err := execCtx.Context().Err(); err != nil {
+		result.Error = err
+		return
 	}
 
 	if toolName == "" {
@@ -767,13 +604,13 @@ func (c *SearchJSON) executeGetSchema(
 			textFormat, call.Name,
 			fmt.Sprintf("Error: %v", err),
 		)
-		if execCtx != nil {
-			execCtx.PublishAfterToolCall(
-				call.Name, call.Args, result, 0, err,
-				gent.WithToolCallId(toolCallId),
-				gent.WithToolCallSource(toolCallSource),
-			)
-		}
+
+		execCtx.PublishAfterToolCall(
+			call.Name, call.Args, result, 0, err,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
+		)
+
 		return
 	}
 
@@ -785,13 +622,13 @@ func (c *SearchJSON) executeGetSchema(
 			textFormat, call.Name,
 			fmt.Sprintf("Error: %v", err),
 		)
-		if execCtx != nil {
-			execCtx.PublishAfterToolCall(
-				call.Name, call.Args, result, 0, err,
-				gent.WithToolCallId(toolCallId),
-				gent.WithToolCallSource(toolCallSource),
-			)
-		}
+
+		execCtx.PublishAfterToolCall(
+			call.Name, call.Args, result, 0, err,
+			gent.WithToolCallId(toolCallId),
+			gent.WithToolCallSource(toolCallSource),
+		)
+
 		return
 	}
 
@@ -806,179 +643,20 @@ func (c *SearchJSON) executeGetSchema(
 		textFormat, call.Name, outputStr,
 	)
 
-	if execCtx != nil {
-		execCtx.Stats().ResetGauge(
-			gent.SGToolCallsErrorConsecutive,
-		)
-		execCtx.Stats().ResetGauge(
-			gent.SGToolCallsErrorConsecutiveFor +
-				gent.StatKey(call.Name),
-		)
-		execCtx.PublishAfterToolCall(
-			call.Name, call.Args,
-			result, duration, nil,
-			gent.WithToolCallId(toolCallId),
-			gent.WithToolCallSource(toolCallSource),
-		)
-	}
-}
-
-// executeRegularTool handles regular registered tool calls.
-// Identical flow to JSON.Execute per-tool logic.
-func (c *SearchJSON) executeRegularTool(
-	ctx context.Context,
-	execCtx *gent.ExecutionContext,
-	call *gent.ToolCall,
-	result *gent.ToolCallResult,
-	textFormat gent.TextFormat,
-) {
-	tool, ok := c.toolMap[call.Name]
-	if !ok {
-		toolErr := fmt.Errorf(
-			"%w: %s", gent.ErrUnknownTool, call.Name,
-		)
-		result.Error = toolErr
-		result.Text = formatSectionText(
-			textFormat, call.Name,
-			fmt.Sprintf(
-				"Error: unknown tool %q. "+
-					"Use the search tool "+
-					"to find available tools.",
-				call.Name,
-			),
-		)
-		publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr, result)
-		return
-	}
-
-	// Validate args against schema
-	if compiled, has := c.schemaMap[call.Name]; has {
-		if err := compiled.Validate(call.Args); err != nil {
-			result.Error = err
-			result.Text = formatSectionText(
-				textFormat, call.Name,
-				fmt.Sprintf("Error: %v", err),
-			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, err, result)
-			return
-		}
-	}
-
-	// Transform raw args to typed input
-	typedInput, err := TransformArgsReflect(
-		tool, call.Args,
+	execCtx.Stats().ResetGauge(
+		gent.SGToolCallsErrorConsecutive,
 	)
-	if err != nil {
-		result.Error = err
-		result.Text = formatSectionText(
-			textFormat, call.Name,
-			fmt.Sprintf("Error: %v", err),
-		)
-		publishFailedToolAttempt(execCtx, call.Name, call.Args, err, result)
-		return
-	}
-	result.Input = typedInput
-
-	// Publish BeforeToolCall (may modify args)
-	inputToUse := typedInput
-	var toolCallId string
-	var toolCallSource string
-	if execCtx != nil {
-		beforeEvent := execCtx.PublishBeforeToolCall(
-			call.Name, typedInput,
-		)
-		inputToUse = beforeEvent.Args
-		toolCallId = beforeEvent.ToolCallId
-		toolCallSource = beforeEvent.Source
-	}
-
-	result.Input = inputToUse
-	result.ToolCallId = toolCallId
-	if execCtx != nil {
-		// A before-call hook or a tool limit can stop the run. Do not start an external effect.
-		if err := execCtx.RecordingError(); err != nil {
-			result.Error = err
-			return
-		}
-		if err := execCtx.Context().Err(); err != nil {
-			result.Error = err
-			return
-		}
-		ctx = execCtx.ToolContext(toolCallId)
-		result.AttemptId = execCtx.AttemptId()
-	}
-	startTime := time.Now()
-	output, err := CallToolWithTypedInputReflect(
-		ctx, tool, inputToUse,
+	execCtx.Stats().ResetGauge(
+		gent.SGToolCallsErrorConsecutiveFor +
+			gent.StatKey(call.Name),
 	)
-	duration := time.Since(startTime)
+	execCtx.PublishAfterToolCall(
+		call.Name, call.Args,
+		result, duration, nil,
+		gent.WithToolCallId(toolCallId),
+		gent.WithToolCallSource(toolCallSource),
+	)
 
-	if err != nil {
-		result.Error = err
-		result.Text = formatSectionText(
-			textFormat, call.Name,
-			fmt.Sprintf("Error: %v", err),
-		)
-	} else {
-		// Successful tool call
-		if execCtx != nil {
-			execCtx.Stats().ResetGauge(
-				gent.SGToolCallsErrorConsecutive,
-			)
-			execCtx.Stats().ResetGauge(
-				gent.SGToolCallsErrorConsecutiveFor +
-					gent.StatKey(call.Name),
-			)
-		}
-
-		result.Output = output.Text
-		result.Instructions = output.Instructions
-
-		// Format output. String outputs pass through
-		// as-is (no JSON wrapping).
-		outputText, marshalErr := formatToolOutputJSON(
-			output.Text,
-		)
-		if marshalErr != nil {
-			result.Error = fmt.Errorf("format tool output: %w", marshalErr)
-			err = result.Error
-			result.Text = formatSectionText(
-				textFormat, call.Name,
-				"error: failed to marshal output",
-			)
-		} else {
-			if output.Instructions != "" {
-				result.Text = textFormat.FormatSections(
-					[]gent.FormattedSection{{
-						Name: call.Name,
-						Children: []gent.FormattedSection{
-							{Name: "result", Content: outputText},
-							{Name: "instructions", Content: output.Instructions},
-						},
-					}},
-				)
-			} else {
-				result.Text = formatSectionText(
-					textFormat, call.Name, outputText,
-				)
-			}
-		}
-
-		if len(output.Media) > 0 {
-			result.Media = output.Media
-		}
-	}
-
-	result.DeduplicationSummary = c.DeduplicateSummary(result)
-	result.SummaryCaptured = true
-	if execCtx != nil {
-		execCtx.PublishAfterToolCall(
-			call.Name, inputToUse,
-			result, duration, err,
-			gent.WithToolCallId(toolCallId),
-			gent.WithToolCallSource(toolCallSource),
-		)
-	}
 }
 
 // DeduplicateSummary returns an abbreviated observation text
@@ -987,7 +665,7 @@ func (c *SearchJSON) executeRegularTool(
 // For built-in tools (search_tool_registry, get_tool_schema),
 // it returns a summary directly. For regular tools, it
 // delegates to the tool's DeduplicateSummary via reflection.
-func (c *SearchJSON) DeduplicateSummary(
+func (c *SearchChain) DeduplicateSummary(
 	result *gent.ToolCallResult,
 ) string {
 	if result.Name == searchToolName {
@@ -1007,7 +685,7 @@ func (c *SearchJSON) DeduplicateSummary(
 
 // searchDedupSummary generates a dedup summary for the
 // built-in search_tool_registry tool.
-func (c *SearchJSON) searchDedupSummary(
+func (c *SearchChain) searchDedupSummary(
 	result *gent.ToolCallResult,
 ) string {
 	query, _ := result.Args["query"].(string)
@@ -1046,7 +724,7 @@ func (c *SearchJSON) searchDedupSummary(
 
 // getSchemaDedupSummary generates a dedup summary for
 // the built-in get_tool_schema tool.
-func (c *SearchJSON) getSchemaDedupSummary(
+func (c *SearchChain) getSchemaDedupSummary(
 	result *gent.ToolCallResult,
 ) string {
 	toolName, _ := result.Args["tool_name"].(string)
@@ -1062,7 +740,7 @@ func (c *SearchJSON) getSchemaDedupSummary(
 
 // GetToolSchema returns the compiled schema for the
 // named tool, or nil if not found. Thread-safe.
-func (c *SearchJSON) GetToolSchema(
+func (c *SearchChain) GetToolSchema(
 	name string,
 ) *schema.Schema {
 	c.mu.RLock()
@@ -1070,5 +748,5 @@ func (c *SearchJSON) GetToolSchema(
 	return c.schemaMap[name]
 }
 
-// Compile-time check that SearchJSON implements ToolChain.
-var _ gent.ToolChain = (*SearchJSON)(nil)
+// Compile-time check that SearchChain implements ToolChain.
+var _ gent.ToolChain = (*SearchChain)(nil)

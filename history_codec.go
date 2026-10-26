@@ -8,8 +8,6 @@ import (
 	"reflect"
 	"sync"
 	"time"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 // EncodedValue preserves concrete types across process boundaries. Ordinary JSON decoding of
@@ -50,16 +48,17 @@ func NewCodecRegistry() *CodecRegistry {
 	}
 	values := []any{false, "", int(0), int8(0), int16(0), int32(0), int64(0), uint(0), uint8(0),
 		uint16(0), uint32(0), uint64(0), float32(0), float64(0), json.Number(""), time.Duration(0),
-		llms.ChatMessageType(""), RecordOrigin(""), RecordMetadataKey(""),
+		ChatMessageType(""), RecordOrigin(""), RecordMetadataKey(""),
 		MessageContentMetadataKey(
 			"",
-		), llms.TextContent{}, llms.ImageURLContent{}, llms.BinaryContent{},
-		llms.ToolCall{}, llms.FunctionCall{}, llms.ToolCallResponse{}, llms.CachedContent{},
-		llms.CacheControl{}, ToolChainResult{}, ToolCallResult{}, HistoryEntry{}, MessageContent{},
-		Task{}, ContentResponse{}, ContentChoice{}, GenerationInfo{}, llms.CallOptions{},
-		llms.Tool{}, llms.FunctionDefinition{}, llms.ToolChoice{}, llms.FunctionReference{},
-		llms.MessageContent{}, llms.ThinkingConfig{}, llms.ThinkingMode(""), json.RawMessage{},
-		llms.FunctionCallBehavior(""), FormattedSection{}, time.Time{}}
+		), TextContent{}, ImageURLContent{}, BinaryContent{},
+		ModelToolCall{}, FunctionCall{}, ToolCallResponse{}, CachedContent{},
+		CacheControl{}, ToolChainResult{}, ToolCallResult{}, HistoryEntry{}, MessageContent{},
+		Task{}, ProviderContinuation{}, RecoveryInfo{}, ContentResponse{}, ContentChoice{},
+		GenerationInfo{}, CallOptions{}, MetaContent{}, ContentSource{},
+		ToolDefinition{}, FunctionDefinition{}, ToolChoice{}, FunctionReference{},
+		ModelMessage{}, ThinkingConfig{}, ThinkingMode(""), json.RawMessage{},
+		FormattedSection{}, time.Time{}}
 	for _, value := range values {
 		typ := reflect.TypeOf(value)
 		id := typ.PkgPath() + "/" + typ.Name()
@@ -232,7 +231,12 @@ func (r *CodecRegistry) encode(
 		if v.IsNil() {
 			return encoded("raw-json-nil", nil)
 		}
-		return encoded("raw-json", v.Interface())
+		if !json.Valid(v.Bytes()) {
+			return EncodedValue{}, errors.New("gent: invalid raw JSON")
+		}
+		// JSON marshaling rewrites RawMessage whitespace and escapes. Save bytes so opaque
+		// provider items retain their exact representation through copies and saved runs.
+		return encoded("raw-json-bytes", v.Bytes())
 	}
 	if v.CanInterface() && (!registered || registration.codec == nil) {
 		if err, ok := v.Interface().(error); ok {
@@ -338,9 +342,6 @@ func (r *CodecRegistry) typeName(t reflect.Type) (string, error) {
 		}
 		if t == reflect.TypeFor[ContentPart]() {
 			return "content", nil
-		}
-		if t == reflect.TypeFor[llms.ContentPart]() {
-			return "llms-content", nil
 		}
 		if t == reflect.TypeFor[error]() {
 			return "error-interface", nil

@@ -59,7 +59,7 @@ const quiz = {
     correct: 1,
     explain:
       'A process can fail after sending a refund but before saving its result. ToolRecovery ' +
-      'must supply a completed result, explicitly allow retry, or leave the call unresolved.',
+      'can supply a completed result or allow retry. Unresolved calls give the model recovery guidance.',
   },
   search: {
     question: 'Who decides which ranked tools are shown on the next results page?',
@@ -205,7 +205,7 @@ function renderLoop() {
     <div class="experiment-layout">
       <aside class="experiment-controls">
         <p class="control-kicker">YOU CONTROL THE MODEL’S REPLY</p>
-        <p class="try-this">Try a tool call. Then make the model guess, or break its format.</p>
+        <p class="try-this">Try a tool call. Then make the model guess, or break its arguments.</p>
         <button type="button" class="primary-button advance" data-action="loop-next"
           ${done ? 'disabled' : ''}>${done ? 'Experiment complete ✓' : next}</button>
         <button type="button" class="text-button" data-action="loop-back"
@@ -215,14 +215,14 @@ function renderLoop() {
           ['tool', 'Look up the order with a tool'],
           ['accepted', 'Give an acceptable answer'],
           ['rejected', 'Guess without evidence'],
-          ['malformed', 'Ignore the output format'],
+          ['malformed', 'Return invalid tool arguments'],
         ]
           .map(([value, text]) => option(value, text, state.route))
           .join('')}</select>
-        <label for="loop-format">Response envelope</label>
+        <label for="loop-format">Prompt format</label>
         <select id="loop-format">${option('xml', 'XML sections', state.format)}
           ${option('markdown', 'Markdown sections', state.format)}</select>
-        <div class="control-note">The envelope changes. The tools and answer rules stay the same.
+        <div class="control-note">Prompt sections change. Native calls and answer rules stay the same.
           ${contractButton('gent.TextFormat')}${contractButton('gent.TextSection')}</div>
       </aside>
       <div class="experiment-stage loop-stage">
@@ -451,9 +451,9 @@ function renderRestart() {
     'missing value codec':
       'The saved typed value cannot be reconstructed. Register its ValueCodec ' +
       'before continuing; a JSON-shaped lookalike is not the same type.',
-    ErrUncertainTool:
-      'The checkpoint proves intent, not outcome. The new worker cannot infer whether ' +
-      'the refund happened. Supply recovery evidence or explicitly authorize retry.',
+    'unknown outcome; model receives recovery guidance':
+      'The checkpoint proves intent, not outcome. Gent saves an unknown-outcome result with ' +
+      'recovery guidance. The model can check the refund service before making a new plan.',
     'saved result reused':
       'The durable result already proves completion. Gent reuses it without ' +
       'calling ToolRecovery or repeating the external effect.',
@@ -494,7 +494,7 @@ function renderRestart() {
         <button type="button" class="primary-button advance" data-action="restore"
           ${resolved ? 'disabled' : ''}>Restore worker B →</button>
         <div class="control-note">The logical call ID survives. The worker attempt changes.
-          ${contractButton('gent.RecoverableToolChain')}
+          ${contractButton('gent.ToolChain')}
           ${contractButton('gent.RecoveryConfig')}</div>
       </aside>
       <div class="experiment-stage restart-stage">
@@ -672,7 +672,12 @@ function resetExperiment() {
       lessonState.recovery = newRecovery(lessonState.recovery.point);
       break;
     case 'search':
-      lessonState.search = { query: 'meaning', mode: 'keyword', weight: 0.7, page: 0 };
+      lessonState.search = {
+        query: 'meaning',
+        mode: 'keyword',
+        weight: 0.7,
+        page: 0,
+      };
       break;
   }
   renderLesson();
@@ -702,7 +707,10 @@ document.addEventListener('click', (event) => {
   if (button.hasAttribute('data-close-contract')) el('lesson-contract').close();
   if (button.dataset.lesson) {
     lessonState.lesson = button.dataset.lesson;
-    const params = new URLSearchParams({ view: 'learn', lesson: lessonState.lesson });
+    const params = new URLSearchParams({
+      view: 'learn',
+      lesson: lessonState.lesson,
+    });
     history.replaceState(null, '', `#${params}`);
     renderLesson();
     el('lesson-rail').querySelector(`[data-lesson="${lessonState.lesson}"]`).focus({

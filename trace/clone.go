@@ -1,5 +1,7 @@
 package trace
 
+import "github.com/rickchristie/gent"
+
 func cloneSnapshot(snapshot *Snapshot) *Snapshot {
 	if snapshot == nil {
 		return nil
@@ -46,6 +48,7 @@ func cloneContext(ctx *Context) *Context {
 		return nil
 	}
 	clone := *ctx
+	clone.SourceMessageIds = append([]string(nil), ctx.SourceMessageIds...)
 	if ctx.CompletedTs != nil {
 		completed := *ctx.CompletedTs
 		clone.CompletedTs = &completed
@@ -87,6 +90,7 @@ func cloneModelCall(call *ModelCall) *ModelCall {
 	}
 	if call.Stream != nil {
 		stream := *call.Stream
+		stream.MetaContent = gent.CloneMetaContent(call.Stream.MetaContent)
 		clone.Stream = &stream
 	}
 	clone.Error = cloneError(call.Error)

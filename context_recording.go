@@ -41,7 +41,6 @@ func registerFrameworkCodecs(registry *CodecRegistry) {
 		ParseErrorType(""),
 		TerminationReason(""),
 		LoopAction(""),
-		ToolCall{},
 		TerminationStatus(0),
 		TerminationResult{},
 		ValidationResult{},
@@ -130,20 +129,28 @@ func (ctx *ExecutionContext) recordEvent(event Event) error {
 	return nil
 }
 
-func (ctx *ExecutionContext) recordChunk(chunk StreamChunk) error {
-	value, err := ctx.run.codecs.Encode(chunk)
+func (ctx *ExecutionContext) recordChunk(chunk *StreamChunk) error {
+	value, err := ctx.run.codecs.Encode(*chunk)
 	if err != nil {
 		return ctx.stopRecording(err)
 	}
 	ctx.run.mu.Lock()
-	ctx.run.pending = append(ctx.run.pending, &RecordedEvent{Type: "model_stream_chunk",
+	recorded := &RecordedEvent{Type: "model_stream_chunk",
 		ContextId: chunk.ContextId, ParentContextId: chunk.ParentContextId,
 		Iteration: chunk.Iteration,
-		AttemptId: ctx.run.attempt, ModelCallId: chunk.ModelCallId, Payload: &value})
+		AttemptId: ctx.run.attempt, ModelCallId: chunk.ModelCallId, Payload: &value}
+	ctx.run.pending = append(ctx.run.pending, recorded)
 	ctx.run.mu.Unlock()
 	// Synchronous acceptance supplies bounded backpressure. The producer cannot outrun storage,
 	// and stream consumers receive a chunk only after its save succeeds.
-	return ctx.FlushProgress()
+	if err := ctx.FlushProgress(); err != nil {
+		return err
+	}
+	ctx.run.mu.RLock()
+	chunk.RunId, chunk.EventNumber = recorded.RunId, recorded.EventNumber
+	ctx.run.mu.RUnlock()
+	chunk.Timestamp = chunk.Timestamp.Round(0)
+	return nil
 }
 
 func (ctx *ExecutionContext) DecodeEvent(event *RecordedEvent) (any, error) {
@@ -161,5 +168,10 @@ func (registry *CodecRegistry) DecodeEvent(event *RecordedEvent) (any, error) {
 	if event.Payload == nil {
 		return nil, nil
 	}
-	return registry.Decode(*event.Payload)
+	value, err := registry.Decode(*event.Payload)
+	if chunk, ok := value.(StreamChunk); ok {
+		chunk.RunId, chunk.EventNumber = event.RunId, event.EventNumber
+		return chunk, err
+	}
+	return value, err
 }

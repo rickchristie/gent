@@ -2,6 +2,7 @@ package react
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,12 +13,11 @@ import (
 	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
-func nativeTestCall(id, name, args string) llms.ToolCall {
-	return llms.ToolCall{ID: id, Type: "function",
-		FunctionCall: &llms.FunctionCall{Name: name, Arguments: args}}
+func nativeTestCall(id, name, args string) gent.ModelToolCall {
+	return gent.ModelToolCall{ID: id, Type: "function",
+		FunctionCall: &gent.FunctionCall{Name: name, Arguments: args}}
 }
 
 func nativeTestResponse(choice *gent.ContentChoice) *gent.ContentResponse {
@@ -27,14 +27,26 @@ func nativeTestResponse(choice *gent.ContentChoice) *gent.ContentResponse {
 	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}}
 }
 
+func nativeTestSource(ctx *gent.ExecutionContext, call int) *gent.ContentSource {
+	id := fmt.Sprintf("%s:model:%d", ctx.ContextId(), call)
+	var ids []string
+	for _, event := range ctx.Events() {
+		if after, ok := event.(*gent.AfterModelCallEvent); ok && after.ModelCallId == id {
+			ids = after.Response.Choices[0].CandidateSource.MessageIds
+		}
+	}
+	return &gent.ContentSource{ModelCallId: id,
+		StreamId: fmt.Sprintf("iter-%d", ctx.Iteration()), StreamTopicId: "llm-response",
+		MessageIds: ids}
+}
+
 // This adapter has no display chunks. Its completed response still needs the same size and
 // repetition checks as a streamed response, including arguments that arrive only on completion.
 type nativeFinalModel struct{ *mockModel }
 
 func (model *nativeFinalModel) GenerateContentStream(_ context.Context,
 	request gent.ModelCallRequest) (gent.Stream, error) {
-	response, err := model.GenerateContent(nil, "", "", request.Messages,
-		llms.WithOptions(request.Options))
+	response, err := model.response(&request)
 	stream := gent.NewStreamWithDuration()
 	stream.Complete(response, err)
 	return stream, nil
@@ -52,7 +64,7 @@ func (tool *nativeMediaTool) Call(ctx context.Context, args map[string]any) (
 		return nil, err
 	}
 	result.Instructions = "Use the image."
-	result.Media = []gent.ContentPart{llms.ImageURLContent{URL: "https://example.com/record.png"}}
+	result.Media = []gent.ContentPart{gent.ImageURLContent{URL: "https://example.com/record.png"}}
 	return result, nil
 }
 
@@ -63,14 +75,18 @@ func TestNativeAgent_RequestAndToolHistory(t *testing.T) {
 			inputs = append(inputs, args)
 			return "record", nil
 		}).WithDeduplicateSummary(func(map[string]any, string) string { return "same record" })}
-	calls := []llms.ToolCall{nativeTestCall("call-a", "lookup", `{"id":7}`),
+	calls := []gent.ModelToolCall{nativeTestCall("call-a", "lookup", `{"id":7}`),
 		nativeTestCall("call-b", "lookup", `{"id":8}`)}
-	model := newMockModel(nativeTestResponse(&gent.ContentChoice{Content: "I will check.",
-		ToolCalls: calls, ReasoningContent: "private reasoning"}),
-		nativeTestResponse(&gent.ContentChoice{Content: "Done."}))
-	agent := NewNativeAgent(model).RegisterTool(tool).
+	model := newMockModel(nativeTestResponse(&gent.ContentChoice{CandidateContent: "I will check.",
+		ToolCalls: calls, MetaContent: []*gent.MetaContent{
+			{
+				Type: gent.MetaContentReasoning, Text: "private reasoning", MessageId: "reasoning",
+			},
+		}}),
+		nativeTestResponse(&gent.ContentChoice{CandidateContent: "Done."}))
+	agent := NewAgent(model).RegisterTool(tool).
 		WithBehaviorAndContext("Support agent").WithCriticalRules("Read only").
-		WithCallOptions(llms.WithTemperature(0.4), llms.WithTopP(0.9))
+		WithCallOptions(gent.WithTemperature(0.4), gent.WithTopP(0.9))
 	ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read two records."}))
 	result, err := agent.Next(ctx)
 	if !assert.NoError(t, err) {
@@ -91,7 +107,8 @@ Use the image.
 		return
 	}
 	assert.Equal(t, &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{llms.TextContent{Text: "Done."}}}, result)
+		Result:        []gent.ContentPart{gent.TextContent{Text: "Done."}},
+		ContentSource: nativeTestSource(ctx, 2)}, result)
 	system := `<behavior>
 Support agent
 </behavior>
@@ -106,27 +123,29 @@ Read only
 <answer_requirements>
 Write your final answer here.
 </answer_requirements>`
-	initial := []llms.MessageContent{llms.TextParts(llms.ChatMessageTypeSystem, system),
-		llms.TextParts(llms.ChatMessageTypeHuman, "Read two records.")}
-	want := append(append([]llms.MessageContent(nil), initial...),
-		llms.MessageContent{Role: llms.ChatMessageTypeAI, Parts: []llms.ContentPart{
-			llms.TextContent{Text: "I will check."}, calls[0], calls[1]}},
-		llms.MessageContent{Role: llms.ChatMessageTypeTool, Parts: []llms.ContentPart{
-			llms.ToolCallResponse{ToolCallID: "call-a", Name: "lookup", Content: toolText}}},
-		llms.MessageContent{Role: llms.ChatMessageTypeTool, Parts: []llms.ContentPart{
-			llms.ToolCallResponse{ToolCallID: "call-b", Name: "lookup", Content: toolText}}},
-		llms.MessageContent{Role: llms.ChatMessageTypeHuman, Parts: []llms.ContentPart{
-			llms.TextContent{Text: "Media from lookup (call call-a):"},
-			llms.ImageURLContent{URL: "https://example.com/record.png"},
-			llms.TextContent{Text: "Media from lookup (call call-b):"},
-			llms.ImageURLContent{URL: "https://example.com/record.png"}}})
-	assert.Equal(t, [][]llms.MessageContent{initial, want}, model.capturedMessages)
-	definitions := []llms.Tool{{Type: "function", Function: &llms.FunctionDefinition{
-		Name: "lookup", Description: "Read a record",
+	initial := []gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeSystem, system),
+		gent.TextParts(gent.ChatMessageTypeHuman, "Read two records.")}
+	want := append(append([]gent.ModelMessage(nil), initial...),
+		gent.ModelMessage{Role: gent.ChatMessageTypeAI, Parts: []gent.ContentPart{
+			gent.TextContent{Text: "I will check."}, calls[0], calls[1]}},
+		gent.ModelMessage{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{
+			gent.ToolCallResponse{ToolCallID: "call-a", Name: "lookup", Content: toolText}}},
+		gent.ModelMessage{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{
+			gent.ToolCallResponse{ToolCallID: "call-b", Name: "lookup", Content: toolText}}},
+		gent.ModelMessage{Role: gent.ChatMessageTypeHuman, Parts: []gent.ContentPart{
+			gent.TextContent{Text: "Media from lookup (call call-a):"},
+			gent.ImageURLContent{URL: "https://example.com/record.png"},
+			gent.TextContent{Text: "Media from lookup (call call-b):"},
+			gent.ImageURLContent{URL: "https://example.com/record.png"}}})
+	assert.Equal(t, [][]gent.ModelMessage{initial, want}, model.capturedMessages)
+	definitions := []gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
+		Name: "lookup", Description: `Read a record
+
+Returns: {"type":"string"}`,
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
 	}}}
-	wantOptions := gent.NewModelCallRequest(nil, llms.WithTemperature(0.4),
-		llms.WithTopP(0.9), llms.WithTools(definitions)).Options
+	wantOptions := gent.NewModelCallRequest(nil, gent.WithTemperature(0.4),
+		gent.WithTopP(0.9), gent.WithTools(definitions)).Options
 	for _, options := range model.capturedOptions {
 		assert.Equal(t, wantOptions, gent.NewModelCallRequest(nil, options...).Options)
 	}
@@ -152,22 +171,22 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 	cases := []testCase{
 		{"no choice", input{nil}, expected{"The model returned no response. Please try again.", 0}},
 		{"incomplete", input{&gent.ContentChoice{StopReason: "length",
-			ToolCalls: []llms.ToolCall{nativeTestCall("a", "lookup", "{}")}}},
+			ToolCalls: []gent.ModelToolCall{nativeTestCall("a", "lookup", "{}")}}},
 			expected{"The response was incomplete. Use a shorter answer or fewer tool calls.", 0}},
 		{"empty", input{&gent.ContentChoice{}},
 			expected{"Use a tool or give a final answer.", 0}},
-		{"duplicate IDs", input{&gent.ContentChoice{ToolCalls: []llms.ToolCall{
+		{"duplicate IDs", input{&gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
 			nativeTestCall("a", "lookup", "{}"), nativeTestCall("a", "lookup", "{}")}}},
 			expected{`duplicate model tool call ID "a"`, 1}},
-		{"bad JSON", input{&gent.ContentChoice{ToolCalls: []llms.ToolCall{
+		{"bad JSON", input{&gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
 			nativeTestCall("a", "lookup", "{")}}},
 			expected{gent.ErrInvalidJSON.Error() + ": unexpected end of JSON input", 1}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			model := newMockModel(nativeTestResponse(test.input.choice),
-				nativeTestResponse(&gent.ContentChoice{Content: "Done."}))
-			agent := NewNativeAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
+				nativeTestResponse(&gent.ContentChoice{CandidateContent: "Done."}))
+			agent := NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
 				func(context.Context, map[string]any) (string, error) {
 					t.Error("invalid response must not execute tools")
 					return "", nil
@@ -185,10 +204,11 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 			result, err = agent.Next(ctx)
 			assert.NoError(t, err)
 			assert.Equal(t, &gent.AgentLoopResult{Action: gent.LATerminate,
-				Result: []gent.ContentPart{llms.TextContent{Text: "Done."}}}, result)
+				Result:        []gent.ContentPart{gent.TextContent{Text: "Done."}},
+				ContentSource: nativeTestSource(ctx, 2)}, result)
 			for _, message := range model.capturedMessages[1] {
 				for _, part := range message.Parts {
-					_, isCall := part.(llms.ToolCall)
+					_, isCall := part.(gent.ModelToolCall)
 					assert.False(t, isCall, "do not replay an invalid call group")
 				}
 			}
@@ -211,13 +231,13 @@ func (validator *nativeValidator) Validate(
 }
 
 func TestNativeAgent_JSONValidation(t *testing.T) {
-	model := newMockModel(nativeTestResponse(&gent.ContentChoice{Content: "invalid"}),
-		nativeTestResponse(&gent.ContentChoice{Content: `{"status":"pending"}`}),
-		nativeTestResponse(&gent.ContentChoice{Content: `{"status":"done"}`}))
+	model := newMockModel(nativeTestResponse(&gent.ContentChoice{CandidateContent: "invalid"}),
+		nativeTestResponse(&gent.ContentChoice{CandidateContent: `{"status":"pending"}`}),
+		nativeTestResponse(&gent.ContentChoice{CandidateContent: `{"status":"done"}`}))
 	validator := &nativeValidator{}
 	term := termination.NewJSON[nativeAnswer]("answer")
 	term.SetValidator(validator)
-	agent := NewNativeAgent(model).WithTermination(term)
+	agent := NewAgent(model).WithTermination(term)
 	ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Check."}))
 	first, err := agent.Next(ctx)
 	assert.NoError(t, err)
@@ -230,7 +250,8 @@ Check the status.
 	third, err := agent.Next(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{llms.TextContent{Text: `{"status":"done"}`}}}, third)
+		Result:        []gent.ContentPart{gent.TextContent{Text: `{"status":"done"}`}},
+		ContentSource: nativeTestSource(ctx, 3)}, third)
 	assert.Equal(t, []any{nativeAnswer{"pending"}, nativeAnswer{"done"}}, validator.values)
 	assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCTerminationParseErrorTotal))
 	assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCAnswerRejectedBy+"status"))
@@ -255,12 +276,13 @@ func TestNativeAgent_FinalOnlySizeAndRepetition(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			model := newMockModel(nativeTestResponse(&gent.ContentChoice{Content: test.input.content,
-				ToolCalls: []llms.ToolCall{nativeTestCall("a", "lookup", test.input.args)}}))
+			model := newMockModel(nativeTestResponse(&gent.ContentChoice{
+				CandidateContent: test.input.content,
+				ToolCalls:        []gent.ModelToolCall{nativeTestCall("a", "lookup", test.input.args)}}))
 			config := agentutil.DefaultRepetitionConfig()
 			config.Enabled = test.input.repetition
 			config.BlockSize = 50
-			agent := NewNativeAgent(&nativeFinalModel{model}).WithMaxResponseChars(test.input.max).
+			agent := NewAgent(&nativeFinalModel{model}).WithMaxResponseChars(test.input.max).
 				WithRepetitionConfig(config).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
 				func(context.Context, map[string]any) (string, error) {
 					t.Error("truncated response must not execute tools")
@@ -301,11 +323,11 @@ func TestNativeAgent_ToolLimits(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			var effects []string
-			model := newMockModel(nativeTestResponse(&gent.ContentChoice{ToolCalls: []llms.ToolCall{
+			model := newMockModel(nativeTestResponse(&gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
 				nativeTestCall("a", "first", "{}"), nativeTestCall("b", "second", "{}")}}),
-				nativeTestResponse(&gent.ContentChoice{ToolCalls: []llms.ToolCall{
+				nativeTestResponse(&gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
 					nativeTestCall("c", "second", "{}"), nativeTestCall("d", "first", "{}")}}))
-			agent := NewNativeAgent(model)
+			agent := NewAgent(model)
 			for _, name := range []string{"first", "second"} {
 				agent.RegisterTool(gent.NewToolFunc(name, "Read", nil,
 					func(context.Context, map[string]any) (string, error) {
@@ -326,23 +348,13 @@ func TestNativeAgent_ToolLimits(t *testing.T) {
 	}
 }
 
-func TestNativeAgent_UnsupportedChain(t *testing.T) {
-	agent := NewNativeAgent(newMockModel()).WithToolChain(newMockToolChain())
-	ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
-	assert.EqualError(t, agent.ConfigureExecution(ctx),
-		"tool chain *react.mockToolChain does not support native calls")
-	_, err := agent.Next(ctx)
-	assert.EqualError(t, err,
-		"model call failed: tool chain *react.mockToolChain does not support native calls")
-	assert.Equal(t, 0, agent.model.(*mockModel).callCount)
-}
-
 func TestNativeAgent_MissingCallID(t *testing.T) {
 	call := nativeTestCall("", "lookup", "{}")
 	call.Type = ""
-	model := newMockModel(nativeTestResponse(&gent.ContentChoice{ToolCalls: []llms.ToolCall{call}}),
-		nativeTestResponse(&gent.ContentChoice{Content: "Done."}))
-	agent := NewNativeAgent(model).WithToolChain(toolchain.NewYAML().RegisterTool(
+	model := newMockModel(
+		nativeTestResponse(&gent.ContentChoice{ToolCalls: []gent.ModelToolCall{call}}),
+		nativeTestResponse(&gent.ContentChoice{CandidateContent: "Done."}))
+	agent := NewAgent(model).WithToolChain(toolchain.New().RegisterTool(
 		gent.NewToolFunc("lookup", "Read", nil,
 			func(context.Context, map[string]any) (string, error) { return "ok", nil })))
 	ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
@@ -352,11 +364,11 @@ func TestNativeAgent_MissingCallID(t *testing.T) {
 	}
 	_, err = agent.Next(ctx)
 	assert.NoError(t, err)
-	saved := model.capturedMessages[1][2].Parts[0].(llms.ToolCall)
+	saved := model.capturedMessages[1][2].Parts[0].(gent.ModelToolCall)
 	assert.NotEmpty(t, saved.ID)
 	assert.Equal(t, "function", saved.Type)
-	assert.Equal(t, llms.MessageContent{Role: llms.ChatMessageTypeTool, Parts: []llms.ContentPart{
-		llms.ToolCallResponse{ToolCallID: saved.ID, Name: "lookup", Content: `<lookup>
+	assert.Equal(t, gent.ModelMessage{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{
+		gent.ToolCallResponse{ToolCallID: saved.ID, Name: "lookup", Content: `<lookup>
 ok
 </lookup>`}}}, model.capturedMessages[1][3])
 }

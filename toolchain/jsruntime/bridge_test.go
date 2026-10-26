@@ -20,53 +20,37 @@ func mockToolCallFn(
 	errs map[string]error,
 	calls *[]string,
 ) ToolCallFn {
-	return func(content string) (
-		*gent.ToolChainResult, error,
-	) {
-		*calls = append(*calls, content)
-
-		// Parse to get tool name(s)
-		var single struct {
-			Tool string `json:"tool"`
-		}
-		var arr []struct {
-			Tool string `json:"tool"`
-		}
-
-		if err := json.Unmarshal(
-			[]byte(content), &single,
-		); err == nil && single.Tool != "" {
-			if e, ok := errs[single.Tool]; ok {
-				return nil, e
+	return func(native []gent.ModelToolCall) (*gent.ToolChainResult, error) {
+		requests := make([]map[string]any, len(native))
+		for i, call := range native {
+			var args any
+			if err := json.Unmarshal([]byte(call.FunctionCall.Arguments), &args); err != nil {
+				return nil, err
 			}
-			return results[single.Tool], nil
+			requests[i] = map[string]any{"tool": call.FunctionCall.Name, "args": args}
 		}
-
-		if err := json.Unmarshal(
-			[]byte(content), &arr,
-		); err == nil && len(arr) > 0 {
-			// For parallel calls, merge results
-			merged := &gent.ToolChainResult{}
-			for _, a := range arr {
-				if e, ok := errs[a.Tool]; ok {
-					merged.Results = append(
-						merged.Results,
-						&gent.ToolCallResult{
-							Name:  a.Tool,
-							Error: e,
-						},
-					)
-				} else if r, ok := results[a.Tool]; ok {
-					merged.Results = append(
-						merged.Results,
-						r.Results...,
-					)
+		var value any = requests
+		if len(requests) == 1 {
+			value = requests[0]
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		*calls = append(*calls, string(data))
+		merged := &gent.ToolChainResult{}
+		for _, call := range native {
+			name := call.FunctionCall.Name
+			if err := errs[name]; err != nil {
+				if len(native) == 1 {
+					return nil, err
 				}
+				merged.Results = append(merged.Results, &gent.ToolCallResult{Name: name, Error: err})
+			} else if result := results[name]; result != nil {
+				merged.Results = append(merged.Results, result.Results...)
 			}
-			return merged, nil
 		}
-
-		return nil, errors.New("unknown format")
+		return merged, nil
 	}
 }
 
@@ -230,7 +214,7 @@ func TestToolBridge(t *testing.T) {
 				results map[string]*gent.ToolChainResult
 				errs    map[string]error
 			}{
-				source: `tool.call("not an object");`,
+				source:  `tool.call("not an object");`,
 				results: map[string]*gent.ToolChainResult{},
 				errs:    map[string]error{},
 			},

@@ -6,7 +6,6 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestNativeAgent_ProviderStopReasons(t *testing.T) {
@@ -27,7 +26,7 @@ func TestNativeAgent_ProviderStopReasons(t *testing.T) {
 	retry := &gent.AgentLoopResult{Action: gent.LAContinue,
 		NextPrompt: "The response was incomplete. Use a shorter answer or fewer tool calls."}
 	answer := &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{llms.TextContent{Text: "Done."}}}
+		Result: []gent.ContentPart{gent.TextContent{Text: "Done."}}}
 	toolResult := &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: `<lookup>
 record
 </lookup>`}
@@ -53,20 +52,26 @@ record
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			choice := &gent.ContentChoice{Content: "Done.", StopReason: test.input.reason}
+			choice := &gent.ContentChoice{CandidateContent: "Done.", StopReason: test.input.reason}
 			if test.input.tools {
-				choice.ToolCalls = []llms.ToolCall{nativeTestCall("call-a", "lookup", "{}")}
+				choice.ToolCalls = []gent.ModelToolCall{nativeTestCall("call-a", "lookup", "{}")}
 			}
 			model := newMockModel(nativeTestResponse(choice))
 			calls := 0
-			agent := NewNativeAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
+			agent := NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
 				func(context.Context, map[string]any) (string, error) {
 					calls++
 					return "record", nil
 				}))
 			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
 			result, err := agent.Next(ctx)
-			assert.Equal(t, test.expected, expected{result, calls, err})
+			want := test.expected
+			if want.result.Action == gent.LATerminate {
+				copy := *want.result
+				copy.ContentSource = nativeTestSource(ctx, 1)
+				want.result = &copy
+			}
+			assert.Equal(t, want, expected{result, calls, err})
 			assert.Equal(t, int64(test.expected.calls), ctx.Stats().GetCounter(gent.SCToolCalls))
 		})
 	}

@@ -3,6 +3,7 @@ package gent_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,7 +117,7 @@ func TestModelReplayCallOrder(t *testing.T) {
 				if !assert.Len(t, chunks, 1) {
 					return
 				}
-				actual.answers = append(actual.answers, response.Choices[0].Content)
+				actual.answers = append(actual.answers, response.Choices[0].CandidateContent)
 				actual.ids = append(actual.ids, chunks[0].ModelCallId)
 			}
 			actual.providerCalls = fresh.calls
@@ -170,7 +171,15 @@ func TestModelReplayRetriesFailedCall(t *testing.T) {
 			if test.input.olderResult {
 				readModelCall(t, ctx, &savedReplyModel{responses: []string{"old"}}, test.input.call)
 			}
-			failed := &savedChunkModel{chunks: []gent.StreamChunk{{Content: "partial"}},
+			failed := &savedChunkModel{chunks: []gent.StreamChunk{
+				{
+					MetaContent: []*gent.MetaContent{
+						{
+							Type: gent.MetaContentIntermediary, Text: "partial",
+						},
+					},
+				},
+			},
 				err: context.Canceled}
 			stream, err := ctx.GenerateContentStream(failed, test.input.call,
 				gent.NewModelCallRequest(nil))
@@ -198,7 +207,7 @@ func TestModelReplayRetriesFailedCall(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			assert.Equal(t, test.expected, expected{response.Choices[0].Content,
+			assert.Equal(t, test.expected, expected{response.Choices[0].CandidateContent,
 				chunks[0].ModelCallId, fresh.calls, gent.ValidateBundle(view)})
 		})
 	}
@@ -231,12 +240,36 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 		input    input
 		expected expected
 	}
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{{Content: "hello",
-		ReasoningContent: "reason", StopReason: "stop"}, {Content: "another choice"}},
+	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{{CandidateContent: "hello",
+		MetaContent: []*gent.MetaContent{
+			{
+				Type: gent.MetaContentReasoning, Text: "reason", MessageId: "reasoning",
+			},
+		}, StopReason: "stop"}, {
+		CandidateContent: "another choice",
+	}},
 		Info: &gent.GenerationInfo{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}
 	stamp := time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)
-	chunks := []gent.StreamChunk{{ReasoningContent: "reason", Timestamp: stamp},
-		{Content: "he", Timestamp: stamp}, {Content: "llo", Timestamp: stamp}}
+	chunks := []gent.StreamChunk{{
+		MetaContent: []*gent.MetaContent{
+			{
+				Type: gent.MetaContentReasoning, Text: "reason", MessageId: "reasoning",
+			},
+		}, Timestamp: stamp,
+	},
+		{
+			MetaContent: []*gent.MetaContent{
+				{
+					Type: gent.MetaContentIntermediary, Text: "he",
+				},
+			}, Timestamp: stamp,
+		}, {
+			MetaContent: []*gent.MetaContent{
+				{
+					Type: gent.MetaContentIntermediary, Text: "llo",
+				},
+			}, Timestamp: stamp,
+		}}
 	cases := []testCase{
 		{"saved chunks", input{chunks: chunks}, expected{response, 0, 8, nil}},
 		{"response without chunks", input{}, expected{response, 0, 8, nil}},
@@ -254,7 +287,15 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 			if test.input.retry {
 				failed := &savedChunkModel{response: &gent.ContentResponse{
 					Info: &gent.GenerationInfo{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}},
-					chunks: []gent.StreamChunk{{Content: "partial"}}, err: context.Canceled}
+					chunks: []gent.StreamChunk{
+						{
+							MetaContent: []*gent.MetaContent{
+								{
+									Type: gent.MetaContentIntermediary, Text: "partial",
+								},
+							},
+						},
+					}, err: context.Canceled}
 				stream, err := ctx.GenerateContentStream(failed, call, gent.NewModelCallRequest(nil))
 				if !assert.NoError(t, err) {
 					return
@@ -263,7 +304,7 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 				stream.Close()
 				assert.ErrorIs(t, err, context.Canceled)
 			}
-			_, liveChunks := readModelCall(t, ctx,
+			liveResponse, liveChunks := readModelCall(t, ctx,
 				&savedChunkModel{response: response, chunks: test.input.chunks}, call)
 			bundle, err := ctx.Export()
 			if !assert.NoError(t, err) {
@@ -277,9 +318,25 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 			fresh := &savedReplyModel{}
 			result, replayChunks := readModelCall(t, restored, fresh, call)
 			assert.Equal(t, liveChunks, replayChunks)
+			assert.Equal(t, liveResponse, result)
 			assert.Equal(t, ctx.Stats().Counters(), restored.Stats().Counters())
 			view, err := restored.Export()
-			assert.Equal(t, test.expected, expected{result, fresh.calls,
+			want := test.expected
+			owned, cloneErr := ctx.Codecs().Clone(want.response)
+			if !assert.NoError(t, cloneErr) {
+				return
+			}
+			want.response = owned.(*gent.ContentResponse)
+			prefix := strings.TrimSuffix(liveResponse.Choices[0].CandidateSource.MessageIds[0], "message:0")
+			for i, choice := range want.response.Choices {
+				choice.CandidateSource = &gent.ContentSource{ModelCallId: "answer",
+					StreamId: "stream", StreamTopicId: "topic",
+					MessageIds: []string{fmt.Sprintf("%smessage:%d", prefix, i)}}
+				for _, item := range choice.MetaContent {
+					item.MessageId = prefix + item.MessageId
+				}
+			}
+			assert.Equal(t, want, expected{result, fresh.calls,
 				restored.Stats().GetCounter(gent.SCTotalTokens), err})
 			assert.Equal(t, bundle, view)
 		})

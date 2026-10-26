@@ -120,13 +120,13 @@ type ToolRecoveryResult struct {
 }
 
 type ToolRecovery interface {
-	Recover(context.Context, ToolRecoveryRequest) (ToolRecoveryResult, error)
+	Recover(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResult, error)
 }
 
-type ToolRecoveryFunc func(context.Context, ToolRecoveryRequest) (ToolRecoveryResult, error)
+type ToolRecoveryFunc func(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResult, error)
 
-func (f ToolRecoveryFunc) Recover(ctx context.Context, request ToolRecoveryRequest) (
-	ToolRecoveryResult, error,
+func (f ToolRecoveryFunc) Recover(ctx context.Context, request *ToolRecoveryRequest) (
+	*ToolRecoveryResult, error,
 ) {
 	return f(ctx, request)
 }

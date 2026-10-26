@@ -686,7 +686,7 @@ func (f *EcommerceFixture) RegisterAllTools(
 }
 
 // RegisterAllToolsSearch registers all e-commerce tools
-// with IndexableTool metadata for SearchJSON toolchain.
+// with IndexableTool metadata for SearchChain toolchain.
 func (f *EcommerceFixture) RegisterAllToolsSearch(
 	tc gent.ToolChain,
 ) {

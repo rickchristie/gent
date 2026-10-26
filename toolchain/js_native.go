@@ -3,10 +3,10 @@ package toolchain
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
 const nativeCodeTool = "run_code"
@@ -14,16 +14,16 @@ const nativeCodeTool = "run_code"
 // RecoveryConfig covers native program settings that are not part of the wrapped tool catalog.
 func (w *JsToolChainWrapper) RecoveryConfig() any {
 	return map[string]any{"codeTimeout": w.codeTimeout, "codeGuidance": w.codeGuidance,
-		"directCallGuidance": w.directCallGuidance, "directCallDisabled": w.directCallDisabled}
+		"directCallGuidance": w.directCallGuidance, "directCallDisabled": w.directCallDisabled,
+		"wrapped": w.wrapped.RecoveryConfig()}
 }
 
 // NativeTools exposes the same local JavaScript runtime through a function call. Code-only mode
 // still includes the available tool schemas in its description so code can use exact arguments.
-func (w *JsToolChainWrapper) NativeTools(ctx *gent.ExecutionContext) ([]llms.Tool, error) {
-	chain, err := w.nativeChain()
-	if err != nil {
-		return nil, err
-	}
+func (w *JsToolChainWrapper) NativeTools(
+	ctx *gent.ExecutionContext,
+) ([]gent.ToolDefinition, error) {
+	chain := w.wrapped
 	tools, err := chain.NativeTools(ctx)
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (w *JsToolChainWrapper) NativeTools(ctx *gent.ExecutionContext) ([]llms.Too
 	} else {
 		description += "\n\nThe other function definitions also describe the tools available in code."
 	}
-	tools = append(tools, llms.Tool{Type: "function", Function: &llms.FunctionDefinition{
+	tools = append(tools, gent.ToolDefinition{Type: "function", Function: &gent.FunctionDefinition{
 		Name: nativeCodeTool, Description: description,
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"code": map[string]any{"type": "string"},
@@ -66,28 +66,18 @@ func (w *JsToolChainWrapper) NativeTools(ctx *gent.ExecutionContext) ([]llms.Too
 	return tools, nil
 }
 
-func (w *JsToolChainWrapper) nativeChain() (gent.NativeToolChain, error) {
-	chain, ok := w.wrapped.(gent.NativeToolChain)
-	if !ok {
-		return nil, fmt.Errorf("tool chain %T does not support native calls", w.wrapped)
-	}
-	return chain, nil
-}
-
 // RegisterCodecs also covers tool outputs saved inside a program result.
 func (w *JsToolChainWrapper) RegisterCodecs(registry *gent.CodecRegistry) error {
-	if chain, ok := w.wrapped.(interface {
-		RegisterCodecs(*gent.CodecRegistry) error
-	}); ok {
-		return chain.RegisterCodecs(registry)
+	if err := registry.RegisterValueType(reflect.TypeOf(programState{})); err != nil {
+		return err
 	}
-	return nil
+	return w.wrapped.RegisterCodecs(registry)
 }
 
 func (w *JsToolChainWrapper) PrepareCalls(
-	ctx *gent.ExecutionContext, calls []llms.ToolCall,
+	ctx *gent.ExecutionContext, calls []gent.ModelToolCall,
 ) (*gent.ToolPlan, error) {
-	return prepareNativeCalls(ctx, w, calls, func(call *gent.ToolCall) error {
+	return prepareNativeCalls(ctx, w, calls, func(call *parsedCall) error {
 		return w.checkNativeCall(call.Name, call.Args)
 	})
 }
@@ -116,15 +106,22 @@ func (w *JsToolChainWrapper) ExecuteNext(
 		return nil, err
 	}
 	if call.Name != nativeCodeTool {
-		chain, err := w.nativeChain()
-		if err != nil {
-			return nil, err
-		}
+		chain := w.wrapped
 		return chain.ExecuteNext(ctx, plan, format)
 	}
-	// A program can complete several external effects before it returns. Its JavaScript stack is
-	// not saved, so recovery must refuse to restart it while this marker is present.
-	if err := ctx.SetCheckpointState("gent:toolchain_active", "JavaScript toolchain"); err != nil {
+	if plan.Abandoned {
+		return completePlannedTool(ctx, plan, skippedTool(plan))
+	}
+	program, found, err := loadProgram(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return w.recoverProgram(ctx, plan, program)
+	}
+	program = &programState{AttemptId: ctx.AttemptId(), CallId: call.Id,
+		Script: call.Args["code"].(string)}
+	if err := ctx.SetCheckpointState("gent:program", program); err != nil {
 		return nil, err
 	}
 	if err := ctx.SetToolPlan(plan); err != nil {
@@ -148,8 +145,8 @@ func (w *JsToolChainWrapper) ExecuteNext(
 		Text: collectText(output), Media: collectMedia(output), SummaryCaptured: true}
 	// Save the outer result and clear the marker in the same checkpoint. Inner calls use the
 	// existing tool bridge, validation, limits, and per-tool evidence. They keep their own IDs.
-	ctx.ClearCheckpointState("gent:toolchain_active")
+	ctx.ClearCheckpointState("gent:program", "gent:program_calls")
 	return completePlannedTool(ctx, plan, result)
 }
 
-var _ gent.NativeToolChain = (*JsToolChainWrapper)(nil)
+var _ gent.ToolChain = (*JsToolChainWrapper)(nil)

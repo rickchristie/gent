@@ -16,17 +16,7 @@ import (
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/trace"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
-
-const recoveryAction = `<action>
-- tool: policy
-  args:
-    id: P10
-- tool: policy
-  args:
-    id: P10
-</action>`
 
 type recoveryInput struct {
 	Id string `json:"id"`
@@ -41,12 +31,16 @@ func (m *recoveryModel) GenerateContentStream(
 	_ context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	m.requests = append(m.requests, request)
-	content := recoveryAction
-	if m.answer || len(m.requests) > 1 {
-		content = `<answer>Policy P10 permits it.</answer>`
+	choice := &gent.ContentChoice{CandidateContent: "Policy P10 permits it."}
+	if !m.answer && len(m.requests) == 1 {
+		choice.CandidateContent = "Read the policy."
+		for _, id := range []string{"policy-a", "policy-b"} {
+			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: id, Type: "function",
+				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}})
+		}
 	}
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: content}},
+		Choices: []*gent.ContentChoice{choice},
 		Info:    &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
 	}, nil), nil
 }
@@ -201,7 +195,7 @@ func TestHistoryRecovery_Boundaries(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			assert.Equal(t, []gent.ContentPart{llms.TextContent{Text: "Policy P10 permits it."}},
+			assert.Equal(t, []gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
 				result.Output)
 			assert.Equal(t, test.expected, expected{len(requests), len(model.requests),
 				len(earlierCalls), len(calls)})
@@ -276,7 +270,7 @@ func TestHistoryRecovery_FreshProcess(t *testing.T) {
 		}
 		assert.Equal(
 			t,
-			[]gent.ContentPart{llms.TextContent{Text: "Policy P10 permits it."}},
+			[]gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
 			result.Output,
 		)
 		assert.Len(t, calls, 1)
@@ -317,4 +311,13 @@ func TestHistoryRecovery_FreshProcess(t *testing.T) {
 			return
 		}
 	}
+}
+
+func recoveryChoice() *gent.ContentChoice {
+	return &gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
+		{ID: "policy-a", Type: "function",
+			FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
+		{ID: "policy-b", Type: "function",
+			FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
+	}}
 }

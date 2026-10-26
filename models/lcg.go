@@ -2,6 +2,8 @@ package models
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -139,11 +141,10 @@ func convertLCGResponse(
 	// Convert choices
 	for i, choice := range lcgResponse.Choices {
 		response.Choices[i] = &gent.ContentChoice{
-			Content:          choice.Content,
+			CandidateContent: choice.Content,
 			StopReason:       choice.StopReason,
-			FuncCall:         choice.FuncCall,
-			ToolCalls:        choice.ToolCalls,
-			ReasoningContent: choice.ReasoningContent,
+			ToolCalls:        gentCalls(choice.ToolCalls),
+			MetaContent:      lcgMetadata(choice),
 		}
 	}
 
@@ -274,6 +275,16 @@ func getIntFromMap(m map[string]any, key string) int {
 func (m *LCGWrapper) GenerateContentStream(
 	base context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
+	messages, options, err := lcgRequest(&request)
+	if err != nil {
+		return nil, err
+	}
+	// This SDK always serializes temperature. Use the accepted default for reasoning
+	// models when Gent omitted it. Direct Responses adapters can omit it correctly.
+	if request.Options.Temperature == nil &&
+		gent.DefaultSamplingParams(m).Temperature.Directive == gent.ParamForbidden {
+		options.Temperature = 1
+	}
 	ctx, cancel := context.WithCancel(base)
 	stream, err := gent.NewBoundedStreamWithDuration(ctx, 64, cancel)
 	if err != nil {
@@ -281,13 +292,14 @@ func (m *LCGWrapper) GenerateContentStream(
 		return nil, err
 	}
 	deduper := newCallbackContentDeduper()
-	options := request.Options
 	if options.Model == "" {
 		options.Model = m.modelName
 	}
 	options.StreamingFunc = func(_ context.Context, content []byte) error {
 		if len(content) > 0 && deduper.shouldEmitStreaming(string(content)) {
-			if !stream.SendContent(string(content)) {
+			if !stream.SendMeta(&gent.MetaContent{
+				Type: gent.MetaContentIntermediary, Text: string(content),
+			}) {
 				return ctx.Err()
 			}
 		}
@@ -295,12 +307,16 @@ func (m *LCGWrapper) GenerateContentStream(
 	}
 	options.StreamingReasoningFunc = func(_ context.Context, reasoning, content []byte) error {
 		if len(reasoning) > 0 {
-			if !stream.SendReasoning(string(reasoning)) {
+			if !stream.SendMeta(&gent.MetaContent{
+				Type: gent.MetaContentReasoning, Text: string(reasoning), MessageId: "reasoning",
+			}) {
 				return ctx.Err()
 			}
 		}
 		if len(content) > 0 && deduper.shouldEmitReasoning(string(content)) {
-			if !stream.SendContent(string(content)) {
+			if !stream.SendMeta(&gent.MetaContent{
+				Type: gent.MetaContentIntermediary, Text: string(content),
+			}) {
 				return ctx.Err()
 			}
 		}
@@ -310,17 +326,33 @@ func (m *LCGWrapper) GenerateContentStream(
 		defer cancel()
 		providerResponse, err := m.model.GenerateContent(
 			ctx,
-			m.providerMessages(request.Messages),
+			m.providerMessages(messages),
 			llms.WithOptions(options),
 		)
 		duration := stream.Duration()
 		var response *gent.ContentResponse
 		if providerResponse != nil {
-			response = convertLCGResponse(m.providerResponse(providerResponse), duration)
+			providerResponse = m.providerResponse(providerResponse)
+			for _, choice := range providerResponse.Choices {
+				if choice.FuncCall != nil && len(choice.ToolCalls) == 0 {
+					err = errors.Join(err,
+						errors.New("LangChainGo returned a legacy function call without a native call ID"))
+				}
+				if len(choice.ToolCalls) > 0 && choice.ReasoningContent != "" {
+					err = errors.Join(err, errors.New(
+						"LangChainGo cannot replay reasoning with tool calls; use a lossless adapter"))
+				}
+			}
+			response = convertLCGResponse(providerResponse, duration)
+			if len(response.Choices) == 1 {
+				choice := response.Choices[0]
+				choice.MetaContent = mergeLCGMetadata(
+					stream.AccumulatedMetaContent(), choice.MetaContent)
+			}
 		} else {
 			response = &gent.ContentResponse{Choices: []*gent.ContentChoice{{
-				Content:          stream.AccumulatedContent(),
-				ReasoningContent: stream.AccumulatedReasoning(),
+				CandidateContent: gent.MetaText(stream.AccumulatedMetaContent(), gent.MetaContentIntermediary),
+				MetaContent:      stream.AccumulatedMetaContent(),
 			}}, Info: &gent.GenerationInfo{Duration: duration}}
 		}
 		stream.Complete(response, err)
@@ -330,3 +362,36 @@ func (m *LCGWrapper) GenerateContentStream(
 
 // Compile-time check that LCGWrapper implements gent.Model.
 var _ gent.Model = (*LCGWrapper)(nil)
+
+func lcgMetadata(choice *llms.ContentChoice) []*gent.MetaContent {
+	var result []*gent.MetaContent
+	if choice.ReasoningContent != "" {
+		result = append(result, &gent.MetaContent{Type: gent.MetaContentReasoning,
+			Text: choice.ReasoningContent, MessageId: "reasoning"})
+	}
+	if choice.Content != "" {
+		result = append(result, &gent.MetaContent{
+			Type: gent.MetaContentIntermediary, Text: choice.Content})
+	}
+	return result
+}
+
+// Keep callback order, then add text present only in the final SDK fields. Their original stream
+// positions are unknown. Remove an already streamed prefix so complete fields are not duplicated.
+// If a final field differs from the stream, retain both versions instead of losing evidence.
+func mergeLCGMetadata(streamed, final []*gent.MetaContent) []*gent.MetaContent {
+	if len(streamed) == 0 {
+		return final
+	}
+	result := streamed
+	for _, item := range final {
+		streamedText := gent.MetaText(streamed, item.Type)
+		if strings.HasPrefix(streamedText, item.Text) {
+			continue
+		}
+		missing := *item
+		missing.Text = strings.TrimPrefix(item.Text, streamedText)
+		result = append(result, &missing)
+	}
+	return result
+}

@@ -1,87 +1,20 @@
-// Package react implements the ReAct (Reasoning and Acting) agent loop pattern.
+// Package react implements a native tool agent loop.
 //
-// # Overview
+// NewAgent sends the current ToolChain definitions on each request. A complete model response
+// either selects native tools or supplies a final answer to the configured Termination handler.
+// Tool calls take priority over text in the same response: their results must be observed before
+// the agent can finish. Incomplete calls and answers produce retry feedback without tool effects.
 //
-// NewNativeAgent uses API tool definitions, native tool calls, and plain final assistant content.
-// It uses the same tools, validators, limits, and saved history as NewAgent. It does not parse
-// response sections or request visible thoughts. JSON, YAML, SearchJSON, and JsToolChainWrapper
-// support this path through the optional gent.NativeToolChain interface.
+// TextFormat renders system prompts and tool results. It does not parse model tool calls.
+// Before-system-prompt and before-model-call hooks can change each request. Before-tool-call
+// hooks can change effective typed input; that input is saved before the tool starts.
 //
-// NewAgent keeps the text behavior described below for existing callers and custom formats.
+// Registry, SearchChain, and JsToolChainWrapper share the native ToolChain contract. Search selects
+// definitions from active run history. JavaScript is exposed as run_code and uses the same tool
+// validation, hooks, limits, and checkpoints for inner calls.
 //
-// The ReAct pattern alternates between thinking (reasoning) and acting (tool execution)
-// to solve complex tasks. Each iteration follows the cycle: Think -> Act -> Observe -> Repeat.
-//
-// # Agent Loop Behavior
-//
-// The agent loop follows these behaviors in order of priority:
-//
-// ## 1. Actions Take Priority Over Termination
-//
-// When the model outputs both an action (tool call) and an answer (termination) in the
-// same response, the action takes priority. The agent executes the tool calls and continues
-// the loop, discarding the answer for that iteration.
-//
-// Rationale: Tool calls may fail or produce unexpected results. Terminating before
-// executing tools would provide an answer based on assumptions rather than actual results.
-// The next iteration will provide the answer after observing tool results.
-//
-// Example: If the LLM responds with:
-//
-//	<thinking>I'll reschedule the booking and send confirmation</thinking>
-//	<action>
-//	- tool: reschedule_booking
-//	  args: {booking_id: "BK001", new_flight: "AA101"}
-//	</action>
-//	<answer>Your booking has been rescheduled successfully!</answer>
-//
-// The agent will:
-//  1. Execute the reschedule_booking tool
-//  2. Continue the loop with the tool observation
-//  3. Discard the premature answer
-//  4. Allow the next iteration to provide an answer based on actual results
-//
-// ## 2. Parse Error Handling
-//
-// Parse errors are only raised if there are no actions to execute and no valid termination.
-// This allows the agent to gracefully handle malformed responses when possible.
-//
-// ## 3. Empty Response Handling
-//
-// If the model response contains neither actions nor a valid termination signal, the agent
-// continues the loop with an empty observation. This allows the model to recover in the
-// next iteration.
-//
-// # Configuration
-//
-// The agent can be configured with:
-//   - WithBehaviorAndContext: Custom behavior instructions (formatted as "behavior" section)
-//   - WithCriticalRules: Rules the agent must follow (formatted as "critical_rules" section)
-//   - WithFormat: Custom output format (default: XML)
-//   - WithToolChain: Custom tool chain (default: YAML)
-//   - WithTermination: Custom termination handler (default: Text)
-//   - WithThinking: Enable thinking section
-//   - WithSystemPromptBuilder: Custom function to build system prompt sections
-//   - WithClock: Clock function with the standard prompt time formats
-//   - WithTimeProvider: Custom time provider and prompt time formats
-//
-// # System Prompt Builder
-//
-// The system prompt is built using a SystemPromptBuilder function. The default builder
-// (DefaultSystemPromptBuilder) returns sections that are formatted by the TextFormat.
-// Sections include: behavior, re_act, critical_rules, available_tools, output_format.
-//
-// Before formatting, a BeforeSystemPromptEvent is published, allowing subscribers to
-// dynamically modify, append, or replace sections on each iteration.
-//
-// For full control over the system prompt, use WithSystemPromptBuilder to provide a custom
-// function that returns []gent.FormattedSection.
-//
-// Example:
-//
-//	agent.WithSystemPromptBuilder(func(ctx SystemPromptContext) []gent.FormattedSection {
-//	    return []gent.FormattedSection{
-//	        {Name: "behavior", Content: "You are a helpful assistant."},
-//	    }
-//	})
+// Set WithRecoveryVersion when a run must resume on a new worker. This version identifies
+// application callbacks and implementation behavior that cannot be derived from schemas.
+// Recovery reuses completed results. Uncertain outcomes produce guidance for a new model plan.
+// Interrupted JavaScript returns partial evidence without restarting the script.
 package react

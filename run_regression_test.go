@@ -14,7 +14,6 @@ import (
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/trace"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type savedReplyModel struct {
@@ -30,7 +29,7 @@ func (m *savedReplyModel) GenerateContentStream(
 		return nil, fmt.Errorf("unexpected model call %d", m.calls+1)
 	}
 	response := &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: m.responses[m.calls]}},
+		Choices: []*gent.ContentChoice{{CandidateContent: m.responses[m.calls]}},
 	}
 	m.calls++
 	if m.responseOnly {
@@ -72,7 +71,7 @@ func TestRunResumeBeforeDecisionCheckpoint(t *testing.T) {
 		expected expected
 	}
 	want := expected{result: &gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
-		Output: []gent.ContentPart{llms.TextContent{Text: "original"}}}}
+		Output: []gent.ContentPart{gent.TextContent{Text: "original"}}}}
 	cases := []testCase{
 		{"saved chunks", input{}, want},
 		{"saved response without chunks", input{true}, want},
@@ -87,7 +86,7 @@ func TestRunResumeBeforeDecisionCheckpoint(t *testing.T) {
 			ctx := gent.NewExecutionContext(context.Background(), "review",
 				gent.NewBasicLoopData(&gent.Task{Text: "review"}), gent.WithRunId("saved-response"),
 				gent.WithCodecs(codecs), gent.WithRecorder(store))
-			original := &savedReplyModel{responses: []string{"<answer>original</answer>"},
+			original := &savedReplyModel{responses: []string{"original"},
 				responseOnly: test.input.responseOnly}
 			agent := react.NewAgent(original).WithRecoveryVersion("review/v1")
 			_, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
@@ -97,7 +96,7 @@ func TestRunResumeBeforeDecisionCheckpoint(t *testing.T) {
 			if !assert.Equal(t, gent.PhaseIterationReady, store.view.Checkpoint.Phase) {
 				return
 			}
-			fresh := &savedReplyModel{responses: []string{"<answer>replacement</answer>"},
+			fresh := &savedReplyModel{responses: []string{"replacement"},
 				responseOnly: test.input.responseOnly}
 			freshAgent := react.NewAgent(fresh).WithRecoveryVersion("review/v1")
 			result, err := executor.NewRunner(freshAgent, executor.DefaultConfig()).Resume(
@@ -121,7 +120,7 @@ func TestRunCustomSettings(t *testing.T) {
 		input    input
 		expected expected
 	}
-	want := expected{output: []gent.ContentPart{llms.TextContent{Text: "ok"}}, calls: 1}
+	want := expected{output: []gent.ContentPart{gent.TextContent{Text: "ok"}}, calls: 1}
 	cases := []testCase{
 		{name: "default", input: input{func(a *react.Agent) *react.Agent { return a }},
 			expected: want},
@@ -137,7 +136,7 @@ func TestRunCustomSettings(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			model := &savedReplyModel{responses: []string{"<answer>ok</answer>"}}
+			model := &savedReplyModel{responses: []string{"ok"}}
 			agent := tc.input.configure(react.NewAgent(model))
 			ctx := gent.NewExecutionContext(context.Background(), "review",
 				gent.NewBasicLoopData(&gent.Task{Text: "review"}))
@@ -184,7 +183,7 @@ func TestRunCustomSettingsRecovery(t *testing.T) {
 			testCase{name + "/with_version", input{configure, "settings/v1"}, expected{
 				recovery: "supported", result: &gent.ExecutionResult{
 					TerminationReason: gent.TerminationSuccess,
-					Output:            []gent.ContentPart{llms.TextContent{Text: "saved answer"}},
+					Output:            []gent.ContentPart{gent.TextContent{Text: "saved answer"}},
 				}}})
 	}
 	for _, test := range cases {
@@ -196,7 +195,7 @@ func TestRunCustomSettingsRecovery(t *testing.T) {
 			ctx := gent.NewExecutionContext(context.Background(), "root",
 				gent.NewBasicLoopData(&gent.Task{Text: "Read the saved answer"}),
 				gent.WithRunId("settings"), gent.WithCodecs(store.codecs), gent.WithRecorder(store))
-			original := &savedReplyModel{responses: []string{"<answer>saved answer</answer>"}}
+			original := &savedReplyModel{responses: []string{"saved answer"}}
 			agent := test.input.configure(react.NewAgent(original)).
 				WithRecoveryVersion(test.input.version)
 			_, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
@@ -274,7 +273,7 @@ func TestModelReplayExplicitId(t *testing.T) {
 			}
 			response, err := stream.Response()
 			stream.Close()
-			got := expected{content: response.Choices[0].Content,
+			got := expected{content: response.Choices[0].CandidateContent,
 				providerCalls: fresh.calls, err: err}
 			assert.Equal(t, tc.expected, got)
 		})
@@ -313,7 +312,7 @@ func TestRunTraceOutputPolicy(t *testing.T) {
 			ctx := gent.NewExecutionContext(context.Background(), "review",
 				gent.NewBasicLoopData(&gent.Task{Text: "review"}),
 				gent.WithRunId("review"), gent.WithObserver(seq))
-			model := &savedReplyModel{responses: []string{"<answer>PRIVATE ANSWER</answer>"}}
+			model := &savedReplyModel{responses: []string{"PRIVATE ANSWER"}}
 			runner := executor.NewRunner(react.NewAgent(model), executor.DefaultConfig())
 			_, err = runner.Execute(ctx)
 			snapshot := seq.Snapshot()

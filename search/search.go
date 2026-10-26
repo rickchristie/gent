@@ -1,7 +1,7 @@
 // Package search provides generic search infrastructure for Go applications.
 //
 // It is a leaf package with no knowledge of LLM agents, tools, or policies.
-// Consumers (like gent's ToolSearchToolChain) use the generic interfaces with
+// Consumers (like Gent's toolchain.SearchChain) use the generic interfaces with
 // domain-specific adapters.
 //
 // # Core Types

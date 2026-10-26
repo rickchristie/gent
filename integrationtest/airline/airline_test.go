@@ -1,8 +1,8 @@
 // This file contains a single integration test for the airline
-// scenario, using the most complex configuration: SearchJSON
+// scenario, using the most complex configuration: SearchChain
 // toolchain with summarization compaction.
 //
-// For other variations (YAML/JSON toolchain, sliding window
+// For other variations (native registry, sliding window
 // compaction, SimpleList hint type, interactive chat), use the
 // integration CLI instead:
 //
@@ -22,7 +22,7 @@ import (
 )
 
 // TestRescheduleSearchSummarizationPTC tests the
-// flight reschedule scenario with SearchJSON toolchain
+// flight reschedule scenario with SearchChain toolchain
 // wrapped in JsToolChainWrapper (programmatic tool
 // calling) and summarization compaction.
 func TestRescheduleSearchSummarizationPTC(
@@ -39,7 +39,6 @@ func TestRescheduleSearchSummarizationPTC(
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
 	config.WrapPTC = true
-	// config.PTCCodeOnly = true
 	config.Compaction = testutil.CompactionConfig{
 		Type:              testutil.CompactionSummarization,
 		TriggerIterations: 5,

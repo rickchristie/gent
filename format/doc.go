@@ -2,8 +2,9 @@
 //
 // # Overview
 //
-// A TextFormat defines how the agent structures its output and how that output
-// is parsed back into sections. The format handles both directions:
+// A TextFormat renders and parses text sections for custom workflows. The standard ReAct
+// agent uses it to render prompts and tool results. Native tool calls use the model API.
+// The format provides three independent operations:
 //
 //  1. DescribeStructure() - Generates instructions for the model
 //  2. Parse() - Extracts sections from the model's output
@@ -30,17 +31,16 @@
 //
 //	// XML format (recommended)
 //	agent := react.NewAgent(model).
-//	    WithTextFormat(format.NewXML())
+//	    WithFormat(format.NewXML())
 //
 //	// Markdown format
 //	agent := react.NewAgent(model).
-//	    WithTextFormat(format.NewMarkdown())
+//	    WithFormat(format.NewMarkdown())
 //
 // # Section Registration
 //
-// Sections are typically registered automatically when you configure
-// toolchains and terminations on the agent. The agent calls RegisterSection
-// for each component that implements [gent.TextSection].
+// Register text sections explicitly before Parse or DescribeStructure. ToolChain is a native
+// interface and does not implement TextSection. FormatSections can render unregistered sections.
 //
 // # Parsing and Error Handling
 //

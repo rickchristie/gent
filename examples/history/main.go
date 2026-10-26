@@ -89,17 +89,15 @@ func (m *demoModel) GenerateContentStream(
 	context.Context,
 	gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	content := `<action>
-- tool: read_policy
-  args:
-    id: P10
-</action>`
-	if m.answer {
-		content = "<answer>P10 permits the refund.</answer>"
+	choice := &gent.ContentChoice{CandidateContent: "P10 permits the refund."}
+	if !m.answer {
+		choice.CandidateContent = ""
+		choice.ToolCalls = []gent.ModelToolCall{{ID: "read-policy", Type: "function",
+			FunctionCall: &gent.FunctionCall{Name: "read_policy", Arguments: `{"id":"P10"}`}}}
 	}
 	m.answer = true
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: content}},
+		Choices: []*gent.ContentChoice{choice},
 		Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
 	}, nil), nil
 }
@@ -159,41 +157,22 @@ func demonstrate(out io.Writer, stop gent.ExecutionPhase) error {
 	freshAgent := newAgent(true, &toolCalls)
 	freshExecutor := executor.NewRunner(freshAgent, executor.DefaultConfig())
 	bindings := gent.RestoreBindings{Codecs: store.codecs}
-	for {
-		newWriter := &writer{store: store, lease: store.nextLease()}
-		restoredSeq, err := trace.RestoreSequencer(bundle, trace.Config{
-			Codecs: bindings.Codecs})
-		if err != nil {
-			return err
-		}
-		bindings.Recorder = newWriter
-		bindings.Observers = []gent.RecordedEventObserver{restoredSeq}
-		_, err = freshExecutor.Resume(context.Background(), bundle, bindings)
-		if !errors.Is(err, gent.ErrUncertainTool) {
-			if err != nil {
-				return err
-			}
-			break
-		}
-		if _, err := fmt.Fprintln(
-			out,
-			"Uncertain tool: continuation waits for a recovery decision.",
-		); err != nil {
-			return err
-		}
-		// This particular tool is a pure read, so retry is safe. A writing tool must consult its
-		// durable idempotency receipt by request.ToolCallId and reconcile with the old writer.
-		bindings.ToolRecovery = gent.ToolRecoveryFunc(
-			func(context.Context, gent.ToolRecoveryRequest) (
-				gent.ToolRecoveryResult, error,
-			) {
-				return gent.ToolRecoveryResult{Status: gent.ToolRecoveryRetryAllowed}, nil
-			},
-		)
-		bundle, err = store.load()
-		if err != nil {
-			return err
-		}
+	// This tool is a pure read, so an explicit retry is safe. Writing tools must consult
+	// durable receipts and reconcile effects, or let the model receive unknown-outcome guidance.
+	bindings.ToolRecovery = gent.ToolRecoveryFunc(func(context.Context, *gent.ToolRecoveryRequest) (
+		*gent.ToolRecoveryResult, error,
+	) {
+		return &gent.ToolRecoveryResult{Status: gent.ToolRecoveryRetryAllowed}, nil
+	})
+	newWriter := &writer{store: store, lease: store.nextLease()}
+	restoredSeq, err := trace.RestoreSequencer(bundle, trace.Config{Codecs: bindings.Codecs})
+	if err != nil {
+		return err
+	}
+	bindings.Recorder = newWriter
+	bindings.Observers = []gent.RecordedEventObserver{restoredSeq}
+	if _, err := freshExecutor.Resume(context.Background(), bundle, bindings); err != nil {
+		return err
 	}
 	terminal, err := store.load() // Finds the lost completion even if no later update arrives.
 	if err != nil {

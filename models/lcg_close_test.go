@@ -86,7 +86,7 @@ type modelRequestInjectionSubscriber struct {
 }
 
 type requestMessageSummary struct {
-	role llms.ChatMessageType
+	role gent.ChatMessageType
 	text string
 }
 
@@ -94,8 +94,8 @@ func (s *modelRequestInjectionSubscriber) OnBeforeModelCall(
 	_ *gent.ExecutionContext,
 	event *gent.BeforeModelCallEvent,
 ) {
-	event.Request.Messages = append(event.Request.Messages, llms.TextParts(
-		llms.ChatMessageTypeSystem,
+	event.Request.Messages = append(event.Request.Messages, gent.TextParts(
+		gent.ChatMessageTypeSystem,
 		"injected context",
 	))
 }
@@ -126,8 +126,8 @@ func TestLCGWrapperGenerateContentStream_BeforeModelCallUsesTypedRequestInjectio
 		wrapper,
 		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
 		gent.NewModelCallRequest(
-			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
-			llms.WithTemperature(0.2),
+			[]gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
+			gent.WithTemperature(0.2),
 		),
 	)
 	require.NoError(t, err)
@@ -142,13 +142,13 @@ func TestLCGWrapperGenerateContentStream_BeforeModelCallUsesTypedRequestInjectio
 
 	assert.Equal(t, expected{
 		messages: []requestMessageSummary{
-			{role: llms.ChatMessageTypeHuman, text: "hello"},
-			{role: llms.ChatMessageTypeSystem, text: "injected context"},
+			{role: gent.ChatMessageTypeHuman, text: "hello"},
+			{role: gent.ChatMessageTypeSystem, text: "injected context"},
 		},
 		temperature: 0.2,
 	}, expected{
 		messages:    summarizeRequestMessages(modelMessages),
-		temperature: afterRequest.Options.Temperature,
+		temperature: *afterRequest.Options.Temperature,
 	})
 	assert.Equal(
 		t,
@@ -167,7 +167,7 @@ func TestLCGWrapperGenerateContentStream_CloseCancelsModelContext(t *testing.T) 
 		wrapper,
 		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
 		gent.NewModelCallRequest(
-			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+			[]gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 		),
 	)
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func TestLCGWrapperGenerateContentStream_NormalCompletionCancelsModelContext(t *
 		wrapper,
 		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
 		gent.NewModelCallRequest(
-			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+			[]gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 		),
 	)
 	require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestLCGWrapperGenerateContentStream_NormalCompletionCancelsModelContext(t *
 	require.NoError(t, err)
 	require.NotNil(t, response)
 	require.Len(t, response.Choices, 1)
-	assert.Equal(t, "done", response.Choices[0].Content)
+	assert.Equal(t, "done", response.Choices[0].CandidateContent)
 
 	select {
 	case err := <-model.done:
@@ -236,7 +236,7 @@ func TestLCGWrapperGenerateContentStream_NilExecutionContextSkipsTracing(t *test
 		wrapper,
 		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
 		gent.NewModelCallRequest(
-			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+			[]gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 		),
 	)
 	require.NoError(t, err)
@@ -247,7 +247,7 @@ func TestLCGWrapperGenerateContentStream_NilExecutionContextSkipsTracing(t *test
 	require.NoError(t, err)
 	require.NotNil(t, response)
 	require.Len(t, response.Choices, 1)
-	assert.Equal(t, "done", response.Choices[0].Content)
+	assert.Equal(t, "done", response.Choices[0].CandidateContent)
 
 	select {
 	case err := <-model.done:
@@ -279,7 +279,7 @@ func TestLCGWrapperGenerateContentStream_LateCompletionKeepsCallIteration(t *tes
 		wrapper,
 		gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
 		gent.NewModelCallRequest(
-			[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+			[]gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 		),
 	)
 	require.NoError(t, err)
@@ -292,7 +292,9 @@ func TestLCGWrapperGenerateContentStream_LateCompletionKeepsCallIteration(t *tes
 	require.Len(t, beforeEvents, 1)
 	assert.GreaterOrEqual(t, emittedChunk.Timestamp.UnixNano(), expectedChunkEarliestTs.UnixNano())
 	assert.Equal(t, gent.StreamChunk{
-		Content:       "first",
+		MetaContent: []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "first",
+			MessageId: streamChunk.MetaContent[0].MessageId}},
+		RunId: execCtx.RunId(), EventNumber: 3,
 		Timestamp:     emittedChunk.Timestamp,
 		Iteration:     1,
 		Depth:         0,
@@ -374,16 +376,28 @@ func receiveModelCallRequest(
 	}
 }
 
-func summarizeRequestMessages(messages []llms.MessageContent) []requestMessageSummary {
+func summarizeRequestMessages(messages any) []requestMessageSummary {
 	result := make([]requestMessageSummary, 0)
-	for _, message := range messages {
-		for _, part := range message.Parts {
-			text, ok := part.(llms.TextContent)
-			if !ok {
-				continue
+	switch values := messages.(type) {
+	case []gent.ModelMessage:
+		for _, message := range values {
+			for _, part := range message.Parts {
+				if text, ok := part.(gent.TextContent); ok {
+					result = append(result, requestMessageSummary{role: message.Role, text: text.Text})
+				}
 			}
-			result = append(result, requestMessageSummary{role: message.Role, text: text.Text})
 		}
+	case []llms.MessageContent:
+		for _, message := range values {
+			for _, part := range message.Parts {
+				if text, ok := part.(llms.TextContent); ok {
+					result = append(result, requestMessageSummary{
+						role: gent.ChatMessageType(message.Role), text: text.Text})
+				}
+			}
+		}
+	default:
+		panic("unexpected message type")
 	}
 	return result
 }

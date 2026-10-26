@@ -13,6 +13,7 @@ import (
 )
 
 type historySequenceModel struct {
+	choices  []*gent.ContentChoice
 	texts    []string
 	requests []gent.ModelCallRequest
 }
@@ -23,10 +24,15 @@ func (m *historySequenceModel) GenerateContentStream(
 ) (
 	gent.Stream, error,
 ) {
-	text := m.texts[len(m.requests)]
+	choice := &gent.ContentChoice{}
+	if len(m.choices) > 0 {
+		choice = m.choices[len(m.requests)]
+	} else {
+		choice.CandidateContent = m.texts[len(m.requests)]
+	}
 	m.requests = append(m.requests, request)
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: text}},
+		Choices: []*gent.ContentChoice{choice},
 		Info:    &gent.GenerationInfo{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
 	}, nil), nil
 }
@@ -41,7 +47,7 @@ func TestHistoryCompaction_PreservesBothSummariesAndResumes(t *testing.T) {
 		phase:  gent.PhaseCompactionCompleted,
 		after:  2,
 	}
-	model := &historySequenceModel{texts: []string{recoveryAction, recoveryAction}}
+	model := &historySequenceModel{choices: []*gent.ContentChoice{recoveryChoice(), recoveryChoice()}}
 	summaries := &historySequenceModel{texts: []string{
 		"Policy P10 permits refunds within 30 days.", "Two policy lookups were completed.",
 	}}
@@ -101,7 +107,7 @@ Policy P10 permits refunds within 30 days.
 Two policy lookups were completed.
 </prior_work_summary>`, second.Messages[0].Parts[0].(interface{ String() string }).String())
 	assert.NotEqual(t, summaries.requests[0].Messages, summaries.requests[1].Messages)
-	freshModel := &historySequenceModel{texts: []string{"<answer>Done.</answer>"}}
+	freshModel := &historySequenceModel{texts: []string{"Done."}}
 	freshSummary := &historySequenceModel{}
 	freshAgent := newAgent(freshModel)
 	bindings := recoveryBindings(t, freshAgent)

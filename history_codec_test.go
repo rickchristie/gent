@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestCodecRegistryRoundTrip(t *testing.T) {
@@ -39,17 +38,20 @@ func TestCodecRegistryRoundTrip(t *testing.T) {
 		map[string]any{"id": uint64(1<<63 + 7), "count": int32(12), "decimal": json.Number("1.20")},
 		namedMap{"large": 1<<62 + 7}, namedSlice{1<<63 + 8}, json.RawMessage(`{"value":7}`),
 		json.RawMessage(nil), json.RawMessage(`null`), EncodedValue{},
+		json.RawMessage(` {
+  "escaped": "\u0061<&>", "number": 1.20, "nested": { "keep": true }
+} `),
 		[2][2]int64{{1, 2}, {3, 1<<62 + 9}},
-		llms.CachedContent{
-			ContentPart:  llms.BinaryContent{MIMEType: "image/png", Data: []byte{0, 255, 7}},
-			CacheControl: &llms.CacheControl{Type: "ephemeral", Duration: 15 * time.Minute},
+		CachedContent{
+			ContentPart:  BinaryContent{MIMEType: "image/png", Data: []byte{0, 255, 7}},
+			CacheControl: &CacheControl{Type: "ephemeral", Duration: 15 * time.Minute},
 		},
-		llms.ImageURLContent{URL: "https://example.test/original.png"},
+		ImageURLContent{URL: "https://example.test/original.png"},
 		customValue{Id: 1<<63 + 19, Values: map[string]any{"nested": []any{true, "text"}}},
-		&Task{Text: "original task", Media: []ContentPart{llms.TextContent{Text: "media"}}},
+		&Task{Text: "original task", Media: []ContentPart{TextContent{Text: "media"}}},
 		&HistoryEntry{Origin: RecordOriginal, ExpireAfterIteration: 5,
-			Messages: []*MessageContent{{Role: llms.ChatMessageTypeHuman,
-				Parts: []ContentPart{llms.TextContent{Text: "policy P-10: exact original text"}},
+			Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
+				Parts: []ContentPart{TextContent{Text: "policy P-10: exact original text"}},
 				Metadata: map[MessageContentMetadataKey]any{MMKToolChainResult: &ToolChainResult{
 					Results: []*ToolCallResult{{Name: "policy", Args: map[string]any{"id": "P-10"},
 						Input: customValue{
@@ -59,8 +61,8 @@ func TestCodecRegistryRoundTrip(t *testing.T) {
 				RecordMetadataKey("custom"): []any{int64(100), true},
 			}},
 		time.Date(2026, 9, 11, 5, 0, 0, 12, time.UTC), time.Duration(42 * time.Minute),
-		llms.CallOptions{Model: "fixture", Temperature: 0.4,
-			Tools: []llms.Tool{{Type: "function", Function: &llms.FunctionDefinition{
+		CallOptions{Model: "fixture", Temperature: func() *float64 { v := 0.4; return &v }(),
+			Tools: []ToolDefinition{{Type: "function", Function: &FunctionDefinition{
 				Name: "lookup", Parameters: map[string]any{"type": "object"}}}}},
 	}
 	var cases []testCase
@@ -106,6 +108,9 @@ func TestCodecRegistryRejectsUnsupportedValues(t *testing.T) {
 		{"channel", input{make(chan int)}, expected{"gent: unsupported value chan int"}},
 		{"nan", input{math.NaN()}, expected{"gent: non-finite number"}},
 		{"cycle", input{cyclic}, expected{"gent: cyclic value map[string]interface {}"}},
+		{"invalid raw JSON", input{json.RawMessage(`{"broken":`)},
+			expected{"gent: invalid raw JSON"}},
+		{"empty raw JSON", input{json.RawMessage{}}, expected{"gent: invalid raw JSON"}},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

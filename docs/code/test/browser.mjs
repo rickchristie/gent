@@ -33,9 +33,9 @@ try {
   await page.goto(url);
   await page.evaluate(() => document.fonts.ready);
   await page.locator('#run-step-title').waitFor();
-  await check('offline HTML initializes with embedded fonts and 47 atlas entries', async () => {
+  await check('offline HTML initializes with embedded fonts and 46 atlas entries', async () => {
     assert.equal(await page.title(), 'Gent · A field guide to agents that remember');
-    assert.equal(await page.locator('.atlas-row').count(), 47);
+    assert.equal(await page.locator('.atlas-row').count(), 46);
     assert.equal(await page.evaluate(() => document.fonts.check('16px "DM Sans"')), true);
     assert.equal(await page.evaluate(() => document.fonts.check('48px "Instrument Serif"')), true);
   });
@@ -72,14 +72,30 @@ try {
     await click('[data-response="answer"]');
     assert.equal(
       await text('#parser-output'),
-      `# thought
-The policy has the answer.
+      `System prompt:
+# instructions
+Use tools to check the policy.
 
-# answer
+Model response:
 Refunds are allowed within 14 days.`,
     );
     await click('[data-response="invalid"]');
-    assert.equal(await text('#parser-output'), 'I would probably ask someone about refunds.');
+    assert.equal(
+      await text('#parser-output'),
+      `System prompt:
+# instructions
+Use tools to check the policy.
+
+Model response:
+{
+  "id": "call-1",
+  "type": "function",
+  "function": {
+    "name": "policy",
+    "arguments": "{"
+  }
+}`,
+    );
     await click('[data-response="tool"]');
   });
   await check('two compactions keep full evidence and every earlier selection', async () => {
@@ -142,7 +158,7 @@ Refunds are allowed within 14 days.`,
           assert.equal(await page.locator('#tool-recovery-actions').isVisible(), true);
           assert.equal(await page.locator('#recovery-next').isDisabled(), true);
           await click('[data-tool-recovery="unresolved"]');
-          assert.equal(await text('#worker-b-state'), 'Blocked: uncertain tool');
+          assert.equal(await text('#worker-b-state'), 'Model receives recovery guidance');
         } else if (scenario === 'terminal') {
           assert.equal(await text('#recovery-cursor'), '128');
           assert.equal(await text('#worker-b-state'), 'Returned saved result');

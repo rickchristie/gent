@@ -54,7 +54,7 @@ import (
 //	embedder, _ := search.NewOnnxEmbedder(*cfg, search.OnnxOptions{...})
 //	searcher := toolchain.NewFusedToolSearcher(embedder)
 //
-//	tc := toolchain.NewSearchJSON(toolchain.SearchHintDomainCategories).
+//	tc := toolchain.NewSearch(toolchain.SearchHintDomainCategories).
 //	    RegisterEngine(searcher)
 type FusedToolSearcher = IndexToolSearcher
 

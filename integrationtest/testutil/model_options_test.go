@@ -8,105 +8,67 @@ import (
 )
 
 func TestDefaultModelName(t *testing.T) {
-	assert.Equal(t, gent.ModelXAIGrok43, DefaultModelName)
+	assert.Equal(t, "grok-4.7", DefaultModelName)
 }
 
-func TestAvailableModels_ProviderOptions(t *testing.T) {
+func TestAvailableModels(t *testing.T) {
+	// Compare the complete menu so older, duplicate, or extra entries cannot return unnoticed.
+	expected := []ModelOption{
+		{
+			Label: "xAI grok-4.7", Name: "grok-4.7",
+			EnvKey: "GENT_TEST_XAI_KEY", BaseURL: "https://api.x.ai/v1",
+		},
+		{
+			Label: "OpenAI gpt-6-astra", Name: "gpt-6-astra",
+			EnvKey: "GENT_TEST_OPENAI_KEY",
+		},
+		{
+			Label: "Google gemini-4-argon", Name: "gemini-4-argon",
+			EnvKey:  "GENT_TEST_GEMINI_KEY",
+			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+		},
+		{
+			Label: "Anthropic claude-fable-5-1", Name: "claude-fable-5-1",
+			EnvKey: "GENT_TEST_ANTHROPIC_KEY",
+		},
+	}
+	assert.Equal(t, expected, AvailableModels)
+}
+
+func TestCreateModel_MissingKey(t *testing.T) {
 	type input struct {
-		envKey string
+		modelName string
 	}
 	type expected struct {
-		models []ModelOption
+		model gent.Model
+		err   string
 	}
 	type testCase struct {
 		name     string
 		input    input
 		expected expected
 	}
-
-	testCases := []testCase{
-		{
-			name:  "xai models exclude retired grok 4.1 ids",
-			input: input{envKey: envKeyXAI},
-			expected: expected{models: []ModelOption{
-				{
-					Label: "xAI grok-4.3", Name: gent.ModelXAIGrok43,
-					EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-				},
-				{
-					Label:  "xAI grok-4.20-0309-reasoning",
-					Name:   gent.ModelXAIGrok420Reasoning,
-					EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-				},
-				{
-					Label:  "xAI grok-4.20-0309-non-reasoning",
-					Name:   gent.ModelXAIGrok420NonReasoning,
-					EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-				},
-				{
-					Label:  "xAI grok-4.20-multi-agent-0309",
-					Name:   gent.ModelXAIGrok420MultiAgent,
-					EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-				},
-			}},
-		},
-		{
-			name:  "openai models include latest gpt 5.5",
-			input: input{envKey: envKeyOpenAI},
-			expected: expected{models: []ModelOption{
-				{Label: "OpenAI o3", Name: gent.ModelOpenAIO3, EnvKey: envKeyOpenAI},
-				{Label: "OpenAI o4-mini", Name: gent.ModelOpenAIO4Mini, EnvKey: envKeyOpenAI},
-				{
-					Label: "OpenAI gpt-4.1", Name: gent.ModelOpenAIGPT41,
-					EnvKey: envKeyOpenAI,
-				},
-				{
-					Label: "OpenAI gpt-4.1-mini", Name: gent.ModelOpenAIGPT41Mini,
-					EnvKey: envKeyOpenAI,
-				},
-				{Label: "OpenAI gpt-5", Name: gent.ModelOpenAIGPT5, EnvKey: envKeyOpenAI},
-				{
-					Label: "OpenAI gpt-5-mini", Name: gent.ModelOpenAIGPT5Mini,
-					EnvKey: envKeyOpenAI,
-				},
-				{
-					Label: "OpenAI gpt-5-nano", Name: gent.ModelOpenAIGPT5Nano,
-					EnvKey: envKeyOpenAI,
-				},
-				{
-					Label: "OpenAI gpt-5.5", Name: gent.ModelOpenAIGPT55,
-					EnvKey: envKeyOpenAI,
-				},
-				{
-					Label: "OpenAI gpt-5.4", Name: gent.ModelOpenAIGPT54,
-					EnvKey: envKeyOpenAI,
-				},
-				{
-					Label: "OpenAI gpt-5.4-mini", Name: gent.ModelOpenAIGPT54Mini,
-					EnvKey: envKeyOpenAI,
-				},
-				{
-					Label: "OpenAI gpt-5.4-nano", Name: gent.ModelOpenAIGPT54Nano,
-					EnvKey: envKeyOpenAI,
-				},
-			}},
-		},
+	cases := []testCase{
+		{"default", input{}, expected{err: "GENT_TEST_XAI_KEY environment variable not set"}},
+		{"xAI", input{"grok-4.7"}, expected{err: "GENT_TEST_XAI_KEY environment variable not set"}},
+		{"OpenAI", input{"gpt-6-astra"}, expected{
+			err: "GENT_TEST_OPENAI_KEY environment variable not set",
+		}},
+		{"Google", input{"gemini-4-argon"}, expected{
+			err: "GENT_TEST_GEMINI_KEY environment variable not set",
+		}},
+		{"Anthropic", input{"claude-fable-5-1"}, expected{
+			err: "GENT_TEST_ANTHROPIC_KEY environment variable not set",
+		}},
 	}
-
-	for _, tc := range testCases {
+	for _, key := range []string{envKeyXAI, envKeyOpenAI, envKeyGemini, envKeyAnthropic} {
+		t.Setenv(key, "")
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expected.models, modelOptionsForEnvKey(tc.input.envKey))
+			model, err := CreateModel(tc.input.modelName)
+			assert.Equal(t, tc.expected.model, model)
+			assert.EqualError(t, err, tc.expected.err)
 		})
 	}
-}
-
-func modelOptionsForEnvKey(envKey string) []ModelOption {
-	models := make([]ModelOption, 0)
-	for _, model := range AvailableModels {
-		if model.EnvKey != envKey {
-			continue
-		}
-		models = append(models, model)
-	}
-	return models
 }

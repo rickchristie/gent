@@ -13,7 +13,7 @@ import (
 	"github.com/rickchristie/gent/agents/react"
 	"github.com/rickchristie/gent/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
+
 	"github.com/tmc/langchaingo/llms/anthropic"
 )
 
@@ -39,7 +39,7 @@ func TestNativeHTTP_AnthropicStopReasons(t *testing.T) {
 	retry := &gent.AgentLoopResult{Action: gent.LAContinue,
 		NextPrompt: "The response was incomplete. Use a shorter answer or fewer tool calls."}
 	answer := &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{llms.TextContent{Text: "Done."}}}
+		Result: []gent.ContentPart{gent.TextContent{Text: "Done."}}}
 	toolResult := &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: `<lookup>
 record
 </lookup>
@@ -85,7 +85,7 @@ record
 				return
 			}
 			calls := 0
-			agent := react.NewNativeAgent(models.NewLCGWrapper(provider)).RegisterTool(
+			agent := react.NewAgent(models.NewLCGWrapper(provider)).RegisterTool(
 				gent.NewToolFunc("lookup", "Read", nil,
 					func(context.Context, map[string]any) (string, error) {
 						calls++
@@ -94,7 +94,13 @@ record
 			ctx := gent.NewExecutionContext(context.Background(), "http", gent.NewBasicLoopData(
 				&gent.Task{Text: "Read two records."}))
 			result, err := agent.Next(ctx)
-			assert.Equal(t, test.expected, expected{result, calls, err})
+			want := test.expected
+			if want.result.Action == gent.LATerminate {
+				copy := *want.result
+				copy.ContentSource = httpTestSource(ctx, 1)
+				want.result = &copy
+			}
+			assert.Equal(t, want, expected{result, calls, err})
 		})
 	}
 }

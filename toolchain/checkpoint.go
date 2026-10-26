@@ -2,13 +2,15 @@ package toolchain
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 
 	"github.com/rickchristie/gent"
 )
 
 func registerToolCodecs(registry *gent.CodecRegistry, tools []any) error {
+	if err := registry.RegisterValueType(reflect.TypeOf(gent.RecoveryInfo{})); err != nil {
+		return err
+	}
 	for _, tool := range tools {
 		call := reflect.ValueOf(tool).MethodByName("Call").Type()
 		if err := registry.RegisterValueType(call.In(1)); err != nil {
@@ -26,45 +28,18 @@ func registerToolCodecs(registry *gent.CodecRegistry, tools []any) error {
 	return nil
 }
 
-func (c *YAML) RegisterCodecs(registry *gent.CodecRegistry) error {
+func (c *Registry) RegisterCodecs(registry *gent.CodecRegistry) error {
 	return registerToolCodecs(registry, c.tools)
 }
 
-func (c *JSON) RegisterCodecs(registry *gent.CodecRegistry) error {
-	return registerToolCodecs(registry, c.tools)
-}
-
-func (c *SearchJSON) RegisterCodecs(registry *gent.CodecRegistry) error {
+func (c *SearchChain) RegisterCodecs(registry *gent.CodecRegistry) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return registerToolCodecs(registry, c.tools)
 }
 
-func prepareToolPlan(
-	ctx *gent.ExecutionContext,
-	chain gent.ToolChain,
-	content string,
-) (*gent.ToolPlan, error) {
-	if ctx == nil {
-		return nil, errors.New("gent: a tool plan requires an execution context")
-	}
-	if codecs, ok := chain.(interface {
-		RegisterCodecs(*gent.CodecRegistry) error
-	}); ok {
-		if err := codecs.RegisterCodecs(ctx.Codecs()); err != nil {
-			return nil, err
-		}
-	}
-	parsed, err := chain.ParseSection(ctx, content)
-	if err != nil {
-		return nil, err
-	}
-	calls := parsed.([]*gent.ToolCall)
-	return prepareParsedToolPlan(ctx, calls)
-}
-
 func prepareParsedToolPlan(
-	ctx *gent.ExecutionContext, calls []*gent.ToolCall,
+	ctx *gent.ExecutionContext, calls []*parsedCall,
 ) (*gent.ToolPlan, error) {
 	plan := &gent.ToolPlan{Version: 1}
 	for _, call := range calls {
@@ -77,32 +52,31 @@ func prepareParsedToolPlan(
 	return plan, nil
 }
 
-func (c *YAML) Prepare(ctx *gent.ExecutionContext, content string) (*gent.ToolPlan, error) {
-	return prepareToolPlan(ctx, c, content)
-}
-func (c *JSON) Prepare(ctx *gent.ExecutionContext, content string) (*gent.ToolPlan, error) {
-	return prepareToolPlan(ctx, c, content)
-}
-func (c *SearchJSON) Prepare(ctx *gent.ExecutionContext, content string) (*gent.ToolPlan, error) {
-	return prepareToolPlan(ctx, c, content)
-}
-
 type rawToolExecutor func(
 	*gent.ExecutionContext,
-	[]*gent.ToolCall,
+	[]*parsedCall,
 	gent.TextFormat,
 ) (*gent.ToolChainResult, error)
 
 func executeNextTool(
 	ctx *gent.ExecutionContext, plan *gent.ToolPlan,
-	format gent.TextFormat, execute rawToolExecutor,
+	format gent.TextFormat, chain gent.ToolChain, execute rawToolExecutor,
 ) (*gent.ToolCallResult, error) {
 	if err := checkToolPlan(ctx, plan); err != nil {
 		return nil, err
 	}
+	if plan.Abandoned {
+		return completePlannedTool(ctx, plan, skippedTool(plan))
+	}
 	ctx.SelectToolCall(plan)
 	defer ctx.SelectToolCall(nil)
 	result, completed, err := ctx.RecoverTool(plan)
+	if errors.Is(err, gent.ErrUncertainTool) {
+		result, err = unknownTool(ctx, plan.ReadyCall, chain)
+		if err == nil {
+			return completePlannedTool(ctx, plan, result)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +85,7 @@ func executeNextTool(
 		if err := ctx.SetToolPlan(plan); err != nil {
 			return nil, err
 		}
-		calls := []*gent.ToolCall{{Name: call.Name, Args: call.Args}}
+		calls := []*parsedCall{{Name: call.Name, Args: call.Args}}
 		output, err := execute(ctx, calls, format)
 		if recordErr := ctx.RecordingError(); recordErr != nil {
 			return nil, recordErr
@@ -150,6 +124,9 @@ func checkToolPlan(ctx *gent.ExecutionContext, plan *gent.ToolPlan) error {
 func completePlannedTool(
 	ctx *gent.ExecutionContext, plan *gent.ToolPlan, result *gent.ToolCallResult,
 ) (*gent.ToolCallResult, error) {
+	if result.Outcome == "unknown" {
+		plan.Abandoned = true
+	}
 	plan.Results = append(plan.Results, result)
 	plan.NextCall++
 	plan.ReadyCall = nil
@@ -162,73 +139,22 @@ func completePlannedTool(
 	return result, nil
 }
 
-func (c *YAML) ExecuteNext(
+func (c *Registry) ExecuteNext(
 	ctx *gent.ExecutionContext,
 	plan *gent.ToolPlan,
 	format gent.TextFormat,
 ) (
 	*gent.ToolCallResult, error,
 ) {
-	return executeNextTool(ctx, plan, format, c.executeParsed)
+	return executeNextTool(ctx, plan, format, c, c.executeParsed)
 }
 
-func (c *JSON) ExecuteNext(
+func (c *SearchChain) ExecuteNext(
 	ctx *gent.ExecutionContext,
 	plan *gent.ToolPlan,
 	format gent.TextFormat,
 ) (
 	*gent.ToolCallResult, error,
 ) {
-	return executeNextTool(ctx, plan, format, c.executeParsed)
-}
-
-func (c *SearchJSON) ExecuteNext(
-	ctx *gent.ExecutionContext,
-	plan *gent.ToolPlan,
-	format gent.TextFormat,
-) (
-	*gent.ToolCallResult, error,
-) {
-	return executeNextTool(ctx, plan, format, c.executeParsed)
-}
-
-func executeToolPlan(ctx *gent.ExecutionContext, chain gent.RecoverableToolChain,
-	content string, format gent.TextFormat) (*gent.ToolChainResult, error) {
-	plan, err := chain.Prepare(ctx, content)
-	if err != nil {
-		return nil, err
-	}
-	for plan.NextCall < len(plan.Calls) {
-		if _, err := chain.ExecuteNext(ctx, plan, format); err != nil {
-			return nil, fmt.Errorf("execute tool %d: %w", plan.NextCall, err)
-		}
-	}
-	return &gent.ToolChainResult{Results: plan.Results}, nil
-}
-
-func (c *YAML) Execute(ctx *gent.ExecutionContext, content string, format gent.TextFormat) (
-	*gent.ToolChainResult, error,
-) {
-	if ctx == nil {
-		return c.executeUnmanaged(nil, content, format)
-	}
-	return executeToolPlan(ctx, c, content, format)
-}
-
-func (c *JSON) Execute(ctx *gent.ExecutionContext, content string, format gent.TextFormat) (
-	*gent.ToolChainResult, error,
-) {
-	if ctx == nil {
-		return c.executeUnmanaged(nil, content, format)
-	}
-	return executeToolPlan(ctx, c, content, format)
-}
-
-func (c *SearchJSON) Execute(ctx *gent.ExecutionContext, content string, format gent.TextFormat) (
-	*gent.ToolChainResult, error,
-) {
-	if ctx == nil {
-		return c.executeUnmanaged(nil, content, format)
-	}
-	return executeToolPlan(ctx, c, content, format)
+	return executeNextTool(ctx, plan, format, c, c.executeParsed)
 }

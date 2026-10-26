@@ -237,7 +237,7 @@ func TestPolicySearchTool_IndexableToolInterface(t *testing.T) {
 
 func TestPolicySearchTool_Call_SnippetOnly_SingleResult(t *testing.T) {
 	tool := &PolicySearchTool{
-		name:        "search_policy",
+		name:       "search_policy",
 		resultMode: SearchResultSnippet,
 		index: &mockPolicyIndex{results: []search.SearchResult{
 			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
@@ -261,7 +261,7 @@ Cancel within 24 hours`, result.Text)
 
 func TestPolicySearchTool_Call_SnippetOnly_MultipleResults(t *testing.T) {
 	tool := &PolicySearchTool{
-		name:        "search_policy",
+		name:       "search_policy",
 		resultMode: SearchResultSnippet,
 		index: &mockPolicyIndex{results: []search.SearchResult{
 			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},
@@ -296,7 +296,7 @@ Refund in 5-7 days`, result.Text)
 func TestPolicySearchTool_Call_FullContent_StillWorks(t *testing.T) {
 	// Verify that snippetOnly=false (default) still returns full content.
 	tool := &PolicySearchTool{
-		name:        "search_policy",
+		name:       "search_policy",
 		resultMode: SearchResultFull,
 		index: &mockPolicyIndex{results: []search.SearchResult{
 			{Id: "cancel-policy", Score: 0.9, Snippet: "Cancel within 24 hours"},

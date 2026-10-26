@@ -57,7 +57,7 @@ Returns may be initiated online or at any TechEdge store location.`,
 			},
 		},
 		{
-			Id: "refund-processing",
+			Id:          "refund-processing",
 			Description: "Refund timeline by payment method",
 			FullContent: `## Refund Processing
 

@@ -1,16 +1,16 @@
 package agents_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestScratchpad_NativeDedupKeepsCallIdentity(t *testing.T) {
-	image := llms.ImageURLContent{URL: "https://example.com/record.png"}
+	image := gent.ImageURLContent{URL: "https://example.com/record.png"}
 	type input struct {
 		expired bool
 		code    bool
@@ -50,8 +50,8 @@ full program log`, true, 2}},
 					metadata.Results = append(metadata.Results, &gent.ToolCallResult{
 						Text: text, Media: []gent.ContentPart{image}})
 				}
-				message := &gent.MessageContent{Role: llms.ChatMessageTypeTool,
-					Parts: []gent.ContentPart{llms.ToolCallResponse{ToolCallID: id,
+				message := &gent.MessageContent{Role: gent.ChatMessageTypeTool,
+					Parts: []gent.ContentPart{gent.ToolCallResponse{ToolCallID: id,
 						Name: "lookup", Content: text}, image}}
 				message.SetMetadata(gent.MMKToolChainResult, metadata)
 				entries = append(entries, &gent.HistoryEntry{Messages: []*gent.MessageContent{message}})
@@ -60,20 +60,20 @@ full program log`, true, 2}},
 				entries[1].ExpireAfterIteration = 2
 			}
 			messages, count := agents.ScratchpadToMessages(entries, 2, &mockToolChain{}, &testXMLFormat{})
-			firstParts := []llms.ContentPart{llms.ToolCallResponse{ToolCallID: "old-call",
+			firstParts := []gent.ContentPart{gent.ToolCallResponse{ToolCallID: "old-call",
 				Name: "lookup", Content: test.expected.firstText}}
 			if test.expected.firstMedia {
 				firstParts = append(firstParts, image)
 			}
-			want := []llms.MessageContent{{Role: llms.ChatMessageTypeTool, Parts: firstParts}}
+			want := []gent.ModelMessage{{Role: gent.ChatMessageTypeTool, Parts: firstParts}}
 			if test.expected.count == 2 {
-				want = append(want, llms.MessageContent{Role: llms.ChatMessageTypeTool,
-					Parts: agents.ToLLMParts(entries[1].Messages[0].Parts)})
+				want = append(want, gent.ModelMessage{Role: gent.ChatMessageTypeTool,
+					Parts: slices.Clone(entries[1].Messages[0].Parts)})
 			}
 			assert.Equal(t, want, messages)
 			assert.Equal(t, test.expected.count, count)
 			assert.Equal(t, "old-call",
-				entries[0].Messages[0].Parts[0].(llms.ToolCallResponse).ToolCallID)
+				entries[0].Messages[0].Parts[0].(gent.ToolCallResponse).ToolCallID)
 		})
 	}
 }

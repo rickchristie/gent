@@ -53,53 +53,11 @@ SkyWings is an international airline. Reply with customer's `+
 			`language.
 `, tp.Today(), tp.Weekday()),
 		CriticalRules: testutil.CriticalRules(config),
-		ThinkingPrompt: "Think step by step about how to " +
-			"help the customer.",
 	})
 }
 
-// GetAirlineTestCases returns all airline test cases for YAML.
-func GetAirlineTestCases() []testutil.TestCase {
-	return []testutil.TestCase{
-		{
-			Name: "John Smith — Reschedule (YAML)",
-			Description: "John reschedules his morning " +
-				"JFK→LAX flight to evening " +
-				"(YAML toolchain)",
-			Run: RunRescheduleScenario,
-		},
-	}
-}
-
-// GetAirlineTestCasesJSON returns all airline test cases for JSON.
-func GetAirlineTestCasesJSON() []testutil.TestCase {
-	return []testutil.TestCase{
-		{
-			Name: "John Smith — Reschedule (JSON)",
-			Description: "John reschedules his morning " +
-				"JFK→LAX flight to evening " +
-				"(JSON toolchain)",
-			Run: RunRescheduleScenario,
-		},
-	}
-}
-
-// GetAirlineTestCasesSearch returns airline test cases for
-// SearchJSON toolchain.
-func GetAirlineTestCasesSearch() []testutil.TestCase {
-	return []testutil.TestCase{
-		{
-			Name: "John Smith — Reschedule (Search)",
-			Description: "John reschedules his morning " +
-				"JFK→LAX flight to evening " +
-				"(SearchJSON toolchain)",
-			Run: RunRescheduleScenarioSearch,
-		},
-	}
-}
-
 // RunRescheduleScenarioSearch runs the flight reschedule
-// scenario using SearchJSON toolchain.
+// scenario using SearchChain toolchain.
 func RunRescheduleScenarioSearch(
 	ctx context.Context,
 	w io.Writer,
@@ -117,7 +75,7 @@ func RunRescheduleScenarioSearch(
 		testutil.ScenarioConfig{
 			Name: "airline-reschedule-search",
 			HeaderTitle: "AIRLINE RESCHEDULE SCENARIO " +
-				"(SearchJSON)",
+				"(SearchChain)",
 			CustomerRequest: `Hi, I'm John Smith and my ` +
 				`email is john.smith@email.com.
 I have a flight booked for tomorrow (flight AA100 ` +
@@ -153,14 +111,12 @@ SkyWings is an international airline. Reply with `+
 				`customer's language.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: testutil.CriticalRules(config),
-			ThinkingPrompt: "Think step by step about " +
-				"how to help the customer.",
 		},
 	)
 }
 
 // RunRescheduleScenarioSearchSimpleList runs the flight
-// reschedule scenario using SearchJSON with SimpleList
+// reschedule scenario using SearchChain with SimpleList
 // hint type.
 func RunRescheduleScenarioSearchSimpleList(
 	ctx context.Context,
@@ -207,8 +163,7 @@ SkyWings is an international airline. Reply with customer's `+
 			`language.
 `, tp.Today(), tp.Weekday()),
 		CriticalRules: testutil.CriticalRules(config),
-		ThinkingPrompt: "Think step by step about how to " +
-			"help the customer.",
+
 		MaxIterations:   15,
 		RegisterTools:   fixture.RegisterAllTools,
 		TimeProvider:    tp,
@@ -217,7 +172,7 @@ SkyWings is an international airline. Reply with customer's `+
 }
 
 // NewAirlineInteractiveChatSearch creates an interactive
-// chat session for the airline domain using SearchJSON
+// chat session for the airline domain using SearchChain
 // toolchain.
 func NewAirlineInteractiveChatSearch(
 	w io.Writer,
@@ -258,8 +213,7 @@ SkyWings is an international airline. Reply with `+
 					`customer's language.
 `, tp.Today(), tp.Weekday()),
 			CriticalRules: testutil.CriticalRules(config),
-			ThinkingPrompt: "Think step by step about " +
-				"how to help the customer.",
+
 			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
 			TimeProvider:    tp,

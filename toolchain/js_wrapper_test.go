@@ -13,7 +13,7 @@ import (
 )
 
 // setupJsWrapper creates a JsToolChainWrapper wrapping
-// a SearchJSON with test tools.
+// a SearchChain with test tools.
 func setupJsWrapper() *JsToolChainWrapper {
 	tools := []*indexableToolFunc{
 		newIndexableToolWithSchema(
@@ -468,278 +468,12 @@ func setupJsWrapper() *JsToolChainWrapper {
 		},
 	}
 
-	searchTC := setupSearchJSON(tools, engines)
+	searchTC := setupSearchChain(tools, engines)
 	return NewJsToolChainWrapper(searchTC)
 }
 
 func jsTestFormat() gent.TextFormat {
 	return format.NewXML()
-}
-
-// -------------------------------------------------------
-// A. Name / Guidance / AvailableToolsPrompt
-// -------------------------------------------------------
-
-func TestJsWrapper_Name(t *testing.T) {
-	w := setupJsWrapper()
-	assert.Equal(t, "action", w.Name())
-}
-
-func TestJsWrapper_Guidance(t *testing.T) {
-	w := setupJsWrapper()
-	guidance := w.Guidance()
-
-	// Contains both modes
-	assert.Contains(t, guidance, "<direct_call>")
-	assert.Contains(t, guidance, "</direct_call>")
-	assert.Contains(t, guidance, "<code>")
-	assert.Contains(t, guidance, "</code>")
-
-	// Contains wrapped ToolChain's guidance inside
-	// direct_call
-	assert.Contains(
-		t, guidance,
-		`{"tool": "tool_name", "args": {...}}`,
-	)
-
-	// Contains recommendation text
-	assert.Contains(
-		t, guidance, "Choose direct_call",
-	)
-}
-
-func TestJsWrapper_Guidance_Custom(t *testing.T) {
-	w := setupJsWrapper().WithCodeGuidance(
-		"Custom JS guidance here",
-	)
-	guidance := w.Guidance()
-	assert.Contains(
-		t, guidance, "Custom JS guidance here",
-	)
-}
-
-func TestJsWrapper_AvailableToolsPrompt(t *testing.T) {
-	w := setupJsWrapper()
-	prompt := w.AvailableToolsPrompt()
-
-	// Contains wrapped prompt content
-	assert.Contains(t, prompt, "tool_registry_search")
-
-	// JS environment details are in Guidance(), not here
-	assert.NotContains(t, prompt, "JavaScript Environment")
-}
-
-// -------------------------------------------------------
-// B. ParseSection — sub-section detection
-// -------------------------------------------------------
-
-func TestJsWrapper_ParseSection(t *testing.T) {
-	type input struct {
-		content string
-	}
-
-	type expected struct {
-		isCode     bool
-		isToolCall bool
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "direct_call delegates to wrapped",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C1"}}
-</direct_call>`,
-			},
-			expected: expected{
-				isToolCall: true,
-			},
-		},
-		{
-			name: "code returns string",
-			input: input{
-				content: `<code>
-var x = tool.call({tool: "lookup_customer", args: {id: "C1"}});
-console.log(JSON.stringify(x));
-</code>`,
-			},
-			expected: expected{
-				isCode: true,
-			},
-		},
-		{
-			name: "neither — fallback to wrapped",
-			input: input{
-				content: `{"tool": "lookup_customer", "args": {"id": "C1"}}`,
-			},
-			expected: expected{
-				isToolCall: true,
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			result, err := w.ParseSection(
-				execCtx, tc.input.content,
-			)
-			require.NoError(t, err)
-
-			if tc.expected.isCode {
-				_, ok := result.(string)
-				assert.True(
-					t, ok,
-					"expected string for code section",
-				)
-			}
-			if tc.expected.isToolCall {
-				_, ok := result.([]*gent.ToolCall)
-				assert.True(
-					t, ok,
-					"expected []*ToolCall for "+
-						"direct_call",
-				)
-			}
-		})
-	}
-}
-
-// -------------------------------------------------------
-// C. Execute — direct_call passthrough
-// -------------------------------------------------------
-
-func TestJsWrapper_Execute_DirectCall(t *testing.T) {
-	type input struct {
-		content string
-	}
-
-	type expected struct {
-		text string
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "single tool call passes through",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>`,
-			},
-			expected: expected{
-				text: `<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>`,
-			},
-		},
-		{
-			name: "parallel tool calls pass through",
-			input: input{
-				content: `<direct_call>
-[{"tool": "lookup_customer", "args": {"id": "C001"}},
- {"tool": "get_orders", "args": {"customer_id": "C001"}}]
-</direct_call>`,
-			},
-			expected: expected{
-				text: `<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>
-<get_orders>
-[{"order_id":"O1"}]
-</get_orders>`,
-			},
-		},
-		{
-			name: "fallback without tags",
-			input: input{
-				content: `{"tool": "lookup_customer", "args": {"id": "C002"}}`,
-			},
-			expected: expected{
-				text: `<lookup_customer>
-{"id":"C002","name":"Alice"}
-</lookup_customer>`,
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			result, err := w.Execute(
-				execCtx, tc.input.content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(
-				t, tc.expected.text, collectText(result),
-			)
-		})
-	}
-}
-
-func TestJsWrapper_Execute_DirectCall_Stats(t *testing.T) {
-	w := setupJsWrapper()
-	execCtx := newExecCtx()
-	tf := jsTestFormat()
-
-	content := `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>`
-
-	_, err := w.Execute(execCtx, content, tf)
-	require.NoError(t, err)
-
-	// Tool call stats flow through wrapped ToolChain
-	assert.Equal(
-		t, int64(1),
-		execCtx.Stats().GetCounter(gent.SCToolCalls),
-	)
-	assert.Equal(
-		t, int64(1),
-		execCtx.Stats().GetCounter(
-			gent.SCToolCallsFor+"lookup_customer",
-		),
-	)
-
-	// Code execution stats should NOT be incremented
-	assert.Equal(
-		t, int64(0),
-		execCtx.Stats().GetCounter(
-			gent.SCCodeExecutions,
-		),
-	)
-}
-
-func TestJsWrapper_Execute_NilExecutionContext(t *testing.T) {
-	w := setupJsWrapper()
-	tf := jsTestFormat()
-	content := `<code>
-var c = tool.call({tool: "lookup_customer", args: {id: "C001"}});
-console.log(c.output.name);
-</code>`
-
-	result, err := w.Execute(nil, content, tf)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, `<tool_call_log>
-[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
-</tool_call_log>
-<output>
-Alice
-</output>`, collectText(result))
 }
 
 // -------------------------------------------------------
@@ -763,12 +497,10 @@ func TestJsWrapper_Execute_Code(t *testing.T) {
 		{
 			name: "simple tool.call with console.log",
 			input: input{
-				content: `<code>
-var c = tool.call(
+				content: `var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
-console.log(c.output.id + ":" + c.output.name);
-</code>`,
+console.log(c.output.id + ":" + c.output.name);`,
 			},
 			expected: expected{
 				text: "<tool_call_log>\n" +
@@ -783,8 +515,7 @@ console.log(c.output.id + ":" + c.output.name);
 		{
 			name: "chained calls",
 			input: input{
-				content: `<code>
-var c = tool.call(
+				content: `var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
 var o = tool.call(
@@ -794,8 +525,7 @@ var o = tool.call(
 console.log(
   "customer=" + c.output.id +
   " orders=" + o.output[0].order_id
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: "<tool_call_log>\n" +
@@ -813,11 +543,9 @@ console.log(
 		{
 			name: "no console.log uses tool output",
 			input: input{
-				content: `<code>
-var c = tool.call(
+				content: `var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -831,9 +559,7 @@ Code executed successfully.
 		{
 			name: "JS syntax error",
 			input: input{
-				content: `<code>
-var x = @;
-</code>`,
+				content: `var x = @;`,
 			},
 			expected: expected{
 				text: `<output>
@@ -845,9 +571,7 @@ SyntaxError: SyntaxError: (anonymous): Line 1:9 Unexpected token ILLEGAL (and 2 
 		{
 			name: "JS runtime error (ReferenceError)",
 			input: input{
-				content: `<code>
-undefinedVar;
-</code>`,
+				content: `undefinedVar;`,
 			},
 			expected: expected{
 				text: `<output>
@@ -862,9 +586,7 @@ ReferenceError: undefinedVar is not defined
 		{
 			name: "code that calls no tools",
 			input: input{
-				content: `<code>
-console.log("hello from JS");
-</code>`,
+				content: `console.log("hello from JS");`,
 			},
 			expected: expected{
 				text: "<output>\n" +
@@ -875,10 +597,8 @@ console.log("hello from JS");
 		{
 			name: "multiple console.log calls",
 			input: input{
-				content: `<code>
-console.log("line1");
-console.log("line2");
-</code>`,
+				content: `console.log("line1");
+console.log("line2");`,
 			},
 			expected: expected{
 				text: "<output>\n" +
@@ -894,7 +614,7 @@ console.log("line2");
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			result, err := w.Execute(
+			result, err := executeTestCode(w,
 				execCtx, tc.input.content, tf,
 			)
 
@@ -922,10 +642,10 @@ func TestJsWrapper_Execute_Code_Stats(t *testing.T) {
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			content := `<code>
+			content := `
 console.log("ok");
-</code>`
-			_, err := w.Execute(execCtx, content, tf)
+`
+			_, err := executeTestCode(w, execCtx, content, tf)
 			require.NoError(t, err)
 
 			assert.Equal(
@@ -956,10 +676,10 @@ console.log("ok");
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			content := `<code>
+			content := `
 undefinedVar;
-</code>`
-			_, err := w.Execute(execCtx, content, tf)
+`
+			_, err := executeTestCode(w, execCtx, content, tf)
 			require.NoError(t, err) // no Go error
 
 			assert.Equal(
@@ -991,10 +711,10 @@ undefinedVar;
 			tf := jsTestFormat()
 
 			// First: error
-			errContent := `<code>
+			errContent := `
 undefinedVar;
-</code>`
-			_, err := w.Execute(
+`
+			_, err := executeTestCode(w,
 				execCtx, errContent, tf,
 			)
 			require.NoError(t, err)
@@ -1006,10 +726,10 @@ undefinedVar;
 			)
 
 			// Second: success
-			okContent := `<code>
+			okContent := `
 console.log("ok");
-</code>`
-			_, err = w.Execute(
+`
+			_, err = executeTestCode(w,
 				execCtx, okContent, tf,
 			)
 			require.NoError(t, err)
@@ -1044,7 +764,7 @@ console.log("ok");
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			content := `<code>
+			content := `
 tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
@@ -1052,8 +772,8 @@ tool.call(
   {tool: "get_orders",
    args: {customer_id: "C001"}}
 );
-</code>`
-			_, err := w.Execute(execCtx, content, tf)
+`
+			_, err := executeTestCode(w, execCtx, content, tf)
 			require.NoError(t, err)
 
 			// Tool call stats from wrapped ToolChain
@@ -1094,10 +814,8 @@ tool.call(
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			content := `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>`
-			_, err := w.Execute(execCtx, content, tf)
+			content := `{"tool": "lookup_customer", "args": {"id": "C001"}}`
+			_, err := executeTestCalls(w, execCtx, content, tf)
 			require.NoError(t, err)
 
 			assert.Equal(
@@ -1120,153 +838,6 @@ tool.call(
 // F. Execute — edge cases
 // -------------------------------------------------------
 
-func TestJsWrapper_Execute_EdgeCases(t *testing.T) {
-	t.Run("empty code block", func(t *testing.T) {
-		w := setupJsWrapper()
-		execCtx := newExecCtx()
-		tf := jsTestFormat()
-
-		result, err := w.Execute(
-			execCtx, "<code>\n</code>", tf,
-		)
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		assert.Equal(
-			t, "",
-			collectText(result),
-		)
-	})
-
-	t.Run(
-		"malformed tool.call returns error result",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
-var r = tool.call({args: {}});
-if (r.error) {
-  console.log("got error");
-} else {
-  console.log("unexpected success");
-}
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(
-				t,
-				"<output>\ngot error\n</output>",
-				collectText(result),
-			)
-		},
-	)
-
-	t.Run(
-		"context cancellation during code",
-		func(t *testing.T) {
-			ctx, cancel := context.WithCancel(
-				context.Background(),
-			)
-			cancel() // Cancel immediately
-
-			w := setupJsWrapper()
-			execCtx := gent.NewExecutionContext(
-				ctx, "test", nil,
-			)
-			tf := jsTestFormat()
-
-			content := `<code>
-while(true) {}
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			// Should return error in result, not err
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(
-				t,
-				`<output>
-execution interrupted: cancelled
-
-1 | while(true) {}
-    ^ cancelled
-
-</output>`,
-				collectText(result),
-			)
-		},
-	)
-
-	t.Run(
-		"raw results collected from code path",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
-var c = tool.call(
-  {tool: "lookup_customer", args: {id: "C001"}}
-);
-console.log(JSON.stringify(c.output));
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.NotEmpty(t, result.Results)
-			assert.Equal(
-				t, "lookup_customer",
-				result.Results[0].Name,
-			)
-		},
-	)
-
-	t.Run(
-		"tool error within code is catchable",
-		func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
-var r = tool.call(
-  {tool: "fail_tool", args: {}}
-);
-if (r.error) {
-  console.log("tool error: " + r.error);
-} else {
-  console.log("unexpected success");
-}
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(
-				t,
-				"<tool_call_log>\n"+
-					"[1] fail_tool({}) -> error: "+
-					"assert.AnError general "+
-					"error for testing\n"+
-					"</tool_call_log>\n"+
-					"<output>\n"+
-					"tool error: assert.AnError "+
-					"general error for testing\n"+
-					"</output>",
-				collectText(result),
-			)
-		},
-	)
-}
-
 // -------------------------------------------------------
 // G. Raw result JSON sanity check
 // -------------------------------------------------------
@@ -1276,7 +847,7 @@ func TestJsWrapper_Execute_Code_RawResults(t *testing.T) {
 	execCtx := newExecCtx()
 	tf := jsTestFormat()
 
-	content := `<code>
+	content := `
 var c = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
@@ -1285,8 +856,8 @@ var o = tool.call(
    args: {customer_id: "C001"}}
 );
 console.log("done");
-</code>`
-	result, err := w.Execute(execCtx, content, tf)
+`
+	result, err := executeTestCode(w, execCtx, content, tf)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -1336,12 +907,10 @@ func TestJsWrapper_PreValidation(t *testing.T) {
 		{
 			name: "invalid literal args caught",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "lookup_customer", args: {}}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1380,12 +949,10 @@ Fix ALL errors above before re-submitting your code.
 		{
 			name: "valid literal args pass",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "lookup_customer", args: {id: "C001"}}
 );
-console.log(r.output.id + ":" + r.output.name);
-</code>`,
+console.log(r.output.id + ":" + r.output.name);`,
 			},
 			expected: expected{
 				text: "<tool_call_log>\n" +
@@ -1401,14 +968,12 @@ console.log(r.output.id + ":" + r.output.name);
 		{
 			name: "dynamic args skip pre-validation",
 			input: input{
-				content: `<code>
-var myId = "C001";
+				content: `var myId = "C001";
 var r = tool.call(
   {tool: "lookup_customer",
    args: {id: myId}}
 );
-console.log(r.output.id + ":" + r.output.name);
-</code>`,
+console.log(r.output.id + ":" + r.output.name);`,
 			},
 			expected: expected{
 				text: "<tool_call_log>\n" +
@@ -1424,14 +989,12 @@ console.log(r.output.id + ":" + r.output.name);
 		{
 			name: "multiple invalid calls all reported",
 			input: input{
-				content: `<code>
-var r1 = tool.call(
+				content: `var r1 = tool.call(
   {tool: "lookup_customer", args: {}}
 );
 var r2 = tool.call(
   {tool: "get_orders", args: {}}
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1489,15 +1052,13 @@ Fix ALL errors above before re-submitting your code.
 		{
 			name: "nested object missing sub-field",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "update_address", args: {
     id: "1",
     address: { street: "123 Main St" }
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1542,15 +1103,13 @@ Fix ALL errors above before re-submitting your code.
 			name: "array of objects missing " +
 				"item field",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "create_order", args: {
     customer_id: "C1",
     items: [{ name: "Widget" }]
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1597,15 +1156,13 @@ Fix ALL errors above before re-submitting your code.
 			name: "map of objects missing " +
 				"value field",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "update_stock", args: {
     id: "S1",
     quantities: { apples: { amount: 5 } }
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1651,15 +1208,13 @@ Fix ALL errors above before re-submitting your code.
 		{
 			name: "mixed invalid literal and dynamic",
 			input: input{
-				content: `<code>
-var r1 = tool.call(
+				content: `var r1 = tool.call(
   {tool: "lookup_customer", args: {}}
 );
 var myArgs = {customer_id: "C001"};
 var r2 = tool.call(
   {tool: "get_orders", args: myArgs}
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1699,8 +1254,7 @@ Fix ALL errors above before re-submitting your code.
 			name: "object contains object " +
 				"missing deep field",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "update_geo", args: {
     id: "1",
     address: {
@@ -1709,8 +1263,7 @@ var r = tool.call(
     }
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1758,8 +1311,7 @@ Fix ALL errors above before re-submitting your code.
 			name: "array of object contains " +
 				"array of object",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "create_shipment", args: {
     id: "S1",
     orders: [{
@@ -1768,8 +1320,7 @@ var r = tool.call(
     }]
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1821,8 +1372,7 @@ Fix ALL errors above before re-submitting your code.
 			name: "map of object contains " +
 				"map of object",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "update_regions", args: {
     id: "R1",
     regions: {
@@ -1832,8 +1382,7 @@ var r = tool.call(
     }
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1884,8 +1433,7 @@ Fix ALL errors above before re-submitting your code.
 			name: "array of object contains " +
 				"map of object",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "update_products", args: {
     id: "P1",
     items: [{
@@ -1896,8 +1444,7 @@ var r = tool.call(
     }]
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -1949,8 +1496,7 @@ Fix ALL errors above before re-submitting your code.
 			name: "map of object contains " +
 				"array of object",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "update_catalog", args: {
     id: "C1",
     categories: {
@@ -1960,8 +1506,7 @@ var r = tool.call(
     }
   }}
 );
-console.log(r.output);
-</code>`,
+console.log(r.output);`,
 			},
 			expected: expected{
 				text: `<output>
@@ -2016,7 +1561,7 @@ Fix ALL errors above before re-submitting your code.
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			result, err := w.Execute(
+			result, err := executeTestCode(w,
 				execCtx, tc.input.content, tf,
 			)
 			require.NoError(t, err)
@@ -2069,12 +1614,12 @@ func TestJsWrapper_PreValidation_ConsecutiveReset(
 	tf := jsTestFormat()
 
 	// First: pre-validation error
-	errContent := `<code>
+	errContent := `
 var r = tool.call(
   {tool: "lookup_customer", args: {}}
 );
-</code>`
-	_, err := w.Execute(execCtx, errContent, tf)
+`
+	_, err := executeTestCode(w, execCtx, errContent, tf)
 	require.NoError(t, err)
 	assert.Equal(
 		t, 1.0,
@@ -2084,10 +1629,10 @@ var r = tool.call(
 	)
 
 	// Second: success
-	okContent := `<code>
+	okContent := `
 console.log("ok");
-</code>`
-	_, err = w.Execute(execCtx, okContent, tf)
+`
+	_, err = executeTestCode(w, execCtx, okContent, tf)
 	require.NoError(t, err)
 	assert.Equal(
 		t, 0.0,
@@ -2171,13 +1716,11 @@ func TestJsWrapper_BridgeSchemaError(t *testing.T) {
 			name: "dynamic args missing " +
 				"required field",
 			input: input{
-				content: `<code>
-var badArgs = {};
+				content: `var badArgs = {};
 var r = tool.call(
   {tool: "lookup_customer", args: badArgs}
 );
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2218,11 +1761,9 @@ Example:
 		{
 			name: "missing tool field in req",
 			input: input{
-				content: `<code>
-var req = {args: {id: "C001"}};
+				content: `var req = {args: {id: "C001"}};
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2250,19 +1791,17 @@ Fix ALL errors above before re-submitting your code.
 		{
 			name: "missing args field in req",
 			input: input{
-				content: `<code>
-var req = {tool: "lookup_customer"};
+				content: `var req = {tool: "lookup_customer"};
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
 					logEntry := enhancedSchemaLog(
 						t, w,
-						"[1] lookup_customer",
+						"[1] lookup_customer({})",
 						"lookup_customer",
-						nil,
+						map[string]any{},
 					)
 					return bridgeText(
 						logEntry,
@@ -2294,14 +1833,12 @@ Example:
 		{
 			name: "wrong field name in args",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "lookup_customer",
   args: {name: "Alice"}
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2345,8 +1882,7 @@ Example:
 		{
 			name: "deep field error in array item",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "create_order",
   args: {
     customer_id: "C001",
@@ -2354,8 +1890,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2413,8 +1948,7 @@ Example:
 		{
 			name: "nested object bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "update_address",
   args: {
     id: "1",
@@ -2422,8 +1956,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2477,8 +2010,7 @@ Example:
 		{
 			name: "map of objects bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "update_stock",
   args: {
     id: "S1",
@@ -2488,8 +2020,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2549,8 +2080,7 @@ Example:
 			name: "object contains object " +
 				"bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "update_geo",
   args: {
     id: "1",
@@ -2561,8 +2091,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2624,8 +2153,7 @@ Example:
 			name: "array of object contains " +
 				"array of object bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "create_shipment",
   args: {
     id: "S1",
@@ -2636,8 +2164,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2707,8 +2234,7 @@ Example:
 			name: "map of object contains " +
 				"map of object bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "update_regions",
   args: {
     id: "R1",
@@ -2722,8 +2248,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2792,8 +2317,7 @@ Example:
 			name: "array of object contains " +
 				"map of object bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "update_products",
   args: {
     id: "P1",
@@ -2806,8 +2330,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2877,8 +2400,7 @@ Example:
 			name: "map of object contains " +
 				"array of object bridge error",
 			input: input{
-				content: `<code>
-var req = {
+				content: `var req = {
   tool: "update_catalog",
   args: {
     id: "C1",
@@ -2890,8 +2412,7 @@ var req = {
   }
 };
 var r = tool.call(req);
-console.log(r.error);
-</code>`,
+console.log(r.error);`,
 			},
 			expected: expected{
 				textFn: func() string {
@@ -2963,7 +2484,7 @@ Example:
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			result, err := w.Execute(
+			result, err := executeTestCode(w,
 				execCtx, tc.input.content, tf,
 			)
 			require.NoError(t, err)
@@ -2996,22 +2517,22 @@ func TestJsWrapper_UnknownToolError(t *testing.T) {
 	w := setupJsWrapper()
 	tf := jsTestFormat()
 
-	content := `<code>
+	content := `
 var r = tool.call({
   tool: "nonexistent_tool",
   args: {}
 });
 console.log(r.error);
-</code>`
+`
 
 	execCtx := newExecCtx()
-	result, err := w.Execute(
+	result, err := executeTestCode(w,
 		execCtx, content, tf,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// The error propagated from wrapped SearchJSON
+	// The error propagated from wrapped SearchChain
 	// should be ErrUnknownTool. First result is the
 	// tool call, last is the synthetic text entry.
 	require.True(t, len(result.Results) >= 1)
@@ -3058,8 +2579,7 @@ func TestJsWrapper_ToolCallLog(t *testing.T) {
 			name: "tool error then success — " +
 				"both appear in log",
 			input: input{
-				content: `<code>
-var r1 = tool.call(
+				content: `var r1 = tool.call(
   {tool: "fail_tool", args: {}}
 );
 var r2 = tool.call(
@@ -3069,8 +2589,7 @@ var r2 = tool.call(
 console.log(
   "err=" + (r1.error ? "yes" : "no") +
   " ok=" + (r2.error ? "no" : "yes")
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3086,8 +2605,7 @@ err=yes ok=yes
 			name: "success then error — " +
 				"both appear in log",
 			input: input{
-				content: `<code>
-var r1 = tool.call(
+				content: `var r1 = tool.call(
   {tool: "lookup_customer",
    args: {id: "C001"}}
 );
@@ -3097,8 +2615,7 @@ var r2 = tool.call(
 console.log(
   "ok=" + (r1.error ? "no" : "yes") +
   " err=" + (r2.error ? "yes" : "no")
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3113,15 +2630,13 @@ ok=yes err=yes
 		{
 			name: "parallel calls all success",
 			input: input{
-				content: `<code>
-var results = tool.parallelCall([
+				content: `var results = tool.parallelCall([
   {tool: "lookup_customer",
    args: {id: "C001"}},
   {tool: "get_orders",
    args: {customer_id: "C001"}}
 ]);
-console.log("done");
-</code>`,
+console.log("done");`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3136,16 +2651,14 @@ done
 		{
 			name: "parallel calls all failed",
 			input: input{
-				content: `<code>
-var results = tool.parallelCall([
+				content: `var results = tool.parallelCall([
   {tool: "fail_tool", args: {}},
   {tool: "fail_tool", args: {}}
 ]);
 console.log(
   "a=" + (results[0].error ? "err" : "ok") +
   " b=" + (results[1].error ? "err" : "ok")
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3161,8 +2674,7 @@ a=err b=err
 			name: "parallel calls partial " +
 				"success and failure",
 			input: input{
-				content: `<code>
-var results = tool.parallelCall([
+				content: `var results = tool.parallelCall([
   {tool: "lookup_customer",
    args: {id: "C001"}},
   {tool: "fail_tool", args: {}}
@@ -3170,8 +2682,7 @@ var results = tool.parallelCall([
 console.log(
   "a=" + (results[0].error ? "err" : "ok") +
   " b=" + (results[1].error ? "err" : "ok")
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3187,8 +2698,7 @@ a=ok b=err
 			name: "sequential then parallel — " +
 				"mixed numbering",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "lookup_customer",
    args: {id: "C001"}}
 );
@@ -3198,8 +2708,7 @@ var results = tool.parallelCall([
   {tool: "get_orders",
    args: {customer_id: "C001"}}
 ]);
-console.log("done");
-</code>`,
+console.log("done");`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3215,9 +2724,7 @@ done
 		{
 			name: "no tool calls no console.log",
 			input: input{
-				content: `<code>
-var x = 1 + 2;
-</code>`,
+				content: `var x = 1 + 2;`,
 			},
 			expected: expected{
 				text: `<output>
@@ -3228,12 +2735,10 @@ Code executed successfully.
 		{
 			name: "tool calls but no console.log",
 			input: input{
-				content: `<code>
-tool.call(
+				content: `tool.call(
   {tool: "lookup_customer",
    args: {id: "C001"}}
-);
-</code>`,
+);`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3248,13 +2753,11 @@ Code executed successfully.
 			name: "runtime error after successful " +
 				"tool call — log + code_error",
 			input: input{
-				content: `<code>
-var r = tool.call(
+				content: `var r = tool.call(
   {tool: "lookup_customer",
    args: {id: "C001"}}
 );
-undefinedVar;
-</code>`,
+undefinedVar;`,
 			},
 			expected: expected{
 				text: `<tool_call_log>
@@ -3279,7 +2782,7 @@ ReferenceError: undefinedVar is not defined
 			execCtx := newExecCtx()
 			tf := jsTestFormat()
 
-			result, err := w.Execute(
+			result, err := executeTestCode(w,
 				execCtx, tc.input.content, tf,
 			)
 			require.NoError(t, err)
@@ -3296,417 +2799,6 @@ ReferenceError: undefinedVar is not defined
 // L. Dual mode — direct_call + code in same action
 // -------------------------------------------------------
 
-func TestJsWrapper_DualMode(t *testing.T) {
-	type input struct {
-		content string
-	}
-
-	type expected struct {
-		text          string
-		codeExec      int64
-		toolCallCount int64
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "both direct_call and code",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>
-<code>
-(function() {
-var r = tool.call(
-  {tool: "get_orders",
-   args: {customer_id: "C001"}}
-);
-if (r.error) return;
-})();
-</code>`,
-			},
-			expected: expected{
-				text: `<direct_call>
-<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>
-</direct_call>
-<code_execution>
-<tool_call_log>
-[1] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
-</tool_call_log>
-<output>
-Code executed successfully.
-</output>
-</code_execution>`,
-				codeExec:      1,
-				toolCallCount: 2,
-			},
-		},
-		{
-			name: "direct_call with code " +
-				"console.log output",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>
-<code>
-(function() {
-var r = tool.call(
-  {tool: "get_orders",
-   args: {customer_id: "C001"}}
-);
-if (r.error) return;
-console.log("orders: " + r.output.length);
-})();
-</code>`,
-			},
-			expected: expected{
-				text: `<direct_call>
-<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>
-</direct_call>
-<code_execution>
-<tool_call_log>
-[1] get_orders({"customer_id":"C001"}) -> [{"order_id":"O1"}]
-</tool_call_log>
-<output>
-orders: 1
-</output>
-</code_execution>`,
-				codeExec:      1,
-				toolCallCount: 2,
-			},
-		},
-		{
-			name: "direct_call error does not " +
-				"block code",
-			input: input{
-				content: `<direct_call>
-{"tool": "nonexistent", "args": {}}
-</direct_call>
-<code>
-(function() {
-var r = tool.call(
-  {tool: "lookup_customer",
-   args: {id: "C001"}}
-);
-if (r.error) return;
-console.log("found: " + r.output.name);
-})();
-</code>`,
-			},
-			expected: expected{
-				codeExec:      1,
-				toolCallCount: 2,
-			},
-		},
-		{
-			name: "code error does not block " +
-				"direct_call result",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>
-<code>
-undefinedVar;
-</code>`,
-			},
-			expected: expected{
-				text: `<direct_call>
-<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>
-</direct_call>
-<code_execution>
-<output>
-ReferenceError: undefinedVar is not defined
-
-1 | undefinedVar;
-    ^ ReferenceError: undefinedVar is not defined
-
-</output>
-</code_execution>`,
-				codeExec:      1,
-				toolCallCount: 1,
-			},
-		},
-		{
-			name: "direct_call only — no wrapper",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>`,
-			},
-			expected: expected{
-				text: `<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>`,
-				toolCallCount: 1,
-			},
-		},
-		{
-			name: "code only — no wrapper",
-			input: input{
-				content: `<code>
-(function() {
-var r = tool.call(
-  {tool: "lookup_customer",
-   args: {id: "C001"}}
-);
-if (r.error) return;
-})();
-</code>`,
-			},
-			expected: expected{
-				text: `<tool_call_log>
-[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
-</tool_call_log>
-<output>
-Code executed successfully.
-</output>`,
-				codeExec:      1,
-				toolCallCount: 1,
-			},
-		},
-		{
-			name: "both with empty code block",
-			input: input{
-				content: `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>
-<code>
-</code>`,
-			},
-			expected: expected{
-				text: `<direct_call>
-<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>
-</direct_call>`,
-				toolCallCount: 1,
-			},
-		},
-		{
-			name: "both with parallel direct_call",
-			input: input{
-				content: `<direct_call>
-[{"tool": "lookup_customer", "args": {"id": "C001"}},
- {"tool": "get_orders", "args": {"customer_id": "C001"}}]
-</direct_call>
-<code>
-console.log("computed: 42");
-</code>`,
-			},
-			expected: expected{
-				text: `<direct_call>
-<lookup_customer>
-{"id":"C001","name":"Alice"}
-</lookup_customer>
-<get_orders>
-[{"order_id":"O1"}]
-</get_orders>
-</direct_call>
-<code_execution>
-<output>
-computed: 42
-</output>
-</code_execution>`,
-				codeExec:      1,
-				toolCallCount: 2,
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			w := setupJsWrapper()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			result, err := w.Execute(
-				execCtx, tc.input.content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-
-			if tc.expected.text != "" {
-				assert.Equal(
-					t, tc.expected.text,
-					collectText(result),
-				)
-			}
-
-			if tc.expected.codeExec > 0 {
-				assert.Equal(
-					t, tc.expected.codeExec,
-					execCtx.Stats().GetCounter(
-						gent.SCCodeExecutions,
-					),
-				)
-			}
-			if tc.expected.toolCallCount > 0 {
-				assert.Equal(
-					t, tc.expected.toolCallCount,
-					execCtx.Stats().GetCounter(
-						gent.SCToolCalls,
-					),
-				)
-			}
-		})
-	}
-}
-
 // -------------------------------------------------------
 // M. Direct call disabled — code-only mode
 // -------------------------------------------------------
-
-func TestJsWrapper_DirectCallDisabled(t *testing.T) {
-	setupCodeOnly := func() *JsToolChainWrapper {
-		return setupJsWrapper().
-			WithDirectCallDisabled()
-	}
-
-	t.Run("guidance shows code only", func(t *testing.T) {
-		w := setupCodeOnly()
-		guidance := w.Guidance()
-		assert.Contains(t, guidance, "<code>")
-		assert.Contains(
-			t, guidance, "Call tools using JavaScript",
-		)
-		assert.NotContains(
-			t, guidance, "direct_call",
-		)
-		assert.NotContains(
-			t, guidance, "two ways",
-		)
-	})
-
-	t.Run(
-		"guidance with custom code guidance",
-		func(t *testing.T) {
-			w := setupCodeOnly().WithCodeGuidance(
-				"Custom code instructions",
-			)
-			guidance := w.Guidance()
-			assert.Contains(
-				t, guidance,
-				"Custom code instructions",
-			)
-			assert.NotContains(
-				t, guidance, "direct_call",
-			)
-		},
-	)
-
-	t.Run(
-		"direct_call tags ignored in Execute",
-		func(t *testing.T) {
-			w := setupCodeOnly()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-
-			// direct_call ignored, content treated as
-			// code fallback (not valid JS, errors)
-			assert.Contains(
-				t, collectText(result), "<output>",
-			)
-		},
-	)
-
-	t.Run(
-		"code executes normally",
-		func(t *testing.T) {
-			w := setupCodeOnly()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `<code>
-var r = tool.call(
-  {tool: "lookup_customer",
-   args: {id: "C001"}}
-);
-console.log(r.output.name);
-</code>`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(
-				t,
-				`<tool_call_log>
-[1] lookup_customer({"id":"C001"}) -> {"id":"C001","name":"Alice"}
-</tool_call_log>
-<output>
-Alice
-</output>`,
-				collectText(result),
-			)
-		},
-	)
-
-	t.Run(
-		"raw content without code tags "+
-			"treated as code",
-		func(t *testing.T) {
-			w := setupCodeOnly()
-			execCtx := newExecCtx()
-			tf := jsTestFormat()
-
-			content := `console.log("hello");`
-			result, err := w.Execute(
-				execCtx, content, tf,
-			)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(
-				t,
-				`<output>
-hello
-</output>`,
-				collectText(result),
-			)
-		},
-	)
-
-	t.Run(
-		"ParseSection skips direct_call",
-		func(t *testing.T) {
-			w := setupCodeOnly()
-			execCtx := newExecCtx()
-
-			content := `<direct_call>
-{"tool": "lookup_customer", "args": {"id": "C001"}}
-</direct_call>
-<code>
-console.log("from code");
-</code>`
-			parsed, err := w.ParseSection(
-				execCtx, content,
-			)
-			require.NoError(t, err)
-
-			// Should return the code string, not
-			// parsed tool calls
-			str, ok := parsed.(string)
-			assert.True(t, ok, "expected string")
-			assert.Contains(
-				t, str, "console.log",
-			)
-		},
-	)
-}

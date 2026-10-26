@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // SummarizationStrategy compacts the scratchpad by
@@ -696,32 +695,32 @@ func (s *SummarizationStrategy) Compact(
 	// system message is static across calls. When empty
 	// (e.g., after WithPrompt), we send a single user
 	// message containing everything.
-	var messages []llms.MessageContent
+	var messages []gent.ModelMessage
 	if s.systemPrompt != "" {
-		messages = []llms.MessageContent{
+		messages = []gent.ModelMessage{
 			{
-				Role: llms.ChatMessageTypeSystem,
-				Parts: []llms.ContentPart{
-					llms.TextContent{
+				Role: gent.ChatMessageTypeSystem,
+				Parts: []gent.ContentPart{
+					gent.TextContent{
 						Text: s.systemPrompt,
 					},
 				},
 			},
 			{
-				Role: llms.ChatMessageTypeHuman,
-				Parts: []llms.ContentPart{
-					llms.TextContent{
+				Role: gent.ChatMessageTypeHuman,
+				Parts: []gent.ContentPart{
+					gent.TextContent{
 						Text: userText,
 					},
 				},
 			},
 		}
 	} else {
-		messages = []llms.MessageContent{
+		messages = []gent.ModelMessage{
 			{
-				Role: llms.ChatMessageTypeHuman,
-				Parts: []llms.ContentPart{
-					llms.TextContent{
+				Role: gent.ChatMessageTypeHuman,
+				Parts: []gent.ContentPart{
+					gent.TextContent{
 						Text: userText,
 					},
 				},
@@ -764,12 +763,21 @@ func (s *SummarizationStrategy) Compact(
 			"summarization model returned no choices",
 		)
 	}
+	// A metadata-only or partial reply cannot replace the selected working context.
+	choice := response.Choices[0]
+	if state := choice.State(); state != gent.ModelAnswer {
+		return gent.HistoryUpdate{}, fmt.Errorf(
+			"summarization model returned %s instead of a completed summary", state)
+	}
+	if strings.TrimSpace(choice.CandidateContent) == "" {
+		return gent.HistoryUpdate{}, fmt.Errorf("summarization model returned no summary text")
+	}
 
 	summaryText := s.textFormat.FormatSections(
 		[]gent.FormattedSection{
 			{
 				Name:    "prior_work_summary",
-				Content: response.Choices[0].Content,
+				Content: choice.CandidateContent,
 			},
 		},
 	)
@@ -779,9 +787,9 @@ func (s *SummarizationStrategy) Compact(
 		Kind: gent.HistorySummary,
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeAI,
+				Role: gent.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
-					llms.TextContent{
+					gent.TextContent{
 						Text: summaryText,
 					},
 				},
@@ -822,16 +830,16 @@ func extractText(entry *gent.HistoryEntry) string {
 	for _, msg := range entry.Messages {
 		for _, part := range msg.Parts {
 			switch value := part.(type) {
-			case llms.TextContent:
+			case gent.TextContent:
 				parts = append(parts, value.Text)
-			case llms.ToolCall:
+			case gent.ModelToolCall:
 				text := fmt.Sprintf("Tool call %q (%s)", value.ID, value.Type)
 				if value.FunctionCall != nil {
 					text = fmt.Sprintf("Tool call %q: %s\nArguments: %s", value.ID,
 						value.FunctionCall.Name, value.FunctionCall.Arguments)
 				}
 				parts = append(parts, text)
-			case llms.ToolCallResponse:
+			case gent.ToolCallResponse:
 				parts = append(parts, fmt.Sprintf("Tool result %q: %s\n%s", value.ToolCallID,
 					value.Name, value.Content))
 			}

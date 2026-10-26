@@ -6,7 +6,6 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // mockValidator is a test validator that can accept or reject answers.
@@ -208,7 +207,7 @@ func TestText_ShouldTerminate(t *testing.T) {
 			assert.Equal(t, tt.expected.status, result.Status)
 			if tt.expected.status == gent.TerminationAnswerAccepted {
 				assert.Len(t, result.Content, 1)
-				tc, ok := result.Content[0].(llms.TextContent)
+				tc, ok := result.Content[0].(gent.TextContent)
 				assert.True(t, ok, "expected TextContent, got %T", result.Content[0])
 				assert.Equal(t, tt.expected.resultText, tc.Text)
 			}

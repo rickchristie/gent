@@ -221,54 +221,55 @@ matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event
 let responsePreset = 'tool';
 function renderParser() {
   const xml = byId('format-select').value === 'xml';
-  let output;
+  const prompt = xml
+    ? '<instructions>Use tools to check the policy.</instructions>'
+    : '# instructions\nUse tools to check the policy.';
+  let response;
   let title;
   let explanation;
   let route;
   if (responsePreset === 'tool') {
-    output = xml
-      ? `<thought>Check the policy first.</thought>
-<action>
-- tool: policy
-  args:
-    id: P10
-</action>`
-      : `# thought
-Check the policy first.
-
-# action
-- tool: policy
-  args:
-    id: P10`;
+    response = JSON.stringify(
+      {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'policy', arguments: '{"id":"P10"}' },
+      },
+      null,
+      2,
+    );
     title = 'A proposal becomes a call.';
-    route = 'FORMAT → TOOLCHAIN → TOOL';
-    explanation = `TextFormat extracts the action section. The YAML toolchain parses the call,
-      validates its arguments, and prepares typed input. A saved tool-ready boundary precedes
-      Tool.Call. The full returned result then becomes evidence and a model observation.`;
+    route = 'NATIVE CALL → TOOLCHAIN → TOOL';
+    explanation = `ToolChain decodes native JSON arguments, validates the schema, and prepares
+      typed input. A saved tool-ready boundary precedes Tool.Call. The returned result becomes
+      evidence and a native tool response paired with the provider call ID.`;
   } else if (responsePreset === 'answer') {
-    output = xml
-      ? `<thought>The policy has the answer.</thought>
-<answer>
-Refunds are allowed within 14 days.
-</answer>`
-      : `# thought
-The policy has the answer.
-
-# answer
-Refunds are allowed within 14 days.`;
+    response = 'Refunds are allowed within 14 days.';
     title = 'An answer still needs acceptance.';
-    route = 'FORMAT → TERMINATION → VALIDATOR';
-    explanation = `TextFormat extracts the answer. Termination parses it and asks its optional
-      AnswerValidator to evaluate it. An accepted answer ends the loop. A rejection is saved as
-      feedback, giving the agent a reason to try another iteration.`;
+    route = 'ASSISTANT CONTENT → TERMINATION → VALIDATOR';
+    explanation = `Termination parses final assistant content and asks its optional AnswerValidator
+      to evaluate it. An accepted answer ends the loop. A rejection is saved as feedback for
+      another iteration.`;
   } else {
-    output = 'I would probably ask someone about refunds.';
-    title = 'No actionable section.';
-    route = 'FORMAT → ERROR / FEEDBACK';
-    explanation = `This example has neither a thought nor an action or answer section in the
-      configured envelope. It cannot become a tool call or accepted answer. Parse errors are
-      observable and counted. ReAct can supply corrective feedback, subject to configured limits.`;
+    response = JSON.stringify(
+      {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'policy', arguments: '{' },
+      },
+      null,
+      2,
+    );
+    title = 'The native arguments are invalid.';
+    route = 'NATIVE CALL → PARSE ERROR → FEEDBACK';
+    explanation = `A native call still needs valid JSON arguments. This call cannot execute.
+      Gent records the parse error and supplies feedback for another iteration, subject to limits.`;
   }
+  const output = `System prompt:
+${prompt}
+
+Model response:
+${response}`;
   write('parser-output', output);
   byId('parser-explanation').dataset.tone = responsePreset === 'invalid' ? 'warning' : 'success';
   byId('parser-explanation').innerHTML = `
@@ -452,8 +453,8 @@ function renderRecovery() {
   } else if (recoveryPhase === 2) {
     copy = tool
       ? `Worker B restores the same run. Tool-ready state cannot prove the external
-      outcome. The default is ErrUncertainTool. The application must reconcile the logical tool
-      call and supply a ToolRecovery decision before that work can proceed.`
+      outcome. A ToolRecovery callback can reconcile the logical call. If it remains unknown, Gent saves
+      recovery guidance for a new model plan. It does not repeat the operation automatically.`
       : `Worker B imports
       the full bundle through 128 and resumes the supported checkpoint. The next event is 129,
       not 121. Run, context, and logical call IDs survive; physical attempt a becomes attempt b.`;
@@ -464,8 +465,8 @@ function renderRecovery() {
       retry: `The application verified that a retry is safe. Gent may attempt the tool again using
         its stable logical identity. External idempotency or reconciliation remains
         the application’s job.`,
-      unresolved: `The outcome is still unknown. ErrUncertainTool stops continuation before another
-        external call. No automatic retry and no claimed success.`,
+      unresolved: `The outcome is still unknown. Gent saves that fact and recovery guidance for the next
+        model request. It does not repeat the operation automatically or claim success.`,
     };
     copy = decisions[recoveryDecision];
   } else if (scenario === 'saved') {
@@ -489,19 +490,17 @@ function renderRecovery() {
       : terminal
         ? 'Returned saved result'
         : recoveryDecision === 'unresolved'
-          ? 'Blocked: uncertain tool'
+          ? 'Model receives recovery guidance'
           : finished
             ? tool
               ? 'Decision applied'
               : 'Continued'
             : tool
-              ? 'Needs reconciliation'
+              ? 'Choose recovery guidance'
               : 'Restored',
   );
   byId('worker-a').className = `worker ${recoveryPhase === 0 ? 'active' : 'stopped'}`;
-  byId('worker-b').className = `worker ${
-    !restored ? 'waiting' : recoveryDecision === 'unresolved' ? 'stopped' : 'active'
-  }`;
+  byId('worker-b').className = `worker ${!restored ? 'waiting' : 'active'}`;
   byId('tool-recovery-actions').hidden = !(tool && recoveryPhase === 2);
   write(
     'recovery-next',
@@ -533,9 +532,14 @@ function recoveryStatus(scenario) {
     const outcomes = {
       completed: { title: 'Completed result reused', tone: 'success' },
       retry: { title: 'Retry allowed by the application', tone: 'success' },
-      unresolved: { title: 'Unresolved · execution stopped', tone: 'warning' },
+      unresolved: { title: 'Unknown outcome · guidance for the model', tone: 'warning' },
     };
-    return outcomes[recoveryDecision] || { title: 'Reconciliation required', tone: 'warning' };
+    return (
+      outcomes[recoveryDecision] || {
+        title: 'Choose reconciliation or model guidance',
+        tone: 'warning',
+      }
+    );
   }
   if (recoveryPhase === 2) return { title: 'Worker B restored', tone: 'success' };
   return {

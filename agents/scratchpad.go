@@ -1,10 +1,10 @@
 package agents
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // ScratchpadToMessages converts scratchpad entries into
@@ -37,9 +37,11 @@ import (
 func ScratchpadToMessages(
 	scratchpad []*gent.HistoryEntry,
 	currentIteration int,
-	toolChain gent.ToolChain,
+	toolChain interface {
+		DeduplicateSummary(*gent.ToolCallResult) string
+	},
 	format gent.TextFormat,
-) ([]llms.MessageContent, int) {
+) ([]gent.ModelMessage, int) {
 	// First pass: collect the last occurrence index of each
 	// tool call hash. Only stateless tools (non-empty dedup
 	// summary) participate.
@@ -49,7 +51,7 @@ func ScratchpadToMessages(
 
 	// Second pass: build messages, replacing earlier
 	// duplicate observations with summaries.
-	var messages []llms.MessageContent
+	var messages []gent.ModelMessage
 	included := 0
 	globalIdx := 0
 
@@ -86,7 +88,9 @@ type lastOccurrenceEntry struct {
 func buildLastOccurrenceIndex(
 	scratchpad []*gent.HistoryEntry,
 	currentIteration int,
-	toolChain gent.ToolChain,
+	toolChain interface {
+		DeduplicateSummary(*gent.ToolCallResult) string
+	},
 ) map[string]*lastOccurrenceEntry {
 	if toolChain == nil {
 		return nil
@@ -132,18 +136,19 @@ func buildLastOccurrenceIndex(
 }
 
 // convertMessage converts a single MessageContent to an
-// llms.MessageContent, applying deduplication where needed.
+// gent.ModelMessage, applying deduplication where needed.
 func convertMessage(
 	msg *gent.MessageContent,
 	iterIndex int,
 	lastOccurrence map[string]*lastOccurrenceEntry,
 	format gent.TextFormat,
-) llms.MessageContent {
+) gent.ModelMessage {
 	tcr := getToolChainResult(msg)
 	if tcr == nil || lastOccurrence == nil {
-		return llms.MessageContent{
-			Role:  msg.Role,
-			Parts: ToLLMParts(msg.Parts),
+		return gent.ModelMessage{
+			Role:         msg.Role,
+			Continuation: msg.Continuation,
+			Parts:        slices.Clone(msg.Parts),
 		}
 	}
 
@@ -162,9 +167,10 @@ func convertMessage(
 	}
 
 	if !needsRebuild {
-		return llms.MessageContent{
-			Role:  msg.Role,
-			Parts: ToLLMParts(msg.Parts),
+		return gent.ModelMessage{
+			Role:         msg.Role,
+			Continuation: msg.Continuation,
+			Parts:        slices.Clone(msg.Parts),
 		}
 	}
 
@@ -182,7 +188,7 @@ func rebuildObservation(
 	iterIndex int,
 	lastOccurrence map[string]*lastOccurrenceEntry,
 	format gent.TextFormat,
-) llms.MessageContent {
+) gent.ModelMessage {
 	tcr := getToolChainResult(msg)
 	var sections []string
 	var allMedia []gent.ContentPart
@@ -230,24 +236,26 @@ func rebuildObservation(
 	// Native results must keep their call ID when their content is shortened. A text part in a
 	// tool message cannot replace ToolCallResponse: providers use the ID to pair calls and results.
 	for _, part := range msg.Parts {
-		if response, ok := part.(llms.ToolCallResponse); ok {
+		if response, ok := part.(gent.ToolCallResponse); ok {
 			response.Content = strings.Join(sections, "\n")
 			parts = append(parts, response)
 			parts = append(parts, allMedia...)
-			return llms.MessageContent{Role: msg.Role, Parts: ToLLMParts(parts)}
+			return gent.ModelMessage{
+				Role: msg.Role, Continuation: msg.Continuation, Parts: slices.Clone(parts)}
 		}
 	}
 	if observation != "" {
 		parts = append(
 			parts,
-			llms.TextContent{Text: observation},
+			gent.TextContent{Text: observation},
 		)
 	}
 	parts = append(parts, allMedia...)
 
-	return llms.MessageContent{
-		Role:  msg.Role,
-		Parts: ToLLMParts(parts),
+	return gent.ModelMessage{
+		Role:         msg.Role,
+		Continuation: msg.Continuation,
+		Parts:        slices.Clone(parts),
 	}
 }
 
@@ -265,14 +273,4 @@ func getToolChainResult(
 		return nil
 	}
 	return tcr
-}
-
-// ToLLMParts converts gent.ContentPart slice to
-// llms.ContentPart slice.
-func ToLLMParts(parts []gent.ContentPart) []llms.ContentPart {
-	result := make([]llms.ContentPart, len(parts))
-	for i, p := range parts {
-		result[i] = p
-	}
-	return result
 }

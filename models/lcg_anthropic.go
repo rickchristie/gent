@@ -40,8 +40,10 @@ func (m *LCGWrapper) providerResponse(response *llms.ContentResponse) *llms.Cont
 		choice.ReasoningContent += block.ReasoningContent
 		choice.ToolCalls = append(choice.ToolCalls, block.ToolCalls...)
 		choice.StopReason = block.StopReason
-		if thinking, ok := block.GenerationInfo["ThinkingContent"].(string); ok {
-			choice.ReasoningContent += thinking
+		// The SDK also extracts <thinking> tags from ordinary text. Only a native thinking
+		// block has ThinkingSignature. Keep quoted tags in the ordinary text channel.
+		if _, ok := block.GenerationInfo["ThinkingSignature"]; ok {
+			choice.ReasoningContent += block.GenerationInfo["ThinkingContent"].(string)
 		}
 		for key, value := range block.GenerationInfo {
 			if _, exists := choice.GenerationInfo[key]; !exists {

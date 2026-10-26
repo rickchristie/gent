@@ -51,18 +51,21 @@ try {
   await page.evaluate(() => document.fonts.ready);
   await check('offline guide initializes with complete source inventory', async () => {
     assert.equal(await page.title(), 'Gent — An interactive explainer');
-    assert.equal(expectedInterfaces.length, 53);
-    assert.equal(await text('#interface-count'), '53named interfaces');
+    assert.equal(expectedInterfaces.length, 52);
+    assert.equal(await text('#interface-count'), '52named interfaces');
     assert.equal(
       await text('#scope-detail'),
-      '16 new or changed declarations · 18 supporting types · 6 structural capabilities',
+      '3 new or changed declarations · 18 supporting types · 8 structural capabilities',
     );
     assert.equal(await page.locator('.map-group').count(), 7);
     assert.equal(await page.evaluate(() => document.fonts.check('16px GuideSans')), true);
     assert.equal(await page.evaluate(() => document.fonts.check('16px GuideMono')), true);
     assert.equal(await page.evaluate(() => document.fonts.check('48px GuideSerif')), true);
   });
-  await page.screenshot({ path: '/tmp/gent-interface-architecture-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: '/tmp/gent-interface-architecture-desktop.png',
+    fullPage: true,
+  });
 
   await check(
     'every named interface has exact current source and a valid source line',
@@ -96,7 +99,7 @@ try {
     await page.fill('#search', 'NoSuchGentContract');
     assert.equal(await text('#result-count'), '0 matching contracts');
     await page.click('#clear-filters');
-    assert.equal(await page.locator('.contract-row').count(), 53);
+    assert.equal(await page.locator('.contract-row').count(), 52);
     await page.selectOption('#group', 'Search');
     assert.deepEqual(
       (
@@ -148,23 +151,26 @@ try {
   await check(
     'embedded contracts, method comments, and previous signatures are inspectable',
     async () => {
-      await open('gent.RecoverableToolChain');
-      await page.locator('.detail-section .related [data-open="gent.ToolChain"]').first().click();
-      assert.equal(await text('#selected-contract'), 'gent.ToolChain');
+      await open('gent.Termination');
       await page.locator('.detail-section .related [data-open="gent.TextSection"]').first().click();
       assert.equal(await text('#selected-contract'), 'gent.TextSection');
       await page.getByText('Declared methods (3)', { exact: true }).click();
       await page.locator('.method-row summary').first().click();
       assert.equal(await page.locator('.method-row[open]').count(), 1);
-      await open('gent.Model');
+      await open('gent.ToolChain');
       await page
-        .getByText(`Previous declaration at ${catalog.head.slice(0, 8)}`, { exact: true })
+        .getByText(`Previous declaration at ${catalog.head.slice(0, 8)}`, {
+          exact: true,
+        })
         .click();
       assert.equal(
         await text('.previous-code code'),
-        catalog.declarations.find((item) => item.id === 'gent.Model').previous,
+        catalog.declarations.find((item) => item.id === 'gent.ToolChain').previous,
       );
-      await page.screenshot({ path: '/tmp/gent-interface-model-desktop.png', fullPage: true });
+      await page.screenshot({
+        path: '/tmp/gent-interface-toolchain-desktop.png',
+        fullPage: true,
+      });
     },
   );
 
@@ -231,8 +237,14 @@ ${reviewText}
         input: 'success',
         expected: ['Batch committed', 'Cursor advances', 'Delivery may proceed'],
       },
-      { input: 'lost', expected: ['Batch committed', 'Cursor unchanged', 'Execution stopped'] },
-      { input: 'rejected', expected: ['Batch rejected', 'Cursor unchanged', 'Execution stopped'] },
+      {
+        input: 'lost',
+        expected: ['Batch committed', 'Cursor unchanged', 'Execution stopped'],
+      },
+      {
+        input: 'rejected',
+        expected: ['Batch rejected', 'Cursor unchanged', 'Execution stopped'],
+      },
     ];
     for (const scenario of outcomes) {
       await page.selectOption('#save-outcome', scenario.input);
@@ -243,6 +255,8 @@ ${reviewText}
     }
     assert.deepEqual((await page.locator('.capability h3').allTextContents()).sort(), [
       'ConfigureExecution',
+      'DeduplicateSummary',
+      'Destroy',
       'EventBase',
       'ModelName',
       'Provider',
@@ -250,7 +264,10 @@ ${reviewText}
       'Unwrap',
     ]);
     await page.selectOption('#save-outcome', 'lost');
-    await page.screenshot({ path: '/tmp/gent-interface-recovery-desktop.png', fullPage: true });
+    await page.screenshot({
+      path: '/tmp/gent-interface-recovery-desktop.png',
+      fullPage: true,
+    });
   });
 
   await check('keyboard search and native dialog behavior work', async () => {
@@ -317,10 +334,16 @@ ${reviewText}
       assert.ok(size >= 12);
     }
     await page.goto(`${url}#view=architecture`);
-    await page.screenshot({ path: '/tmp/gent-interface-architecture-mobile.png', fullPage: true });
+    await page.screenshot({
+      path: '/tmp/gent-interface-architecture-mobile.png',
+      fullPage: true,
+    });
     await page.locator('[data-open="gent.LoopData"]').first().click();
     assert.equal(await page.locator('#catalog-panel').getAttribute('open'), null);
-    await page.screenshot({ path: '/tmp/gent-interface-atlas-mobile.png', fullPage: true });
+    await page.screenshot({
+      path: '/tmp/gent-interface-atlas-mobile.png',
+      fullPage: true,
+    });
   });
   assert.deepEqual(failures, []);
   assert.deepEqual(network, []);

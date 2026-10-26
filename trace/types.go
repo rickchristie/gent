@@ -23,6 +23,7 @@ const (
 	EventTypeModelCallStarted  EventType = "model_call_started"
 	EventTypeModelCallFinished EventType = "model_call_finished"
 	EventTypeModelStreamChunk  EventType = "model_stream_chunk"
+	EventTypeExecutionContent  EventType = "execution_content"
 	EventTypeToolCallStarted   EventType = "tool_call_started"
 	EventTypeToolCallFinished  EventType = "tool_call_finished"
 	EventTypeParseError        EventType = "parse_error"
@@ -118,6 +119,11 @@ type RunResult struct {
 
 // Context is a materialized execution context record.
 type Context struct {
+	Content          string   `json:"content,omitempty"`
+	MessageId        string   `json:"messageId,omitempty"`
+	SourceMessageIds []string `json:"sourceMessageIds,omitempty"`
+	ContentTruncated bool     `json:"contentTruncated,omitempty"`
+
 	Id       string `json:"id"`
 	ParentId string `json:"parentId,omitempty"`
 	Name     string `json:"name,omitempty"`
@@ -201,15 +207,10 @@ type ModelCall struct {
 
 // ModelStream is the materialized stream state for a model call.
 type ModelStream struct {
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoningContent,omitempty"`
-
-	ChunkCount int `json:"chunkCount"`
-
-	ContentTruncated          bool `json:"contentTruncated,omitempty"`
-	ReasoningContentTruncated bool `json:"reasoningContentTruncated,omitempty"`
-
-	LastChunkEventNumber uint64 `json:"lastChunkEventNumber,omitempty"`
+	MetaContent          []*gent.MetaContent `json:"metaContent,omitempty"`
+	MetaContentTruncated bool                `json:"metaContentTruncated,omitempty"`
+	ChunkCount           int                 `json:"chunkCount"`
+	LastChunkEventNumber uint64              `json:"lastChunkEventNumber,omitempty"`
 }
 
 // ModelUsage contains normalized token usage.

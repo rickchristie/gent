@@ -11,7 +11,6 @@ import (
 	"github.com/rickchristie/gent/format"
 	"github.com/rickchristie/gent/internal/tt"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestSummarization_NativeToolEvidence(t *testing.T) {
@@ -70,15 +69,15 @@ record 8
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			model := tt.NewMockModel().AddRawResponse(&gent.ContentResponse{
-				Choices: []*gent.ContentChoice{{Content: test.input.content,
-					ToolCalls: []llms.ToolCall{
-						{ID: "call-a", Type: "function", FunctionCall: &llms.FunctionCall{
+				Choices: []*gent.ContentChoice{{CandidateContent: test.input.content,
+					ToolCalls: []gent.ModelToolCall{
+						{ID: "call-a", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "lookup", Arguments: `{"id":7}`}},
-						{ID: "call-b", Type: "function", FunctionCall: &llms.FunctionCall{
+						{ID: "call-b", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "lookup", Arguments: `{"id":8}`}},
 					}}},
 			})
-			agent := react.NewNativeAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read",
+			agent := react.NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read",
 				nil, func(_ context.Context, args map[string]any) (string, error) {
 					return fmt.Sprintf("record %v", args["id"]), nil
 				}))
@@ -109,7 +108,7 @@ record 8
 			if !assert.Equal(t, test.expected.err, err) {
 				return
 			}
-			assert.Equal(t, [][]llms.MessageContent{{llms.TextParts(llms.ChatMessageTypeHuman,
+			assert.Equal(t, [][]gent.ModelMessage{{gent.TextParts(gent.ChatMessageTypeHuman,
 				test.expected.prompt)}}, summary.CapturedMessages)
 			assert.NoError(t, ctx.UpdateHistory(update))
 			active, err := ctx.Scratchpad()
@@ -117,8 +116,8 @@ record 8
 				return
 			}
 			assert.Equal(t, update.Active, ctx.ContextDraft().Active)
-			assert.Equal(t, []*gent.MessageContent{{Role: llms.ChatMessageTypeAI,
-				Parts: []gent.ContentPart{llms.TextContent{Text: `<prior_work_summary>
+			assert.Equal(t, []*gent.MessageContent{{Role: gent.ChatMessageTypeAI,
+				Parts: []gent.ContentPart{gent.TextContent{Text: `<prior_work_summary>
 Read records 7 and 8.
 </prior_work_summary>`}}}}, active[0].Messages)
 			for _, entry := range original {
@@ -133,12 +132,12 @@ Read records 7 and 8.
 func TestSummarization_TextAndMedia(t *testing.T) {
 	ctx := gent.NewExecutionContext(context.Background(), "summary", gent.NewBasicLoopData(nil))
 	assert.NoError(t, ctx.AppendRecord(&gent.HistoryEntry{Messages: []*gent.MessageContent{
-		{Role: llms.ChatMessageTypeHuman, Parts: []gent.ContentPart{
-			llms.TextContent{Text: "Read the image."},
-			llms.ImageURLContent{URL: "https://example.com/image.png"},
+		{Role: gent.ChatMessageTypeHuman, Parts: []gent.ContentPart{
+			gent.TextContent{Text: "Read the image."},
+			gent.ImageURLContent{URL: "https://example.com/image.png"},
 		}},
-		{Role: llms.ChatMessageTypeAI, Parts: []gent.ContentPart{
-			llms.TextContent{Text: "The image has two records."},
+		{Role: gent.ChatMessageTypeAI, Parts: []gent.ContentPart{
+			gent.TextContent{Text: "The image has two records."},
 		}},
 	}}, true))
 	model := tt.NewMockModel().AddResponse("Two records.", 0, 0)
@@ -150,7 +149,7 @@ func TestSummarization_TextAndMedia(t *testing.T) {
 	}
 	_, err = strategy.Compact(ctx, selection)
 	assert.NoError(t, err)
-	assert.Equal(t, [][]llms.MessageContent{{llms.TextParts(llms.ChatMessageTypeHuman,
+	assert.Equal(t, [][]gent.ModelMessage{{gent.TextParts(gent.ChatMessageTypeHuman,
 		`## Existing Summary
 
 None (first compaction).

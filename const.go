@@ -6,7 +6,10 @@ package gent
 // =============================================================================
 
 const (
-	// GPT-5.5 Series (Latest)
+	// GPT-6 Series
+	ModelOpenAIGPT6Astra = "gpt-6-astra"
+
+	// GPT-5.5 Series
 	ModelOpenAIGPT55 = "gpt-5.5"
 
 	// GPT-5.4 Series
@@ -45,7 +48,10 @@ const (
 // =============================================================================
 
 const (
-	// Claude 4.6 Series (Latest)
+	// Claude Fable 5.1
+	ModelAnthropicClaude51Fable = "claude-fable-5-1"
+
+	// Claude 4.6 Series
 	ModelAnthropicClaude46Opus   = "claude-opus-4-6"
 	ModelAnthropicClaude46Sonnet = "claude-sonnet-4-6"
 
@@ -66,7 +72,10 @@ const (
 // =============================================================================
 
 const (
-	// Gemini 3.1 Series (Latest)
+	// Gemini 4 Series
+	ModelGoogleGemini4Argon = "gemini-4-argon"
+
+	// Gemini 3.1 Series
 	ModelGoogleGemini31Pro       = "gemini-3.1-pro-preview"
 	ModelGoogleGemini31FlashLite = "gemini-3.1-flash-lite-preview"
 
@@ -86,7 +95,10 @@ const (
 // =============================================================================
 
 const (
-	// Grok 4.3 Series (Latest)
+	// Grok 4.7 Series
+	ModelXAIGrok47 = "grok-4.7"
+
+	// Grok 4.3 Series
 	ModelXAIGrok43       = "grok-4.3"
 	ModelXAIGrok43Latest = "grok-4.3-latest"
 	ModelXAIGrokLatest   = "grok-latest"

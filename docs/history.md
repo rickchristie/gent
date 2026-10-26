@@ -64,7 +64,8 @@ same event number, but can be redacted and truncated. Keeping these types separa
 settings from becoming a restoration format. Live observation and restored traces use the same
 direct projection. Replay never needs a live execution context or dispatches a mutation hook.
 Call correlation uses the recorded logical call ID and attempt ID. Matching a stream or tool name
-cannot establish which call produced an event; events with missing or unknown call IDs remain visible
+cannot establish which call produced an event; events with missing or unknown call IDs remain
+visible
 without updating another call's summary.
 
 ## Edit context through owned values
@@ -118,7 +119,8 @@ instead of recursively expanding already encoded JSON bytes.
 argument may be omitted for built-in types. It checks numbering,
 run identity, revisions, entry references, and checkpoint consistency. It does not execute hooks,
 tools, stats publishers, or limits. A database still supplies atomicity and fencing across workers.
-The execution context serializes local acceptance; the database supplies the distributed writer lease.
+The execution context serializes local acceptance; the database supplies the distributed writer
+lease.
 
 Gent assigns numbers and freezes the candidate before `Save`. Readers and accepted subscribers
 continue seeing the old cursor while saving. A successful acknowledgment promotes the whole batch.
@@ -127,7 +129,8 @@ made at application boundaries, avoiding repeated serialization for each streame
 The private event and batch indexes grow only after acceptance. `Export` copies those indexes under
 the run lock before copying payloads, so a caller can read or change its snapshot during recording.
 `PersistenceError` retains the exact failed or uncertain batch and stops further execution. No next
-model or tool effect starts after that failure. `ctx.RetrySave(worker)` retries the same batch and identity;
+model or tool effect starts after that failure. `ctx.RetrySave(worker)` retries the same batch and
+identity;
 do not manufacture a new batch ID after a lost acknowledgment. After recovery, load the store's
 accepted run and resume on a fresh execution context. Retrying a save does not clear the failed
 execution's cancellation or restart its model/tool work.
@@ -154,9 +157,10 @@ Provider adapters implement:
 GenerateContentStream(context.Context, gent.ModelCallRequest) (gent.Stream, error)
 ```
 
-Invoke them through `ctx.GenerateContentStream(model, call, request)`. The framework runs mutable
-before-hooks, freezes the effective messages and resolved options, accepts that request, then calls
-the provider. The request records the source selection/revision as well as the actual provider
+Invoke them through `ctx.GenerateContentStream(model, call, request)`. The framework copies the
+request before mutable hooks run. Hook changes cannot affect the caller's request or shared agent
+settings. It then freezes the effective messages and resolved options, accepts that request, and
+calls the provider. The request records the source selection/revision and the actual provider
 input. Hooks can change options; the adapter receives those final values. `NewModelCallRequest`
 evaluates option functions once. ReAct's `WithCallOptions` resolves its functions once when
 configuring the agent and reuses those values for compatibility and requests.
@@ -168,16 +172,33 @@ finishes. The built-in LangChainGo adapter uses a bounded queue and cancellation
 custom adapters can use `NewBoundedStreamWithDuration` too. Its producer must run in a goroutine and
 call `Complete` after it actually stops, even on cancellation.
 
+Display chunks carry ordered `MetaContent` entries. The provider response contains candidate text,
+not an accepted execution answer. On success, the executor adds one `execution_content` event to the
+terminal checkpoint batch. It contains the full accepted `Content`, a final `MessageId`, and
+`SourceMessageIds` for the previews it replaces. A child accepts this event with runtime evidence
+without moving the root checkpoint. No final event is emitted for an error, cancellation, or limit.
+
+Observers and context subscriptions see this final event only after the save succeeds. It does not
+add a model request, output tokens, or another history message. `RetrySave` reconciles an uncertain
+save without notifying the old worker's subscribers. Reconnect reads the accepted events, and a
+terminal restore returns the saved result without publishing a new answer. Deduplicate by run ID
+and event number. Use `CodecRegistry.DecodeEvent` for saved chunks; it supplies the envelope's
+cursor.
+See the [frontend contract](native-tools.md#frontend-and-storage-contract) for preview replacement,
+message IDs, trace limits, and provider completion states. The saved-run schema version is now 5.
+
 Only model, tool, and system-prompt before-hooks mutate effective input. Other lifecycle observers
 receive copies. The low-level typed `Publish...` helpers queue evidence and return event values;
 managed execution checks `RecordingError` and crosses explicit acceptance barriers. Custom callers
 must check `FlushProgress` before external work. Generic `Publish` returns an error directly.
 
-YAML, JSON, and SearchJSON implement `RecoverableToolChain` with `Prepare` and `ExecuteNext`. Plans
-save logical call identities, positions, raw arguments, effective typed input, completed results,
-and the next cursor. SearchJSON also saves its seen-tools state. Two identical calls in two list
-positions have different logical IDs. `ToolCallResult` retains IDs, raw/typed input, typed output,
-formatted text, media, instructions, errors, and the deduplication summary captured by that tool.
+All ToolChains implement `NativeTools`, `PrepareCalls`, and `ExecuteNext`. Plans save logical call
+identities, positions, raw arguments, effective typed input, completed results, and the next cursor.
+SearchChain derives discovered definitions from active history. Equal calls at different positions
+have different logical IDs. Results retain typed data, text, media, instructions, errors, and
+summaries.
+Provider continuation items are saved with model responses and assistant messages. Adapters must
+replay the exact provider items or reject incompatible data.
 
 ## Continue on a fresh worker
 
@@ -239,9 +260,12 @@ work. Application code must not replace a terminal failure with an empty success
 
 Saving tool-ready happens before calling the tool. The process can die after an external write but
 before its result is saved. Gent cannot determine whether that action occurred from a checkpoint.
-The default is `ErrUncertainTool`, leaving the run resumable.
+The default result has an `unknown` outcome and standard recovery guidance. A per-tool
+`gent.WithRecoveryMessage(func(*gent.RecoveryInfo) string)` callback can add application guidance.
+Later unstarted calls receive `not_started` results. The model can then make a new plan.
 
-`ToolRecovery` receives the stable logical ID, previous attempt, arguments, and effective input. It
+`ToolRecoveryFunc` receives a context and `*ToolRecoveryRequest` and returns `*ToolRecoveryResult`.
+The request contains the stable logical ID, previous attempt, arguments, and effective input. It
 must return one of `ToolRecoveryCompleted` with the full result, `ToolRecoveryRetryAllowed`, or
 `ToolRecoveryUnresolved`. A durable saved result takes precedence over that adapter. An authorized
 retry uses the same logical ID, a new attempt, and the original effective input without rerunning
@@ -279,14 +303,16 @@ already restored custom state. Custom executors can still use `RestoreExecutionC
 `Continue` explicitly with compatible bindings. That lower-level path must initialize the loop
 during restoration; `Continue` checks executor compatibility without reinitializing saved state.
 
-An active child or JavaScript frame is unsupported in this release: there is no saved Go/VM stack.
-Gent rejects these continuations explicitly. Completed children remain archived in later
-checkpoints, including their accounting and history. Ordinary execution and observation of children
-and JavaScript continue to work. Unsupported custom loops can execute normally but cannot claim
-resumable state.
+An active child context remains unsupported because Gent does not save the Go stack. An interrupted
+JavaScript program is supported through saved inner call plans and completed results. Recovery does
+not restore the VM or restart the script. It returns partial evidence and optional executor guidance
+through the original native `run_code` call ID, then saves the transition before another model call.
+Application recorders must reject expired worker leases at every save boundary. An old worker stops
+before another call when that save fails; an effect already in progress can still finish.
 
 `CodecRegistry` preserves dynamic types, large integers, named containers, bytes, media, cache
 duration, and typed tool metadata. Built-in tool/JSON-answer declarations register their types.
+Raw provider JSON is stored as bytes so serialization preserves its whitespace and escapes.
 Register values hidden inside `any` and custom content parts explicitly with a stable type name and
 version, or supply a `ValueCodec` for private fields. Unknown types, cycles, callbacks, channels,
 and unsupported versions fail explicitly. Codecs must be deterministic local serialization
@@ -297,6 +323,9 @@ identity; `EntryIds()` supplies the ordered IDs when needed. Strategies return `
 including optional `CompactionRecord` provenance such as generated summary IDs. The executor fills
 the input selection, decision identity, model-call references, and error, then accepts the update
 with trigger state and checkpoint. Removal-only and failed compactions remain recorded.
+Summarization accepts only a completed, non-blank candidate. A metadata-only, incomplete, or
+tool-call response returns an error and leaves the active selection intact. This prevents an
+empty or partial summary from replacing usable working context.
 
 `SavedError` preserves text, causes, standard Gent/context classifications, and `CodedError`
 application codes for `errors.Is`. It does not recreate arbitrary private error implementations. Use
@@ -320,5 +349,6 @@ the next update to apply is 131. Slow or bounded display subscribers cannot alte
 
 Permanent tests cover subprocess recovery, recorder failure boundaries, retries, exact resumed
 requests, two summaries, immutable views, cursor/delta replay, lost completion, interrupted model
-usage, tool reconciliation, SearchJSON paging/schema state, typed values, extension state, remaining
+usage, tool reconciliation, SearchChain paging/schema state, typed values, extension state,
+remaining
 limits, terminal failure/cancellation, deadlines, concurrent observers, and unsupported boundaries.

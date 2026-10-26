@@ -10,10 +10,9 @@ import (
 //
 // The framework separates concerns between Tool and ToolChain:
 //   - Tool: Accept typed input, execute business logic, return typed output
-//   - ToolChain: Parse LLM output, validate args, call tools, format results
+//   - ToolChain: Decode native arguments, validate inputs, call tools, format results
 //
-// This separation means tools are reusable across different formats (YAML, JSON)
-// and don't need to know about LLM communication.
+// This separation keeps business tools independent of the model provider and its wire format.
 //
 // # Implementing a Tool
 //
@@ -51,7 +50,7 @@ import (
 //	    }
 //	    return &gent.ToolResult[ImageMeta]{
 //	        Text:  meta, // Will be formatted by ToolChain
-//	        Media: []gent.ContentPart{llms.BinaryPart{Data: imageBytes, MIMEType: "image/png"}},
+//	        Media: []gent.ContentPart{BinaryPart{Data: imageBytes, MIMEType: "image/png"}},
 //	    }, nil
 //	}
 //
@@ -153,7 +152,7 @@ type Tool[I, TextOutput any] interface {
 //
 //	return &gent.ToolResult[ImageMeta]{
 //	    Text:  ImageMeta{Width: 1024, Height: 768},
-//	    Media: []gent.ContentPart{llms.BinaryPart{Data: imageBytes, MIMEType: "image/png"}},
+//	    Media: []gent.ContentPart{BinaryPart{Data: imageBytes, MIMEType: "image/png"}},
 //	}, nil
 //
 // Result with follow-up instructions:
@@ -164,7 +163,7 @@ type Tool[I, TextOutput any] interface {
 //	}, nil
 type ToolResult[TextOutput any] struct {
 	// Text is the typed output from the tool that will be formatted as text.
-	// The ToolChain formats this using its configured format (JSON, YAML, etc.).
+	// The ToolChain preserves strings and encodes structured output as JSON.
 	//
 	// Use structs for structured data, strings for simple text output.
 	Text TextOutput
@@ -173,8 +172,8 @@ type ToolResult[TextOutput any] struct {
 	// These are passed through by the ToolChain and included in the observation.
 	//
 	// Common types:
-	//   - llms.BinaryPart: Raw binary data with MIME type
-	//   - llms.ImageURLPart: Image URL reference
+	//   - BinaryPart: Raw binary data with MIME type
+	//   - ImageURLPart: Image URL reference
 	Media []ContentPart
 
 	// Instructions are optional follow-up instructions for the LLM.
@@ -206,6 +205,8 @@ type ToolFunc[I, TextOutput any] struct {
 
 // NewToolFunc creates a new ToolFunc with typed input and output.
 // Output formatting is handled by the ToolChain during execution.
+// The schema is explicit: nil advertises no parameters. Supply each input field in the schema
+// so native callers know which arguments to send. The Go input type alone does not define it.
 func NewToolFunc[I, TextOutput any](
 	name, description string,
 	schema map[string]any,

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const RunSchemaVersion = 3
+const RunSchemaVersion = 5
 
 // RecordedEvent is the lossless numbered event. Payload uses the registry, while Change is a
 // structured history transition. Display projections may redact data without altering this record.

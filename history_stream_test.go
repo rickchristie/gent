@@ -48,7 +48,13 @@ func TestExecutionContext_ObserversDoNotBlockRecording(t *testing.T) {
 			go func() {
 				for i := 0; i < test.expected.count; i++ {
 					if err := emitter.EmitChunk(
-						StreamChunk{Content: "policy evidence"},
+						StreamChunk{
+							MetaContent: []*MetaContent{
+								{
+									Type: MetaContentIntermediary, Text: "policy evidence",
+								},
+							},
+						},
 					); err != nil {
 						done <- err
 						return
@@ -99,10 +105,15 @@ func TestBoundedProviderStream_CancellationReleasesBackpressure(t *testing.T) {
 	defer cancel()
 	stream, err := NewBoundedStreamWithDuration(ctx, 1, nil)
 	assert.NoError(t, err)
-	assert.True(t, stream.SendContent("first"))
+	assert.True(t, stream.SendMeta(&MetaContent{Type: MetaContentIntermediary, Text: "first"}))
 	started := make(chan struct{})
 	done := make(chan bool, 1)
-	go func() { close(started); done <- stream.SendContent("second") }()
+	go func() {
+		close(started)
+		done <- stream.SendMeta(&MetaContent{
+			Type: MetaContentIntermediary, Text: "second",
+		})
+	}()
 	<-started
 	select {
 	case <-done:

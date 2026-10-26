@@ -220,20 +220,20 @@ func (h *streamHub) emit(chunk StreamChunk) {
 
 	// Send to all subscribers
 	for _, sub := range h.allSubscribers {
-		sub.buffer.Send(chunk)
+		sub.buffer.Send(cloneStreamChunk(chunk))
 	}
 
 	// Send to stream-specific subscribers
 	if chunk.StreamId != "" {
 		for _, sub := range h.byStreamId[chunk.StreamId] {
-			sub.buffer.Send(chunk)
+			sub.buffer.Send(cloneStreamChunk(chunk))
 		}
 	}
 
 	// Send to topic-specific subscribers
 	if chunk.StreamTopicId != "" {
 		for _, sub := range h.byTopicId[chunk.StreamTopicId] {
-			sub.buffer.Send(chunk)
+			sub.buffer.Send(cloneStreamChunk(chunk))
 		}
 	}
 }

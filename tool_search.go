@@ -48,14 +48,14 @@ type IndexableTool interface {
 
 // ToolSearcher indexes tools and searches them by query.
 //
-// Search engines are pluggable backends for ToolSearchToolChain.
+// Search engines are pluggable backends for toolchain.SearchChain.
 // Each engine provides a different search strategy (e.g., BM25
 // full-text search, regex pattern matching).
 //
 // # Contract
 //
 //   - Search returns ALL matching tool names ranked by relevance.
-//     The ToolSearchToolChain handles pagination over results.
+//     SearchChain handles pagination over results.
 //   - Error messages from Search are surfaced to the LLM, so they
 //     should be descriptive (e.g., "invalid regex: ...").
 type ToolSearcher interface {

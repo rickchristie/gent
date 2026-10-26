@@ -197,15 +197,16 @@ func (s *Sequencer) applyModelChunk(event *Event) {
 	call.LastUpdatedTs = event.Ts
 	call.LastEventNumber = event.EventNumber
 	payload, _ := event.Payload.(map[string]any)
-	if content, ok := payload["content"].(string); ok {
-		call.Stream.Content, call.Stream.ContentTruncated = appendLimitedUTF8(
-			call.Stream.Content, content, s.cfg.maxModelContentBytes,
-		)
-	}
-	if reasoning, ok := payload["reasoningContent"].(string); ok {
-		call.Stream.ReasoningContent, call.Stream.ReasoningContentTruncated = appendLimitedUTF8(
-			call.Stream.ReasoningContent, reasoning, s.cfg.maxReasoningContentBytes,
-		)
+	if items, ok := payload["metaContent"].([]any); ok {
+		for _, value := range items {
+			item, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			s.appendStreamMeta(call.Stream, &gent.MetaContent{
+				Type: stringFromPayload(item, "type"), Text: stringFromPayload(item, "text"),
+				MessageId: stringFromPayload(item, "messageId")})
+		}
 	}
 	if event.Error != nil {
 		call.Error = cloneError(event.Error)
@@ -412,4 +413,47 @@ func runStatus(reason gent.TerminationReason, err *Error) RunStatus {
 		}
 		return RunStatusSucceeded
 	}
+}
+
+func (s *Sequencer) appendStreamMeta(stream *ModelStream, item *gent.MetaContent) {
+	remaining := s.cfg.maxMetaContentBytes
+	if remaining >= 0 {
+		for _, saved := range stream.MetaContent {
+			remaining -= len(saved.Text)
+		}
+		if remaining <= 0 {
+			stream.MetaContentTruncated = stream.MetaContentTruncated || item.Text != ""
+			return
+		}
+	}
+	text, truncated := appendLimitedUTF8("", item.Text, remaining)
+	stream.MetaContentTruncated = stream.MetaContentTruncated || truncated
+	if text == "" {
+		return
+	}
+	if n := len(stream.MetaContent); n > 0 {
+		last := stream.MetaContent[n-1]
+		if last.Type == item.Type && last.MessageId == item.MessageId {
+			last.Text += text
+			return
+		}
+	}
+	stream.MetaContent = append(stream.MetaContent, &gent.MetaContent{
+		Type: item.Type, Text: text, MessageId: item.MessageId})
+}
+
+func (s *Sequencer) applyExecutionContent(event *Event) {
+	ctx := s.contextById[event.ContextId]
+	if ctx == nil {
+		s.applyContextStarted(event)
+		ctx = s.contextById[event.ContextId]
+	}
+	payload, _ := event.Payload.(map[string]any)
+	ctx.LastEventNumber = event.EventNumber
+	ctx.MessageId = stringFromPayload(payload, "messageId")
+	if ids, ok := payload["sourceMessageIds"].([]string); ok {
+		ctx.SourceMessageIds = append([]string(nil), ids...)
+	}
+	ctx.Content, ctx.ContentTruncated = appendLimitedUTF8(
+		"", stringFromPayload(payload, "content"), s.cfg.maxContentBytes)
 }

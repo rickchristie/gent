@@ -80,7 +80,13 @@ func TestReliabilityRestoreFailureReleasesConfiguredWork(t *testing.T) {
 func TestReliabilityExportDuringAcceptance(t *testing.T) {
 	ctx := gent.NewExecutionContext(context.Background(), "test", nil)
 	defer ctx.Release()
-	if !assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{Content: "first"})) {
+	if !assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
+		MetaContent: []*gent.MetaContent{
+			{
+				Type: gent.MetaContentIntermediary, Text: "first",
+			},
+		},
+	})) {
 		return
 	}
 	first, err := ctx.Export()
@@ -94,7 +100,13 @@ func TestReliabilityExportDuringAcceptance(t *testing.T) {
 		defer wg.Done()
 		<-start
 		for i := 0; i < 128; i++ {
-			assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{Content: "next"}))
+			assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
+				MetaContent: []*gent.MetaContent{
+					{
+						Type: gent.MetaContentIntermediary, Text: "next",
+					},
+				},
+			}))
 		}
 	}()
 	go func() {

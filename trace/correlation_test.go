@@ -34,7 +34,13 @@ func TestSequencerCallCorrelationRequiresIdentity(t *testing.T) {
 		model: ModelCall{Id: "model-1", Model: "model", StreamId: "stream", ContextId: "ctx",
 			Iteration: 1, Status: StepStatusSucceeded, DurationMs: 1, StartedEventNumber: 1,
 			LastEventNumber: 4, CompletedEventNumber: 4, Usage: &ModelUsage{},
-			Stream: &ModelStream{Content: "answer", ChunkCount: 1, LastChunkEventNumber: 3}},
+			Stream: &ModelStream{
+				MetaContent: []*gent.MetaContent{
+					{
+						Type: gent.MetaContentIntermediary, Text: "answer",
+					},
+				}, ChunkCount: 1, LastChunkEventNumber: 3,
+			}},
 		tool: ToolCall{Id: "tool-1", Name: "lookup", ContextId: "ctx", Iteration: 1,
 			Status: StepStatusSucceeded, DurationMs: 1, StartedEventNumber: 2,
 			LastEventNumber: 5, CompletedEventNumber: 5},
@@ -56,7 +62,11 @@ func TestSequencerCallCorrelationRequiresIdentity(t *testing.T) {
 			recordTestValue(t, seq, "tool_call_started", &gent.BeforeToolCallEvent{
 				BaseEvent: base, ToolName: "lookup", ToolCallId: "tool-1"})
 			recordTestValue(t, seq, "model_stream_chunk", gent.StreamChunk{
-				Content: "answer", ModelCallId: test.input.modelCallId, StreamId: "stream",
+				MetaContent: []*gent.MetaContent{
+					{
+						Type: gent.MetaContentIntermediary, Text: "answer",
+					},
+				}, ModelCallId: test.input.modelCallId, StreamId: "stream",
 				ContextId: "ctx", Iteration: 1})
 			finished := time.Now()
 			base.Timestamp = finished

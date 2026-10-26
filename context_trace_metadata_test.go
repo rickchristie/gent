@@ -80,7 +80,13 @@ func TestExecutionContext_TraceMetadata_BaseEventAndChunkMetadata(t *testing.T) 
 	chunkEarliestTs := time.Now()
 	chunks, unsubscribe := execCtx.SubscribeAll()
 	defer unsubscribe()
-	execCtx.EmitChunk(StreamChunk{Content: "hello", StreamId: "stream"})
+	execCtx.EmitChunk(StreamChunk{
+		MetaContent: []*MetaContent{
+			{
+				Type: MetaContentIntermediary, Text: "hello",
+			},
+		}, StreamId: "stream",
+	})
 	chunk := receiveTraceMetadataChunk(t, chunks)
 
 	assert.GreaterOrEqual(t, event.Timestamp.UnixNano(), eventEarliestTs.UnixNano())

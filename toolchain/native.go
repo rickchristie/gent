@@ -6,11 +6,15 @@ import (
 	"strings"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
 )
 
-func nativeDefinitions(tools []any, outputSchema bool) ([]llms.Tool, error) {
-	definitions := make([]llms.Tool, 0, len(tools))
+type parsedCall struct {
+	Name string
+	Args map[string]any
+}
+
+func nativeDefinitions(tools []any, outputSchema bool) ([]gent.ToolDefinition, error) {
+	definitions := make([]gent.ToolDefinition, 0, len(tools))
 	for _, tool := range tools {
 		meta, err := GetToolMeta(tool)
 		if err != nil {
@@ -31,31 +35,25 @@ func nativeDefinitions(tools []any, outputSchema bool) ([]llms.Tool, error) {
 		if parameters == nil {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		definitions = append(definitions, llms.Tool{Type: "function",
-			Function: &llms.FunctionDefinition{Name: meta.Name(), Description: description,
+		definitions = append(definitions, gent.ToolDefinition{Type: "function",
+			Function: &gent.FunctionDefinition{Name: meta.Name(), Description: description,
 				Parameters: parameters}})
 	}
 	return definitions, nil
 }
 
 // copyNativeTools keeps request hooks from changing the registered tool schemas.
-func copyNativeTools(ctx *gent.ExecutionContext, tools []llms.Tool) ([]llms.Tool, error) {
+func copyNativeTools(
+	ctx *gent.ExecutionContext, tools []gent.ToolDefinition,
+) ([]gent.ToolDefinition, error) {
 	owned, err := ctx.Codecs().Clone(tools)
 	if err != nil {
 		return nil, err
 	}
-	return owned.([]llms.Tool), nil
+	return owned.([]gent.ToolDefinition), nil
 }
 
-func (c *JSON) NativeTools(ctx *gent.ExecutionContext) ([]llms.Tool, error) {
-	tools, err := nativeDefinitions(c.tools, c.printOutputSchema)
-	if err != nil {
-		return nil, err
-	}
-	return copyNativeTools(ctx, tools)
-}
-
-func (c *YAML) NativeTools(ctx *gent.ExecutionContext) ([]llms.Tool, error) {
+func (c *Registry) NativeTools(ctx *gent.ExecutionContext) ([]gent.ToolDefinition, error) {
 	tools, err := nativeDefinitions(c.tools, c.printOutputSchema)
 	if err != nil {
 		return nil, err
@@ -64,17 +62,13 @@ func (c *YAML) NativeTools(ctx *gent.ExecutionContext) ([]llms.Tool, error) {
 }
 
 func prepareNativeCalls(
-	ctx *gent.ExecutionContext, chain gent.ToolChain, calls []llms.ToolCall,
-	validate func(*gent.ToolCall) error,
+	ctx *gent.ExecutionContext, chain gent.ToolChain, calls []gent.ModelToolCall,
+	validate func(*parsedCall) error,
 ) (*gent.ToolPlan, error) {
-	if codecs, ok := chain.(interface {
-		RegisterCodecs(*gent.CodecRegistry) error
-	}); ok {
-		if err := codecs.RegisterCodecs(ctx.Codecs()); err != nil {
-			return nil, err
-		}
+	if err := chain.RegisterCodecs(ctx.Codecs()); err != nil {
+		return nil, err
 	}
-	parsed := make([]*gent.ToolCall, 0, len(calls))
+	parsed := make([]*parsedCall, 0, len(calls))
 	for _, call := range calls {
 		decoded, err := decodeNativeCall(call)
 		if err == nil && validate != nil {
@@ -94,7 +88,7 @@ func prepareNativeCalls(
 	return prepareParsedToolPlan(ctx, parsed)
 }
 
-func decodeNativeCall(call llms.ToolCall) (*gent.ToolCall, error) {
+func decodeNativeCall(call gent.ModelToolCall) (*parsedCall, error) {
 	if call.Type != "" && call.Type != "function" {
 		return nil, fmt.Errorf("unsupported tool call type %q", call.Type)
 	}
@@ -108,32 +102,26 @@ func decodeNativeCall(call llms.ToolCall) (*gent.ToolCall, error) {
 	if args == nil {
 		return nil, fmt.Errorf("%w: tool arguments must be an object", gent.ErrInvalidJSON)
 	}
-	return &gent.ToolCall{Name: call.FunctionCall.Name, Args: args}, nil
+	return &parsedCall{Name: call.FunctionCall.Name, Args: args}, nil
 }
 
-func (c *JSON) PrepareCalls(
-	ctx *gent.ExecutionContext, calls []llms.ToolCall,
+func (c *Registry) PrepareCalls(
+	ctx *gent.ExecutionContext, calls []gent.ModelToolCall,
 ) (*gent.ToolPlan, error) {
 	return prepareNativeCalls(ctx, c, calls, nil)
 }
 
-func (c *YAML) PrepareCalls(
-	ctx *gent.ExecutionContext, calls []llms.ToolCall,
+func (c *SearchChain) PrepareCalls(
+	ctx *gent.ExecutionContext, calls []gent.ModelToolCall,
 ) (*gent.ToolPlan, error) {
 	return prepareNativeCalls(ctx, c, calls, nil)
 }
 
-func (c *SearchJSON) PrepareCalls(
-	ctx *gent.ExecutionContext, calls []llms.ToolCall,
-) (*gent.ToolPlan, error) {
-	return prepareNativeCalls(ctx, c, calls, nil)
-}
-
-func (c *SearchJSON) NativeTools(ctx *gent.ExecutionContext) ([]llms.Tool, error) {
+func (c *SearchChain) NativeTools(ctx *gent.ExecutionContext) ([]gent.ToolDefinition, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !c.initialized {
-		return nil, fmt.Errorf("SearchJSON must be initialized before native tool calls")
+		return nil, fmt.Errorf("SearchChain must be initialized before native tool calls")
 	}
 	records, err := ctx.Scratchpad()
 	if err != nil {
@@ -187,7 +175,7 @@ func addDiscoveredTools(names map[string]bool, result *gent.ToolChainResult) {
 	}
 }
 
-func (c *SearchJSON) nativeSearchTools() []llms.Tool {
+func (c *SearchChain) nativeSearchTools() []gent.ToolDefinition {
 	hint := buildDomainSummary(c.indexableTools)
 	if c.hintType == SearchHintSimpleList {
 		hint = buildSimpleList(c.indexableTools)
@@ -201,11 +189,11 @@ func (c *SearchJSON) nativeSearchTools() []llms.Tool {
 		description += " Call get_tool_schema to load a tool before using it."
 	}
 	description += "\n\nRegistry:\n" + hint + "\nSearch engines:" + engines.String()
-	tools := []llms.Tool{{Type: "function", Function: &llms.FunctionDefinition{
+	tools := []gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
 		Name: searchToolName, Description: description, Parameters: c.searchToolSchema,
 	}}}
 	if c.searchType == SearchGet {
-		tools = append(tools, llms.Tool{Type: "function", Function: &llms.FunctionDefinition{
+		tools = append(tools, gent.ToolDefinition{Type: "function", Function: &gent.FunctionDefinition{
 			Name: getSchemaToolName, Description: "Load a tool's schema, policy, and instructions.",
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{
 				"tool_name": map[string]any{"type": "string"},
@@ -215,6 +203,6 @@ func (c *SearchJSON) nativeSearchTools() []llms.Tool {
 	return tools
 }
 
-var _ gent.NativeToolChain = (*JSON)(nil)
-var _ gent.NativeToolChain = (*YAML)(nil)
-var _ gent.NativeToolChain = (*SearchJSON)(nil)
+var _ gent.ToolChain = (*Registry)(nil)
+
+var _ gent.ToolChain = (*SearchChain)(nil)

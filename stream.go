@@ -5,9 +5,11 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/tmc/langchaingo/llms"
 )
+
+// streamCodecs owns response copies at the producer/consumer boundary. Provider metadata must
+// use the built-in wire types, as do provider JSON values.
+var streamCodecs = NewCodecRegistry()
 
 // streamBuffer implements Stream with an unbounded internal buffer.
 // It guarantees that Send() never blocks, even when:
@@ -45,8 +47,7 @@ type streamBuffer struct {
 	responseDone chan struct{}
 
 	// Content accumulator for building final response
-	contentAccum   []byte
-	reasoningAccum []byte
+	metaAccum metaAccumulator
 }
 
 // newStreamBuffer creates a new streaming buffer.
@@ -156,13 +157,8 @@ func (s *streamBuffer) Send(chunk StreamChunk) bool {
 		return false // Silently ignore sends after close
 	}
 
-	// Accumulate content for final response
-	if chunk.Content != "" {
-		s.contentAccum = append(s.contentAccum, chunk.Content...)
-	}
-	if chunk.ReasoningContent != "" {
-		s.reasoningAccum = append(s.reasoningAccum, chunk.ReasoningContent...)
-	}
+	chunk = cloneStreamChunk(chunk)
+	s.metaAccum.add(chunk.MetaContent)
 
 	// Add to queue and signal
 	s.queue = append(s.queue, chunk)
@@ -170,14 +166,9 @@ func (s *streamBuffer) Send(chunk StreamChunk) bool {
 	return true
 }
 
-// SendContent is a convenience method to send a content-only chunk.
-func (s *streamBuffer) SendContent(content string) bool {
-	return s.Send(StreamChunk{Content: content})
-}
-
-// SendReasoning is a convenience method to send a reasoning-only chunk.
-func (s *streamBuffer) SendReasoning(reasoning string) bool {
-	return s.Send(StreamChunk{ReasoningContent: reasoning})
+// SendMeta sends one provisional text delta. The buffer owns a copy of the entry.
+func (s *streamBuffer) SendMeta(content *MetaContent) bool {
+	return s.Send(StreamChunk{MetaContent: []*MetaContent{content}})
 }
 
 // SendError sends an error chunk. This does NOT close the stream.
@@ -206,6 +197,10 @@ func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 		s.stopWatch()
 	}
 	s.onClose = nil
+	owned, copyErr := cloneOwned(streamCodecs, response)
+	if copyErr != nil {
+		err = errors.Join(err, copyErr)
+	}
 	s.closeErr = err
 
 	// If we have an error, add it as a final chunk
@@ -215,7 +210,7 @@ func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 
 	// Set the final response
 	s.responseMu.Lock()
-	s.response = response
+	s.response = owned
 	s.responseErr = err
 	close(s.responseDone)
 	s.responseMu.Unlock()
@@ -229,21 +224,15 @@ func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
 // and the provided generation info.
 func (s *streamBuffer) CompleteWithGenerationInfo(info *GenerationInfo, err error) {
 	s.mu.Lock()
-	content := string(s.contentAccum)
-	reasoning := string(s.reasoningAccum)
+	metadata := s.metaAccum.snapshot()
 	s.mu.Unlock()
 
 	var response *ContentResponse
 	if err == nil {
-		response = &ContentResponse{
-			Choices: []*ContentChoice{
-				{
-					Content:          content,
-					ReasoningContent: reasoning,
-				},
-			},
-			Info: info,
-		}
+		response = &ContentResponse{Choices: []*ContentChoice{{
+			CandidateContent: MetaText(metadata, MetaContentIntermediary),
+			MetaContent:      metadata,
+		}}, Info: info}
 	}
 
 	s.Complete(response, err)
@@ -265,7 +254,11 @@ func (s *streamBuffer) Response() (*ContentResponse, error) {
 	<-s.responseDone
 	s.responseMu.Lock()
 	defer s.responseMu.Unlock()
-	return s.response, s.responseErr
+	response, err := cloneOwned(streamCodecs, s.response)
+	if err != nil {
+		return nil, errors.Join(s.responseErr, err)
+	}
+	return response, s.responseErr
 }
 
 // Close implements Stream.Close.
@@ -293,79 +286,33 @@ func (s *streamBuffer) closeDrain() {
 	})
 }
 
-// AccumulatedContent returns the content accumulated so far.
-func (s *streamBuffer) AccumulatedContent() string {
+// AccumulatedMetaContent returns an owned snapshot of the provisional text.
+func (s *streamBuffer) AccumulatedMetaContent() []*MetaContent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return string(s.contentAccum)
+	return s.metaAccum.snapshot()
 }
 
-// AccumulatedReasoning returns the reasoning content accumulated so far.
-func (s *streamBuffer) AccumulatedReasoning() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return string(s.reasoningAccum)
-}
-
-// Compile-time check that streamBuffer implements Stream.
 var _ Stream = (*streamBuffer)(nil)
 
-// StreamingCallbackAdapter creates llms.CallOption callbacks that feed into a streamBuffer.
-// It returns the callbacks and the stream buffer.
-//
-// This is useful for adapting LangChainGo's callback-based streaming to gent's channel-based
-// streaming.
-func StreamingCallbackAdapter() (
-	contentCallback, reasoningCallback llms.CallOption, stream *streamBuffer,
-) {
-	stream = newStreamBuffer()
-
-	contentCallback = llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-		stream.SendContent(string(chunk))
-		return nil
-	})
-
-	reasoningCallback = llms.WithStreamingReasoningFunc(
-		func(ctx context.Context, reasoningChunk, contentChunk []byte) error {
-			if len(reasoningChunk) > 0 {
-				stream.SendReasoning(string(reasoningChunk))
-			}
-			if len(contentChunk) > 0 {
-				stream.SendContent(string(contentChunk))
-			}
-			return nil
-		},
-	)
-
-	return contentCallback, reasoningCallback, stream
-}
-
-// SimpleStreamingCallback creates a simple streaming callback that only handles content.
-// Use StreamingCallbackAdapter for full reasoning support.
-func SimpleStreamingCallback() (llms.CallOption, *streamBuffer) {
-	stream := newStreamBuffer()
-
-	callback := llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-		stream.SendContent(string(chunk))
-		return nil
-	})
-
-	return callback, stream
-}
-
 // NewCompletedStream creates a Stream that is already complete with the given
-// response. The stream emits a single chunk with the full content then closes.
+// response. The stream emits each non-empty text channel then closes.
 // This is used by mock models and non-streaming callers that need to satisfy the
 // [Model] interface without actual streaming.
 func NewCompletedStream(resp *ContentResponse, err error) Stream {
 	s := newStreamBuffer()
 	if resp != nil && len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
-		if choice.Content != "" {
-			s.SendContent(choice.Content)
+		for _, item := range choice.MetaContent {
+			s.SendMeta(item)
 		}
-		if choice.ReasoningContent != "" {
-			s.SendReasoning(choice.ReasoningContent)
+		if choice.CandidateContent != "" && MetaText(choice.MetaContent, MetaContentIntermediary) == "" {
+			id := ""
+			if choice.CandidateSource != nil && len(choice.CandidateSource.MessageIds) == 1 {
+				id = choice.CandidateSource.MessageIds[0]
+			}
+			s.SendMeta(&MetaContent{Type: MetaContentIntermediary,
+				Text: choice.CandidateContent, MessageId: id})
 		}
 	}
 	s.Complete(resp, err)

@@ -33,10 +33,10 @@ I just noticed that I was charged twice for a ` +
 				`on my credit card statement, both for ` +
 				`$79.99. Can you look into this and help ` +
 				`me get the duplicate charge resolved?`,
-			MaxIterations: 20,
+			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllTools,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:  tp,
+			TimeProvider:    tp,
 			SystemPrompt: fmt.Sprintf(
 				`## Task Description
 
@@ -68,57 +68,12 @@ Important: Our internal payment records may be `+
 				"Follow the policy steps IN ORDER "+
 					"— do not skip steps",
 			),
-			ThinkingPrompt: "Think step by step about " +
-				"how to investigate and resolve " +
-				"the customer's billing issue.",
 		},
 	)
 }
 
-// GetEcommerceTestCases returns all e-commerce test cases
-// for YAML toolchain.
-func GetEcommerceTestCases() []testutil.TestCase {
-	return []testutil.TestCase{
-		{
-			Name: "Alex Rivera — Double Charge (YAML)",
-			Description: "Alex investigates a double " +
-				"charge on a mouse purchase " +
-				"(YAML toolchain)",
-			Run: RunDoubleChargeScenario,
-		},
-	}
-}
-
-// GetEcommerceTestCasesJSON returns all e-commerce test cases
-// for JSON toolchain.
-func GetEcommerceTestCasesJSON() []testutil.TestCase {
-	return []testutil.TestCase{
-		{
-			Name: "Alex Rivera — Double Charge (JSON)",
-			Description: "Alex investigates a double " +
-				"charge on a mouse purchase " +
-				"(JSON toolchain)",
-			Run: RunDoubleChargeScenario,
-		},
-	}
-}
-
-// GetEcommerceTestCasesSearch returns e-commerce test cases
-// for SearchJSON toolchain.
-func GetEcommerceTestCasesSearch() []testutil.TestCase {
-	return []testutil.TestCase{
-		{
-			Name: "Alex Rivera — Double Charge (Search)",
-			Description: "Alex investigates a double " +
-				"charge on a mouse purchase " +
-				"(SearchJSON toolchain)",
-			Run: RunDoubleChargeScenarioSearch,
-		},
-	}
-}
-
 // RunDoubleChargeScenarioSearch runs the double-charge
-// scenario using SearchJSON toolchain.
+// scenario using SearchChain toolchain.
 func RunDoubleChargeScenarioSearch(
 	ctx context.Context,
 	w io.Writer,
@@ -136,7 +91,7 @@ func RunDoubleChargeScenarioSearch(
 		testutil.ScenarioConfig{
 			Name: "ecommerce-double-charge-search",
 			HeaderTitle: "ECOMMERCE DOUBLE CHARGE " +
-				"SCENARIO (SearchJSON)",
+				"SCENARIO (SearchChain)",
 			CustomerRequest: `Hi, I'm Alex Rivera and ` +
 				`my email is ` +
 				`alex.rivera@email.com.
@@ -147,10 +102,10 @@ I just noticed that I was charged twice for a ` +
 				`both for $79.99. Can you look into ` +
 				`this and help me get the duplicate ` +
 				`charge resolved?`,
-			MaxIterations: 25,
+			MaxIterations:   25,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:  tp,
+			TimeProvider:    tp,
 			SystemPrompt: fmt.Sprintf(
 				`## Task Description
 
@@ -183,15 +138,12 @@ Important: Our internal payment records may be `+
 				"Follow the policy steps IN ORDER "+
 					"— do not skip steps",
 			),
-			ThinkingPrompt: "Think step by step about " +
-				"how to investigate and resolve " +
-				"the customer's billing issue.",
 		},
 	)
 }
 
 // RunDoubleChargeScenarioSearchSimpleList runs the
-// double-charge scenario using SearchJSON with SimpleList
+// double-charge scenario using SearchChain with SimpleList
 // hint type.
 func RunDoubleChargeScenarioSearchSimpleList(
 	ctx context.Context,
@@ -249,19 +201,17 @@ Important: Our internal payment records may be `+
 				"Follow the policy steps IN ORDER "+
 					"— do not skip steps",
 			),
-			ThinkingPrompt: "Think step by step about " +
-				"how to investigate and resolve " +
-				"the customer's billing issue.",
-			MaxIterations: 20,
+
+			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllTools,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:  tp,
+			TimeProvider:    tp,
 		},
 	)
 }
 
 // NewEcommerceInteractiveChatSearch creates an interactive
-// chat session for the e-commerce domain using SearchJSON
+// chat session for the e-commerce domain using SearchChain
 // toolchain.
 func NewEcommerceInteractiveChatSearch(
 	w io.Writer,
@@ -310,13 +260,11 @@ Important: Our internal payment records may be `+
 				"Follow the policy steps IN ORDER "+
 					"— do not skip steps",
 			),
-			ThinkingPrompt: "Think step by step about " +
-				"how to investigate and resolve " +
-				"the customer's billing issue.",
-			MaxIterations: 25,
+
+			MaxIterations:   25,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:  tp,
+			TimeProvider:    tp,
 		},
 	)
 }

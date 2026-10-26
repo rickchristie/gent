@@ -9,7 +9,7 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
+
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/openai"
 )
@@ -152,20 +152,20 @@ func TestSmokeAllProviders(t *testing.T) {
 			// Apply model-appropriate sampling defaults (e.g., send 1.0
 			// for reasoning models, omit top_p for Claude).
 			params := gent.DefaultSamplingParams(model)
-			var callOpts []llms.CallOption
+			var callOpts []gent.CallOption
 			if v, ok := params.Temperature.EffectiveValue(); ok {
-				callOpts = append(callOpts, llms.WithTemperature(v))
+				callOpts = append(callOpts, gent.WithTemperature(v))
 			}
 			if v, ok := params.TopP.EffectiveValue(); ok {
-				callOpts = append(callOpts, llms.WithTopP(v))
+				callOpts = append(callOpts, gent.WithTopP(v))
 			}
 
 			stream, err := execCtx.GenerateContentStream(
 				model,
 				gent.ModelCall{StreamId: "", StreamTopicId: ""},
-				gent.NewModelCallRequest([]llms.MessageContent{
-					llms.TextParts(
-						llms.ChatMessageTypeHuman,
+				gent.NewModelCallRequest([]gent.ModelMessage{
+					gent.TextParts(
+						gent.ChatMessageTypeHuman,
 						"Hello World! Reply with a short greeting.",
 					),
 				}, callOpts...),
@@ -176,7 +176,7 @@ func TestSmokeAllProviders(t *testing.T) {
 			require.NoError(t, err, "stream failed for %s", tt.modelID)
 			require.NotEmpty(t, response.Choices, "expected non-empty choices")
 
-			content := response.Choices[0].Content
+			content := response.Choices[0].CandidateContent
 			assert.NotEmpty(t, content, "expected non-empty response content")
 			t.Logf("[%s] response: %s", tt.modelID, content)
 

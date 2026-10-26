@@ -74,9 +74,9 @@ func TestNativeHTTP_ToolRoundTrip(t *testing.T) {
 				return
 			}
 			var got []map[string]any
-			agent := react.NewNativeAgent(models.NewLCGWrapper(client).WithModelName("wire-test")).
-				WithCallOptions(llms.WithTemperature(0.5), llms.WithTopP(1), llms.WithMaxTokens(100)).
-				WithSystemPromptBuilder(func(react.SystemPromptContext) []gent.FormattedSection {
+			agent := react.NewAgent(models.NewLCGWrapper(client).WithModelName("wire-test")).
+				WithCallOptions(gent.WithTemperature(0.5), gent.WithTopP(1), gent.WithMaxTokens(100)).
+				WithSystemPromptBuilder(func(*react.SystemPromptContext) []gent.FormattedSection {
 					return []gent.FormattedSection{{Name: "instructions", Content: "Read records."}}
 				}).RegisterTool(gent.NewToolFunc("lookup", "Read a record", nil,
 				func(_ context.Context, args map[string]any) (string, error) {
@@ -100,7 +100,8 @@ record
 				return
 			}
 			assert.Equal(t, &gent.AgentLoopResult{Action: gent.LATerminate,
-				Result: []gent.ContentPart{llms.TextContent{Text: "Done."}}}, final)
+				Result:        []gent.ContentPart{gent.TextContent{Text: "Done."}},
+				ContentSource: httpTestSource(ctx, 2)}, final)
 			assert.Equal(t, []map[string]any{{"id": float64(1)}, {"id": float64(2)}}, got)
 			lock.Lock()
 			defer lock.Unlock()
@@ -114,4 +115,16 @@ record
 			assert.Equal(t, want, requests)
 		})
 	}
+}
+
+func httpTestSource(ctx *gent.ExecutionContext, call int) *gent.ContentSource {
+	id := fmt.Sprintf("%s:model:%d", ctx.ContextId(), call)
+	var ids []string
+	for _, event := range ctx.Events() {
+		if after, ok := event.(*gent.AfterModelCallEvent); ok && after.ModelCallId == id {
+			ids = after.Response.Choices[0].CandidateSource.MessageIds
+		}
+	}
+	return &gent.ContentSource{ModelCallId: id, StreamId: "iter-0", StreamTopicId: "llm-response",
+		MessageIds: ids}
 }

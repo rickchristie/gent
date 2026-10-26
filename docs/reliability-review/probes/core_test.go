@@ -22,7 +22,6 @@ import (
 	"github.com/rickchristie/gent/toolchain/jsruntime"
 	"github.com/rickchristie/gent/trace"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // These probes preserve failures from the review. See the parent README before running them.
@@ -37,7 +36,7 @@ func (m reviewModel) GenerateContentStream(
 	context.Context, gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: m.text}},
+		Choices: []*gent.ContentChoice{{CandidateContent: m.text}},
 	}, m.err), nil
 }
 
@@ -56,7 +55,7 @@ func TestReviewSharedAgent(t *testing.T) {
 		expected expected
 	}
 	want := expected{result: gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
-		Output: []gent.ContentPart{llms.TextContent{Text: "done"}}}}
+		Output: []gent.ContentPart{gent.TextContent{Text: "done"}}}}
 	tests := []testCase{
 		{"XML", input{format.NewXML(), `<answer>done</answer>`}, want},
 		{"Markdown", input{format.NewMarkdown(), `# answer
@@ -380,7 +379,13 @@ func BenchmarkReviewEmitChunk(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				ctx := gent.NewExecutionContext(context.Background(), "review", nil)
 				for i := 0; i < count; i++ {
-					if err := ctx.EmitChunk(gent.StreamChunk{Content: "x"}); err != nil {
+					if err := ctx.EmitChunk(gent.StreamChunk{
+						MetaContent: []*gent.MetaContent{
+							{
+								Type: gent.MetaContentIntermediary, Text: "x",
+							},
+						},
+					}); err != nil {
 						b.Fatal(err)
 					}
 				}

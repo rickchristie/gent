@@ -1,121 +1,70 @@
 package gent
 
-import (
-	"strings"
-	"sync"
-)
+import "sync"
 
-// StreamAccumulator accumulates StreamChunks into a complete ContentResponse.
-// It handles both content and reasoning content, building up the full response
-// as chunks arrive.
-//
-// Usage:
-//
-//	acc := NewStreamAccumulator()
-//	for chunk := range stream.Chunks() {
-//	    if chunk.Err != nil {
-//	        return chunk.Err
-//	    }
-//	    acc.Add(chunk)
-//	}
-//	response := acc.Response()
+// StreamAccumulator collects provisional metadata and the accepted answer separately.
+// Provider completion data and tool calls come from Stream.Response, not from display chunks.
 type StreamAccumulator struct {
-	mu               sync.Mutex
-	content          strings.Builder
-	reasoningContent strings.Builder
-	lastError        error
+	mu        sync.Mutex
+	content   string
+	metadata  metaAccumulator
+	lastError error
 }
 
-// NewStreamAccumulator creates a new StreamAccumulator.
-func NewStreamAccumulator() *StreamAccumulator {
-	return &StreamAccumulator{}
-}
+func NewStreamAccumulator() *StreamAccumulator { return &StreamAccumulator{} }
 
-// Add adds a chunk to the accumulator.
-// If the chunk contains an error, it is stored and can be retrieved via Error().
 func (a *StreamAccumulator) Add(chunk StreamChunk) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-
 	if chunk.Content != "" {
-		a.content.WriteString(chunk.Content)
+		a.content = chunk.Content
 	}
-	if chunk.ReasoningContent != "" {
-		a.reasoningContent.WriteString(chunk.ReasoningContent)
-	}
+	a.metadata.add(chunk.MetaContent)
 	if chunk.Err != nil {
 		a.lastError = chunk.Err
 	}
 }
 
-// Content returns the accumulated content so far.
+// Content returns the accepted answer snapshot, not the provisional text.
 func (a *StreamAccumulator) Content() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.content.String()
+	return a.content
 }
 
-// ReasoningContent returns the accumulated reasoning content so far.
-func (a *StreamAccumulator) ReasoningContent() string {
+func (a *StreamAccumulator) MetaContent() []*MetaContent {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.reasoningContent.String()
+	return a.metadata.snapshot()
 }
 
-// Error returns the last error encountered, if any.
 func (a *StreamAccumulator) Error() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.lastError
 }
 
-// Response builds a ContentResponse from the accumulated chunks.
-// This should be called after all chunks have been added.
-// Note: This only populates content fields. Token counts and other metadata
-// should come from the Stream.Response() or be set separately.
+// Response builds a provisional provider response. It cannot establish execution success.
 func (a *StreamAccumulator) Response() *ContentResponse {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	return &ContentResponse{
-		Choices: []*ContentChoice{
-			{
-				Content:          a.content.String(),
-				ReasoningContent: a.reasoningContent.String(),
-			},
-		},
-	}
+	metadata := a.MetaContent()
+	return &ContentResponse{Choices: []*ContentChoice{{
+		CandidateContent: MetaText(metadata, MetaContentIntermediary), MetaContent: metadata,
+	}}}
 }
 
-// ResponseWithInfo builds a ContentResponse and merges it with info from Stream.Response().
-// This is the preferred method when you have access to the Stream's final response,
-// as it includes token counts and duration.
-func (a *StreamAccumulator) ResponseWithInfo(streamResponse *ContentResponse) *ContentResponse {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	response := &ContentResponse{
-		Choices: []*ContentChoice{
-			{
-				Content:          a.content.String(),
-				ReasoningContent: a.reasoningContent.String(),
-			},
-		},
+// ResponseWithInfo is used when local size or repetition checks stop a provider early.
+func (a *StreamAccumulator) ResponseWithInfo(response *ContentResponse) *ContentResponse {
+	result := a.Response()
+	if response != nil {
+		result.Info = response.Info
 	}
-
-	// Copy info from stream response if available
-	if streamResponse != nil && streamResponse.Info != nil {
-		response.Info = streamResponse.Info
-	}
-
-	return response
+	return result
 }
 
-// Reset clears the accumulator for reuse.
 func (a *StreamAccumulator) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.content.Reset()
-	a.reasoningContent.Reset()
+	a.content = ""
+	a.metadata.reset()
 	a.lastError = nil
 }

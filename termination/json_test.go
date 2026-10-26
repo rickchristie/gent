@@ -8,7 +8,6 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestJSON_Name(t *testing.T) {
@@ -48,8 +47,8 @@ func TestJSON_Name(t *testing.T) {
 
 func TestJSON_Prompt(t *testing.T) {
 	type input struct {
-		promptText  string
-		useCustom   bool
+		promptText string
+		useCustom  bool
 	}
 
 	type expected struct {
@@ -478,7 +477,7 @@ func TestJSON_ShouldTerminate(t *testing.T) {
 			assert.Equal(t, tt.expected.status, result.Status)
 			if tt.expected.status == gent.TerminationAnswerAccepted {
 				assert.Len(t, result.Content, 1)
-				tc, ok := result.Content[0].(llms.TextContent)
+				tc, ok := result.Content[0].(gent.TextContent)
 				assert.True(t, ok, "expected TextContent, got %T", result.Content[0])
 				if tt.expected.containsName {
 					assert.True(t, strings.Contains(tc.Text, "test"),
@@ -584,7 +583,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError            bool
 				terminationErrorTotal  int64
 				terminationErrorConsec float64
-				}{
+			}{
 				shouldError:            true,
 				terminationErrorTotal:  1,
 				terminationErrorConsec: 1,
@@ -597,7 +596,7 @@ func TestJSON_ParseSection_TracesErrors(t *testing.T) {
 				shouldError            bool
 				terminationErrorTotal  int64
 				terminationErrorConsec float64
-				}{
+			}{
 				shouldError:            false,
 				terminationErrorTotal:  0,
 				terminationErrorConsec: 0,

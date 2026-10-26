@@ -22,18 +22,17 @@ import (
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/search"
 	"github.com/rickchristie/gent/toolchain"
-	"github.com/tmc/langchaingo/llms"
+
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
-// ToolChainType specifies which toolchain format to use.
+// ToolChainType specifies which toolchain to use.
 type ToolChainType string
 
 const (
-	ToolChainYAML   ToolChainType = "yaml"
-	ToolChainJSON   ToolChainType = "json"
-	ToolChainSearch ToolChainType = "search"
+	ToolChainRegistry ToolChainType = "registry"
+	ToolChainSearch   ToolChainType = "search"
 )
 
 // CompactionType specifies the scratchpad context management strategy.
@@ -60,19 +59,19 @@ type CompactionConfig struct {
 
 // TestConfig configures how integration test output is displayed.
 type TestConfig struct {
-	// ToolChain specifies which toolchain format to use.
+	// ToolChain specifies which toolchain to use.
 	ToolChain ToolChainType
 	// SearchHintType controls how the tool summary is
-	// shown in SearchJSON prompts. Only used when
+	// shown in SearchChain prompts. Only used when
 	// ToolChain is ToolChainSearch.
 	SearchHintType toolchain.SearchHintType
-	// PinTools lists tool names to pin in SearchJSON.
+	// PinTools lists tool names to pin in SearchChain.
 	// Only used when ToolChain is ToolChainSearch.
 	PinTools []string
 	// WrapPTC wraps the toolchain with
 	// JsToolChainWrapper for programmatic tool calling.
 	WrapPTC bool
-	// PTCCodeOnly disables direct_call in the PTC
+	// PTCCodeOnly disables direct tool calls in the PTC
 	// wrapper, forcing all tool calls through code
 	// execution. Only used when WrapPTC is true.
 	PTCCodeOnly bool
@@ -84,19 +83,19 @@ type TestConfig struct {
 	LogWriter io.Writer
 	// Compaction configures scratchpad context management.
 	Compaction CompactionConfig
-	// Embedder for hybrid BM25+semantic search. Used by both tool search (SearchJSON)
+	// Embedder for hybrid BM25+semantic search. Used by both tool search (SearchChain)
 	// and policy search (PolicySearchTool). Created by DefaultTestConfig.
 	Embedder search.Embedder
-	// ModelName overrides the LLM model. Default: "grok-4.3".
+	// ModelName overrides the LLM model. An empty value uses [DefaultModelName].
 	ModelName string
 }
 
-// DefaultTestConfig returns a config suitable for go test with JSON toolchain.
+// DefaultTestConfig returns a config suitable for go test with native registry.
 // Creates an ONNX embedder (multilingual-e5-small) for hybrid search. Panics if
 // the model is not downloaded — run `gent setup onnx` first.
 func DefaultTestConfig() TestConfig {
 	return TestConfig{
-		ToolChain:            ToolChainJSON,
+		ToolChain:            ToolChainRegistry,
 		ShowIterationHistory: true,
 		ShowEvents:           true,
 		Embedder:             createEmbedder(),
@@ -131,21 +130,10 @@ func createEmbedder() search.Embedder {
 }
 
 // InteractiveConfig returns a config for interactive CLI with streaming
-// and YAML toolchain.
+// and native registry.
 func InteractiveConfig() TestConfig {
 	return TestConfig{
-		ToolChain:            ToolChainYAML,
-		ShowIterationHistory: false,
-		ShowEvents:           false,
-		Embedder:             createEmbedder(),
-	}
-}
-
-// InteractiveConfigJSON returns a config for interactive CLI with
-// streaming and JSON toolchain.
-func InteractiveConfigJSON() TestConfig {
-	return TestConfig{
-		ToolChain:            ToolChainJSON,
+		ToolChain:            ToolChainRegistry,
 		ShowIterationHistory: false,
 		ShowEvents:           false,
 		Embedder:             createEmbedder(),
@@ -153,7 +141,7 @@ func InteractiveConfigJSON() TestConfig {
 }
 
 // InteractiveConfigSearch returns a config for interactive
-// CLI with streaming and SearchJSON toolchain.
+// CLI with streaming and SearchChain toolchain.
 func InteractiveConfigSearch() TestConfig {
 	return TestConfig{
 		ToolChain:            ToolChainSearch,
@@ -163,17 +151,6 @@ func InteractiveConfigSearch() TestConfig {
 	}
 }
 
-// TestCase represents a test that can be run.
-type TestCase struct {
-	Name        string
-	Description string
-	Run         func(
-		ctx context.Context,
-		w io.Writer,
-		config TestConfig,
-	) error
-}
-
 // ConversationMessage represents a message in conversation history.
 type ConversationMessage struct {
 	Role    string // "user" or "agent"
@@ -181,7 +158,7 @@ type ConversationMessage struct {
 }
 
 // DefaultModelName is the default LLM model for integration tests.
-const DefaultModelName = gent.ModelXAIGrok43
+const DefaultModelName = gent.ModelXAIGrok47
 
 // ModelOption defines an LLM model available for integration tests.
 type ModelOption struct {
@@ -205,122 +182,23 @@ const (
 	envKeyAnthropic = "GENT_TEST_ANTHROPIC_KEY"
 )
 
-// AvailableModels lists all models the CLI can select from.
+// AvailableModels keeps one current flagship per provider so the CLI stays easy to use.
+// Check provider docs when updating this list. See ../README.md for sources and selection rules.
 var AvailableModels = []ModelOption{
 	{
-		Label: "xAI grok-4.3", Name: gent.ModelXAIGrok43,
+		Label: "xAI grok-4.7", Name: gent.ModelXAIGrok47,
 		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
 	},
 	{
-		Label:  "xAI grok-4.20-0309-reasoning",
-		Name:   gent.ModelXAIGrok420Reasoning,
-		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-	},
-	{
-		Label:  "xAI grok-4.20-0309-non-reasoning",
-		Name:   gent.ModelXAIGrok420NonReasoning,
-		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-	},
-	{
-		Label:  "xAI grok-4.20-multi-agent-0309",
-		Name:   gent.ModelXAIGrok420MultiAgent,
-		EnvKey: envKeyXAI, BaseURL: baseURLXAI,
-	},
-	{
-		Label: "OpenAI o3", Name: gent.ModelOpenAIO3,
+		Label: "OpenAI gpt-6-astra", Name: gent.ModelOpenAIGPT6Astra,
 		EnvKey: envKeyOpenAI,
 	},
 	{
-		Label: "OpenAI o4-mini", Name: gent.ModelOpenAIO4Mini,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-4.1", Name: gent.ModelOpenAIGPT41,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-4.1-mini", Name: gent.ModelOpenAIGPT41Mini,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5", Name: gent.ModelOpenAIGPT5,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5-mini", Name: gent.ModelOpenAIGPT5Mini,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5-nano", Name: gent.ModelOpenAIGPT5Nano,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5.5", Name: gent.ModelOpenAIGPT55,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5.4", Name: gent.ModelOpenAIGPT54,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5.4-mini", Name: gent.ModelOpenAIGPT54Mini,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "OpenAI gpt-5.4-nano", Name: gent.ModelOpenAIGPT54Nano,
-		EnvKey: envKeyOpenAI,
-	},
-	{
-		Label: "Google gemini-2.5-pro", Name: gent.ModelGoogleGemini25Pro,
+		Label: "Google gemini-4-argon", Name: gent.ModelGoogleGemini4Argon,
 		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
 	},
 	{
-		Label: "Google gemini-2.5-flash", Name: gent.ModelGoogleGemini25Flash,
-		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
-	},
-	{
-		Label:  "Google gemini-2.5-flash-lite",
-		Name:   gent.ModelGoogleGemini25FlashLite,
-		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
-	},
-	{
-		Label:  "Google gemini-3-pro-preview",
-		Name:   gent.ModelGoogleGemini3Pro,
-		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
-	},
-	{
-		Label:  "Google gemini-3-flash-preview",
-		Name:   gent.ModelGoogleGemini3Flash,
-		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
-	},
-	{
-		Label:  "Google gemini-3.1-pro-preview",
-		Name:   gent.ModelGoogleGemini31Pro,
-		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
-	},
-	{
-		Label:  "Google gemini-3.1-flash-lite-preview",
-		Name:   gent.ModelGoogleGemini31FlashLite,
-		EnvKey: envKeyGemini, BaseURL: baseURLGemini,
-	},
-	{
-		Label:  "Anthropic claude-opus-4-6",
-		Name:   gent.ModelAnthropicClaude46Opus,
-		EnvKey: envKeyAnthropic,
-	},
-	{
-		Label:  "Anthropic claude-sonnet-4-6",
-		Name:   gent.ModelAnthropicClaude46Sonnet,
-		EnvKey: envKeyAnthropic,
-	},
-	{
-		Label:  "Anthropic claude-sonnet-4-5",
-		Name:   gent.ModelAnthropicClaude45Sonnet,
-		EnvKey: envKeyAnthropic,
-	},
-	{
-		Label:  "Anthropic claude-haiku-4-5",
-		Name:   gent.ModelAnthropicClaude45Haiku,
+		Label: "Anthropic claude-fable-5-1", Name: gent.ModelAnthropicClaude51Fable,
 		EnvKey: envKeyAnthropic,
 	},
 }
@@ -360,6 +238,15 @@ func CreateModel(
 
 	httpClient := &http.Client{
 		Transport: &models.ErrorCaptureTransport{},
+	}
+
+	if opt.EnvKey == envKeyOpenAI || opt.EnvKey == envKeyXAI {
+		provider, baseURL := "openai", "https://api.openai.com/v1"
+		if opt.EnvKey == envKeyXAI {
+			provider, baseURL = "xai", baseURLXAI
+		}
+		return models.NewResponses(&models.ResponsesConfig{Provider: provider, BaseURL: baseURL,
+			APIKey: apiKey, Model: modelName, HTTPClient: httpClient}), nil
 	}
 
 	// Anthropic models use a different client.
@@ -409,43 +296,30 @@ func createAnthropicModel(
 }
 
 // CreateToolChain creates the appropriate toolchain based on config. For
-// ToolChainSearch, returns a SearchJSON with hybrid BM25+semantic search.
+// ToolChainSearch, returns a SearchChain with hybrid BM25+semantic search.
 // When WrapPTC is enabled, output schema printing is turned on.
 func CreateToolChain(config TestConfig) gent.ToolChain {
 	switch config.ToolChain {
-	case ToolChainJSON:
-		tc := toolchain.NewJSON()
-		if config.WrapPTC {
-			tc.WithOutputSchema(true)
-		}
-		return tc
 	case ToolChainSearch:
-		tc := toolchain.NewSearchJSON(config.SearchHintType).
+		tc := toolchain.NewSearch(config.SearchHintType).
 			WithSearchType(toolchain.SearchGet).
 			RegisterEngine(
 				toolchain.NewFusedToolSearcher(config.Embedder),
 			)
-		if config.WrapPTC {
-			tc.WithOutputSchema(true)
-		}
 		return tc
 	default:
-		tc := toolchain.NewYAML()
-		if config.WrapPTC {
-			tc.WithOutputSchema(true)
-		}
-		return tc
+		return toolchain.New()
 	}
 }
 
 // InitializeToolChain applies pinned tools and calls
-// Initialize() on a SearchJSON toolchain. No-op for
+// Initialize() on a SearchChain toolchain. No-op for
 // other toolchain types.
 func InitializeToolChain(
 	tc gent.ToolChain,
 	config TestConfig,
 ) error {
-	if stc, ok := tc.(*toolchain.SearchJSON); ok {
+	if stc, ok := tc.(*toolchain.SearchChain); ok {
 		for _, name := range config.PinTools {
 			stc.Pin(name)
 		}
@@ -513,7 +387,7 @@ func PrintSection(w io.Writer, title string) {
 
 // CriticalRules returns the standard critical rules for integration test
 // scenarios. Extra rules are appended after the standard set. When the
-// config uses SearchJSON or PTC, a tool schema discovery rule is added.
+// config uses SearchChain or PTC, a tool schema discovery rule is added.
 func CriticalRules(
 	config TestConfig, extra ...string,
 ) string {
@@ -525,7 +399,7 @@ func CriticalRules(
 	for _, r := range extra {
 		rules += "\n- " + r
 	}
-	if config.ToolChain == ToolChainSearch || config.WrapPTC {
+	if config.ToolChain == ToolChainSearch {
 		rules += "\n- You must have the tool schemas in " +
 			"scratchpad before calling any tool. " +
 			"Use tool_registry_search and get_tool_schema."
@@ -570,9 +444,9 @@ func (h *PolicySuggestionHook) OnBeforeIteration(
 		ExpireAfterIteration: 3,
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeHuman,
+				Role: gent.ChatMessageTypeHuman,
 				Parts: []gent.ContentPart{
-					llms.TextContent{Text: content},
+					gent.TextContent{Text: content},
 				},
 			},
 		},
@@ -631,7 +505,6 @@ type ScenarioConfig struct {
 	RegisterTools   func(tc gent.ToolChain)
 	SystemPrompt    string
 	CriticalRules   string
-	ThinkingPrompt  string
 	// PolicySuggester generates a policy suggestion section for
 	// the system prompt based on the conversation text. Called
 	// once before the agent loop starts. Returns empty string
@@ -665,8 +538,7 @@ func RunScenario(
 		WithRecoveryVersion("integration/v1").
 		WithTimeProvider(scenario.TimeProvider).
 		WithBehaviorAndContext(scenario.SystemPrompt).
-		WithCriticalRules(scenario.CriticalRules).
-		WithThinking(scenario.ThinkingPrompt)
+		WithCriticalRules(scenario.CriticalRules)
 
 	data := gent.NewBasicLoopData(
 		&gent.Task{Text: scenario.CustomerRequest},
@@ -759,7 +631,7 @@ func RunScenario(
 	} else {
 		PrintSection(w, "Final Response to Customer")
 		for _, part := range result.Output {
-			if tc, ok := part.(llms.TextContent); ok {
+			if tc, ok := part.(gent.TextContent); ok {
 				fmt.Fprintln(w, tc.Text)
 			}
 		}
@@ -793,7 +665,7 @@ func RunScenario(
 			for _, msg := range entry.Messages {
 				fmt.Fprintf(w, "[%s]\n", msg.Role)
 				for _, part := range msg.Parts {
-					if tc, ok := part.(llms.TextContent); ok {
+					if tc, ok := part.(gent.TextContent); ok {
 						text := tc.Text
 						if len(text) > 3000 {
 							text = text[:3000] +
@@ -825,13 +697,12 @@ func RunScenario(
 
 // ChatConfig defines domain-specific parameters for interactive chat.
 type ChatConfig struct {
-	Name           string
-	SystemPrompt   string
-	CriticalRules  string
-	ThinkingPrompt string
-	MaxIterations  float64
-	RegisterTools  func(tc gent.ToolChain)
-	TimeProvider   gent.TimeProvider
+	Name          string
+	SystemPrompt  string
+	CriticalRules string
+	MaxIterations float64
+	RegisterTools func(tc gent.ToolChain)
+	TimeProvider  gent.TimeProvider
 	// PolicySuggester generates a policy suggestion section based
 	// on conversation history. Called on each SendMessage with
 	// the last 10 messages formatted as text. Returns empty string
@@ -929,8 +800,7 @@ func (s *InteractiveChat) SendMessage(
 		WithRecoveryVersion("integration/v1").
 		WithTimeProvider(s.ChatCfg.TimeProvider).
 		WithBehaviorAndContext(s.ChatCfg.SystemPrompt).
-		WithCriticalRules(s.ChatCfg.CriticalRules).
-		WithThinking(s.ChatCfg.ThinkingPrompt)
+		WithCriticalRules(s.ChatCfg.CriticalRules)
 
 	taskContent := s.formatMessageHistory()
 	data := gent.NewBasicLoopData(
@@ -1012,7 +882,7 @@ func (s *InteractiveChat) SendMessage(
 
 	var responseText string
 	for _, part := range result.Output {
-		if tc, ok := part.(llms.TextContent); ok {
+		if tc, ok := part.(gent.TextContent); ok {
 			responseText = tc.Text
 		}
 	}

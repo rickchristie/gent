@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/tmc/langchaingo/llms"
+
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
@@ -90,18 +90,22 @@ func (w *ChunkWriter) Write(chunk gent.StreamChunk) {
 		w.contentLen += len(chunk.Content)
 		w.chunkCount++
 	}
-	if chunk.ReasoningContent != "" {
-		content := chunk.ReasoningContent
+	for _, item := range chunk.MetaContent {
+		content := item.Text
 		if w.config.EscapeNewlines {
 			content = strings.ReplaceAll(content, "\n", "\\n")
 		}
 		if w.config.ShowChunkBoundaries {
-			fmt.Fprintf(w.bw, "|[R:%s]", content)
+			fmt.Fprintf(w.bw, "|[%s:%s]", item.Type, content)
 		} else {
-			fmt.Fprintf(w.bw, "[Reasoning: %s]", content)
+			fmt.Fprint(w.bw, content)
 		}
 		w.flush()
-		w.reasoningLen += len(chunk.ReasoningContent)
+		if item.Type == gent.MetaContentReasoning {
+			w.reasoningLen += len(item.Text)
+		} else {
+			w.contentLen += len(item.Text)
+		}
 		w.chunkCount++
 	}
 }
@@ -137,6 +141,7 @@ func (w *ChunkWriter) PrintStats() {
 	if w.reasoningLen > 0 {
 		fmt.Fprintf(w.bw, ", Reasoning: %d chars", w.reasoningLen)
 	}
+
 	if w.chunkCount > 0 {
 		fmt.Fprintf(w.bw, ", Avg: %.1f chars/chunk", float64(w.contentLen)/float64(w.chunkCount))
 	}
@@ -222,9 +227,9 @@ func RunStreamingBasic(ctx context.Context, w io.Writer, config StreamOutputConf
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"Write 3 paragraphs of a creative dark fantasy story",
 			),
 		}),
@@ -277,9 +282,9 @@ func RunStreamingWithReasoning(ctx context.Context, w io.Writer, config StreamOu
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"What is 15 * 17? Show your reasoning step by step.",
 			),
 		}),
@@ -332,9 +337,9 @@ func RunStreamingSlowConsumer(ctx context.Context, w io.Writer, config StreamOut
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"Write a short poem about Go programming (4 lines).",
 			),
 		}),
@@ -357,7 +362,7 @@ func RunStreamingSlowConsumer(ctx context.Context, w io.Writer, config StreamOut
 		if chunk.Err != nil {
 			return fmt.Errorf("stream error: %w", chunk.Err)
 		}
-		if chunk.Content != "" {
+		if len(chunk.MetaContent) > 0 {
 			time.Sleep(50 * time.Millisecond)
 			cw.Write(chunk)
 		}
@@ -395,8 +400,8 @@ func RunStreamingNoListener(ctx context.Context, w io.Writer, _ StreamOutputConf
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(llms.ChatMessageTypeHuman, "Say hello in one word."),
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(gent.ChatMessageTypeHuman, "Say hello in one word."),
 		}),
 	)
 	if err != nil {
@@ -411,9 +416,9 @@ func RunStreamingNoListener(ctx context.Context, w io.Writer, _ StreamOutputConf
 		return fmt.Errorf("failed to get response: %w", err)
 	}
 
-	fmt.Fprintf(w, "Response received: %q\n", response.Choices[0].Content)
+	fmt.Fprintf(w, "Response received: %q\n", response.Choices[0].CandidateContent)
 
-	if len(response.Choices) == 0 || response.Choices[0].Content == "" {
+	if len(response.Choices) == 0 || response.Choices[0].CandidateContent == "" {
 		return fmt.Errorf("expected non-empty response")
 	}
 
@@ -434,9 +439,9 @@ func RunStreamingCancellation(ctx context.Context, w io.Writer, config StreamOut
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"Write a very long story about a programmer. Make it at least 500 words.",
 			),
 		}),
@@ -516,8 +521,8 @@ func RunStreamingConcurrent(ctx context.Context, w io.Writer, _ StreamOutputConf
 			stream, err := execCtx.GenerateContentStream(
 				model,
 				gent.ModelCall{StreamId: "", StreamTopicId: ""},
-				gent.NewModelCallRequest([]llms.MessageContent{
-					llms.TextParts(llms.ChatMessageTypeHuman, p),
+				gent.NewModelCallRequest([]gent.ModelMessage{
+					gent.TextParts(gent.ChatMessageTypeHuman, p),
 				}),
 			)
 			if err != nil {
@@ -532,7 +537,7 @@ func RunStreamingConcurrent(ctx context.Context, w io.Writer, _ StreamOutputConf
 					results[idx].err = chunk.Err
 					return
 				}
-				content.WriteString(chunk.Content)
+				content.WriteString(gent.MetaText(chunk.MetaContent, gent.MetaContentIntermediary))
 				chunks++
 			}
 
@@ -574,8 +579,8 @@ func RunStreamingResponseInfo(ctx context.Context, w io.Writer, config StreamOut
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(llms.ChatMessageTypeHuman, "What is 2+2?"),
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(gent.ChatMessageTypeHuman, "What is 2+2?"),
 		}),
 	)
 	if err != nil {

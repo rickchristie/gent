@@ -1,7 +1,6 @@
 package toolchain
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,29 +8,20 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/rickchristie/gent/format"
+
 	"github.com/rickchristie/gent/schema"
 	"github.com/rickchristie/gent/toolchain/jsruntime"
 )
 
-// JsToolChainWrapper wraps any ToolChain to add
-// programmatic tool calling (PTC) via JavaScript.
-//
-// The LLM can output either:
-//   - <direct_call> — passes through to the wrapped
-//     ToolChain unchanged
-//   - <code> — executes JS via Sobek, where tool.call()
-//     routes back through the wrapped ToolChain
-//
-// All existing stats, events, schema validation, and
-// limits work unchanged for tool calls made from code.
+// JsToolChainWrapper adds native programmatic tool calls. Inner calls use the wrapped registry's
+// validation, events, limits, and recovery. Each script gets an isolated JavaScript runtime.
 type JsToolChainWrapper struct {
 	wrapped            gent.ToolChain
 	codeTimeout        time.Duration
 	codeGuidance       string
 	directCallGuidance string
 	directCallDisabled bool
-	innerFormat        gent.TextFormat
+	recoveryMessage    gent.RecoveryMessageProvider
 }
 
 // NewJsToolChainWrapper creates a wrapper around the
@@ -44,9 +34,6 @@ func NewJsToolChainWrapper(
 		codeTimeout: 30 * time.Second,
 	}
 
-	// Build default inner format for sub-section parsing
-	w.innerFormat = buildDefaultInnerFormat()
-
 	return w
 }
 
@@ -58,8 +45,7 @@ func (w *JsToolChainWrapper) WithCodeTimeout(
 	return w
 }
 
-// WithCodeGuidance sets custom guidance for the code
-// section.
+// WithCodeGuidance sets instructions in the native run_code definition.
 func (w *JsToolChainWrapper) WithCodeGuidance(
 	guidance string,
 ) *JsToolChainWrapper {
@@ -67,9 +53,7 @@ func (w *JsToolChainWrapper) WithCodeGuidance(
 	return w
 }
 
-// WithDirectCallGuidance sets custom guidance for the
-// direct_call section. Defaults to the wrapped
-// ToolChain's Guidance().
+// WithDirectCallGuidance adds instructions to each direct function definition.
 func (w *JsToolChainWrapper) WithDirectCallGuidance(
 	guidance string,
 ) *JsToolChainWrapper {
@@ -77,27 +61,11 @@ func (w *JsToolChainWrapper) WithDirectCallGuidance(
 	return w
 }
 
-// WithDirectCallDisabled forces all tool calls through
-// code execution. The guidance will only show the code
-// pattern, and direct_call sections are treated as code
-// fallback.
+// WithDirectCallDisabled exposes only run_code and puts the inner catalog in its description.
+// Direct native business calls are rejected.
 func (w *JsToolChainWrapper) WithDirectCallDisabled() *JsToolChainWrapper {
 	w.directCallDisabled = true
 	return w
-}
-
-// WithInnerFormat sets a custom TextFormat for parsing
-// sub-sections (direct_call vs code).
-func (w *JsToolChainWrapper) WithInnerFormat(
-	f gent.TextFormat,
-) *JsToolChainWrapper {
-	w.innerFormat = f
-	return w
-}
-
-// Name returns the wrapped ToolChain's section name.
-func (w *JsToolChainWrapper) Name() string {
-	return w.wrapped.Name()
 }
 
 // GetToolSchema delegates to the wrapped ToolChain.
@@ -116,237 +84,10 @@ func (w *JsToolChainWrapper) DeduplicateSummary(
 
 // RegisterTool delegates to the wrapped ToolChain.
 func (w *JsToolChainWrapper) RegisterTool(
-	tool any,
+	tool any, options ...gent.ToolOption,
 ) gent.ToolChain {
-	w.wrapped.RegisterTool(tool)
+	w.wrapped.RegisterTool(tool, options...)
 	return w
-}
-
-// AvailableToolsPrompt delegates to the wrapped
-// ToolChain. JS environment details (tool.call,
-// console.log, etc.) are covered in Guidance().
-func (w *JsToolChainWrapper) AvailableToolsPrompt() string {
-	return w.wrapped.AvailableToolsPrompt()
-}
-
-// Guidance returns the action section guidance. When
-// direct call is enabled (default), shows both modes.
-// When disabled, shows only the code pattern.
-func (w *JsToolChainWrapper) Guidance() string {
-	if w.directCallDisabled {
-		return w.codeOnlyGuidance()
-	}
-	return w.dualModeGuidance()
-}
-
-// dualModeGuidance returns guidance showing both
-// direct_call and code modes.
-func (w *JsToolChainWrapper) dualModeGuidance() string {
-	var sb strings.Builder
-	sb.WriteString(
-		"You can call tools in two ways:\n\n",
-	)
-	sb.WriteString(
-		"1. Direct call — for simple single or " +
-			"parallel tool calls:\n",
-	)
-	sb.WriteString("<direct_call>\n")
-	if w.directCallGuidance != "" {
-		sb.WriteString(w.directCallGuidance)
-	} else {
-		sb.WriteString(w.wrapped.Guidance())
-	}
-	sb.WriteString("\n</direct_call>\n\n")
-
-	sb.WriteString(
-		"2. Programmatic — for multi-step " +
-			"orchestration with logic:\n",
-	)
-	sb.WriteString("<code>\n")
-	if w.codeGuidance != "" {
-		sb.WriteString(w.codeGuidance)
-	} else {
-		sb.WriteString(defaultCodeGuidance())
-	}
-	sb.WriteString("\n</code>\n\n")
-
-	sb.WriteString(
-		"Choose direct_call for simple operations. " +
-			"Choose code when you need to chain " +
-			"results, apply conditions, or loop.",
-	)
-	return sb.String()
-}
-
-// codeOnlyGuidance returns guidance showing only the
-// code pattern, with no mention of direct_call.
-func (w *JsToolChainWrapper) codeOnlyGuidance() string {
-	var sb strings.Builder
-	sb.WriteString(
-		"Call tools using JavaScript code:\n\n",
-	)
-	sb.WriteString("<code>\n")
-	if w.codeGuidance != "" {
-		sb.WriteString(w.codeGuidance)
-	} else {
-		sb.WriteString(defaultCodeGuidance())
-	}
-	sb.WriteString("\n</code>")
-	return sb.String()
-}
-
-// ParseSection detects sub-section mode and returns
-// either parsed tool calls (for direct_call) or the
-// code string (for code). When direct call is disabled,
-// all content is treated as code.
-func (w *JsToolChainWrapper) ParseSection(
-	execCtx *gent.ExecutionContext,
-	content string,
-) (any, error) {
-	// Parse sub-sections using inner format (nil execCtx
-	// to avoid stats pollution from inner format parsing)
-	sections, err := w.innerFormat.Parse(nil, content)
-	if err == nil {
-		// Check for direct_call (skip if disabled)
-		if !w.directCallDisabled {
-			if dc, ok := sections["direct_call"]; ok &&
-				len(dc) > 0 {
-				return w.wrapped.ParseSection(
-					execCtx, dc[0],
-				)
-			}
-		}
-
-		// Check for code
-		if code, ok := sections["code"]; ok &&
-			len(code) > 0 {
-			return code[0], nil
-		}
-	}
-
-	// When direct call is disabled, treat raw content
-	// as code (the LLM may omit <code> tags)
-	if w.directCallDisabled {
-		return content, nil
-	}
-
-	// Fallback: try wrapped ParseSection directly
-	// (graceful degradation when LLM omits sub-section
-	// tags)
-	return w.wrapped.ParseSection(execCtx, content)
-}
-
-// Execute detects the mode(s) and routes accordingly.
-// Supports direct_call only, code only, or both in the
-// same action. When both are present, results are wrapped
-// in <direct_call> and <code_execution> sections.
-func (w *JsToolChainWrapper) Execute(
-	execCtx *gent.ExecutionContext, content string, textFormat gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	if execCtx == nil {
-		return w.execute(execCtx, content, textFormat)
-	}
-	if err := execCtx.SetCheckpointState(
-		"gent:toolchain_active",
-		"JavaScript toolchain",
-	); err != nil {
-		return nil, err
-	}
-	if err := execCtx.CommitCheckpoint(gent.PhaseDecisionReady); err != nil {
-		return nil, err
-	}
-	result, err := w.execute(execCtx, content, textFormat)
-	if !execCtx.IsWorkerInterrupted() {
-		execCtx.ClearCheckpointState("gent:toolchain_active")
-	}
-	return result, err
-}
-
-func (w *JsToolChainWrapper) execute(
-	execCtx *gent.ExecutionContext,
-	content string,
-	textFormat gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	if textFormat == nil {
-		panic("textFormat must not be nil")
-	}
-
-	// Detect modes via inner format
-	sections, err := w.innerFormat.Parse(nil, content)
-
-	var dcContent string
-	var codeContent string
-	var hasCode bool
-
-	if err == nil {
-		// Ignore direct_call when disabled
-		if !w.directCallDisabled {
-			if dc, ok := sections["direct_call"]; ok &&
-				len(dc) > 0 {
-				dcContent = dc[0]
-			}
-		}
-		if code, ok := sections["code"]; ok {
-			hasCode = true
-			if len(code) > 0 {
-				codeContent = code[0]
-			}
-		}
-	}
-
-	// Check for <code> tags even if parse failed
-	if !hasCode && hasCodeTags(content) {
-		hasCode = true
-	}
-
-	hasDC := dcContent != ""
-	dualMode := hasDC && hasCode
-
-	// Single mode: direct_call only
-	if hasDC && !hasCode {
-		return w.executeDirectCall(
-			execCtx, dcContent, textFormat,
-		)
-	}
-
-	// Single mode: code only
-	if hasCode && !hasDC {
-		return w.executeSingleCode(
-			execCtx, codeContent, textFormat,
-		)
-	}
-
-	// Dual mode: both direct_call and code
-	if dualMode {
-		return w.executeDualMode(
-			execCtx, dcContent, codeContent,
-			textFormat,
-		)
-	}
-
-	// When direct call is disabled, treat unrecognized
-	// content as code (LLM may omit <code> tags)
-	if w.directCallDisabled {
-		return w.executeSingleCode(
-			execCtx, content, textFormat,
-		)
-	}
-
-	// Fallback: pass through to wrapped ToolChain
-	return w.wrapped.Execute(
-		execCtx, content, textFormat,
-	)
-}
-
-// executeDirectCall delegates to the wrapped ToolChain.
-func (w *JsToolChainWrapper) executeDirectCall(
-	execCtx *gent.ExecutionContext,
-	content string,
-	textFormat gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	return w.wrapped.Execute(
-		execCtx, content, textFormat,
-	)
 }
 
 // executeSingleCode runs code and returns the result
@@ -362,104 +103,6 @@ func (w *JsToolChainWrapper) executeSingleCode(
 	return w.executeCode(
 		execCtx, code, textFormat,
 	)
-}
-
-// executeDualMode runs both direct_call and code, then
-// combines results with <direct_call> and
-// <code_execution> wrapper sections.
-func (w *JsToolChainWrapper) executeDualMode(
-	execCtx *gent.ExecutionContext,
-	dcContent, codeContent string,
-	textFormat gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	// Run direct_call
-	dcResult, dcErr := w.executeDirectCall(
-		execCtx, dcContent, textFormat,
-	)
-
-	// Run code (even if direct_call failed)
-	var codeResult *gent.ToolChainResult
-	var codeErr error
-	if codeContent == "" {
-		codeResult = &gent.ToolChainResult{}
-	} else {
-		codeResult, codeErr = w.executeCode(
-			execCtx, codeContent, textFormat,
-		)
-	}
-
-	// If both errored, return the first Go-level error
-	if dcErr != nil && codeErr != nil {
-		return nil, dcErr
-	}
-	if dcErr != nil {
-		return nil, dcErr
-	}
-	if codeErr != nil {
-		return nil, codeErr
-	}
-
-	// Wrap results in sections
-	var outerSections []gent.FormattedSection
-	dcText := collectText(dcResult)
-	if dcText != "" {
-		outerSections = append(
-			outerSections, gent.FormattedSection{
-				Name:    "direct_call",
-				Content: dcText,
-			},
-		)
-	}
-	codeText := collectText(codeResult)
-	if codeText != "" {
-		outerSections = append(
-			outerSections, gent.FormattedSection{
-				Name:    "code_execution",
-				Content: codeText,
-			},
-		)
-	}
-
-	text := textFormat.FormatSections(outerSections)
-	if text == "" {
-		text = "Code executed successfully."
-	}
-
-	// Collect media before clearing individual results.
-	media := collectMedia(dcResult, codeResult)
-
-	// Merge individual results (for dedup data) and
-	// add a synthetic entry with the combined text.
-	merged := mergeResults(dcResult, codeResult)
-	for _, r := range merged.Results {
-		r.Text = ""
-		r.Media = nil
-	}
-	merged.Results = append(
-		merged.Results,
-		&gent.ToolCallResult{
-			Text:  text,
-			Media: media,
-		},
-	)
-
-	return merged, nil
-}
-
-// mergeResults combines ToolCallResults from two
-// ToolChainResults into a new ToolChainResult.
-func mergeResults(
-	a, b *gent.ToolChainResult,
-) *gent.ToolChainResult {
-	merged := &gent.ToolChainResult{}
-	for _, r := range []*gent.ToolChainResult{a, b} {
-		if r != nil {
-			merged.Results = append(
-				merged.Results, r.Results...,
-			)
-		}
-	}
-	return merged
 }
 
 // collectText joins all non-empty Text fields from the
@@ -538,11 +181,10 @@ func (w *JsToolChainWrapper) executeCode(
 	textFormat gent.TextFormat,
 ) (*gent.ToolChainResult, error) {
 	// Increment code execution counter
-	if execCtx != nil {
-		execCtx.Stats().IncrCounter(
-			gent.SCCodeExecutions, 1,
-		)
-	}
+
+	execCtx.Stats().IncrCounter(
+		gent.SCCodeExecutions, 1,
+	)
 
 	// Use wrapped toolchain's schema lookup for
 	// pre-validation and runtime error enhancement
@@ -572,15 +214,22 @@ func (w *JsToolChainWrapper) executeCode(
 	// Create result collector
 	collector := jsruntime.NewCollectedResults()
 
-	// Create ToolCallFn that routes through wrapped
-	// ToolChain
+	// A failed checkpoint is not a normal tool error. Stop the VM before another bridge
+	// call can replace its pending plan, even if the script catches or ignores errors.
+	var callErr error
 	callFn := jsruntime.MakeToolCallFn(
-		func(jsonContent string) (
+		func(calls []gent.ModelToolCall) (
 			*gent.ToolChainResult, error,
 		) {
-			return w.wrapped.Execute(
-				execCtx, jsonContent, textFormat,
-			)
+			if callErr != nil {
+				return nil, callErr
+			}
+			result, err := w.executeProgramCalls(execCtx, calls, textFormat)
+			if err != nil {
+				callErr = err
+				rt.VM().Interrupt(err)
+			}
+			return result, err
 		},
 		collector,
 	)
@@ -591,24 +240,23 @@ func (w *JsToolChainWrapper) executeCode(
 		rt, callFn, code, schemaFn,
 	)
 
-	// Execute the code. Nil execCtx is supported for parity with JSON/YAML toolchains.
-	ctx := context.Background()
-	if execCtx != nil {
-		ctx = execCtx.Context()
-	}
+	// Execute the code under the run context.
+	ctx := execCtx.Context()
 	result, err := rt.Execute(ctx, code)
+	if callErr != nil {
+		return nil, callErr
+	}
 
 	if err != nil {
 		// Code execution failed
-		if execCtx != nil {
-			execCtx.Stats().IncrCounter(
-				gent.SCCodeExecutionsError, 1,
-			)
-			execCtx.Stats().IncrGauge(
-				gent.SGCodeExecutionsErrorConsecutive,
-				1,
-			)
-		}
+
+		execCtx.Stats().IncrCounter(
+			gent.SCCodeExecutionsError, 1,
+		)
+		execCtx.Stats().IncrGauge(
+			gent.SGCodeExecutionsErrorConsecutive,
+			1,
+		)
 
 		// Build sections: tool_call_log (if any calls
 		// happened before the error) + output with
@@ -636,11 +284,10 @@ func (w *JsToolChainWrapper) executeCode(
 	}
 
 	// Success — reset consecutive error gauge
-	if execCtx != nil {
-		execCtx.Stats().ResetGauge(
-			gent.SGCodeExecutionsErrorConsecutive,
-		)
-	}
+
+	execCtx.Stats().ResetGauge(
+		gent.SGCodeExecutionsErrorConsecutive,
+	)
 
 	// Build observation sections
 	var sections []gent.FormattedSection
@@ -687,14 +334,13 @@ func (w *JsToolChainWrapper) preValidationError(
 	code string,
 	preErrs []jsruntime.PreValidationError,
 ) (*gent.ToolChainResult, error) {
-	if execCtx != nil {
-		execCtx.Stats().IncrCounter(
-			gent.SCCodeExecutionsError, 1,
-		)
-		execCtx.Stats().IncrGauge(
-			gent.SGCodeExecutionsErrorConsecutive, 1,
-		)
-	}
+
+	execCtx.Stats().IncrCounter(
+		gent.SCCodeExecutionsError, 1,
+	)
+	execCtx.Stats().IncrGauge(
+		gent.SGCodeExecutionsErrorConsecutive, 1,
+	)
 
 	msg := jsruntime.FormatPreValidationErrors(
 		code, preErrs,
@@ -864,45 +510,8 @@ func formatOutput(output any) string {
 	return string(data)
 }
 
-// hasCodeTags returns true if content contains <code>
-// and </code> tags, even if the content between them is
-// empty.
-func hasCodeTags(content string) bool {
-	return strings.Contains(content, "<code>") &&
-		strings.Contains(content, "</code>")
-}
-
-// simpleSection is a lightweight TextSection for inner
-// format registration.
-type simpleSection struct {
-	name string
-}
-
-func (s *simpleSection) Name() string {
-	return s.name
-}
-
-func (s *simpleSection) Guidance() string {
-	return ""
-}
-
-func (s *simpleSection) ParseSection(
-	_ *gent.ExecutionContext, content string,
-) (any, error) {
-	return content, nil
-}
-
-// buildDefaultInnerFormat creates an XML format with
-// direct_call and code sections registered.
-func buildDefaultInnerFormat() gent.TextFormat {
-	f := format.NewXML()
-	f.RegisterSection(&simpleSection{name: "direct_call"})
-	f.RegisterSection(&simpleSection{name: "code"})
-	return f
-}
-
 // defaultCodeGuidance returns the default guidance text
-// for the code section.
+// for the native run_code tool.
 func defaultCodeGuidance() string {
 	return `(function() {
 // Sequential calls — check .error before using .output:

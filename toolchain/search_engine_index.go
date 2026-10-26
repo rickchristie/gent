@@ -50,7 +50,7 @@ func NewIndexToolSearcher(
 		id:             id,
 		index:          index,
 		searchGuidance: defaultIndexSearchGuidance,
-		topK:           100, // return enough results for SearchJSON pagination
+		topK:           100, // return enough results for SearchChain pagination
 	}
 }
 
@@ -61,7 +61,7 @@ func (e *IndexToolSearcher) WithSearchGuidance(guidance string) *IndexToolSearch
 }
 
 // WithTopK sets the maximum number of results to retrieve from the underlying index.
-// Default: 100 (high because SearchJSON handles pagination over the full result set).
+// Default: 100 (high because SearchChain handles pagination over the full result set).
 func (e *IndexToolSearcher) WithTopK(topK int) *IndexToolSearcher {
 	e.topK = topK
 	return e
@@ -71,7 +71,7 @@ func (e *IndexToolSearcher) Id() string             { return e.id }
 func (e *IndexToolSearcher) SearchGuidance() string { return e.searchGuidance }
 
 // IndexAll indexes all tools by calling Swap on the underlying SearchIndex. This atomically
-// replaces the entire index contents, which is correct for the SearchJSON.Initialize() flow
+// replaces the entire index contents, which is correct for the SearchChain.Initialize() flow
 // where all tools are registered before IndexAll is called.
 func (e *IndexToolSearcher) IndexAll(tools []gent.IndexableTool) error {
 	docs := make(map[string]gent.IndexableTool, len(tools))

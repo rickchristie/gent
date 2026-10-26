@@ -71,7 +71,10 @@ try {
     assert.equal(await page.locator('#lesson-rail button').count(), 5);
     assert.equal(await text('#loop-headline'), 'The application supplies the task.');
     await noOverflow('desktop');
-    await page.screenshot({ path: '/tmp/gent-learning-loop.png', fullPage: true });
+    await page.screenshot({
+      path: '/tmp/gent-learning-loop.png',
+      fullPage: true,
+    });
     await page.screenshot({ path: '/tmp/gent-learning-loop-viewport.png' });
   });
   await check(
@@ -80,11 +83,14 @@ try {
       await advance('loop-next', 2);
       assert.equal(
         await text('#loop-output'),
-        `<action>
-tool: lookup_order
-args:
-  order_id: 42
-</action>`,
+        `{
+  "id": "call-1",
+  "type": "function",
+  "function": {
+    "name": "lookup_order",
+    "arguments": "{\\"order_id\\":42}"
+  }
+}`,
       );
       await advance('loop-next', 3);
       assert.equal(
@@ -98,8 +104,14 @@ Next working context: [H1]`,
         'Order 42 ships on Friday. → accepted → LATerminate',
       );
       const cases = [
-        { input: 'rejected', expected: '“Use the order tool; do not guess.” → LAContinue' },
-        { input: 'accepted', expected: 'Order 42 ships on Friday. → LATerminate' },
+        {
+          input: 'rejected',
+          expected: '“Use the order tool; do not guess.” → LAContinue',
+        },
+        {
+          input: 'accepted',
+          expected: 'Order 42 ships on Friday. → LATerminate',
+        },
         { input: 'malformed', expected: 'parse error → feedback → LAContinue' },
       ];
       for (const { input, expected } of cases) {
@@ -112,10 +124,14 @@ Next working context: [H1]`,
       await advance('loop-next', 2);
       assert.equal(
         await text('#loop-output'),
-        `# action
-tool: lookup_order
-args:
-  order_id: 42`,
+        `{
+  "id": "call-1",
+  "type": "function",
+  "function": {
+    "name": "lookup_order",
+    "arguments": "{\\"order_id\\":42}"
+  }
+}`,
       );
       await click('answer', '1');
       assert.equal(await page.locator('.answer-feedback strong').textContent(), 'Exactly.');
@@ -154,7 +170,10 @@ args:
       await click('memory-edit', 'reverse');
       assert.equal(await text('#selected-ids'), '[H4, H1, S2]');
       assert.equal(await text('#history-count'), '6');
-      await page.screenshot({ path: '/tmp/gent-learning-memory.png', fullPage: true });
+      await page.screenshot({
+        path: '/tmp/gent-learning-memory.png',
+        fullPage: true,
+      });
     },
   );
   await check(
@@ -170,7 +189,10 @@ args:
         'Stopped — context canceled',
         'Nothing delivered',
       ]);
-      await page.screenshot({ path: '/tmp/gent-learning-save.png', fullPage: true });
+      await page.screenshot({
+        path: '/tmp/gent-learning-save.png',
+        fullPage: true,
+      });
       await click('save-next');
       assert.deepEqual(await saveState(), [
         '121',
@@ -205,11 +227,19 @@ args:
     },
   );
   await check(
-    'recovery refuses uncertain execution and reveals duplicate external effects',
+    'recovery provides guidance and shows duplicate effects when retry is allowed',
     async () => {
       await lesson('restart');
       await click('restore');
-      assert.equal(await text('#recovery-result'), 'ErrUncertainTool');
+      assert.equal(
+        await text('#recovery-result'),
+        'unknown outcome; model receives recovery guidance',
+      );
+      assert.equal(
+        await text('#recovery-status'),
+        'The checkpoint proves intent, not outcome. Gent saves an unknown-outcome result with ' +
+          'recovery guidance. The model can check the refund service before making a new plan.',
+      );
       assert.equal(await text('#attempt-id'), 'attempt: worker-B');
       await click('recover', 'completed');
       assert.equal(await text('#recovery-result'), 'reconciled with receipt');
@@ -218,7 +248,10 @@ args:
       await click('restore');
       await click('recover', 'retry');
       assert.equal(await text('#refund-count'), '2');
-      await page.screenshot({ path: '/tmp/gent-learning-restart.png', fullPage: true });
+      await page.screenshot({
+        path: '/tmp/gent-learning-restart.png',
+        fullPage: true,
+      });
       await page.check('#idempotent-service');
       await click('restore');
       await click('recover', 'retry');
@@ -284,10 +317,13 @@ args:
         '0.08',
       ]);
       assert.equal(await slider.evaluate((node) => node === document.activeElement), true);
-      await page.screenshot({ path: '/tmp/gent-learning-search.png', fullPage: true });
+      await page.screenshot({
+        path: '/tmp/gent-learning-search.png',
+        fullPage: true,
+      });
     },
   );
-  await check('all 53 interfaces have on-demand contracts inside their lesson', async () => {
+  await check('all 52 interfaces have on-demand contracts inside their lesson', async () => {
     const covered = [];
     for (const item of lessons) {
       await lesson(item.id);
@@ -310,7 +346,7 @@ args:
         .map((item) => item.id)
         .sort(),
     );
-    assert.equal(await text('#lesson-coverage'), '5 / 5 explored · all 53 interfaces connected');
+    assert.equal(await text('#lesson-coverage'), '5 / 5 explored · all 52 interfaces connected');
   });
   await check('each experiment fits narrow and tablet viewports and remains usable', async () => {
     for (const width of [900, 736, 390, 320]) {

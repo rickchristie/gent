@@ -11,7 +11,7 @@ import (
 
 func TestToolPlanKeepsCapturedSummary(t *testing.T) {
 	type input struct {
-		chain func() gent.RecoverableToolChain
+		chain func() gent.ToolChain
 		empty bool
 	}
 	type expected struct {
@@ -26,11 +26,10 @@ func TestToolPlanKeepsCapturedSummary(t *testing.T) {
 		input    input
 		expected expected
 	}
-	chains := map[string]func() gent.RecoverableToolChain{
-		"JSON": func() gent.RecoverableToolChain { return NewJSON() },
-		"YAML": func() gent.RecoverableToolChain { return NewYAML() },
-		"SearchJSON": func() gent.RecoverableToolChain {
-			return NewSearchJSON(SearchHintSimpleList).RegisterEngine(NewRegexToolSearcher())
+	chains := map[string]func() gent.ToolChain{
+		"Registry": func() gent.ToolChain { return New() },
+		"SearchChain": func() gent.ToolChain {
+			return NewSearch(SearchHintSimpleList).RegisterEngine(NewRegexToolSearcher())
 		},
 	}
 	var cases []testCase
@@ -56,13 +55,13 @@ func TestToolPlanKeepsCapturedSummary(t *testing.T) {
 			})
 			chain := test.input.chain()
 			chain.RegisterTool(tool)
-			if search, ok := chain.(*SearchJSON); ok {
+			if search, ok := chain.(*SearchChain); ok {
 				if !assert.NoError(t, search.Initialize()) {
 					return
 				}
 			}
 			ctx := newExecCtx()
-			result, err := chain.Execute(ctx, `[{"tool":"lookup","args":{}}]`, searchTestFormat())
+			result, err := executeTestCalls(chain, ctx, `[{"tool":"lookup","args":{}}]`, searchTestFormat())
 			if !assert.NoError(t, err) || !assert.Len(t, result.Results, 1) {
 				return
 			}

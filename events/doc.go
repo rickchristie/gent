@@ -68,8 +68,8 @@
 //	    event *gent.BeforeModelCallEvent,
 //	) {
 //	    // Add a system message (ephemeral - not persisted)
-//	    event.Request.Messages = append(event.Request.Messages, llms.TextParts(
-//	        llms.ChatMessageTypeSystem,
+//	    event.Request.Messages = append(event.Request.Messages, gent.TextParts(
+//	        gent.ChatMessageTypeSystem,
 //	        "Current time: " + time.Now().Format(time.RFC3339),
 //	    ))
 //	}

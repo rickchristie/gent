@@ -24,9 +24,9 @@ func main() {
 
 	fixture := ecommerce.NewEcommerceFixture(nil, embedder)
 
-	// 3. Setup tool search engine + SearchJSON
+	// 3. Setup tool search engine + SearchChain
 	toolSearcher := toolchain.NewFusedToolSearcher(embedder)
-	tc := toolchain.NewSearchJSON(
+	tc := toolchain.NewSearch(
 		toolchain.SearchHintDomainCategories,
 	).RegisterEngine(toolSearcher)
 	fixture.RegisterAllToolsSearch(tc)
@@ -37,7 +37,7 @@ func main() {
 	// 4. Chunk and search each thinking block
 	ctx := context.Background()
 	chunker := &search.MarkdownChunker{
-		ChunkSize:  256,
+		ChunkSize: 256,
 		TokenCount: func(s string) int {
 			return len(s) / 4
 		},

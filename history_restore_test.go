@@ -74,12 +74,6 @@ func TestRestoreUnsupportedBoundaries(t *testing.T) {
 			ctx.SpawnChild("child", nil)
 			return ctx.FlushProgress()
 		}}, expected{ErrUnsupportedRecovery}},
-		{"active JavaScript frame", input{func(ctx *ExecutionContext) error {
-			if err := ctx.SetCheckpointState("gent:toolchain_active", "JavaScript"); err != nil {
-				return err
-			}
-			return ctx.CommitCheckpoint(PhaseDecisionReady)
-		}}, expected{ErrUnsupportedRecovery}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

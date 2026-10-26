@@ -57,8 +57,8 @@ func NewGitHubCopilotModel(
 ) (*LCGWrapper, error) {
 	if token == "" {
 		return nil, fmt.Errorf(
-			"github token is required: "+
-				"create a fine-grained PAT with models:read "+
+			"github token is required: " +
+				"create a fine-grained PAT with models:read " +
 				"at https://github.com/settings/personal-access-tokens/new",
 		)
 	}

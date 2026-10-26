@@ -4,14 +4,13 @@ package gent
 //
 // # Concept
 //
-// LLM outputs often contain multiple logical sections. For example, a ReAct agent might
-// output "Thinking" and "Action" sections, or "Thinking" and "Answer" sections. TextSection
-// allows modular definition of these sections with their own parsing logic.
+// Custom text workflows can use separate notes, classifications, and answers. TextSection
+// defines each section and its parser. The standard ReAct loop uses native tool calls and
+// validates final assistant content without a text action envelope.
 //
 // # Relationships
 //
 //   - [TextFormat] uses TextSections to know what to parse and how to format
-//   - [ToolChain] implements TextSection for the "action" section
 //   - [Termination] implements TextSection for the "answer" section
 //
 // # Implementing TextSection
@@ -60,7 +59,6 @@ package gent
 //
 // Supported ErrorTypes and their corresponding keys:
 //   - "section": [SGSectionParseErrorConsecutive] (for generic sections)
-//   - "toolchain": [SGToolchainParseErrorConsecutive] (for ToolChain)
 //   - "termination": [SGTerminationParseErrorConsecutive] (for Termination)
 //
 // On successful parse:
@@ -78,7 +76,7 @@ package gent
 //
 // See: [TextFormat] for how sections are structured in the overall output.
 type TextSection interface {
-	// Name returns the section identifier (e.g., "thinking", "action", "answer")
+	// Name returns the section identifier (e.g., "notes", "classification", "answer")
 	Name() string
 
 	// Guidance returns the guidance text that appears inside this section when

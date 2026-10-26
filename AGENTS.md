@@ -20,6 +20,7 @@
   complexity or prevent interleaving conditionals.
 - **DO NOT excessively nil check**. Treat pointer/interface parameters/struct fields as required unless explicitly documented optional.
   If caller sends nil, then nil pointer panic is fine. Fail fast, unless we truly need the recovery.
+- **Code simplicity**: Remove vestigial code and unused interfaces when found.
 - **ALWAYS make main branch a single trunk line**. No merge commits, squash and rebase when needed.
 </critical_behavior>
 
@@ -52,7 +53,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Implementation: `executor/executor.go`
 - Executor runs the loop: BeforeExecution → [BeforeIteration → AgentLoop.Next() → AfterIteration]* → AfterExecution
 - AgentLoop.Next() returns `LAContinue` (keep looping) or `LATerminate` (stop with result)
-- ReAct agent: `agents/react/agent.go` - parses LLM output → executes tools OR validates answer
+- ReAct agent: `agents/react/agent.go` - reads native calls → executes tools OR validates final content
 
 ### LoopData
 - Defined in: `agent.go`
@@ -66,19 +67,21 @@ goal is to make it easy to write and experiment with custom agent loops.
 ### Model
 - Interface: `model.go`
 - Implementation: `models/` (e.g., `models/lcg.go` for LangChainGo wrapper)
-- Wraps LLM provider, normalizes token count stats across OpenAI/Anthropic/Google/etc.
+- Gent owns message/tool types and opaque provider continuation items
+- OpenAI/Grok use direct Responses adapters; LangChainGo is used for lossless conversions
 - Managed ExecutionContext calls record requests, chunks, responses, and usage before delivery
 - Adapters return a Stream; they must Complete after their producer stops, including cancellation
 
 ### ToolChain
-- Interface: `toolchain.go`
-- Implementations: `toolchain/yaml.go`
-- Parses tool calls from LLM output (YAML or JSON format)
-- Validates args against JSON Schema, transforms to typed input, executes Tool.Call()
-- AvailableToolsPrompt(): generates tool catalog with schemas for system prompt
-- Guidance(): instructions on tool call syntax (inherited from TextSection)
-- SIDE EFFECT: BeforeToolCallEvent auto-increments tool_calls, tool_calls:<name>
-- SIDE EFFECT: AfterToolCallEvent with error increments error counters/gauges
+- Interface: `toolchain.go` (native calls only)
+- Implementations: Registry, SearchChain, JsToolChainWrapper in `toolchain/`
+- NativeTools selects definitions; PrepareCalls saves a plan; ExecuteNext executes one step
+- Validates JSON arguments, converts typed input, runs hooks, and saves results
+- Search derives discovered definitions from active run history; pinned tools stay visible
+- PTC exposes run_code and saves inner calls separately from the outer plan
+- RecoveryMessage uses func(*RecoveryInfo) string callbacks for unknown outcomes
+- Interrupted PTC returns partial evidence and guidance without restarting the script
+- SIDE EFFECT: BeforeToolCallEvent increments tool-call counters; AfterToolCallEvent tracks errors
 - SIDE EFFECT: Success resets consecutive error gauges
 
 ### Termination + Validator
@@ -116,12 +119,12 @@ goal is to make it easy to write and experiment with custom agent loops.
 
 ## Data Flow (ReAct Agent)
 1. Executor.Run() → creates ExecutionContext with LoopData, Stats, Limits
-2. BeforeExecution hook → agent builds system prompt (tools, format instructions)
+2. BeforeExecution hook → agent prepares prompt and execution settings
 3. Loop iteration:
    - Model.Call() → LLM response (streams chunks, increments token stats)
-   - TextFormat.Parse() → extracts sections (thought, action, answer)
-   - If action: ToolChain.Process() → validate, execute Tool.Call(), append result to scratchpad
-   - If answer: Termination.Process() → validate, run AnswerValidator → accept/reject
+   - ToolChain.NativeTools() supplies definitions for each model request
+   - If native calls: PrepareCalls → ExecuteNext → append structured call/result history
+   - If final content: Termination → validate, run AnswerValidator → accept/reject
 4. On limit exceeded: context canceled, TerminationLimitExceeded returned
 5. On accepted answer: TerminationSuccess with result
 

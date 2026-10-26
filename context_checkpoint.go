@@ -15,19 +15,11 @@ func (ctx *ExecutionContext) FlushProgress() error {
 }
 
 func (ctx *ExecutionContext) CommitCheckpoint(phase ExecutionPhase) error {
-	// A child has no independent resumable Go stack. Keep its evidence and local phase without
-	// replacing the root's last safe boundary. The next root checkpoint includes its final state.
-	if ctx.Parent() != nil {
-		ctx.run.mu.Lock()
-		ctx.phase = phase
-		ctx.run.mu.Unlock()
-		return ctx.FlushProgress()
-	}
 	return ctx.flushHistory(phase)
 }
 
 func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
-	if phase != "" {
+	if phase != "" && ctx.Parent() == nil {
 		if err := ctx.captureExtensions(); err != nil {
 			return ctx.stopRecording(err)
 		}
@@ -51,13 +43,17 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 	run.mu.Lock()
 	runtimeState.Contexts = append(runtimeState.Contexts, cloneWire(run.archivedRuntime)...)
 	runtimeState.Allocation = run.allocation
-	events := append([]*RecordedEvent(nil), run.pending...)
-	pendingCount := len(events)
 	var checkpoint *Checkpoint
 	var err error
-	if phase != "" {
+	// Child completion accepts its evidence and runtime without replacing the root boundary.
+	if phase != "" && ctx.Parent() == nil {
 		checkpoint, err = ctx.prepareCheckpoint(phase, contexts, runtimeState)
 	}
+	if err == nil && phase == PhaseTerminal && ctx.phase != PhaseTerminal {
+		err = ctx.queueFinalContent()
+	}
+	events := append([]*RecordedEvent(nil), run.pending...)
+	pendingCount := len(events)
 	run.mu.Unlock()
 	if err != nil {
 		return ctx.stopRecording(err)
@@ -75,6 +71,9 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 		return ctx.stopRecording(err)
 	}
 	run.mu.Lock()
+	for i, event := range events {
+		event.RunId, event.EventNumber = batch.Events[i].RunId, batch.Events[i].EventNumber
+	}
 	clear(run.pending[:pendingCount])
 	run.pending = run.pending[pendingCount:]
 	if len(run.pending) == 0 {
@@ -86,6 +85,13 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 			ctx.completedIteration = ctx.Iteration()
 		}
 	}
+	run.mu.Unlock()
+	// Stream queues do not call application code. Deliver under the acceptance lock, before
+	// queuing observers, so a delayed observer cannot let Release close a later chunk's stream.
+	if err := ctx.emitCommittedChunks(batch.Events); err != nil {
+		return ctx.stopRecording(err)
+	}
+	run.mu.Lock()
 	run.notifications = append(run.notifications, committedNotification{ctx, batch.Events})
 	run.mu.Unlock()
 	run.flushMu.Unlock()
@@ -170,6 +176,28 @@ func (ctx *ExecutionContext) dispatchCommitted(events []*RecordedEvent) error {
 		owner.mu.Unlock()
 		if publisher != nil {
 			publisher.Dispatch(owner, event)
+		}
+	}
+	return nil
+}
+
+// emitCommittedChunks delivers only durable text. Observer notification is independent of the
+// unbounded subscription queues; a slow observer must not hold the last answer until after release.
+func (ctx *ExecutionContext) emitCommittedChunks(events []*RecordedEvent) error {
+	for _, recorded := range events {
+		if recorded.Type == "model_stream_chunk" || recorded.Type == "execution_content" {
+			value, err := ctx.DecodeEvent(recorded)
+			if err != nil {
+				return err
+			}
+			chunk := value.(StreamChunk)
+			chunk.RunId, chunk.EventNumber = recorded.RunId, recorded.EventNumber
+			for _, owner := range ctx.run.root.allContexts() {
+				if owner.ContextId() == recorded.ContextId {
+					owner.emitAcceptedChunk(chunk)
+					break
+				}
+			}
 		}
 	}
 	return nil
@@ -380,9 +408,7 @@ func RestoreExecutionContext(
 			if err != nil {
 				return nil, fmt.Errorf("gent: checkpoint state %q: %w", name, err)
 			}
-			if name == "gent:toolchain_active" && decoded != "" {
-				return nil, fmt.Errorf("%w: active %v", ErrUnsupportedRecovery, decoded)
-			}
+			_ = decoded
 		}
 		if err := restoreExtensions(state, bindings); err != nil {
 			return nil, err

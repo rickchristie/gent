@@ -39,17 +39,11 @@ type SamplingParam struct {
 // EffectiveValue returns the value to send and whether to send it.
 //
 // For [ParamOverride], returns the configured Value.
-// For [ParamForbidden], returns 1.0 (the API default that reasoning models
-// accept). This works around langchaingo v0.1.14's OpenAI client always
-// serializing the temperature field — without an explicit value, the
-// zero-value 0.0 is sent and rejected by reasoning models.
-// For [ParamOmit], returns (0, false).
+// For [ParamForbidden] and [ParamOmit], returns (0, false).
 func (p SamplingParam) EffectiveValue() (float64, bool) {
 	switch p.Directive {
 	case ParamOverride:
 		return p.Value, true
-	case ParamForbidden:
-		return 1.0, true
 	default:
 		return 0, false
 	}
@@ -68,9 +62,13 @@ func (p SamplingParam) EffectiveValue() (float64, bool) {
 //	│ Model                │ Temperature  │ TopP         │
 //	├──────────────────────┼──────────────┼──────────────┤
 //	│ OpenAI reasoning     │ forbidden    │ forbidden    │
-//	│ (o1/o3/o4/gpt-5)     │              │              │
+//	│ (o1/o3/o4/gpt-5/6)   │              │              │
 //	├──────────────────────┼──────────────┼──────────────┤
-//	│ Claude (all)         │ override 0.2 │ omit         │
+//	│ Claude Fable 5.1     │ forbidden    │ forbidden    │
+//	├──────────────────────┼──────────────┼──────────────┤
+//	│ Other Claude models  │ override 0.2 │ omit         │
+//	├──────────────────────┼──────────────┼──────────────┤
+//	│ Grok 4.7             │ override 0.7 │ override 0.95│
 //	├──────────────────────┼──────────────┼──────────────┤
 //	│ Gemini 3+            │ override 1.0 │ omit         │
 //	├──────────────────────┼──────────────┼──────────────┤
@@ -105,11 +103,20 @@ func DefaultSamplingParams(model Model) SamplingParams {
 		return defaultParams
 	}
 
-	// OpenAI reasoning models — both params forbidden.
-	if isOpenAIReasoningModel(name) {
+	// These reasoning models reject custom sampling values. Use provider defaults.
+	if isOpenAIReasoningModel(name) ||
+		stripPrefix(name, "anthropic/") == ModelAnthropicClaude51Fable {
 		return SamplingParams{
 			Temperature: SamplingParam{Directive: ParamForbidden},
 			TopP:        SamplingParam{Directive: ParamForbidden},
+		}
+	}
+
+	// Grok 4.7 recommends these values for reliable tool calls and reasoning.
+	if stripPrefix(name, "xai/") == ModelXAIGrok47 {
+		return SamplingParams{
+			Temperature: SamplingParam{Directive: ParamOverride, Value: 0.7},
+			TopP:        SamplingParam{Directive: ParamOverride, Value: 0.95},
 		}
 	}
 
@@ -156,7 +163,7 @@ var defaultParams = SamplingParams{
 }
 
 // isOpenAIReasoningModel returns true for OpenAI reasoning models that do not support
-// sampling parameters. Covers: o1, o3, o4-mini, gpt-5 family.
+// sampling parameters with default reasoning. Covers: o1, o3, o4-mini, gpt-5, and gpt-6.
 func isOpenAIReasoningModel(name string) bool {
 	n := stripPrefix(name, "openai/")
 	if n == "o1" || strings.HasPrefix(n, "o1-") ||
@@ -165,7 +172,7 @@ func isOpenAIReasoningModel(name string) bool {
 		return true
 	}
 
-	if strings.HasPrefix(n, "gpt-5") {
+	if strings.HasPrefix(n, "gpt-5") || strings.HasPrefix(n, "gpt-6") {
 		return true
 	}
 

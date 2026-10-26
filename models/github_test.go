@@ -10,7 +10,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
 )
 
 const ghCopilotTestModel = GHCopilotGPT4oMini
@@ -30,9 +29,9 @@ func TestGitHubCopilotGenerate(t *testing.T) {
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "", StreamTopicId: ""},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"Reply with exactly: Hello from GitHub Models",
 			),
 		}),
@@ -50,7 +49,7 @@ func TestGitHubCopilotGenerate(t *testing.T) {
 
 	require.NotEmpty(t, response.Choices, "expected non-empty choices")
 	assert.NotEmpty(
-		t, response.Choices[0].Content,
+		t, response.Choices[0].CandidateContent,
 		"expected non-empty response content",
 	)
 
@@ -85,9 +84,9 @@ func TestGitHubCopilotStreaming(t *testing.T) {
 	stream, err := execCtx.GenerateContentStream(
 		model,
 		gent.ModelCall{StreamId: "gh-stream", StreamTopicId: "test"},
-		gent.NewModelCallRequest([]llms.MessageContent{
-			llms.TextParts(
-				llms.ChatMessageTypeHuman,
+		gent.NewModelCallRequest([]gent.ModelMessage{
+			gent.TextParts(
+				gent.ChatMessageTypeHuman,
 				"Write a haiku about Go programming.",
 			),
 		}),
@@ -98,8 +97,8 @@ func TestGitHubCopilotStreaming(t *testing.T) {
 	var totalContent string
 	for chunk := range stream.Chunks() {
 		require.NoError(t, chunk.Err, "stream chunk error")
-		totalContent += chunk.Content
-		if chunk.Content != "" {
+		totalContent += gent.MetaText(chunk.MetaContent, gent.MetaContentIntermediary)
+		if gent.MetaText(chunk.MetaContent, gent.MetaContentIntermediary) != "" {
 			chunkCount++
 		}
 	}

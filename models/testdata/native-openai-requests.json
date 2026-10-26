@@ -18,7 +18,7 @@
         "type": "function",
         "function": {
           "name": "lookup",
-          "description": "Read a record",
+          "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
           "parameters": {
             "type": "object",
             "properties": {}
@@ -82,7 +82,7 @@
         "type": "function",
         "function": {
           "name": "lookup",
-          "description": "Read a record",
+          "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
           "parameters": {
             "type": "object",
             "properties": {}

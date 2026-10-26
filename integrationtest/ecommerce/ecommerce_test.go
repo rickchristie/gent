@@ -1,8 +1,8 @@
 // This file contains a single integration test for the
 // e-commerce scenario, using the most complex configuration:
-// SearchJSON toolchain with summarization compaction.
+// SearchChain toolchain with summarization compaction.
 //
-// For other variations (YAML/JSON toolchain, sliding window
+// For other variations (native registry, sliding window
 // compaction, SimpleList hint type, interactive chat), use the
 // integration CLI instead:
 //
@@ -22,7 +22,7 @@ import (
 )
 
 // TestDoubleChargeSearchSummarizationPTC tests the
-// double-charge scenario with SearchJSON toolchain
+// double-charge scenario with SearchChain toolchain
 // wrapped in JsToolChainWrapper (programmatic tool
 // calling) and summarization compaction.
 func TestDoubleChargeSearchSummarizationPTC(
@@ -39,7 +39,6 @@ func TestDoubleChargeSearchSummarizationPTC(
 	config := testutil.DefaultTestConfig()
 	config.ToolChain = testutil.ToolChainSearch
 	config.WrapPTC = true
-	// config.PTCCodeOnly = true
 	config.Compaction = testutil.CompactionConfig{
 		Type:              testutil.CompactionSummarization,
 		TriggerIterations: 5,

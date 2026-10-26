@@ -231,6 +231,7 @@ func (e *Runner) execute(
 			return e.finish(execCtx)
 		}
 		if result.Action == gent.LATerminate {
+			execCtx.SetFinalContentSource(result.ContentSource)
 			execCtx.SetTermination(gent.TerminationSuccess, result.Result, nil)
 			return e.finish(execCtx)
 		}

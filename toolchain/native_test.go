@@ -9,16 +9,15 @@ import (
 	"github.com/rickchristie/gent/events"
 	"github.com/rickchristie/gent/format"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
-func nativeCall(name, arguments string) llms.ToolCall {
-	return llms.ToolCall{ID: "provider-id", Type: "function",
-		FunctionCall: &llms.FunctionCall{Name: name, Arguments: arguments}}
+func nativeCall(name, arguments string) gent.ModelToolCall {
+	return gent.ModelToolCall{ID: "provider-id", Type: "function",
+		FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments}}
 }
 
 func TestNativeTools_DefinitionsAndExecution(t *testing.T) {
-	type input struct{ chain func() gent.NativeToolChain }
+	type input struct{ chain func() gent.ToolChain }
 	type expected struct{ text string }
 	type testCase struct {
 		name     string
@@ -26,11 +25,7 @@ func TestNativeTools_DefinitionsAndExecution(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"JSON", input{func() gent.NativeToolChain { return NewJSON().WithOutputSchema(true) }},
-			expected{`<lookup>
-record 7
-</lookup>`}},
-		{"YAML", input{func() gent.NativeToolChain { return NewYAML().WithOutputSchema(true) }},
+		{"Registry", input{func() gent.ToolChain { return New().WithOutputSchema(true) }},
 			expected{`<lookup>
 record 7
 </lookup>`}},
@@ -51,7 +46,7 @@ record 7
 			if !assert.NoError(t, err) {
 				return
 			}
-			want := []llms.Tool{{Type: "function", Function: &llms.FunctionDefinition{
+			want := []gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
 				Name: "lookup", Description: `Read a record
 
 Policy: Read only
@@ -64,7 +59,7 @@ Returns: {"type":"string"}`,
 			again, err := chain.NativeTools(ctx)
 			assert.NoError(t, err)
 			assert.Equal(t, want, again)
-			plan, err := chain.PrepareCalls(ctx, []llms.ToolCall{nativeCall("lookup", `{"id":7}`)})
+			plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{nativeCall("lookup", `{"id":7}`)})
 			if !assert.NoError(t, err) {
 				return
 			}
@@ -88,7 +83,7 @@ Returns: {"type":"string"}`,
 }
 
 func TestNativeCalls_ArgumentErrors(t *testing.T) {
-	type input struct{ call llms.ToolCall }
+	type input struct{ call gent.ModelToolCall }
 	type expected struct{ errorText string }
 	type testCase struct {
 		name     string
@@ -96,8 +91,8 @@ func TestNativeCalls_ArgumentErrors(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"name", input{llms.ToolCall{Type: "function"}}, expected{gent.ErrMissingToolName.Error()}},
-		{"kind", input{llms.ToolCall{Type: "computer"}},
+		{"name", input{gent.ModelToolCall{Type: "function"}}, expected{gent.ErrMissingToolName.Error()}},
+		{"kind", input{gent.ModelToolCall{Type: "computer"}},
 			expected{`unsupported tool call type "computer"`}},
 		{"null", input{nativeCall("lookup", "null")},
 			expected{gent.ErrInvalidJSON.Error() + ": tool arguments must be an object"}},
@@ -109,13 +104,13 @@ func TestNativeCalls_ArgumentErrors(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := newExecCtx()
-			chain := NewJSON()
-			plan, err := chain.PrepareCalls(ctx, []llms.ToolCall{test.input.call})
+			chain := New()
+			plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{test.input.call})
 			assert.Nil(t, plan)
 			assert.EqualError(t, err, test.expected.errorText)
 			assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCToolchainParseErrorTotal))
 			assert.Equal(t, float64(1), ctx.Stats().GetGauge(gent.SGToolchainParseErrorConsecutive))
-			_, err = chain.PrepareCalls(ctx, []llms.ToolCall{nativeCall("lookup", "{}")})
+			_, err = chain.PrepareCalls(ctx, []gent.ModelToolCall{nativeCall("lookup", "{}")})
 			assert.NoError(t, err)
 			assert.Equal(t, float64(0), ctx.Stats().GetGauge(gent.SGToolchainParseErrorConsecutive))
 		})
@@ -145,9 +140,9 @@ func TestNativeSearch_DiscoveryBelongsToActiveHistory(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := newExecCtx()
-			chain := NewSearchJSON(test.input.hint).WithSearchType(test.input.mode)
+			chain := NewSearch(test.input.hint).WithSearchType(test.input.mode)
 			_, err := chain.NativeTools(ctx)
-			assert.EqualError(t, err, "SearchJSON must be initialized before native tool calls")
+			assert.EqualError(t, err, "SearchChain must be initialized before native tool calls")
 			chain.RegisterEngine(&mockToolSearcher{id: "test", guidance: "Use words",
 				searchFn: func(context.Context, string) ([]string, error) {
 					return []string{"lookup"}, nil
@@ -184,7 +179,7 @@ func TestNativeSearch_DiscoveryBelongsToActiveHistory(t *testing.T) {
 	}
 }
 
-func nativeNames(t *testing.T, chain gent.NativeToolChain, ctx *gent.ExecutionContext) []string {
+func nativeNames(t *testing.T, chain gent.ToolChain, ctx *gent.ExecutionContext) []string {
 	t.Helper()
 	definitions, err := chain.NativeTools(ctx)
 	if !assert.NoError(t, err) {
@@ -197,10 +192,10 @@ func nativeNames(t *testing.T, chain gent.NativeToolChain, ctx *gent.ExecutionCo
 	return names
 }
 
-func executeNativeTestCall(t *testing.T, chain gent.NativeToolChain, ctx *gent.ExecutionContext,
-	call llms.ToolCall) *gent.ToolCallResult {
+func executeNativeTestCall(t *testing.T, chain gent.ToolChain, ctx *gent.ExecutionContext,
+	call gent.ModelToolCall) *gent.ToolCallResult {
 	t.Helper()
-	plan, err := chain.PrepareCalls(ctx, []llms.ToolCall{call})
+	plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{call})
 	if !assert.NoError(t, err) {
 		t.FailNow()
 	}
@@ -214,7 +209,7 @@ func executeNativeTestCall(t *testing.T, chain gent.NativeToolChain, ctx *gent.E
 func appendNativeSearchResult(t *testing.T, ctx *gent.ExecutionContext,
 	result *gent.ToolCallResult, expiry int) {
 	t.Helper()
-	message := &gent.MessageContent{Role: llms.ChatMessageTypeTool}
+	message := &gent.MessageContent{Role: gent.ChatMessageTypeTool}
 	message.SetMetadata(gent.MMKToolChainResult, &gent.ToolChainResult{
 		Results: []*gent.ToolCallResult{result},
 	})
@@ -231,7 +226,7 @@ func (hook *nativeCancelHook) OnBeforeToolCall(ctx *gent.ExecutionContext,
 }
 
 func TestNativeSearch_CancelBeforeEffect(t *testing.T) {
-	chain := setupSearchJSON([]*indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
+	chain := setupSearchChain([]*indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
 		nil, nil, func(context.Context, map[string]any) (string, error) {
 			t.Error("cancelled tool must not run")
 			return "", nil
@@ -239,15 +234,13 @@ func TestNativeSearch_CancelBeforeEffect(t *testing.T) {
 	ctx := newExecCtx()
 	hook := &nativeCancelHook{}
 	ctx.SetEventPublisher(events.NewRegistry().Subscribe(hook))
-	plan, err := chain.PrepareCalls(ctx, []llms.ToolCall{nativeCall("lookup", "{}")})
+	plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{nativeCall("lookup", "{}")})
 	if !assert.NoError(t, err) {
 		return
 	}
 	result, err := chain.ExecuteNext(ctx, plan, format.NewXML())
-	if !assert.NoError(t, err) {
-		return
-	}
-	assert.ErrorIs(t, result.Error, context.Canceled)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result)
 	assert.Equal(t, 1, hook.calls)
-	assert.Equal(t, 1, plan.NextCall)
+	assert.Equal(t, 0, plan.NextCall)
 }

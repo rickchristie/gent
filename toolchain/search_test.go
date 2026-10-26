@@ -115,13 +115,13 @@ func newExecCtx() *gent.ExecutionContext {
 	)
 }
 
-// setupSearchJSON creates a fully initialized SearchJSON
+// setupSearchChain creates a fully initialized SearchChain
 // with the given tools and engines.
-func setupSearchJSON(
+func setupSearchChain(
 	tools []*indexableToolFunc,
 	engines []gent.ToolSearcher,
-) *SearchJSON {
-	tc := NewSearchJSON(SearchHintDomainCategories)
+) *SearchChain {
+	tc := NewSearch(SearchHintDomainCategories)
 	for _, eng := range engines {
 		tc.RegisterEngine(eng)
 	}
@@ -138,58 +138,7 @@ func setupSearchJSON(
 // Constructor / Config Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Name(t *testing.T) {
-	type input struct {
-		customName string
-	}
-
-	type expected struct {
-		name string
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name:     "default name",
-			input:    input{customName: ""},
-			expected: expected{name: "action"},
-		},
-		{
-			name:     "custom name",
-			input:    input{customName: "tools"},
-			expected: expected{name: "tools"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
-			if tt.input.customName != "" {
-				tc.WithSectionName(tt.input.customName)
-			}
-			assert.Equal(t, tt.expected.name, tc.Name())
-		})
-	}
-}
-
-func TestSearchJSON_Guidance(t *testing.T) {
-	tc := NewSearchJSON(SearchHintDomainCategories)
-	guidance := tc.Guidance()
-
-	expectedGuidance := `Call tools using JSON format:
-{"tool": "tool_name", "args": {...}}
-
-For multiple parallel calls, use an array:
-[{"tool": "tool1", "args": {...}}, ` +
-		`{"tool": "tool2", "args": {...}}]`
-
-	assert.Equal(t, expectedGuidance, guidance)
-}
-
-func TestSearchJSON_Config(t *testing.T) {
+func TestSearchChain_Config(t *testing.T) {
 	type expected struct {
 		pageSize         int
 		noResultsMessage string
@@ -197,13 +146,13 @@ func TestSearchJSON_Config(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		setup    func() *SearchJSON
+		setup    func() *SearchChain
 		expected expected
 	}{
 		{
 			name: "default page size",
-			setup: func() *SearchJSON {
-				return NewSearchJSON(SearchHintDomainCategories)
+			setup: func() *SearchChain {
+				return NewSearch(SearchHintDomainCategories)
 			},
 			expected: expected{
 				pageSize: 3,
@@ -215,8 +164,8 @@ func TestSearchJSON_Config(t *testing.T) {
 		},
 		{
 			name: "custom page size",
-			setup: func() *SearchJSON {
-				return NewSearchJSON(SearchHintDomainCategories).WithPageSize(5)
+			setup: func() *SearchChain {
+				return NewSearch(SearchHintDomainCategories).WithPageSize(5)
 			},
 			expected: expected{
 				pageSize:         5,
@@ -225,8 +174,8 @@ func TestSearchJSON_Config(t *testing.T) {
 		},
 		{
 			name: "custom no-results message",
-			setup: func() *SearchJSON {
-				return NewSearchJSON(SearchHintDomainCategories).
+			setup: func() *SearchChain {
+				return NewSearch(SearchHintDomainCategories).
 					WithNoResultsMessage("Nothing found")
 			},
 			expected: expected{
@@ -255,9 +204,9 @@ func TestSearchJSON_Config(t *testing.T) {
 // RegisterTool Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_RegisterTool(t *testing.T) {
+func TestSearchChain_RegisterTool(t *testing.T) {
 	t.Run("valid indexable tool succeeds", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		tool := newIndexableTool(
 			"test", "Test tool", "General",
 			nil, nil,
@@ -272,7 +221,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 	})
 
 	t.Run("panics on non-IndexableTool", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		tool := gent.NewToolFunc(
 			"test", "Test tool", nil,
 			func(_ context.Context, _ map[string]any) (string, error) {
@@ -285,14 +234,14 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 	})
 
 	t.Run("panics on invalid type", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		assert.Panics(t, func() {
 			tc.RegisterTool("not a tool")
 		})
 	})
 
 	t.Run("panics on duplicate name", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		tool1 := newIndexableTool(
 			"test", "Tool 1", "General",
 			nil, nil,
@@ -314,7 +263,7 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 	})
 
 	t.Run("method chaining works", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		tool1 := newIndexableTool(
 			"tool1", "Tool 1", "A",
 			nil, nil,
@@ -331,15 +280,15 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 		)
 		result := tc.RegisterTool(tool1).RegisterTool(tool2)
 		assert.NotNil(t, result)
-		// SearchJSON is under the ToolChain interface,
+		// SearchChain is under the ToolChain interface,
 		// cast back to check
-		stc := result.(*SearchJSON)
+		stc := result.(*SearchChain)
 		assert.Len(t, stc.tools, 2)
 	})
 
 	t.Run("multiple tools registered correctly",
 		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
+			tc := NewSearch(SearchHintDomainCategories)
 			for i := range 5 {
 				name := fmt.Sprintf("tool_%d", i)
 				tool := newIndexableTool(
@@ -362,9 +311,9 @@ func TestSearchJSON_RegisterTool(t *testing.T) {
 // Initialize Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Initialize(t *testing.T) {
+func TestSearchChain_Initialize(t *testing.T) {
 	t.Run("success with one engine", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		engine := &mockToolSearcher{
 			id:       "mock",
 			guidance: "mock guidance",
@@ -383,12 +332,14 @@ func TestSearchJSON_Initialize(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, tc.initialized)
 		assert.True(t, engine.indexCalled)
-		assert.NotEmpty(t, tc.searchToolPrompt)
+		definitions, err := tc.NativeTools(newExecCtx())
+		assert.NoError(t, err)
+		assert.Len(t, definitions, 1)
 	})
 
 	t.Run("success with multiple engines",
 		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
+			tc := NewSearch(SearchHintDomainCategories)
 			eng1 := &mockToolSearcher{
 				id: "eng1", guidance: "g1",
 			}
@@ -414,7 +365,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	)
 
 	t.Run("error when no engines", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		tool := newIndexableTool(
 			"test", "Test", "General",
 			nil, nil,
@@ -433,7 +384,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 	t.Run("error when engine IndexAll fails",
 		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
+			tc := NewSearch(SearchHintDomainCategories)
 			engine := &mockToolSearcher{
 				id:       "failing",
 				guidance: "g",
@@ -456,7 +407,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 	)
 
 	t.Run("re-initialize updates state", func(t *testing.T) {
-		tc := NewSearchJSON(SearchHintDomainCategories)
+		tc := NewSearch(SearchHintDomainCategories)
 		engine := &mockToolSearcher{
 			id:       "mock",
 			guidance: "guide",
@@ -473,11 +424,13 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 		err := tc.Initialize()
 		require.NoError(t, err)
-		prompt1 := tc.searchToolPrompt
+		prompt1, err := tc.NativeTools(newExecCtx())
+		require.NoError(t, err)
 
 		err = tc.Initialize()
 		require.NoError(t, err)
-		prompt2 := tc.searchToolPrompt
+		prompt2, err := tc.NativeTools(newExecCtx())
+		require.NoError(t, err)
 
 		assert.Equal(t, prompt1, prompt2)
 		assert.True(t, tc.initialized)
@@ -485,7 +438,7 @@ func TestSearchJSON_Initialize(t *testing.T) {
 
 	t.Run("domain summary with categories and counts",
 		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
+			tc := NewSearch(SearchHintDomainCategories)
 			engine := &mockToolSearcher{
 				id: "mock", guidance: "g",
 			}
@@ -518,7 +471,9 @@ func TestSearchJSON_Initialize(t *testing.T) {
 			err := tc.Initialize()
 			require.NoError(t, err)
 
-			prompt := tc.AvailableToolsPrompt()
+			definitions, err := tc.NativeTools(newExecCtx())
+			require.NoError(t, err)
+			prompt := definitions[0].Function.Description
 			assert.Contains(
 				t, prompt,
 				"Orders (lookup, mutation) - 3 tools",
@@ -533,531 +488,20 @@ func TestSearchJSON_Initialize(t *testing.T) {
 }
 
 // -------------------------------------------------------
-// AvailableToolsPrompt Tests
+// NativeTools Tests
 // -------------------------------------------------------
-
-func TestSearchJSON_AvailableToolsPrompt(t *testing.T) {
-	tools := []*indexableToolFunc{
-		newIndexableTool(
-			"tool1", "First tool", "DomainA",
-			[]string{"cat1"}, nil,
-			func(_ context.Context, _ map[string]any) (string, error) {
-				return "ok", nil
-			},
-		),
-		newIndexableTool(
-			"tool2", "Second tool", "DomainA",
-			[]string{"cat2"}, nil,
-			func(_ context.Context, _ map[string]any) (string, error) {
-				return "ok", nil
-			},
-		),
-		newIndexableTool(
-			"tool3", "Third tool", "DomainB",
-			[]string{"cat3"}, nil,
-			func(_ context.Context, _ map[string]any) (string, error) {
-				return "ok", nil
-			},
-		),
-	}
-
-	eng1 := &mockToolSearcher{
-		id: "bm25", guidance: "natural language",
-	}
-	eng2 := &mockToolSearcher{
-		id: "regex", guidance: "regex patterns",
-	}
-
-	tc := setupSearchJSON(
-		tools, []gent.ToolSearcher{eng1, eng2},
-	)
-	prompt := tc.AvailableToolsPrompt()
-
-	t.Run("shows only search tool", func(t *testing.T) {
-		assert.Contains(t, prompt, "tool_registry_search")
-		// Should NOT contain individual tools
-		assert.NotContains(t, prompt, "\n- tool1:")
-		assert.NotContains(t, prompt, "\n- tool2:")
-		assert.NotContains(t, prompt, "\n- tool3:")
-	})
-
-	t.Run("includes domain summary", func(t *testing.T) {
-		assert.Contains(t, prompt, "DomainA")
-		assert.Contains(t, prompt, "DomainB")
-	})
-
-	t.Run("includes engine IDs in query_type enum",
-		func(t *testing.T) {
-			assert.Contains(t, prompt, `"bm25"`)
-			assert.Contains(t, prompt, `"regex"`)
-		},
-	)
-
-	t.Run("includes per-engine search guidance",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "bm25: natural language",
-			)
-			assert.Contains(
-				t, prompt, "regex: regex patterns",
-			)
-		},
-	)
-
-	t.Run("includes correct total tool count",
-		func(t *testing.T) {
-			assert.Contains(t, prompt, "3 tools across")
-		},
-	)
-
-	t.Run("schema has required properties",
-		func(t *testing.T) {
-			assert.Contains(t, prompt, `"query"`)
-			assert.Contains(t, prompt, `"query_type"`)
-			assert.Contains(t, prompt, `"page"`)
-		},
-	)
-}
-
-func TestSearchJSON_OutputSchema_PinnedTools(t *testing.T) {
-	pinnedTool := newIndexableTool(
-		"get_item", "Get an item", "Items",
-		[]string{"lookup"}, nil,
-		func(
-			_ context.Context, _ map[string]any,
-		) (string, error) {
-			return "", nil
-		},
-	)
-
-	eng := &mockToolSearcher{
-		id: "bm25", guidance: "search",
-	}
-
-	t.Run("output schema disabled by default",
-		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories).
-				RegisterEngine(eng)
-			tc.RegisterTool(pinnedTool)
-			tc.Pin("get_item")
-			require.NoError(t, tc.Initialize())
-			prompt := tc.AvailableToolsPrompt()
-			assert.NotContains(t, prompt, "Returns:")
-		},
-	)
-
-	t.Run("output schema enabled on pinned tools",
-		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories).
-				WithOutputSchema(true).
-				RegisterEngine(eng)
-			tc.RegisterTool(pinnedTool)
-			tc.Pin("get_item")
-			require.NoError(t, tc.Initialize())
-			prompt := tc.AvailableToolsPrompt()
-			assert.Contains(t, prompt, "Returns:")
-			assert.Contains(t, prompt, `"type": "string"`)
-		},
-	)
-}
-
-func TestSearchJSON_AvailableToolsPrompt_SimpleList(
-	t *testing.T,
-) {
-	tools := []*indexableToolFunc{
-		newIndexableTool(
-			"search_customer", "Search customer",
-			"Customer",
-			[]string{"lookup"}, nil,
-			func(
-				_ context.Context,
-				_ map[string]any,
-			) (string, error) {
-				return "ok", nil
-			},
-		),
-		newIndexableTool(
-			"get_policy", "Get policy",
-			"Policy",
-			[]string{"lookup"}, nil,
-			func(
-				_ context.Context,
-				_ map[string]any,
-			) (string, error) {
-				return "ok", nil
-			},
-		),
-		newIndexableTool(
-			"send_email", "Send email",
-			"Communication",
-			[]string{"email"}, nil,
-			func(
-				_ context.Context,
-				_ map[string]any,
-			) (string, error) {
-				return "ok", nil
-			},
-		),
-	}
-
-	eng := &mockToolSearcher{
-		id: "bm25", guidance: "natural language",
-	}
-
-	tc := NewSearchJSON(SearchHintSimpleList)
-	tc.RegisterEngine(eng)
-	for _, tool := range tools {
-		tc.RegisterTool(tool)
-	}
-	err := tc.Initialize()
-	require.NoError(t, err)
-
-	prompt := tc.AvailableToolsPrompt()
-
-	t.Run("lists all tool names",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "  - search_customer\n",
-			)
-			assert.Contains(
-				t, prompt, "  - get_policy\n",
-			)
-			assert.Contains(
-				t, prompt, "  - send_email\n",
-			)
-		},
-	)
-
-	t.Run("does not contain domain summary",
-		func(t *testing.T) {
-			assert.NotContains(
-				t, prompt, "Domains:",
-			)
-			assert.NotContains(
-				t, prompt, "Customer (lookup)",
-			)
-		},
-	)
-
-	t.Run("includes correct total tool count",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "3 tools:",
-			)
-		},
-	)
-
-	t.Run("includes search tool name",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "tool_registry_search",
-			)
-		},
-	)
-
-	t.Run("includes engine guidance",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt,
-				"bm25: natural language",
-			)
-		},
-	)
-}
 
 // -------------------------------------------------------
 // Pin Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Pin_DomainCategories(
-	t *testing.T,
-) {
-	okFn := func(
-		_ context.Context,
-		_ map[string]any,
-	) (string, error) {
-		return "ok", nil
-	}
-	tools := []*indexableToolFunc{
-		newIndexableToolWithSchema(
-			"search_policy",
-			"Search company policies",
-			"Policy",
-			[]string{"lookup", "policy"},
-			[]string{"policy", "guidance"},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"keyword": map[string]any{
-						"type": "string",
-					},
-				},
-				"required": []string{"keyword"},
-			},
-			okFn,
-		),
-		newIndexableTool(
-			"lookup_customer",
-			"Lookup customer by email",
-			"Customer",
-			[]string{"lookup", "customer"},
-			nil, okFn,
-		),
-		newIndexableTool(
-			"get_order", "Get order details",
-			"Orders",
-			[]string{"lookup", "orders"},
-			nil, okFn,
-		),
-	}
-
+func TestSearchChain_Pin_InvalidTool(t *testing.T) {
 	eng := &mockToolSearcher{
 		id:       "bm25",
 		guidance: "natural language",
 	}
 
-	tc := NewSearchJSON(SearchHintDomainCategories)
-	tc.RegisterEngine(eng)
-	for _, tool := range tools {
-		tc.RegisterTool(tool)
-	}
-	tc.Pin("search_policy")
-	err := tc.Initialize()
-	require.NoError(t, err)
-
-	prompt := tc.AvailableToolsPrompt()
-
-	t.Run("shows pinned tool definition",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt,
-				"- search_policy: "+
-					"Search company policies\n",
-			)
-		},
-	)
-
-	t.Run("shows pinned tool schema",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, `"keyword"`,
-			)
-		},
-	)
-
-	t.Run("does not show unpinned tools",
-		func(t *testing.T) {
-			assert.NotContains(
-				t, prompt,
-				"- lookup_customer:",
-			)
-			assert.NotContains(
-				t, prompt,
-				"- get_order:",
-			)
-		},
-	)
-
-	t.Run("changes guidance text when pinned",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt,
-				"Some tools are pinned below.",
-			)
-			assert.Contains(
-				t, prompt,
-				"Use tool_registry_search "+
-					"to discover more.",
-			)
-			assert.NotContains(
-				t, prompt,
-				"Use tool_registry_search "+
-					"for tool discovery.",
-			)
-		},
-	)
-
-	t.Run("still shows domain summary",
-		func(t *testing.T) {
-			assert.Contains(t, prompt, "Policy")
-			assert.Contains(t, prompt, "Customer")
-			assert.Contains(t, prompt, "Orders")
-		},
-	)
-
-	t.Run("includes total tool count",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "3 tools across",
-			)
-		},
-	)
-}
-
-func TestSearchJSON_Pin_SimpleList(t *testing.T) {
-	okFn := func(
-		_ context.Context,
-		_ map[string]any,
-	) (string, error) {
-		return "ok", nil
-	}
-	tools := []*indexableToolFunc{
-		newIndexableToolWithSchema(
-			"search_policy",
-			"Search company policies",
-			"Policy",
-			[]string{"lookup"},
-			nil,
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"keyword": map[string]any{
-						"type": "string",
-					},
-				},
-				"required": []string{"keyword"},
-			},
-			okFn,
-		),
-		newIndexableTool(
-			"lookup_customer",
-			"Lookup customer",
-			"Customer",
-			[]string{"lookup"}, nil, okFn,
-		),
-	}
-
-	eng := &mockToolSearcher{
-		id:       "bm25",
-		guidance: "natural language",
-	}
-
-	tc := NewSearchJSON(SearchHintSimpleList)
-	tc.RegisterEngine(eng)
-	for _, tool := range tools {
-		tc.RegisterTool(tool)
-	}
-	tc.Pin("search_policy")
-	err := tc.Initialize()
-	require.NoError(t, err)
-
-	prompt := tc.AvailableToolsPrompt()
-
-	t.Run("shows pinned tool definition",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt,
-				"- search_policy: "+
-					"Search company policies\n",
-			)
-		},
-	)
-
-	t.Run("changes guidance text when pinned",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt,
-				"Some tools are pinned below.",
-			)
-			assert.Contains(
-				t, prompt,
-				"Use tool_registry_search "+
-					"to get other tool details.",
-			)
-			assert.NotContains(
-				t, prompt,
-				"Use tool_registry_search "+
-					"to get tool details "+
-					"before calling.",
-			)
-		},
-	)
-
-	t.Run("still lists all tool names",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "  - search_policy\n",
-			)
-			assert.Contains(
-				t, prompt,
-				"  - lookup_customer\n",
-			)
-		},
-	)
-}
-
-func TestSearchJSON_Pin_NoPins(t *testing.T) {
-	okFn := func(
-		_ context.Context,
-		_ map[string]any,
-	) (string, error) {
-		return "ok", nil
-	}
-
-	eng := &mockToolSearcher{
-		id:       "bm25",
-		guidance: "natural language",
-	}
-
-	t.Run("domain categories without pins",
-		func(t *testing.T) {
-			tc := NewSearchJSON(
-				SearchHintDomainCategories,
-			)
-			tc.RegisterEngine(eng)
-			tc.RegisterTool(newIndexableTool(
-				"tool1", "Tool 1", "D",
-				nil, nil, okFn,
-			))
-			err := tc.Initialize()
-			require.NoError(t, err)
-
-			prompt := tc.AvailableToolsPrompt()
-			assert.Contains(
-				t, prompt,
-				"Use tool_registry_search "+
-					"for tool discovery.",
-			)
-			assert.NotContains(
-				t, prompt,
-				"pinned below",
-			)
-		},
-	)
-
-	t.Run("simple list without pins",
-		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintSimpleList)
-			tc.RegisterEngine(eng)
-			tc.RegisterTool(newIndexableTool(
-				"tool1", "Tool 1", "D",
-				nil, nil, okFn,
-			))
-			err := tc.Initialize()
-			require.NoError(t, err)
-
-			prompt := tc.AvailableToolsPrompt()
-			assert.Contains(
-				t, prompt,
-				"Use tool_registry_search "+
-					"to get tool details "+
-					"before calling.",
-			)
-			assert.NotContains(
-				t, prompt,
-				"pinned below",
-			)
-		},
-	)
-}
-
-func TestSearchJSON_Pin_InvalidTool(t *testing.T) {
-	eng := &mockToolSearcher{
-		id:       "bm25",
-		guidance: "natural language",
-	}
-
-	tc := NewSearchJSON(SearchHintDomainCategories)
+	tc := NewSearch(SearchHintDomainCategories)
 	tc.RegisterEngine(eng)
 	tc.RegisterTool(newIndexableTool(
 		"tool1", "Tool 1", "D", nil, nil,
@@ -1079,62 +523,7 @@ func TestSearchJSON_Pin_InvalidTool(t *testing.T) {
 	)
 }
 
-func TestSearchJSON_Pin_MultiplePins(t *testing.T) {
-	okFn := func(
-		_ context.Context,
-		_ map[string]any,
-	) (string, error) {
-		return "ok", nil
-	}
-
-	eng := &mockToolSearcher{
-		id:       "bm25",
-		guidance: "natural language",
-	}
-
-	tc := NewSearchJSON(SearchHintDomainCategories)
-	tc.RegisterEngine(eng)
-	tc.RegisterTool(newIndexableTool(
-		"tool_a", "Tool A", "D",
-		nil, nil, okFn,
-	))
-	tc.RegisterTool(newIndexableTool(
-		"tool_b", "Tool B", "D",
-		nil, nil, okFn,
-	))
-	tc.RegisterTool(newIndexableTool(
-		"tool_c", "Tool C", "D",
-		nil, nil, okFn,
-	))
-	tc.Pin("tool_a")
-	tc.Pin("tool_c")
-
-	err := tc.Initialize()
-	require.NoError(t, err)
-
-	prompt := tc.AvailableToolsPrompt()
-
-	t.Run("shows both pinned tools",
-		func(t *testing.T) {
-			assert.Contains(
-				t, prompt, "- tool_a: Tool A\n",
-			)
-			assert.Contains(
-				t, prompt, "- tool_c: Tool C\n",
-			)
-		},
-	)
-
-	t.Run("does not show unpinned tool",
-		func(t *testing.T) {
-			assert.NotContains(
-				t, prompt, "- tool_b:",
-			)
-		},
-	)
-}
-
-func TestSearchJSON_Pin_ToolStillSearchable(
+func TestSearchChain_Pin_ToolStillSearchable(
 	t *testing.T,
 ) {
 	okFn := func(
@@ -1154,7 +543,7 @@ func TestSearchJSON_Pin_ToolStillSearchable(
 		},
 	}
 
-	tc := NewSearchJSON(SearchHintDomainCategories)
+	tc := NewSearch(SearchHintDomainCategories)
 	tc.RegisterEngine(eng)
 	tc.RegisterTool(newIndexableTool(
 		"pinned_tool", "A pinned tool", "D",
@@ -1166,7 +555,7 @@ func TestSearchJSON_Pin_ToolStillSearchable(
 	require.NoError(t, err)
 
 	// Pinned tool should still be found via search
-	result, err := tc.Execute(
+	result, err := executeTestCalls(tc,
 		newExecCtx(),
 		`{"tool":"tool_registry_search",`+
 			`"args":{"query":"pinned",`+
@@ -1183,163 +572,11 @@ func TestSearchJSON_Pin_ToolStillSearchable(
 // ParseSection Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_ParseSection(t *testing.T) {
-	type input struct {
-		content string
-	}
-
-	type expected struct {
-		calls []*gent.ToolCall
-		err   error
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "valid single JSON call",
-			input: input{
-				content: `{"tool": "search", ` +
-					`"args": {"query": "test"}}`,
-			},
-			expected: expected{
-				calls: []*gent.ToolCall{
-					{
-						Name: "search",
-						Args: map[string]any{
-							"query": "test",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "valid array of calls",
-			input: input{
-				content: `[` +
-					`{"tool": "a", "args": {}},` +
-					`{"tool": "b", "args": {}}]`,
-			},
-			expected: expected{
-				calls: []*gent.ToolCall{
-					{Name: "a", Args: map[string]any{}},
-					{Name: "b", Args: map[string]any{}},
-				},
-			},
-		},
-		{
-			name: "invalid JSON",
-			input: input{
-				content: `{invalid}`,
-			},
-			expected: expected{
-				err: gent.ErrInvalidJSON,
-			},
-		},
-		{
-			name: "missing tool name",
-			input: input{
-				content: `{"args": {"q": "test"}}`,
-			},
-			expected: expected{
-				err: gent.ErrMissingToolName,
-			},
-		},
-		{
-			name: "empty content returns empty slice",
-			input: input{
-				content: "",
-			},
-			expected: expected{
-				calls: []*gent.ToolCall{},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
-			result, err := tc.ParseSection(
-				nil, tt.input.content,
-			)
-
-			if tt.expected.err != nil {
-				assert.ErrorIs(t, err, tt.expected.err)
-				return
-			}
-
-			require.NoError(t, err)
-			calls := result.([]*gent.ToolCall)
-			assert.Len(
-				t, calls, len(tt.expected.calls),
-			)
-			for i, exp := range tt.expected.calls {
-				assert.Equal(t, exp.Name, calls[i].Name)
-				assert.Equal(t, exp.Args, calls[i].Args)
-			}
-		})
-	}
-}
-
-func TestSearchJSON_ParseSection_Events(t *testing.T) {
-	t.Run("parse error publishes event",
-		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
-			execCtx := newExecCtx()
-
-			_, err := tc.ParseSection(
-				execCtx, "{invalid}",
-			)
-			assert.Error(t, err)
-
-			counter := execCtx.Stats().GetCounter(
-				gent.SCToolchainParseErrorTotal,
-			)
-			assert.Equal(t, int64(1), counter)
-
-			gauge := execCtx.Stats().GetGauge(
-				gent.SGToolchainParseErrorConsecutive,
-			)
-			assert.Equal(t, float64(1), gauge)
-		},
-	)
-
-	t.Run("successful parse resets consecutive gauge",
-		func(t *testing.T) {
-			tc := NewSearchJSON(SearchHintDomainCategories)
-			execCtx := newExecCtx()
-
-			// First: cause an error
-			_, _ = tc.ParseSection(
-				execCtx, "{invalid}",
-			)
-			gauge := execCtx.Stats().GetGauge(
-				gent.SGToolchainParseErrorConsecutive,
-			)
-			assert.Equal(t, float64(1), gauge)
-
-			// Then: successful parse
-			_, err := tc.ParseSection(
-				execCtx,
-				`{"tool": "x", "args": {}}`,
-			)
-			require.NoError(t, err)
-
-			gauge = execCtx.Stats().GetGauge(
-				gent.SGToolchainParseErrorConsecutive,
-			)
-			assert.Equal(t, float64(0), gauge)
-		},
-	)
-}
-
 // -------------------------------------------------------
 // Execute — Search Tool Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Execute_Search(t *testing.T) {
+func TestSearchChain_Execute_Search(t *testing.T) {
 	okFn := func(_ context.Context, _ map[string]any) (string, error) {
 		return "ok", nil
 	}
@@ -1405,7 +642,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 		},
 	}
 
-	tc := setupSearchJSON(
+	tc := setupSearchChain(
 		tools, []gent.ToolSearcher{mockEng},
 	)
 
@@ -1414,7 +651,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "order", ` +
 				`"query_type": "mock"}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1433,7 +670,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "all", ` +
 				`"query_type": "mock"}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1464,7 +701,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "all", ` +
 				`"query_type": "mock", "page": 2}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1485,7 +722,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "order", ` +
 				`"query_type": "mock", "page": 99}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1500,7 +737,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "zzzzz", ` +
 				`"query_type": "mock"}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1515,7 +752,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "test", ` +
 				`"query_type": "unknown_engine"}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			// Schema validation should catch this
@@ -1537,7 +774,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 					)
 				},
 			}
-			tcErr := NewSearchJSON(SearchHintDomainCategories).
+			tcErr := NewSearch(SearchHintDomainCategories).
 				RegisterEngine(errEng)
 			tool := newIndexableTool(
 				"t1", "d", "D", nil, nil, okFn,
@@ -1548,7 +785,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "test", ` +
 				`"query_type": "err_eng"}}`
-			result, err := tcErr.Execute(
+			result, err := executeTestCalls(tcErr,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1567,7 +804,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 				`{"tool": "tool_registry_search", ` +
 				`"args": {"query": "email", ` +
 				`"query_type": "mock"}}]`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1585,7 +822,7 @@ func TestSearchJSON_Execute_Search(t *testing.T) {
 // Execute — Regular Tool Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Execute_RegularTool(t *testing.T) {
+func TestSearchChain_Execute_RegularTool(t *testing.T) {
 	t.Run("tool call succeeds with typed result",
 		func(t *testing.T) {
 			tool := newIndexableTool(
@@ -1601,14 +838,14 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
 			content := `{"tool": "greet", ` +
 				`"args": {"name": "Alice"}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1631,25 +868,22 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 				return "ok", nil
 			},
 		)
-		tc := setupSearchJSON(
+		tc := setupSearchChain(
 			[]*indexableToolFunc{tool},
 			[]gent.ToolSearcher{eng},
 		)
 
 		content := `{"tool": "nonexistent", "args": {}}`
-		result, err := tc.Execute(
+		result, err := executeTestCalls(tc,
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
 		assert.ErrorIs(
 			t, result.Results[0].Error, gent.ErrUnknownTool,
 		)
-		assert.Contains(
-			t, collectText(result),
-			`Error: unknown tool "nonexistent". `+
-				`Use the search tool to find `+
-				`available tools.`,
-		)
+		assert.Equal(t, `<nonexistent>
+Error: unknown tool "nonexistent". Use a function from the current native tool definitions.
+</nonexistent>`, collectText(result))
 	})
 
 	t.Run("schema validation fails", func(t *testing.T) {
@@ -1671,13 +905,13 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 		eng := &mockToolSearcher{
 			id: "m", guidance: "g",
 		}
-		tc := setupSearchJSON(
+		tc := setupSearchChain(
 			[]*indexableToolFunc{tool},
 			[]gent.ToolSearcher{eng},
 		)
 
 		content := `{"tool": "strict_tool", "args": {}}`
-		result, err := tc.Execute(
+		result, err := executeTestCalls(tc,
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
@@ -1697,13 +931,13 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 		eng := &mockToolSearcher{
 			id: "m", guidance: "g",
 		}
-		tc := setupSearchJSON(
+		tc := setupSearchChain(
 			[]*indexableToolFunc{tool},
 			[]gent.ToolSearcher{eng},
 		)
 
 		content := `{"tool": "failing", "args": {}}`
-		result, err := tc.Execute(
+		result, err := executeTestCalls(tc,
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
@@ -1724,12 +958,12 @@ func TestSearchJSON_Execute_RegularTool(t *testing.T) {
 			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
-			tc := NewSearchJSON(SearchHintDomainCategories).RegisterEngine(eng)
+			tc := NewSearch(SearchHintDomainCategories).RegisterEngine(eng)
 			tc.RegisterTool(instructionTool)
 			require.NoError(t, tc.Initialize())
 
 			content := `{"tool": "with_inst", "args": {}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1762,7 +996,7 @@ func (t *instructionToolImpl) Call(
 // Execute — Mixed Parallel Calls Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Execute_Mixed(t *testing.T) {
+func TestSearchChain_Execute_Mixed(t *testing.T) {
 	okFn := func(_ context.Context, args map[string]any) (string, error) {
 		return "regular_result", nil
 	}
@@ -1788,7 +1022,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 		},
 	}
 
-	tc := setupSearchJSON(
+	tc := setupSearchChain(
 		tools, []gent.ToolSearcher{eng},
 	)
 
@@ -1799,7 +1033,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 				`"args": {"query": "test", ` +
 				`"query_type": "mock"}},` +
 				`{"tool": "regular_tool", "args": {}}]`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1825,7 +1059,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 				`"args": {"query": "q2", ` +
 				`"query_type": "mock"}},` +
 				`{"tool": "another_tool", "args": {}}]`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1838,7 +1072,7 @@ func TestSearchJSON_Execute_Mixed(t *testing.T) {
 // Execute — Events & Stats Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Execute_Stats(t *testing.T) {
+func TestSearchChain_Execute_Stats(t *testing.T) {
 	okFn := func(_ context.Context, _ map[string]any) (string, error) {
 		return "ok", nil
 	}
@@ -1857,7 +1091,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			tool := newIndexableTool(
 				"t", "d", "D", nil, nil, okFn,
 			)
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
@@ -1866,7 +1100,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "x", ` +
 				`"query_type": "mock"}}`
-			_, err := tc.Execute(
+			_, err := executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1895,14 +1129,14 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			tool := newIndexableTool(
 				"my_tool", "d", "D", nil, nil, okFn,
 			)
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
 			content := `{"tool": "my_tool", "args": {}}`
-			_, err := tc.Execute(
+			_, err := executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1927,14 +1161,14 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			eng := &mockToolSearcher{
 				id: "m", guidance: "g",
 			}
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{},
 				[]gent.ToolSearcher{eng},
 			)
 
 			execCtx := newExecCtx()
 			content := `{"tool": "missing_tool", "args": {}}`
-			_, err := tc.Execute(
+			_, err := executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -1978,7 +1212,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			tool := newIndexableTool(
 				"t", "d", "D", nil, nil, okFn,
 			)
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
@@ -1987,7 +1221,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "x", ` +
 				`"query_type": "mock"}}`
-			_, err := tc.Execute(
+			_, err := executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -2026,7 +1260,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			tool := newIndexableTool(
 				"t", "d", "D", nil, nil, okFn,
 			)
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
@@ -2037,7 +1271,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "x", ` +
 				`"query_type": "mock"}}`
-			_, _ = tc.Execute(
+			_, _ = executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			assert.Equal(
@@ -2048,7 +1282,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			)
 
 			// Second: success
-			_, err := tc.Execute(
+			_, err := executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -2076,7 +1310,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 			okTool := newIndexableTool(
 				"ok_tool", "d", "D", nil, nil, okFn,
 			)
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				[]*indexableToolFunc{failTool, okTool},
 				[]gent.ToolSearcher{eng},
 			)
@@ -2085,7 +1319,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 
 			// First: error
 			content := `{"tool": "fail_tool", "args": {}}`
-			_, _ = tc.Execute(
+			_, _ = executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			assert.Equal(
@@ -2097,7 +1331,7 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 
 			// Then: success
 			content = `{"tool": "ok_tool", "args": {}}`
-			_, err := tc.Execute(
+			_, err := executeTestCalls(tc,
 				execCtx, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -2111,10 +1345,10 @@ func TestSearchJSON_Execute_Stats(t *testing.T) {
 	)
 }
 
-func TestSearchJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
+func TestSearchChain_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 	type input struct {
 		content  string
-		setup    func() *SearchJSON
+		setup    func() *SearchChain
 		limitKey gent.StatKey
 	}
 
@@ -2131,8 +1365,8 @@ func TestSearchJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 			name: "unknown regular tool trips per-tool call limit",
 			input: input{
 				content: `{"tool": "missing_tool", "args": {}}`,
-				setup: func() *SearchJSON {
-					return setupSearchJSON(
+				setup: func() *SearchChain {
+					return setupSearchChain(
 						[]*indexableToolFunc{},
 						[]gent.ToolSearcher{&mockToolSearcher{id: "mock", guidance: "g"}},
 					)
@@ -2152,8 +1386,8 @@ func TestSearchJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
   "tool": "tool_registry_search",
   "args": {"query": "x", "query_type": "missing_engine"}
 }`,
-				setup: func() *SearchJSON {
-					return setupSearchJSON(
+				setup: func() *SearchChain {
+					return setupSearchChain(
 						[]*indexableToolFunc{},
 						[]gent.ToolSearcher{&mockToolSearcher{id: "mock", guidance: "g"}},
 					)
@@ -2174,7 +1408,7 @@ func TestSearchJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 			execCtx := newExecCtx()
 			execCtx.SetLimits([]gent.Limit{tt.expected.exceededLimit})
 
-			_, err := tc.Execute(execCtx, tt.input.content, searchTestFormat())
+			_, err := executeTestCalls(tc, execCtx, tt.input.content, searchTestFormat())
 
 			require.NoError(t, err)
 			require.NotNil(t, execCtx.ExceededLimit())
@@ -2190,7 +1424,7 @@ func TestSearchJSON_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 // Execute — Pagination Details Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Execute_Pagination(t *testing.T) {
+func TestSearchChain_Execute_Pagination(t *testing.T) {
 	okFn := func(_ context.Context, _ map[string]any) (string, error) {
 		return "ok", nil
 	}
@@ -2220,7 +1454,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 		},
 	}
 
-	tc := setupSearchJSON(
+	tc := setupSearchChain(
 		tools, []gent.ToolSearcher{eng},
 	)
 
@@ -2229,7 +1463,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "x", ` +
 				`"query_type": "mock"}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -2248,7 +1482,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 		content := `{"tool": "tool_registry_search", ` +
 			`"args": {"query": "x", ` +
 			`"query_type": "mock", "page": 2}}`
-		result, err := tc.Execute(
+		result, err := executeTestCalls(tc,
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
@@ -2267,7 +1501,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "x", ` +
 				`"query_type": "mock", "page": 3}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -2284,7 +1518,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 		content := `{"tool": "tool_registry_search", ` +
 			`"args": {"query": "x", ` +
 			`"query_type": "mock", "page": 0}}`
-		result, err := tc.Execute(
+		result, err := executeTestCalls(tc,
 			nil, content, searchTestFormat(),
 		)
 		require.NoError(t, err)
@@ -2299,7 +1533,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 			content := `{"tool": "tool_registry_search", ` +
 				`"args": {"query": "x", ` +
 				`"query_type": "mock", "page": 99}}`
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, content, searchTestFormat(),
 			)
 			require.NoError(t, err)
@@ -2314,7 +1548,7 @@ func TestSearchJSON_Execute_Pagination(t *testing.T) {
 // Execute — Search Dedup Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
+func TestSearchChain_Execute_SearchDedup(t *testing.T) {
 	okFn := func(
 		_ context.Context, _ map[string]any,
 	) (string, error) {
@@ -2540,12 +1774,12 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 				searchFn: tt.input.searchFn,
 			}
 
-			tc := setupSearchJSON(
+			tc := setupSearchChain(
 				tools, []gent.ToolSearcher{eng},
 			)
 			tc.WithPageSize(10) // avoid pagination
 
-			result, err := tc.Execute(
+			result, err := executeTestCalls(tc,
 				nil, tt.input.content,
 				searchTestFormat(),
 			)
@@ -2615,7 +1849,7 @@ func TestSearchJSON_Execute_SearchDedup(t *testing.T) {
 // Thread Safety Tests
 // -------------------------------------------------------
 
-func TestSearchJSON_ConcurrentAccess(t *testing.T) {
+func TestSearchChain_ConcurrentAccess(t *testing.T) {
 	okFn := func(_ context.Context, _ map[string]any) (string, error) {
 		return "ok", nil
 	}
@@ -2641,7 +1875,7 @@ func TestSearchJSON_ConcurrentAccess(t *testing.T) {
 		},
 	}
 
-	tc := setupSearchJSON(
+	tc := setupSearchChain(
 		tools, []gent.ToolSearcher{eng},
 	)
 
@@ -2656,7 +1890,7 @@ func TestSearchJSON_ConcurrentAccess(t *testing.T) {
 					defer wg.Done()
 					content := `{"tool": "tool_a", ` +
 						`"args": {}}`
-					_, errs[idx] = tc.Execute(
+					_, errs[idx] = executeTestCalls(tc,
 						nil, content, searchTestFormat(),
 					)
 				}(i)
@@ -2670,7 +1904,7 @@ func TestSearchJSON_ConcurrentAccess(t *testing.T) {
 	)
 
 	t.Run(
-		"concurrent Initialize + AvailableToolsPrompt",
+		"concurrent Initialize + NativeTools",
 		func(t *testing.T) {
 			var wg sync.WaitGroup
 
@@ -2682,7 +1916,7 @@ func TestSearchJSON_ConcurrentAccess(t *testing.T) {
 				}()
 				go func() {
 					defer wg.Done()
-					_ = tc.AvailableToolsPrompt()
+					_, _ = tc.NativeTools(newExecCtx())
 				}()
 			}
 

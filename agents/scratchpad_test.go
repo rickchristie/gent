@@ -2,17 +2,16 @@ package agents_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents"
-	"github.com/rickchristie/gent/schema"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // -----------------------------------------------------------------------------
-// TestToolChainResult_ToHistoryEntry
+// Tool observations in history
 // -----------------------------------------------------------------------------
 
 // testXMLFormat is a minimal TextFormat that wraps content in XML
@@ -49,224 +48,12 @@ func (f *testXMLFormat) FormatSections(
 	return result
 }
 
-func TestToolChainResult_ToHistoryEntry(t *testing.T) {
-	xmlFmt := &testXMLFormat{}
-
-	type input struct {
-		results []*gent.ToolCallResult
-	}
-
-	type expected struct {
-		messageCount int
-		role         llms.ChatMessageType
-		textPart     string
-		mediaCount   int
-		hasMetadata  bool
-	}
-
-	tests := []struct {
-		name     string
-		input    input
-		expected expected
-	}{
-		{
-			name: "single tool call result",
-			input: input{
-				results: []*gent.ToolCallResult{
-					{
-						Name: "search",
-						Args: map[string]any{"query": "weather"},
-						Hash: "search:weather",
-						Text: "<search>\nSunny, 72F\n</search>",
-					},
-				},
-			},
-			expected: expected{
-				messageCount: 1,
-				role:         llms.ChatMessageTypeHuman,
-				textPart: `<observation>
-<search>
-Sunny, 72F
-</search>
-</observation>`,
-				mediaCount:  0,
-				hasMetadata: true,
-			},
-		},
-		{
-			name: "multiple tool call results merged",
-			input: input{
-				results: []*gent.ToolCallResult{
-					{
-						Name: "search",
-						Text: "<search>\nresult1\n</search>",
-					},
-					{
-						Name: "lookup",
-						Text: "<lookup>\nresult2\n</lookup>",
-					},
-				},
-			},
-			expected: expected{
-				messageCount: 1,
-				role:         llms.ChatMessageTypeHuman,
-				textPart: `<observation>
-<search>
-result1
-</search>
-<lookup>
-result2
-</lookup>
-</observation>`,
-				mediaCount:  0,
-				hasMetadata: true,
-			},
-		},
-		{
-			name: "results with media",
-			input: input{
-				results: []*gent.ToolCallResult{
-					{
-						Name: "screenshot",
-						Text: "<screenshot>\nCapture done\n</screenshot>",
-						Media: []gent.ContentPart{
-							llms.BinaryContent{
-								MIMEType: "image/png",
-								Data:     []byte("fake-png"),
-							},
-						},
-					},
-				},
-			},
-			expected: expected{
-				messageCount: 1,
-				role:         llms.ChatMessageTypeHuman,
-				textPart: `<observation>
-<screenshot>
-Capture done
-</screenshot>
-</observation>`,
-				mediaCount:  1,
-				hasMetadata: true,
-			},
-		},
-		{
-			name: "empty results produces iteration with no text",
-			input: input{
-				results: []*gent.ToolCallResult{
-					{
-						Name: "noop",
-						Text: "",
-					},
-				},
-			},
-			expected: expected{
-				messageCount: 1,
-				role:         llms.ChatMessageTypeHuman,
-				textPart:     "",
-				mediaCount:   0,
-				hasMetadata:  true,
-			},
-		},
-		{
-			name: "error result has text with error, no Output",
-			input: input{
-				results: []*gent.ToolCallResult{
-					{
-						Name:  "failing_tool",
-						Args:  map[string]any{"x": 1},
-						Hash:  "failing_tool:x=1",
-						Error: fmt.Errorf("connection refused"),
-						Text:  "<failing_tool>\nError: connection refused\n</failing_tool>",
-					},
-				},
-			},
-			expected: expected{
-				messageCount: 1,
-				role:         llms.ChatMessageTypeHuman,
-				textPart: `<observation>
-<failing_tool>
-Error: connection refused
-</failing_tool>
-</observation>`,
-				mediaCount:  0,
-				hasMetadata: true,
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tcr := &gent.ToolChainResult{Results: tc.input.results}
-			iter := tcr.ToHistoryEntry(xmlFmt)
-
-			assert.Equal(
-				t, tc.expected.messageCount, len(iter.Messages),
-			)
-
-			msg := iter.Messages[0]
-			assert.Equal(t, tc.expected.role, msg.Role)
-
-			// Check metadata points to original ToolChainResult
-			assert.Equal(t, tc.expected.hasMetadata, msg.Metadata != nil)
-			if tc.expected.hasMetadata {
-				val, ok := msg.GetMetadata(gent.MMKToolChainResult)
-				assert.True(t, ok)
-				assert.Same(t, tcr, val)
-			}
-
-			// Count text and media parts
-			textParts := ""
-			mediaCount := 0
-			for _, part := range msg.Parts {
-				switch p := part.(type) {
-				case llms.TextContent:
-					textParts = p.Text
-				default:
-					mediaCount++
-				}
-			}
-
-			assert.Equal(t, tc.expected.textPart, textParts)
-			assert.Equal(t, tc.expected.mediaCount, mediaCount)
-		})
-	}
-}
-
-// -----------------------------------------------------------------------------
-// TestScratchpadToMessages
-// -----------------------------------------------------------------------------
-
-// mockToolChain implements the ToolChain interface for testing
-// deduplication. Only DeduplicateSummary is meaningful; other
-// methods are stubs.
+// mockToolChain supplies captured summaries for the history rendering tests.
 type mockToolChain struct {
 	// summaries maps tool name to a summary string.
 	// If a tool name is present with non-empty value, that
 	// value is returned by DeduplicateSummary.
 	summaries map[string]string
-}
-
-func (m *mockToolChain) Name() string     { return "action" }
-func (m *mockToolChain) Guidance() string { return "" }
-func (m *mockToolChain) ParseSection(
-	_ *gent.ExecutionContext, _ string,
-) (any, error) {
-	return nil, nil
-}
-func (m *mockToolChain) RegisterTool(_ any) gent.ToolChain {
-	return m
-}
-func (m *mockToolChain) AvailableToolsPrompt() string {
-	return ""
-}
-func (m *mockToolChain) GetToolSchema(_ string) *schema.Schema {
-	return nil
-}
-func (m *mockToolChain) Execute(
-	_ *gent.ExecutionContext, _ string, _ gent.TextFormat,
-) (*gent.ToolChainResult, error) {
-	return nil, nil
 }
 
 func (m *mockToolChain) DeduplicateSummary(
@@ -285,10 +72,28 @@ func buildIteration(
 	tcr *gent.ToolChainResult,
 	xmlFmt gent.TextFormat,
 ) *gent.HistoryEntry {
-	obsIter := tcr.ToHistoryEntry(xmlFmt)
+	var text []string
+	var media []gent.ContentPart
+	for _, result := range tcr.Results {
+		if result.Text != "" {
+			text = append(text, result.Text)
+		}
+		media = append(media, result.Media...)
+	}
+	observation := &gent.MessageContent{Role: gent.ChatMessageTypeHuman}
+	if len(text) > 0 {
+		observation.Parts = append(observation.Parts, gent.TextContent{
+			Text: xmlFmt.FormatSections([]gent.FormattedSection{
+				{Name: "observation", Content: strings.Join(text, "\n")},
+			}),
+		})
+	}
+	observation.Parts = append(observation.Parts, media...)
+	observation.SetMetadata(gent.MMKToolChainResult, tcr)
+	obsIter := &gent.HistoryEntry{Messages: []*gent.MessageContent{observation}}
 	aiMsg := &gent.MessageContent{
-		Role:  llms.ChatMessageTypeAI,
-		Parts: []gent.ContentPart{llms.TextContent{Text: aiText}},
+		Role:  gent.ChatMessageTypeAI,
+		Parts: []gent.ContentPart{gent.TextContent{Text: aiText}},
 	}
 	return &gent.HistoryEntry{
 		Messages: append(
@@ -305,15 +110,15 @@ func buildPlainIteration(
 	return &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeAI,
+				Role: gent.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
-					llms.TextContent{Text: aiText},
+					gent.TextContent{Text: aiText},
 				},
 			},
 			{
-				Role: llms.ChatMessageTypeHuman,
+				Role: gent.ChatMessageTypeHuman,
 				Parts: []gent.ContentPart{
-					llms.TextContent{Text: humanText},
+					gent.TextContent{Text: humanText},
 				},
 			},
 		},
@@ -326,23 +131,25 @@ func TestScratchpadToMessages(t *testing.T) {
 	type input struct {
 		scratchpad       []*gent.HistoryEntry
 		currentIteration int
-		toolChain        gent.ToolChain
+		toolChain        interface {
+			DeduplicateSummary(*gent.ToolCallResult) string
+		}
 	}
 
 	type expected struct {
 		messageTexts []string
-		messageRoles []llms.ChatMessageType
+		messageRoles []gent.ChatMessageType
 		included     int
 	}
 
 	// Helper: extract text content from messages for comparison.
 	extractTexts := func(
-		msgs []llms.MessageContent,
+		msgs []gent.ModelMessage,
 	) []string {
 		var texts []string
 		for _, msg := range msgs {
 			for _, part := range msg.Parts {
-				if tp, ok := part.(llms.TextContent); ok {
+				if tp, ok := part.(gent.TextContent); ok {
 					texts = append(texts, tp.Text)
 				}
 			}
@@ -351,9 +158,9 @@ func TestScratchpadToMessages(t *testing.T) {
 	}
 
 	extractRoles := func(
-		msgs []llms.MessageContent,
-	) []llms.ChatMessageType {
-		var roles []llms.ChatMessageType
+		msgs []gent.ModelMessage,
+	) []gent.ChatMessageType {
+		var roles []gent.ChatMessageType
 		for _, msg := range msgs {
 			roles = append(roles, msg.Role)
 		}
@@ -394,9 +201,9 @@ func TestScratchpadToMessages(t *testing.T) {
 					"I will search",
 					"Search result",
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 1,
 			},
@@ -408,9 +215,9 @@ func TestScratchpadToMessages(t *testing.T) {
 					{
 						Messages: []*gent.MessageContent{
 							{
-								Role: llms.ChatMessageTypeAI,
+								Role: gent.ChatMessageTypeAI,
 								Parts: []gent.ContentPart{
-									llms.TextContent{
+									gent.TextContent{
 										Text: "expired msg",
 									},
 								},
@@ -425,9 +232,9 @@ func TestScratchpadToMessages(t *testing.T) {
 			},
 			expected: expected{
 				messageTexts: []string{"kept", "reply"},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 1,
 			},
@@ -439,9 +246,9 @@ func TestScratchpadToMessages(t *testing.T) {
 					{
 						Messages: []*gent.MessageContent{
 							{
-								Role: llms.ChatMessageTypeAI,
+								Role: gent.ChatMessageTypeAI,
 								Parts: []gent.ContentPart{
-									llms.TextContent{
+									gent.TextContent{
 										Text: "not expired",
 									},
 								},
@@ -458,10 +265,10 @@ func TestScratchpadToMessages(t *testing.T) {
 				messageTexts: []string{
 					"not expired", "also kept", "reply2",
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -521,11 +328,11 @@ Sunny, 72F
 </search>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -603,13 +410,13 @@ Page content
 </fetch>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 3,
 			},
@@ -677,11 +484,11 @@ Sunny
 </search>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -742,11 +549,11 @@ Sunny
 </search>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -803,11 +610,11 @@ Result B
 </stateful_tool>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -862,11 +669,11 @@ Sunny
 </search>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -944,13 +751,13 @@ func main() {}
 </read>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 3,
 			},
@@ -1009,11 +816,11 @@ Headlines
 </search>
 </observation>`,
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 2,
 			},
@@ -1054,13 +861,13 @@ Headlines
 					// iter 4 kept (ExpireAfterIteration=10, current=5)
 					"i", "j",
 				},
-				messageRoles: []llms.ChatMessageType{
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
-					llms.ChatMessageTypeAI,
-					llms.ChatMessageTypeHuman,
+				messageRoles: []gent.ChatMessageType{
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
+					gent.ChatMessageTypeAI,
+					gent.ChatMessageTypeHuman,
 				},
 				included: 3,
 			},

@@ -21,8 +21,20 @@ func TestExecutionContext_SubscribeAll(t *testing.T) {
 	defer unsub()
 
 	go func() {
-		ctx.EmitChunk(StreamChunk{Content: "hello"})
-		ctx.EmitChunk(StreamChunk{Content: "world"})
+		ctx.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "hello",
+				},
+			},
+		})
+		ctx.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "world",
+				},
+			},
+		})
 		ctx.CloseStreams()
 	}()
 
@@ -54,9 +66,27 @@ func TestExecutionContext_SubscribeToStream(t *testing.T) {
 			input: input{
 				streamID: "my-stream",
 				chunks: []StreamChunk{
-					{Content: "skip", StreamId: "other"},
-					{Content: "hello", StreamId: "my-stream"},
-					{Content: "world", StreamId: "my-stream"},
+					{
+						MetaContent: []*MetaContent{
+							{
+								Type: MetaContentIntermediary, Text: "skip",
+							},
+						}, StreamId: "other",
+					},
+					{
+						MetaContent: []*MetaContent{
+							{
+								Type: MetaContentIntermediary, Text: "hello",
+							},
+						}, StreamId: "my-stream",
+					},
+					{
+						MetaContent: []*MetaContent{
+							{
+								Type: MetaContentIntermediary, Text: "world",
+							},
+						}, StreamId: "my-stream",
+					},
 				},
 			},
 			expected: expected{count: 2},
@@ -107,9 +137,27 @@ func TestExecutionContext_SubscribeToTopic(t *testing.T) {
 			input: input{
 				topicID: "llm-response",
 				chunks: []StreamChunk{
-					{Content: "skip", StreamTopicId: "other"},
-					{Content: "hello", StreamTopicId: "llm-response"},
-					{Content: "world", StreamTopicId: "llm-response"},
+					{
+						MetaContent: []*MetaContent{
+							{
+								Type: MetaContentIntermediary, Text: "skip",
+							},
+						}, StreamTopicId: "other",
+					},
+					{
+						MetaContent: []*MetaContent{
+							{
+								Type: MetaContentIntermediary, Text: "hello",
+							},
+						}, StreamTopicId: "llm-response",
+					},
+					{
+						MetaContent: []*MetaContent{
+							{
+								Type: MetaContentIntermediary, Text: "world",
+							},
+						}, StreamTopicId: "llm-response",
+					},
 				},
 			},
 			expected: expected{count: 2},
@@ -219,7 +267,13 @@ func TestExecutionContext_EmitChunk_AutoPopulatesSource(t *testing.T) {
 	defer unsub()
 
 	go func() {
-		ctx.EmitChunk(StreamChunk{Content: "hello"})
+		ctx.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "hello",
+				},
+			},
+		})
 		ctx.CloseStreams()
 	}()
 
@@ -235,7 +289,13 @@ func TestExecutionContext_EmitChunk_PreservesExistingSource(t *testing.T) {
 	defer unsub()
 
 	go func() {
-		ctx.EmitChunk(StreamChunk{Content: "hello", Source: "custom/path"})
+		ctx.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "hello",
+				},
+			}, Source: "custom/path",
+		})
 		ctx.CloseStreams()
 	}()
 
@@ -254,13 +314,19 @@ func TestExecutionContext_ParentPropagation(t *testing.T) {
 	defer parentUnsub()
 
 	go func() {
-		child.EmitChunk(StreamChunk{Content: "from child"})
+		child.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "from child",
+				},
+			},
+		})
 		parent.CloseStreams()
 		child.CloseStreams()
 	}()
 
 	chunk := <-parentCh
-	assert.Equal(t, "from child", chunk.Content)
+	assert.Equal(t, "from child", MetaText(chunk.MetaContent, MetaContentIntermediary))
 	assert.Equal(t, "parent/1/child/1", chunk.Source)
 }
 
@@ -278,14 +344,20 @@ func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
 	defer rootUnsub()
 
 	go func() {
-		grandchild.EmitChunk(StreamChunk{Content: "from grandchild"})
+		grandchild.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "from grandchild",
+				},
+			},
+		})
 		root.CloseStreams()
 		child.CloseStreams()
 		grandchild.CloseStreams()
 	}()
 
 	chunk := <-rootCh
-	assert.Equal(t, "from grandchild", chunk.Content)
+	assert.Equal(t, "from grandchild", MetaText(chunk.MetaContent, MetaContentIntermediary))
 	assert.Equal(t, "root/1/child/1/grandchild/1", chunk.Source)
 }
 
@@ -313,8 +385,8 @@ func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
 			defer wg.Done()
 			for j := range chunksPerChild {
 				c.EmitChunk(StreamChunk{
-					Content:  "chunk",
-					StreamId: string(rune(childID*100 + j)),
+					MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "chunk"}},
+					StreamId:    string(rune(childID*100 + j)),
 				})
 			}
 		}(i, child)
@@ -344,7 +416,13 @@ func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
 
 	go func() {
 		for i := range 100 {
-			ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))})
+			ctx.EmitChunk(StreamChunk{
+				MetaContent: []*MetaContent{
+					{
+						Type: MetaContentIntermediary, Text: string(rune('A' + i%26)),
+					},
+				},
+			})
 			time.Sleep(time.Millisecond)
 		}
 		ctx.CloseStreams()
@@ -384,15 +462,21 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 	defer unsub2()
 
 	go func() {
-		ctx.EmitChunk(StreamChunk{Content: "hello", StreamTopicId: "topic"})
+		ctx.EmitChunk(StreamChunk{
+			MetaContent: []*MetaContent{
+				{
+					Type: MetaContentIntermediary, Text: "hello",
+				},
+			}, StreamTopicId: "topic",
+		})
 		ctx.CloseStreams()
 	}()
 
 	chunk1 := <-ch1
 	chunk2 := <-ch2
 
-	assert.Equal(t, "hello", chunk1.Content)
-	assert.Equal(t, "hello", chunk2.Content)
+	assert.Equal(t, "hello", MetaText(chunk1.MetaContent, MetaContentIntermediary))
+	assert.Equal(t, "hello", MetaText(chunk2.MetaContent, MetaContentIntermediary))
 }
 
 func TestExecutionContext_EmitChunkRecordsWithoutListeners(t *testing.T) {
@@ -400,7 +484,13 @@ func TestExecutionContext_EmitChunkRecordsWithoutListeners(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		for i := range 1000 {
-			if err := ctx.EmitChunk(StreamChunk{Content: string(rune('A' + i%26))}); err != nil {
+			if err := ctx.EmitChunk(StreamChunk{
+				MetaContent: []*MetaContent{
+					{
+						Type: MetaContentIntermediary, Text: string(rune('A' + i%26)),
+					},
+				},
+			}); err != nil {
 				done <- err
 				return
 			}

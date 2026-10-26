@@ -252,7 +252,7 @@ third`,
 		{
 			name: "error at last line",
 			input: input{
-				source: "a\nb\nc",
+				source:  "a\nb\nc",
 				line:    3,
 				col:     2,
 				message: "end error",

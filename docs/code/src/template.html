@@ -375,8 +375,8 @@ AfterExecution → terminal checkpoint</code></pre>
               <span class="note-number">↳</span>
               <p>
                 <strong>An interface names a job.</strong> An implementation does that job.
-                <code>Loop</code> is an interface; <code>react.Agent</code> is an
-                implementation. You can bring your own loop.
+                <code>Loop</code> is an interface; <code>react.Agent</code> is an implementation.
+                You can bring your own loop.
               </p>
             </div>
           </section>
@@ -394,7 +394,7 @@ AfterExecution → terminal checkpoint</code></pre>
               <div class="lab-topline">
                 <span class="eyebrow">INSPECT A MODEL RESPONSE</span>
                 <label class="select-label"
-                  >Envelope
+                  >Prompt format
                   <select id="format-select">
                     <option value="xml">XML tags</option>
                     <option value="markdown">Markdown headings</option>
@@ -413,16 +413,16 @@ AfterExecution → terminal checkpoint</code></pre>
                 <div id="parser-explanation" class="parser-explanation" aria-live="polite"></div>
               </div>
               <div class="parser-chain">
-                <button data-inspect="format">Envelope</button><span>→</span>
-                <button data-inspect="section">Section content</button><span>→</span>
+                <button data-inspect="model">Native response</button><span>→</span>
                 <button data-inspect="tools">Typed tool call</button
                 ><span class="parser-or">or</span>
                 <button data-inspect="termination">Validated answer</button>
               </div>
             </div>
             <p class="supporting-copy">
-              YAML and JSON toolchains validate schemas and transform typed arguments.
-              <button class="inline-link" data-inspect="searchtools">SearchJSON</button> can
+              Native toolchains validate schemas and transform typed arguments. TextFormat controls
+              prompt sections; native tool calls use the model API.
+              <button class="inline-link" data-inspect="searchtools">SearchChain</button> can
               discover tools in pages.
               <button class="inline-link" data-inspect="validator">AnswerValidator</button> can
               reject an answer with feedback. A parse failure becomes an observable error and can
@@ -600,8 +600,8 @@ Export() (RunView, error)</code></pre>
                 <p>
                   <strong>FlushProgress</strong> saves activity.
                   <strong>CommitCheckpoint</strong> also saves a control boundary.
-                  <strong>Export</strong> returns the complete
-                  accepted run, including progress after the checkpoint.
+                  <strong>Export</strong> returns the complete accepted run, including progress
+                  after the checkpoint.
                 </p>
               </div>
               <div>
@@ -730,7 +730,8 @@ Export() (RunView, error)</code></pre>
                 A saved successful model response can be reused before a decision checkpoint exists.
               </p>
               <p>
-                Active child and JavaScript frames cannot resume: their Go/VM stacks are not saved.
+                Active child frames cannot resume. Interrupted JavaScript returns saved partial
+                results and recovery guidance without restoring a VM stack or restarting the script.
                 Completed children remain archived. Unknown schemas, codecs, incompatible
                 configuration, and unsupported custom state are rejected explicitly.
               </p>

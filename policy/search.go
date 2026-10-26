@@ -59,7 +59,7 @@ type PolicySearchTool struct {
 	topK       int
 	resultMode SearchResultMode
 
-	// IndexableTool metadata for SearchJSON compatibility.
+	// IndexableTool metadata for SearchChain compatibility.
 	keywords         []string
 	syntheticQueries []string
 }
@@ -179,7 +179,7 @@ func (t *PolicySearchTool) WithResultMode(
 	return t
 }
 
-// WithIndexableKeywords sets the keywords for IndexableTool (SearchJSON compatibility).
+// WithIndexableKeywords sets the keywords for IndexableTool (SearchChain compatibility).
 func (t *PolicySearchTool) WithIndexableKeywords(kw []string) *PolicySearchTool {
 	t.keywords = kw
 	return t
@@ -328,7 +328,7 @@ func (t *PolicySearchTool) DeduplicateSummary(
 	)
 }
 
-// --- gent.IndexableTool implementation (for SearchJSON compatibility) ---
+// --- gent.IndexableTool implementation (for SearchChain compatibility) ---
 
 func (t *PolicySearchTool) Domain() string              { return "Policy & Guidance" }
 func (t *PolicySearchTool) Categories() []string         { return []string{"lookup", "policy"} }

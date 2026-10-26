@@ -6,8 +6,8 @@ const (
 	DefaultMaxRecentEvents          = 5000
 	DefaultMaxRecentLifecycleEvents = 500
 	DefaultMaxRecentChunkEvents     = 500
-	DefaultMaxModelContentBytes     = 64 * 1024
-	DefaultMaxReasoningContentBytes = 64 * 1024
+	DefaultMaxContentBytes          = 64 * 1024
+	DefaultMaxMetaContentBytes      = 64 * 1024
 
 	NoRecentEvents = -1
 	NoContentLimit = -1
@@ -29,8 +29,8 @@ type Config struct {
 	MaxRecentEvents          int
 	MaxRecentLifecycleEvents int
 	MaxRecentChunkEvents     int
-	MaxModelContentBytes     int
-	MaxReasoningContentBytes int
+	MaxContentBytes          int
+	MaxMetaContentBytes      int
 
 	Redactor Redactor
 }
@@ -40,8 +40,8 @@ type config struct {
 	maxRecentEvents          int
 	maxRecentLifecycleEvents int
 	maxRecentChunkEvents     int
-	maxModelContentBytes     int
-	maxReasoningContentBytes int
+	maxContentBytes          int
+	maxMetaContentBytes      int
 	redactor                 Redactor
 }
 
@@ -56,11 +56,11 @@ func normalizeConfig(cfg Config) config {
 	result.maxRecentChunkEvents = normalizeDefaultedLimit(
 		cfg.MaxRecentChunkEvents, DefaultMaxRecentChunkEvents,
 	)
-	result.maxModelContentBytes = normalizeDefaultedLimit(
-		cfg.MaxModelContentBytes, DefaultMaxModelContentBytes,
+	result.maxContentBytes = normalizeDefaultedLimit(
+		cfg.MaxContentBytes, DefaultMaxContentBytes,
 	)
-	result.maxReasoningContentBytes = normalizeDefaultedLimit(
-		cfg.MaxReasoningContentBytes, DefaultMaxReasoningContentBytes,
+	result.maxMetaContentBytes = normalizeDefaultedLimit(
+		cfg.MaxMetaContentBytes, DefaultMaxMetaContentBytes,
 	)
 	result.redactor = cfg.Redactor
 	if result.redactor == nil {

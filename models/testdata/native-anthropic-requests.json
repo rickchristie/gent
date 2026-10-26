@@ -19,7 +19,7 @@
     "tools": [
       {
         "name": "lookup",
-        "description": "Read a record",
+        "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
         "input_schema": {
           "type": "object",
           "properties": {}
@@ -103,7 +103,7 @@
     "tools": [
       {
         "name": "lookup",
-        "description": "Read a record",
+        "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
         "input_schema": {
           "type": "object",
           "properties": {}

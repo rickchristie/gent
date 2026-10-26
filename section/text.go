@@ -26,14 +26,12 @@ import (
 //	thinking := section.NewText("thinking").
 //	    WithGuidance("Think step by step about how to solve this problem.")
 //
-// # Using with Agent
+// # Custom Text Workflows
 //
-// Text sections are typically registered on the TextFormat via the agent:
+// Register sections explicitly on a TextFormat. The standard native ReAct loop does not
+// require thinking sections or parse tool calls from text.
 //
-//	// Using the default "thinking" section in react agent
-//	agent := react.NewAgent(model)  // Includes thinking section by default
-//
-//	// Or register custom text sections
+//	// Register custom text sections
 //	textFormat := format.NewXML().
 //	    RegisterSection(section.NewText("thinking").
 //	        WithGuidance("Reason about the problem.")).

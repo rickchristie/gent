@@ -36,9 +36,9 @@ The journal lab deliberately separates the store cursor from Gent’s accepted c
 acknowledgment can leave storage ahead. Retrying the identical batch reconciles acceptance without
 reviving the stopped execution context. Keep this distinction when changing the examples.
 
-The recovery examples deliberately stop at an uncertain external operation until the application
-supplies a `ToolRecovery` decision. They must never imply that a checkpoint proves an external side
-effect completed, or that Gent guarantees exactly-once effects.
+Recovery examples distinguish saved results, explicit reconciliation, and unknown outcomes.
+Unknown calls produce recovery guidance for a new model plan. A checkpoint does not prove that an
+external effect completed, and Gent does not guarantee exactly-once effects.
 
 ## Verify
 

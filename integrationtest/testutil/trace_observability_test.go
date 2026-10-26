@@ -25,6 +25,42 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 
 	testCases := []testCase{
 		{
+			name: "iteration starts without model text",
+			input: input{events: []*genttrace.Event{
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
+			}},
+			expected: expected{output: `
+--- Iteration 1 ---
+`},
+		},
+		{
+			name: "empty model chunk",
+			input: input{events: []*genttrace.Event{
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
+				{
+					Type:          genttrace.EventTypeModelStreamChunk,
+					Iteration:     1,
+					StreamTopicId: llmResponseTopic,
+				},
+			}},
+			expected: expected{output: `
+--- Iteration 1 ---
+`},
+		},
+		{
+			name: "commentary stream chunks",
+			input: input{events: []*genttrace.Event{
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
+				{Type: genttrace.EventTypeModelStreamChunk, Iteration: 1,
+					StreamTopicId: llmResponseTopic,
+					Payload:       map[string]any{"metaContent": []any{map[string]any{"type": "commentary", "text": "Checking."}}}},
+			}},
+			expected: expected{output: `
+--- Iteration 1 ---
+  LLM: Checking.
+`},
+		},
+		{
 			name: "model stream chunks",
 			input: input{events: []*genttrace.Event{
 				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
@@ -57,7 +93,104 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 					Payload:       map[string]any{"content": "hidden"},
 				},
 			}},
-			expected: expected{output: ``},
+			expected: expected{output: `
+--- Iteration 1 ---
+`},
+		},
+		{
+			name: "iteration with only tool calls between model text iterations",
+			input: input{events: []*genttrace.Event{
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
+				{
+					Type:          genttrace.EventTypeModelStreamChunk,
+					Iteration:     1,
+					StreamTopicId: llmResponseTopic,
+					Payload:       map[string]any{"content": "Checking the booking."},
+				},
+				{Type: genttrace.EventTypeIterationFinished, Iteration: 1},
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 2},
+				{
+					Type:       genttrace.EventTypeToolCallStarted,
+					Iteration:  2,
+					ToolCallId: "tool-1",
+					Payload: map[string]any{
+						"name": "get_booking_info",
+						"args": map[string]any{"booking_id": "BK001"},
+					},
+				},
+				{
+					Type:       genttrace.EventTypeToolCallFinished,
+					Iteration:  2,
+					ToolCallId: "tool-1",
+					Payload: map[string]any{
+						"name":       "get_booking_info",
+						"output":     map[string]any{"status": "confirmed"},
+						"durationMs": float64(12),
+					},
+				},
+				{Type: genttrace.EventTypeIterationFinished, Iteration: 2},
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 3},
+				{
+					Type:          genttrace.EventTypeModelStreamChunk,
+					Iteration:     3,
+					StreamTopicId: llmResponseTopic,
+					Payload:       map[string]any{"metaContent": []any{map[string]any{"type": "reasoning", "text": "The booking is confirmed."}}},
+				},
+			}},
+			expected: expected{output: `
+--- Iteration 1 ---
+  LLM: Checking the booking.
+
+--- Iteration 2 ---
+
+
+  [Tool: get_booking_info]
+    Args: {"booking_id":"BK001"}
+    Output: {"status":"confirmed"}
+    Duration: 12ms
+
+--- Iteration 3 ---
+  LLM: The booking is confirmed.
+`},
+		},
+		{
+			name: "stream error without model text",
+			input: input{events: []*genttrace.Event{
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
+				{
+					Type:          genttrace.EventTypeModelStreamChunk,
+					Iteration:     1,
+					StreamTopicId: llmResponseTopic,
+					Error:         &genttrace.Error{Message: "connection closed"},
+				},
+			}},
+			expected: expected{output: `
+--- Iteration 1 ---
+  [Stream Error: connection closed]
+`},
+		},
+		{
+			name: "stream error after model text",
+			input: input{events: []*genttrace.Event{
+				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
+				{
+					Type:          genttrace.EventTypeModelStreamChunk,
+					Iteration:     1,
+					StreamTopicId: llmResponseTopic,
+					Payload:       map[string]any{"content": "Checking the booking."},
+				},
+				{
+					Type:          genttrace.EventTypeModelStreamChunk,
+					Iteration:     1,
+					StreamTopicId: llmResponseTopic,
+					Error:         &genttrace.Error{Message: "connection closed"},
+				},
+			}},
+			expected: expected{output: `
+--- Iteration 1 ---
+  LLM: Checking the booking.
+  [Stream Error: connection closed]
+`},
 		},
 		{
 			name: "tool call result",
@@ -183,7 +316,7 @@ func TestTraceEventLogger_WritesEventsAndSnapshot(t *testing.T) {
 			snapshotOutput: `
 >>> FinalTraceSnapshot
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "runId": "run",
   "status": "succeeded",
   "startedTs": "2026-05-10T12:00:00Z",

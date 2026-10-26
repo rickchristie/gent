@@ -21,22 +21,19 @@ import (
 //
 // # Registering Sections
 //
-// Sections are typically registered automatically by the agent when you configure
-// toolchains and terminations. You can also register sections manually:
+// Register sections explicitly when using the parser in a custom text workflow:
 //
 //	textFormat := format.NewMarkdown().
-//	    RegisterSection(toolchain).
-//	    RegisterSection(termination)
+//	    RegisterSection(section.NewText("notes")).
+//	    RegisterSection(section.NewText("answer"))
 //
 // # Example LLM Output
 //
-//	# Thinking
+//	# Notes
 //	I need to search for the weather in Tokyo to answer this question.
 //
-//	# Action
-//	tool: search
-//	args:
-//	  query: weather in tokyo
+//	# Answer
+//	The weather report says it is sunny.
 //
 // # Parsing Behavior
 //
@@ -44,8 +41,8 @@ import (
 // parsing but the original registered name is used in the result map:
 //
 //	sections, _ := textFormat.Parse(execCtx, llmOutput)
-//	// sections["Thinking"] = ["I need to search..."]
-//	// sections["Action"] = ["tool: search..."]
+//	// sections["notes"] = ["I need to search..."]
+//	// sections["answer"] = ["The weather report..."]
 //
 // # Nested Sections
 //
@@ -57,11 +54,11 @@ import (
 //
 // # Using with Agent
 //
-// The agent handles format registration automatically:
+// The standard ReAct agent uses the format for prompts and tool results:
 //
 //	agent := react.NewAgent(model).
-//	    WithTextFormat(format.NewMarkdown()).
-//	    WithToolChain(toolchain.NewYAML().RegisterTool(searchTool)).
+//	    WithFormat(format.NewMarkdown()).
+//	    WithToolChain(toolchain.New().RegisterTool(searchTool)).
 //	    WithTermination(termination.NewText("answer"))
 type Markdown struct {
 	mu            sync.RWMutex

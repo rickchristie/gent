@@ -12,14 +12,8 @@ import (
 	"github.com/rickchristie/gent/schema"
 )
 
-// ToolCallFn executes a tool call given JSON content.
-// Returns the ToolChainResult from the wrapped ToolChain.
-// The JSON content is in the format the wrapped ToolChain
-// expects (e.g., {"tool":"x","args":{...}} for single,
-// or [{...},{...}] for parallel).
-type ToolCallFn func(content string) (
-	*gent.ToolChainResult, error,
-)
+// ToolCallFn sends JavaScript calls through the native tool plan.
+type ToolCallFn func(calls []gent.ModelToolCall) (*gent.ToolChainResult, error)
 
 // RegisterToolBridge registers tool.call() and
 // tool.parallelCall() on the given Runtime.
@@ -96,15 +90,7 @@ func toolCall(
 		)
 	}
 
-	// Marshal to JSON for the wrapped ToolChain
-	jsonBytes, err := json.Marshal(req)
-	if err != nil {
-		panic(vm.NewTypeError(
-			"tool.call: failed to marshal: %v", err,
-		))
-	}
-
-	result, execErr := callFn(string(jsonBytes))
+	result, execErr := callFn([]gent.ModelToolCall{nativeCall(vm, req)})
 	return buildSingleResult(
 		vm, toolName, result, execErr,
 		source, schemaFn, req,
@@ -141,16 +127,11 @@ func toolParallelCall(
 		return vm.ToValue([]any{})
 	}
 
-	// Marshal to JSON array for the wrapped ToolChain
-	jsonBytes, err := json.Marshal(reqs)
-	if err != nil {
-		panic(vm.NewTypeError(
-			"tool.parallelCall: failed to marshal: %v",
-			err,
-		))
+	calls := make([]gent.ModelToolCall, len(reqs))
+	for i, req := range reqs {
+		calls[i] = nativeCall(vm, req)
 	}
-
-	result, execErr := callFn(string(jsonBytes))
+	result, execErr := callFn(calls)
 	return buildParallelResults(
 		vm, reqs, result, execErr,
 		source, schemaFn,
@@ -505,15 +486,15 @@ func (c *CollectedResults) BuildResult() *gent.ToolChainResult {
 // the provided callback and collects results. This is
 // used by JsToolChainWrapper to wire up the bridge.
 func MakeToolCallFn(
-	executeFn func(content string) (
+	executeFn func(calls []gent.ModelToolCall) (
 		*gent.ToolChainResult, error,
 	),
 	collector *CollectedResults,
 ) ToolCallFn {
-	return func(content string) (
+	return func(calls []gent.ModelToolCall) (
 		*gent.ToolChainResult, error,
 	) {
-		result, err := executeFn(content)
+		result, err := executeFn(calls)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"tool execution error: %w", err,
@@ -522,4 +503,19 @@ func MakeToolCallFn(
 		collector.Add(result)
 		return result, nil
 	}
+}
+
+// Only arguments are encoded. The bridge does not use a text tool protocol.
+func nativeCall(vm *sobek.Runtime, req map[string]any) gent.ModelToolCall {
+	name, _ := req["tool"].(string)
+	args := req["args"]
+	if args == nil {
+		args = map[string]any{}
+	}
+	data, err := json.Marshal(args)
+	if err != nil {
+		panic(vm.NewTypeError("tool arguments: %v", err))
+	}
+	return gent.ModelToolCall{Type: "function", FunctionCall: &gent.FunctionCall{
+		Name: name, Arguments: string(data)}}
 }

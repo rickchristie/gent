@@ -16,8 +16,17 @@
         })[char],
     );
   const storageKey = `gent-interface-review:${data.fingerprint}`;
-  const statusNames = { unread: 'Not reviewed', reviewed: 'Reviewed', question: 'Discuss' };
-  const state = { view: 'learn', selected: 'gent.LoopData', phase: 3, notes: {} };
+  const statusNames = {
+    unread: 'Not reviewed',
+    reviewed: 'Reviewed',
+    question: 'Discuss',
+  };
+  const state = {
+    view: 'learn',
+    selected: 'gent.LoopData',
+    phase: 3,
+    notes: {},
+  };
   let storageAvailable = true;
   let feedbackTimer;
 
@@ -217,9 +226,7 @@
           const explanation =
             name === 'error'
               ? 'Built-in error: Error() string.'
-              : name === 'llms.ContentPart'
-                ? 'LangChainGo v0.1.14 ContentPart has an isPart() marker; use its content types.'
-                : 'This contract is supplied by an external package.';
+              : 'This contract is supplied by an external package.';
           return `<p><code>${escape(name)}</code> — ${escape(explanation)}</p>`;
         })
         .join('') +
@@ -536,7 +543,10 @@
       $('phase-list').querySelector(`[data-phase="${state.phase}"]`).focus();
     }
     if (button.dataset.status) {
-      state.notes[state.selected] = { ...noteFor(state.selected), status: button.dataset.status };
+      state.notes[state.selected] = {
+        ...noteFor(state.selected),
+        status: button.dataset.status,
+      };
       saveNotes();
       document
         .querySelectorAll('[data-status]')

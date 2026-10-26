@@ -12,8 +12,8 @@ func TestStreamBufferCloseStopsBlockedDrainLoop(t *testing.T) {
 	stream := newStreamBuffer()
 	chunks := stream.Chunks()
 
-	require.True(t, stream.SendContent("first"))
-	require.True(t, stream.SendContent("second"))
+	require.True(t, stream.SendMeta(&MetaContent{Type: MetaContentIntermediary, Text: "first"}))
+	require.True(t, stream.SendMeta(&MetaContent{Type: MetaContentIntermediary, Text: "second"}))
 	require.Eventually(t, func() bool {
 		return len(chunks) == 1
 	}, time.Second, 10*time.Millisecond)
@@ -27,7 +27,13 @@ func TestStreamBufferCloseStopsBlockedDrainLoop(t *testing.T) {
 	}
 
 	chunk, ok := <-chunks
-	assert.Equal(t, StreamChunk{Content: "first"}, chunk)
+	assert.Equal(t, StreamChunk{
+		MetaContent: []*MetaContent{
+			{
+				Type: MetaContentIntermediary, Text: "first",
+			},
+		},
+	}, chunk)
 	assert.True(t, ok)
 
 	chunk, ok = <-chunks

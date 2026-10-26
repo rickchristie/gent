@@ -3,13 +3,13 @@ package toolchain
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 func TestNativeJavaScript_Execution(t *testing.T) {
@@ -45,7 +45,7 @@ record
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			var inputs []map[string]any
-			chain := NewJSON().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+			chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
 				func(_ context.Context, args map[string]any) (string, error) {
 					inputs = append(inputs, args)
 					return "record", nil
@@ -81,20 +81,27 @@ record
 }
 
 func TestNativeJavaScript_Descriptions(t *testing.T) {
-	chain := NewJSON().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+	chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
 		func(context.Context, map[string]any) (string, error) { return "record", nil }))
 	wrapper := NewJsToolChainWrapper(chain).WithDirectCallDisabled().WithCodeGuidance("Use JS.")
 	definitions, err := wrapper.NativeTools(newExecCtx())
 	assert.NoError(t, err)
-	assert.Equal(t, []llms.Tool{{Type: "function", Function: &llms.FunctionDefinition{
-		Name: nativeCodeTool, Description: `Run JavaScript on the application server.
+	catalog, err := json.Marshal(&gent.FunctionDefinition{
+		Name: "lookup", Description: `Read data
+
+Returns: {"type":"string"}`, Parameters: map[string]any{
+			"properties": map[string]any{}, "type": "object"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
+		Name: nativeCodeTool, Description: fmt.Sprintf(`Run JavaScript on the application server.
 Use tool.call or tool.parallelCall for registered tools.
 
 Use JS.
 
 Available tools inside code:
-{"name":"lookup","description":"Read data","parameters":{"properties":{},"type":"object"}}
-`, Parameters: map[string]any{"type": "object", "properties": map[string]any{
+%s
+`, catalog), Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"code": map[string]any{"type": "string"},
 		}, "required": []string{"code"}, "additionalProperties": false},
 	}}}, definitions)
@@ -102,7 +109,7 @@ Available tools inside code:
 
 func TestNativeJavaScript_CallValidation(t *testing.T) {
 	type input struct {
-		call     llms.ToolCall
+		call     gent.ModelToolCall
 		codeOnly bool
 	}
 	type expected struct{ errorText string }
@@ -121,16 +128,16 @@ func TestNativeJavaScript_CallValidation(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			wrapper := NewJsToolChainWrapper(NewJSON())
+			wrapper := NewJsToolChainWrapper(New())
 			if test.input.codeOnly {
 				wrapper.WithDirectCallDisabled()
 			}
 			ctx := newExecCtx()
-			plan, err := wrapper.PrepareCalls(ctx, []llms.ToolCall{test.input.call})
+			plan, err := wrapper.PrepareCalls(ctx, []gent.ModelToolCall{test.input.call})
 			assert.Nil(t, plan)
 			assert.EqualError(t, err, test.expected.errorText)
 			assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCToolchainParseErrorTotal))
-			_, err = wrapper.PrepareCalls(ctx, []llms.ToolCall{test.input.call})
+			_, err = wrapper.PrepareCalls(ctx, []gent.ModelToolCall{test.input.call})
 			assert.EqualError(t, err, test.expected.errorText)
 			assert.Equal(t, float64(2), ctx.Stats().GetGauge(gent.SGToolchainParseErrorConsecutive))
 		})
@@ -138,7 +145,7 @@ func TestNativeJavaScript_CallValidation(t *testing.T) {
 }
 
 func TestNativeJavaScript_SearchDiscovery(t *testing.T) {
-	chain := setupSearchJSON([]*indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
+	chain := setupSearchChain([]*indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
 		nil, nil, func(context.Context, map[string]any) (string, error) { return "ok", nil })},
 		[]gent.ToolSearcher{&mockToolSearcher{id: "test",
 			searchFn: func(context.Context, string) ([]string, error) { return []string{"lookup"}, nil }}})
@@ -157,7 +164,7 @@ func TestNativeJavaScript_SearchDiscovery(t *testing.T) {
 }
 
 func TestNativeJavaScript_TimeoutAndReset(t *testing.T) {
-	wrapper := NewJsToolChainWrapper(NewJSON()).WithCodeTimeout(time.Millisecond)
+	wrapper := NewJsToolChainWrapper(New()).WithCodeTimeout(time.Millisecond)
 	ctx := newExecCtx()
 	result := executeNativeTestCall(t, wrapper, ctx,
 		nativeCall(nativeCodeTool, `{"code":"while (true) {}"}`))

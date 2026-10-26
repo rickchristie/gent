@@ -167,7 +167,7 @@ const (
 //
 // Auto-updated when ParseErrorEvent with ErrorType="toolchain" is
 // published. These track errors when the ToolChain fails to parse
-// tool calls (YAML/JSON).
+// native tool calls and their JSON arguments.
 //
 // Default limit: 3 consecutive errors (see DefaultLimits).
 const (

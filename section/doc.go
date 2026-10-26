@@ -31,9 +31,9 @@
 //
 // # Sections vs Terminations
 //
-// Sections ([Text], [JSON], [YAML]) parse content during the agent loop
-// for intermediate processing. Terminations ([termination.Text], [termination.JSON])
-// determine when the loop should end and return the final answer.
+// Custom workflows can use sections ([Text], [JSON], [YAML]) for intermediate content.
+// The standard native ReAct loop uses terminations ([termination.Text], [termination.JSON])
+// to validate final assistant content and decide when the loop should end.
 //
 // Use sections for:
 //   - Thinking/reasoning that guides the agent
@@ -63,7 +63,6 @@
 //	textFormat := format.NewXML().
 //	    RegisterSection(thinking).
 //	    RegisterSection(classify).
-//	    RegisterSection(toolchain).
 //	    RegisterSection(termination)
 //
 // # Schema Generation

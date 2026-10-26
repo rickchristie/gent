@@ -165,7 +165,7 @@ func TestLCGWrapperGenerateContentStream_ConcurrentCallbacksDedupeContent(t *tes
 				wrapper,
 				gent.ModelCall{StreamId: "stream", StreamTopicId: "topic"},
 				gent.NewModelCallRequest(
-					[]llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
+					[]gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 				),
 			)
 			require.NoError(t, err)
@@ -224,8 +224,8 @@ func collectStreamContentCounts(t *testing.T, stream gent.Stream) map[string]int
 	contentCounts := make(map[string]int)
 	for chunk := range stream.Chunks() {
 		require.NoError(t, chunk.Err)
-		if chunk.Content != "" {
-			contentCounts[chunk.Content]++
+		if text := gent.MetaText(chunk.MetaContent, gent.MetaContentIntermediary); text != "" {
+			contentCounts[text]++
 		}
 	}
 	_, err := stream.Response()

@@ -71,7 +71,6 @@ export const lessons = [
     takeaway:
       'A tool-ready checkpoint proves intent. Recovery needs evidence of the external result.',
     contracts: [
-      'gent.RecoverableToolChain',
       'gent.CheckpointState',
       'gent.RecoveryConfig',
       'gent.ToolRecovery',
@@ -100,21 +99,24 @@ export const lessons = [
 ];
 
 export function loopFrames(route, format) {
-  const action = `tool: lookup_order
-args:
-  order_id: 42`;
+  const nativeCall = JSON.stringify(
+    {
+      id: 'call-1',
+      type: 'function',
+      function: {
+        name: 'lookup_order',
+        arguments: route === 'malformed' ? '{' : '{"order_id":42}',
+      },
+    },
+    null,
+    2,
+  );
   const answer = route === 'rejected' ? 'Probably delivered.' : 'Order 42 ships on Friday.';
-  const body = route === 'tool' ? action : answer;
-  const section = route === 'tool' ? 'action' : 'answer';
-  const response =
-    route === 'malformed'
-      ? 'Some unstructured text without any recognized section.'
-      : format === 'xml'
-        ? `<${section}>
-${body}
-</${section}>`
-        : `# ${section}
-${body}`;
+  const response = route === 'tool' || route === 'malformed' ? nativeCall : answer;
+  const prompt =
+    format === 'xml'
+      ? '<instructions>Use tools to check the order.</instructions>'
+      : '# instructions\nUse tools to check the order.';
   const frames = [
     [
       'Task',
@@ -129,31 +131,31 @@ ${body}`;
       'gent.Loop',
       'The runner calls Loop.Next.',
       'The loop builds a request from the task and selected history. It chooses the agent pattern.',
-      'task + active history → model request',
+      `${prompt}\nTask + active history + native definitions → model request`,
       'Call the model →',
     ],
     [
       'Generate',
       'gent.Model',
       'The managed context accepts the effective request first.',
-      'Model calls the provider. Stream delivers chunks; the producer stops before completion.',
+      'Stream delivers provisional MetaContent; provider completion supplies a candidate.',
       response,
-      'Parse the response →',
+      'Read the response →',
     ],
     [
-      'Parse',
-      'gent.TextFormat',
-      'Separate the envelope from the section’s contents.',
-      'TextFormat finds the outer sections. TextSection interprets the content inside each one.',
+      'Read',
+      route === 'tool' || route === 'malformed' ? 'gent.ToolChain' : 'gent.Termination',
+      'Read native calls or candidate assistant text.',
+      'ToolChain prepares structured calls. Termination checks candidate text when there are no calls.',
       response,
-      route === 'tool' ? 'Execute the action →' : 'Check the answer →',
+      route === 'tool' ? 'Execute the tool →' : 'Check the response →',
     ],
   ];
   if (route === 'malformed') {
     frames.push([
       'Retry',
-      'gent.TextFormat',
-      'There is no recognized section to act on.',
+      'gent.ToolChain',
+      'The tool arguments are not valid JSON.',
       'The parse failure becomes feedback. Another iteration can run within the executor’s limits.',
       'parse error → feedback → LAContinue',
       'Try a different response',
@@ -163,7 +165,7 @@ ${body}`;
       'Act',
       'gent.ToolChain',
       'The chain validates, converts, and calls the tool.',
-      'Tool accepts typed input. The chain owns parsing, schema checks, and result formatting.',
+      'Tool accepts typed input. The chain owns JSON decoding, schema checks, and result formatting.',
       'lookup_order({order_id: 42}) → {status: "ships Friday"}',
       'Keep the observation →',
     ]);
@@ -193,7 +195,7 @@ Next working context: [H1]`,
         : 'The answer passes validation.',
       route === 'rejected'
         ? 'Feedback asks for evidence. A valid answer format can still require another iteration.'
-        : 'Termination reports acceptance and the executor saves the terminal outcome.',
+        : 'The executor saves Content with the terminal outcome, then publishes the accepted answer.',
       route === 'rejected'
         ? '“Use the order tool; do not guess.” → LAContinue'
         : `${answer} → LATerminate`,
@@ -206,10 +208,18 @@ Next working context: [H1]`,
 export function newMemory() {
   return {
     entries: [
-      { id: 'H1', kind: 'original', text: 'Policy: refunds allowed within 14 days.' },
+      {
+        id: 'H1',
+        kind: 'original',
+        text: 'Policy: refunds allowed within 14 days.',
+      },
       { id: 'H2', kind: 'original', text: 'Order 42 was bought 10 days ago.' },
       { id: 'H3', kind: 'original', text: 'The receipt has been verified.' },
-      { id: 'H4', kind: 'original', text: 'The user requested the original payment method.' },
+      {
+        id: 'H4',
+        kind: 'original',
+        text: 'The user requested the original payment method.',
+      },
     ],
     selections: [['H1', 'H2', 'H3', 'H4']],
     reason: 'Four observations are selected for the next prompt.',
@@ -239,7 +249,11 @@ export function changeMemory(state, action, pinned = false) {
     if (candidates.length < 2) return state;
     const id = `S${revision}`;
     const text = candidates.map((id) => entries.find((entry) => entry.id === id).text).join(' ');
-    entries.push({ id, kind: 'summary', text: `Summary of ${candidates.join(' + ')}: ${text}` });
+    entries.push({
+      id,
+      kind: 'summary',
+      text: `Summary of ${candidates.join(' + ')}: ${text}`,
+    });
     selected = [id, ...active.filter((id) => !candidates.includes(id))];
     entries.push({
       id: `C${revision}`,
@@ -282,7 +296,13 @@ export function advanceSave(state) {
     };
   }
   if (state.step === 3 && state.outcome === 'lost') {
-    return { ...state, step: 4, accepted: 121, attempts: 2, observer: 'event 121' };
+    return {
+      ...state,
+      step: 4,
+      accepted: 121,
+      attempts: 2,
+      observer: 'event 121',
+    };
   }
   return state;
 }
@@ -304,7 +324,10 @@ export function recoverWorker(state, action, options) {
   const restored = { ...state, attempt: 'worker-B', restored: true };
   if (state.point === 'after-result') return { ...restored, status: 'saved result reused' };
   if (action === 'restore' || action === 'unresolved') {
-    return { ...restored, status: 'ErrUncertainTool' };
+    return {
+      ...restored,
+      status: 'unknown outcome; model receives recovery guidance',
+    };
   }
   if (action === 'completed') {
     if (state.effects === 0) return { ...restored, status: 'no external receipt to return' };
@@ -344,8 +367,14 @@ export const searchFixtures = {
   },
 };
 export const searchTools = [
-  { id: 'refund_order', description: 'Refund an order to its original payment method.' },
-  { id: 'lookup_order', description: 'Look up an order, its status, and purchase date.' },
+  {
+    id: 'refund_order',
+    description: 'Refund an order to its original payment method.',
+  },
+  {
+    id: 'lookup_order',
+    description: 'Look up an order, its status, and purchase date.',
+  },
   { id: 'cancel_reservation', description: 'Cancel a travel reservation.' },
 ];
 

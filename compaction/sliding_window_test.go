@@ -6,7 +6,6 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // makeIter creates a simple Iteration with text content.
@@ -14,9 +13,9 @@ func makeIter(text string) *gent.HistoryEntry {
 	return &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeAI,
+				Role: gent.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
-					llms.TextContent{Text: text},
+					gent.TextContent{Text: text},
 				},
 			},
 		},

@@ -6,7 +6,7 @@ import (
 
 // IndexableToolFunc wraps a [gent.ToolFunc] with
 // [gent.IndexableTool] metadata. This allows existing tools
-// to be used with [toolchain.SearchJSON] without modifying
+// to be used with [toolchain.SearchChain] without modifying
 // the original tool definitions.
 //
 // # Example

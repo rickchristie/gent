@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSearchJSONPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
+func TestSearchChainPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
 	type input struct {
 		mode    SearchType
 		content string
@@ -36,8 +36,8 @@ func TestSearchJSONPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			newChain := func(searches *int) *SearchJSON {
-				chain := NewSearchJSON(SearchHintSimpleList).WithSearchType(tt.input.mode)
+			newChain := func(searches *int) *SearchChain {
+				chain := NewSearch(SearchHintSimpleList).WithSearchType(tt.input.mode)
 				chain.WithPageSize(1).RegisterEngine(&mockToolSearcher{
 					id: "mock", guidance: "Find policies",
 					searchFn: func(context.Context, string) ([]string, error) {
@@ -59,7 +59,7 @@ func TestSearchJSONPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
 			searches := 0
 			chain := newChain(&searches)
 			ctx := newExecCtx()
-			plan, err := chain.Prepare(ctx, tt.input.content)
+			plan, err := chain.PrepareCalls(ctx, testCalls(tt.input.content))
 			if !assert.NoError(t, err) {
 				return
 			}

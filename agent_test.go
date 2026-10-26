@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // -----------------------------------------------------------------------------
@@ -181,7 +180,7 @@ func TestMessageContent_Metadata(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			msg := &MessageContent{
-				Role:     llms.ChatMessageTypeHuman,
+				Role:     ChatMessageTypeHuman,
 				Metadata: tc.input.initialMetadata,
 			}
 

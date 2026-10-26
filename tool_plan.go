@@ -23,24 +23,25 @@ type SavedToolCall struct {
 }
 
 type ToolPlan struct {
-	Version   int
-	Calls     []PlannedToolCall
-	NextCall  int
-	ReadyCall *SavedToolCall
-	Results   []*ToolCallResult
-	State     EncodedValue
-}
-
-type RecoverableToolChain interface {
-	ToolChain
-	Prepare(*ExecutionContext, string) (*ToolPlan, error)
-	ExecuteNext(*ExecutionContext, *ToolPlan, TextFormat) (*ToolCallResult, error)
+	// CheckpointKey separates an inner program plan from its outer native call.
+	CheckpointKey string
+	Abandoned     bool
+	Version       int
+	Calls         []PlannedToolCall
+	NextCall      int
+	ReadyCall     *SavedToolCall
+	Results       []*ToolCallResult
+	State         EncodedValue
 }
 
 func (ctx *ExecutionContext) NewToolCallId() string { return ctx.nextToolCallId() }
 
 func (ctx *ExecutionContext) SetToolPlan(plan *ToolPlan) error {
-	return ctx.SetCheckpointState("gent:tool_plan", plan)
+	key := plan.CheckpointKey
+	if key == "" {
+		key = "gent:tool_plan"
+	}
+	return ctx.SetCheckpointState(key, plan)
 }
 
 func (ctx *ExecutionContext) SavedToolPlan() (*ToolPlan, bool, error) {
@@ -133,8 +134,8 @@ func (ctx *ExecutionContext) ToolContext(id string) context.Context {
 		ContextId: ctx.ContextId(), ToolCallId: id, AttemptId: ctx.AttemptId()})
 }
 
-// RecoverTool refuses to guess whether an external effect occurred. A completed saved result
-// takes precedence over the recovery adapter; otherwise the adapter explicitly decides.
+// RecoverTool first reuses accepted evidence, then asks the optional recovery adapter.
+// An unresolved result lets the toolchain produce guidance without repeating the operation.
 func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan) (*ToolCallResult, bool, error) {
 	if plan.ReadyCall == nil || plan.ReadyCall.AttemptId == ctx.AttemptId() {
 		return nil, false, nil
@@ -166,7 +167,7 @@ func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan) (*ToolCallResult, bool,
 	if err != nil {
 		return nil, false, err
 	}
-	result, err := ctx.run.toolRecovery.Recover(ctx.Context(), ToolRecoveryRequest{
+	result, err := ctx.run.toolRecovery.Recover(ctx.Context(), &ToolRecoveryRequest{
 		RunId: ctx.RunId(), ContextId: ctx.ContextId(), ToolCallId: ready.Id,
 		AttemptId: ready.AttemptId, Name: ready.Name, Args: ownedArgs.(map[string]any),
 		Input: cloneWire(ready.Input)})

@@ -3,6 +3,7 @@ package gent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -46,9 +47,18 @@ func (ctx *ExecutionContext) GenerateContentStream(
 	if stream != nil {
 		return stream, nil
 	}
+	// Hooks may change nested options and messages. Give them a request owned by this call so
+	// reusable agent settings and requests from other runs cannot change through shared pointers.
+	request, err = cloneOwned(ctx.Codecs(), request)
+	if err != nil {
+		return nil, ctx.stopRecording(err)
+	}
 	before := ctx.PublishBeforeModelCall(call.Model, request, WithModelCallId(call.Id),
 		WithModelStream(call.StreamId, call.StreamTopicId), WithModelCallSource(call.Source),
 		WithModelProvider(call.Provider))
+	// A physical retry may reuse the logical call ID within the same worker attempt.
+	// Its preview must have a new identity; saved replay keeps this identity unchanged.
+	messagePrefix := before.ContextId + ":message:" + randomIdentity() + ":"
 	if err := ctx.RecordingError(); err != nil {
 		return nil, err
 	}
@@ -94,6 +104,17 @@ func (ctx *ExecutionContext) GenerateContentStream(
 		defer cancel()
 		var recordingErr error
 		for chunk := range provider.Chunks() {
+			chunk = cloneStreamChunk(chunk)
+			// A model cannot accept the execution result. Even custom adapters that send
+			// Content are shown as provisional text until the executor commits success.
+			if chunk.Content != "" {
+				chunk.MetaContent = append(chunk.MetaContent, &MetaContent{
+					Type: MetaContentIntermediary, Text: chunk.Content})
+				chunk.Content = ""
+			}
+			for _, item := range chunk.MetaContent {
+				item.MessageId = scopedMessageId(messagePrefix, item.MessageId)
+			}
 			if chunk.Timestamp.IsZero() {
 				chunk.Timestamp = time.Now()
 			}
@@ -106,7 +127,7 @@ func (ctx *ExecutionContext) GenerateContentStream(
 			chunk.Depth = before.Depth
 			chunk.Source = before.Source
 			if recordingErr == nil {
-				recordingErr = ctx.EmitChunk(chunk)
+				recordingErr = ctx.emitChunk(&chunk)
 			}
 			if recordingErr != nil {
 				cancel()
@@ -116,6 +137,12 @@ func (ctx *ExecutionContext) GenerateContentStream(
 			output.Send(chunk)
 		}
 		response, providerErr := provider.Response()
+		if response != nil && recordingErr == nil {
+			response, recordingErr = cloneOwned(ctx.Codecs(), response)
+			if recordingErr == nil {
+				scopeResponseMessages(before, messagePrefix, response)
+			}
+		}
 		if recordingErr == nil {
 			ctx.PublishAfterModelCallForIteration(before.Iteration, before.Model, request, response,
 				time.Since(started), providerErr, WithModelCallId(before.ModelCallId),
@@ -127,12 +154,40 @@ func (ctx *ExecutionContext) GenerateContentStream(
 			output.Complete(nil, recordingErr)
 			return
 		}
-		cloned, err := ctx.Codecs().Clone(response)
-		if err != nil {
-			output.Complete(nil, ctx.stopRecording(err))
-			return
-		}
-		output.Complete(cloned.(*ContentResponse), providerErr)
+		output.Complete(response, providerErr)
 	}()
 	return output, nil
+}
+
+func scopedMessageId(prefix, local string) string {
+	if local == "" {
+		local = "message:0"
+	}
+	return prefix + local
+}
+
+func scopeResponseMessages(
+	call *BeforeModelCallEvent, prefix string, response *ContentResponse,
+) {
+	for index, choice := range response.Choices {
+		for _, item := range choice.MetaContent {
+			item.MessageId = scopedMessageId(prefix, item.MessageId)
+		}
+		if choice.CandidateContent == "" {
+			continue
+		}
+		source := cloneContentSource(choice.CandidateSource)
+		if source == nil {
+			source = &ContentSource{}
+		}
+		if len(source.MessageIds) == 0 {
+			source.MessageIds = []string{fmt.Sprintf("message:%d", index)}
+		}
+		source.ModelCallId, source.StreamId = call.ModelCallId, call.StreamId
+		source.StreamTopicId = call.StreamTopicId
+		for i, id := range source.MessageIds {
+			source.MessageIds[i] = scopedMessageId(prefix, id)
+		}
+		choice.CandidateSource = source
+	}
 }

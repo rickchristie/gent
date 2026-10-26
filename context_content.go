@@ -1,0 +1,50 @@
+package gent
+
+import "strings"
+
+// SetFinalContentSource links the next successful terminal result to its provisional messages.
+// The executor supplies AgentLoopResult.ContentSource. A custom executor may call this directly.
+func (ctx *ExecutionContext) SetFinalContentSource(source *ContentSource) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.finalContentSource = cloneContentSource(source)
+}
+
+// queueFinalContent runs under run.mu at the terminal save boundary. It never flushes by itself:
+// Acceptance without the terminal checkpoint could publish an answer that a retry repeats.
+func (ctx *ExecutionContext) queueFinalContent() error {
+	ctx.mu.RLock()
+	reason, result := ctx.terminationReason, ctx.finalResult
+	source := cloneContentSource(ctx.finalContentSource)
+	stamp := ctx.endTime
+	ctx.mu.RUnlock()
+	if reason != TerminationSuccess {
+		return nil
+	}
+	var text strings.Builder
+	for _, part := range result {
+		switch part := part.(type) {
+		case TextContent:
+			text.WriteString(part.Text)
+		case *TextContent:
+			text.WriteString(part.Text)
+		}
+	}
+	chunk := StreamChunk{Content: text.String(), MessageId: ctx.ContextId() + ":answer",
+		ContextId: ctx.ContextId(), ParentContextId: ctx.ParentContextId(),
+		Iteration: ctx.Iteration(), Depth: ctx.Depth(), Source: ctx.BuildSourcePath(), Timestamp: stamp}
+	if source != nil {
+		chunk.ModelCallId, chunk.StreamId = source.ModelCallId, source.StreamId
+		chunk.StreamTopicId = source.StreamTopicId
+		chunk.SourceMessageIds = source.MessageIds
+	}
+	value, err := ctx.run.codecs.Encode(chunk)
+	if err != nil {
+		return err
+	}
+	ctx.run.pending = append(ctx.run.pending, &RecordedEvent{Type: "execution_content",
+		ContextId: chunk.ContextId, ParentContextId: chunk.ParentContextId,
+		Iteration: chunk.Iteration, AttemptId: ctx.run.attempt, ModelCallId: chunk.ModelCallId,
+		Ts: stamp, Payload: &value})
+	return nil
+}

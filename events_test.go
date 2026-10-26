@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 // -----------------------------------------------------------------------------
@@ -335,7 +334,7 @@ func (p *blockingModelRequestPublisher) Dispatch(_ *ExecutionContext, event Even
 	}
 	beforeModel.Request.Messages = append(
 		beforeModel.Request.Messages,
-		llms.TextParts(llms.ChatMessageTypeSystem, "injected"),
+		TextParts(ChatMessageTypeSystem, "injected"),
 	)
 	close(p.entered)
 	<-p.release
@@ -354,8 +353,8 @@ func TestEvents_HidesMutableEventUntilDispatchCompletes(t *testing.T) {
 
 	go func() {
 		published <- execCtx.PublishBeforeModelCall("gpt", ModelCallRequest{
-			Messages: []llms.MessageContent{
-				llms.TextParts(llms.ChatMessageTypeHuman, "original"),
+			Messages: []ModelMessage{
+				TextParts(ChatMessageTypeHuman, "original"),
 			},
 		})
 	}()
@@ -379,7 +378,7 @@ func TestEvents_HidesMutableEventUntilDispatchCompletes(t *testing.T) {
 
 	publishedEvent.Request.Messages = append(
 		publishedEvent.Request.Messages,
-		llms.TextParts(llms.ChatMessageTypeSystem, "caller mutation"),
+		TextParts(ChatMessageTypeSystem, "caller mutation"),
 	)
 	loggedEvent := execCtx.Events()[0].(*BeforeModelCallEvent)
 	assert.Equal(t, []string{"original", "injected"}, modelRequestTexts(loggedEvent.Request))
@@ -412,7 +411,7 @@ func modelRequestTexts(request ModelCallRequest) []string {
 	texts := make([]string, 0)
 	for _, message := range request.Messages {
 		for _, part := range message.Parts {
-			text, ok := part.(llms.TextContent)
+			text, ok := part.(TextContent)
 			if !ok {
 				continue
 			}

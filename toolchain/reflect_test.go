@@ -328,4 +328,3 @@ func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 	output := result.Text.(string)
 	assert.Equal(t, expected, output)
 }
-

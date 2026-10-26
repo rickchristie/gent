@@ -60,6 +60,8 @@ type EventPublisher interface {
 // is safe for concurrent use, and custom LoopData implementations must provide their own
 // synchronization if they are accessed concurrently.
 type ExecutionContext struct {
+	finalContentSource *ContentSource
+
 	mu                 sync.RWMutex
 	run                *executionRun
 	savedTask          EncodedValue
@@ -1707,6 +1709,13 @@ func (ctx *ExecutionContext) SubscribeToTopic(
 //
 // If chunk.Source is empty, it will be populated with BuildSourcePath().
 func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) error {
+	return ctx.emitChunk(&chunk)
+}
+
+func (ctx *ExecutionContext) emitChunk(chunk *StreamChunk) error {
+	if chunk.Content != "" || chunk.MessageId != "" || len(chunk.SourceMessageIds) != 0 {
+		return fmt.Errorf("gent: Content is reserved for terminal publication; emit MetaContent")
+	}
 	if chunk.Timestamp.IsZero() {
 		chunk.Timestamp = time.Now()
 	}
@@ -1728,7 +1737,6 @@ func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) error {
 	if err := ctx.recordChunk(chunk); err != nil {
 		return err
 	}
-	ctx.emitAcceptedChunk(chunk)
 	return nil
 }
 

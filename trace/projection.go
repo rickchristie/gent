@@ -2,6 +2,7 @@ package trace
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -146,18 +147,21 @@ func (s *Sequencer) project(
 			payload["data"] = jsonSafeValue(s.cfg.redactor.RedactStateChange(recorded.EventName, saved))
 		}
 	case gent.StreamChunk:
+		if recorded.Type == "execution_content" {
+			saved.Content = redactedContent(s.cfg.redactor, saved.Content)
+		}
 		chunk := s.cfg.redactor.RedactChunk(saved)
 		event.Depth, event.Source = chunk.Depth, chunk.Source
 		event.StreamId, event.StreamTopicId = chunk.StreamId, chunk.StreamTopicId
 		event.Error = redactError(s.cfg.redactor, chunk.Err)
 		payload["streamId"], payload["streamTopicId"] = chunk.StreamId, chunk.StreamTopicId
+		payload["messageId"] = chunk.MessageId
+		payload["sourceMessageIds"] = append([]string(nil), chunk.SourceMessageIds...)
 		if s.cfg.IncludeChunkText {
-			if chunk.Content != "" {
-				payload["content"] = chunk.Content
-			}
-			if chunk.ReasoningContent != "" {
-				payload["reasoningContent"] = chunk.ReasoningContent
-			}
+			payload["metaContent"] = jsonSafeValue(chunk.MetaContent)
+		}
+		if s.cfg.IncludeRunOutput && recorded.Type == "execution_content" {
+			payload["content"] = chunk.Content
 		}
 	default:
 		event.Payload = nil
@@ -185,6 +189,8 @@ func (s *Sequencer) applyEvent(event *Event) {
 		s.applyModelCallStarted(event)
 	case EventTypeModelCallFinished:
 		s.applyModelCallFinished(event)
+	case EventTypeExecutionContent:
+		s.applyExecutionContent(event)
 	case EventTypeModelStreamChunk:
 		s.applyModelChunk(event)
 	case EventTypeToolCallStarted:
@@ -246,5 +252,28 @@ func intFromAny(value any) int {
 		return int(v)
 	default:
 		return 0
+	}
+}
+
+// A run-output redactor may replace structured output with any value. Only text is suitable for
+// the final text channel; omit other forms instead of exposing the unredacted answer.
+func redactedContent(redactor Redactor, content string) string {
+	value := redactor.RedactRunOutput([]gent.ContentPart{gent.TextContent{Text: content}})
+	switch output := value.(type) {
+	case string:
+		return output
+	case []gent.ContentPart:
+		var text strings.Builder
+		for _, part := range output {
+			switch part := part.(type) {
+			case gent.TextContent:
+				text.WriteString(part.Text)
+			case *gent.TextContent:
+				text.WriteString(part.Text)
+			}
+		}
+		return text.String()
+	default:
+		return ""
 	}
 }

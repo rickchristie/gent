@@ -13,7 +13,6 @@ import (
 	"github.com/rickchristie/gent/executor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type traceTestLoop struct {
@@ -87,8 +86,9 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	assert.NoError(t, execCtx.FlushProgress())
 
 	request := gent.ModelCallRequest{
-		Messages: []llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "hello")},
-		Options:  llms.CallOptions{Temperature: 0.2, MaxTokens: 123},
+		Messages: []gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
+		Options: gent.NewModelCallRequest(
+			nil, gent.WithTemperature(0.2), gent.WithMaxTokens(123)).Options,
 	}
 	beforeModel := execCtx.PublishBeforeModelCall(
 		"gpt", request,
@@ -97,7 +97,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	)
 	assert.NoError(t, execCtx.FlushProgress())
 	assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
-		Content:       "hel",
+		MetaContent:   []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "hel"}},
 		ModelCallId:   beforeModel.ModelCallId,
 		StreamId:      "stream",
 		StreamTopicId: "topic",
@@ -107,7 +107,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		ContextId:     beforeModel.ContextId,
 	}))
 	assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
-		Content:       "lo",
+		MetaContent:   []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "lo"}},
 		ModelCallId:   beforeModel.ModelCallId,
 		StreamId:      "stream",
 		StreamTopicId: "topic",
@@ -146,7 +146,8 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	require.Len(t, snapshot.ModelCalls, 1)
 	require.Len(t, snapshot.ToolCalls, 1)
 	assertJSONSafe(t, snapshot)
-	assert.Equal(t, "hello", snapshot.ModelCalls[0].Stream.Content)
+	assert.Equal(t, "hello",
+		gent.MetaText(snapshot.ModelCalls[0].Stream.MetaContent, gent.MetaContentIntermediary))
 	assert.Equal(t, "openai", snapshot.ModelCalls[0].Provider)
 	assert.Equal(t, &ModelUsage{
 		InputTokens:       3,
@@ -191,21 +192,21 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 				if len(output) == 0 {
 					return ""
 				}
-				text, _ := output[0].(llms.TextContent)
+				text, _ := output[0].(gent.TextContent)
 				return text.Text
 			},
 		},
 	})
 	registry := events.NewRegistry()
 	childExec := executor.New[*gent.BasicLoopData](
-		&traceTestLoop{result: []gent.ContentPart{llms.TextContent{Text: "child result"}}},
+		&traceTestLoop{result: []gent.ContentPart{gent.TextContent{Text: "child result"}}},
 		executor.Config{Events: registry},
 	)
 
 	var rootStartedTs time.Time
 	var afterChild *Snapshot
 	parentLoop := &traceTestLoop{
-		result: []gent.ContentPart{llms.TextContent{Text: "root result"}},
+		result: []gent.ContentPart{gent.TextContent{Text: "root result"}},
 		beforeReturn: func(execCtx *gent.ExecutionContext) {
 			rootStartedTs = seq.Snapshot().StartedTs
 			childData := gent.NewBasicLoopData(&gent.Task{Text: "child task"})
@@ -327,7 +328,7 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 			name: "limit exceeded",
 			input: input{
 				loop: &traceTestLoop{
-					result: []gent.ContentPart{llms.TextContent{Text: "child result"}},
+					result: []gent.ContentPart{gent.TextContent{Text: "child result"}},
 				},
 				limits: []gent.Limit{{
 					Type:     gent.LimitExactKey,
@@ -404,7 +405,7 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 	seq := newTestSequencer(t, "run", Config{
 		IncludeChunkText:      true,
-		MaxModelContentBytes:  5,
+		MaxMetaContentBytes:   5,
 		IncludeModelRequests:  true,
 		IncludeModelResponses: true,
 		IncludeToolOutput:     true,
@@ -423,13 +424,13 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 		BaseEvent: base,
 		Model:     "gpt",
 		Request: gent.ModelCallRequest{
-			Messages: []llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "secret")},
+			Messages: []gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "secret")},
 		},
 		ModelCallId: "model-1",
 		StreamId:    "stream",
 	})
 	recordTestValue(t, seq, "model_stream_chunk", gent.StreamChunk{
-		Content:     "abcédef",
+		MetaContent: []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "abcédef"}},
 		ModelCallId: "model-1",
 		StreamId:    "stream",
 		Source:      "main/1",
@@ -448,8 +449,9 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 	require.Len(t, snapshot.ModelCalls, 1)
 	require.Len(t, snapshot.Errors, 1)
 	assertJSONSafe(t, snapshot)
-	assert.Equal(t, "abcé", snapshot.ModelCalls[0].Stream.Content)
-	assert.True(t, snapshot.ModelCalls[0].Stream.ContentTruncated)
+	assert.Equal(t, "abcé",
+		gent.MetaText(snapshot.ModelCalls[0].Stream.MetaContent, gent.MetaContentIntermediary))
+	assert.True(t, snapshot.ModelCalls[0].Stream.MetaContentTruncated)
 	assert.Equal(t, StepStatusRunning, snapshot.ModelCalls[0].Status)
 	assert.Equal(t, "redacted", snapshot.Errors[0].Message)
 	_, ok := snapshot.ModelCalls[0].Request.(map[string]any)
@@ -515,7 +517,13 @@ func TestSequencer_ConcurrentRecordingIsMonotonic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{Content: "x", StreamId: "s"}))
+			assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
+				MetaContent: []*gent.MetaContent{
+					{
+						Type: gent.MetaContentIntermediary, Text: "x",
+					},
+				}, StreamId: "s",
+			}))
 		}(i)
 	}
 	close(start)

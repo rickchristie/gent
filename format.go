@@ -34,7 +34,7 @@ type FormattedSection struct {
 //   - Structure: Generate format description for prompts (DescribeStructure)
 //
 // The format does NOT define what content goes in each section - that's handled by
-// [TextSection] implementations (ToolChain, Termination, custom sections).
+// [TextSection] implementations (Termination and custom sections).
 //
 // # Implementing TextFormat
 //
@@ -139,7 +139,7 @@ var (
 	ErrUnclosedTag     = errors.New("unclosed tag")
 	ErrInvalidJSON     = errors.New("invalid JSON in section content")
 	ErrInvalidYAML     = errors.New("invalid YAML in section content")
-	ErrMissingToolName = errors.New("tool call missing 'tool' field")
+	ErrMissingToolName = errors.New("tool call has no function name")
 	ErrUnknownTool     = errors.New("unknown tool")
 	ErrInvalidToolArgs = errors.New("invalid tool arguments")
 )

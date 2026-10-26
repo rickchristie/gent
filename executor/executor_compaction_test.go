@@ -565,7 +565,7 @@ func (l *modelCallingLoop) Next(
 	// Publish model call event to set per-iteration gauges
 	resp := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{
-			{Content: "response"},
+			{CandidateContent: "response"},
 		},
 		Info: &gent.GenerationInfo{
 			InputTokens:  l.inputTokens,

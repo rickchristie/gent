@@ -16,13 +16,7 @@ type iterationFrame struct {
 	Iteration      int
 	Response       *gent.ContentResponse
 	Repetition     *agentutil.RepetitionResult
-	Parsed         bool
-	Sections       map[string][]string
-	ParseError     error
-	ToolContent    int
 	ToolPlanActive bool
-	ToolResults    []*gent.ToolCallResult
-	ToolErrors     []string
 }
 
 func (r *Agent) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
@@ -51,12 +45,7 @@ func (r *Agent) RegisterCodecs(registry *gent.CodecRegistry) error {
 			return err
 		}
 	}
-	if codecs, ok := r.toolChain.(interface {
-		RegisterCodecs(*gent.CodecRegistry) error
-	}); ok {
-		return codecs.RegisterCodecs(registry)
-	}
-	return nil
+	return r.toolChain.RegisterCodecs(registry)
 }
 
 func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
@@ -66,24 +55,15 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 	if ctx.Parent() != nil {
 		return nil
 	}
-	outputFormat := ""
-	if r.nativeToolCalls {
-		if _, err := r.nativeChain(); err != nil {
-			return err
-		}
-	} else {
-		r.registerSections()
-		outputFormat = r.format.DescribeStructure()
-	}
 	request := gent.NewModelCallRequest(nil, r.callOptions...)
 	options, err := ctx.Codecs().Encode(request.Options)
 	if err != nil {
 		return err
 	}
 	configuration := map[string]any{
-		"version": 1, "application": r.recoveryVersion, "behavior": r.behaviorAndContext,
-		"rules": r.criticalRules, "format": outputFormat,
-		"formatType": fmt.Sprintf("%T", r.format), "tools": r.toolChain.AvailableToolsPrompt(),
+		"version": 2, "application": r.recoveryVersion, "behavior": r.behaviorAndContext,
+		"rules":      r.criticalRules,
+		"formatType": fmt.Sprintf("%T", r.format), "tools": r.toolChain.RecoveryConfig(),
 		"toolchainType": fmt.Sprintf("%T", r.toolChain), "termination": r.termination.Guidance(),
 		"terminationType": fmt.Sprintf(
 			"%T",
@@ -96,12 +76,7 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 		"tooLongMessage": r.responseTooLongMessage,
 		"repetition":     r.repetitionConfiguration(),
 	}
-	if r.nativeToolCalls {
-		configuration["nativeToolCalls"] = true
-		if configured, ok := r.toolChain.(gent.RecoveryConfig); ok {
-			configuration["nativeToolConfig"] = configured.RecoveryConfig()
-		}
-	}
+
 	if configured, ok := r.model.(gent.RecoveryConfig); ok {
 		configuration["modelConfig"] = configured.RecoveryConfig()
 	}
@@ -170,32 +145,7 @@ func saveFrame(ctx *gent.ExecutionContext, frame *iterationFrame) error {
 	return ctx.CommitCheckpoint(gent.PhaseDecisionReady)
 }
 
-func (r *Agent) executeRecoverableToolContent(
-	ctx *gent.ExecutionContext, frame *iterationFrame, content string,
-) (*gent.ToolChainResult, error) {
-	chain, ok := r.toolChain.(gent.RecoverableToolChain)
-	if !ok {
-		if err := ctx.SetCheckpointState(
-			"gent:toolchain_active",
-			fmt.Sprintf("%T", r.toolChain),
-		); err != nil {
-			return nil, err
-		}
-		if err := ctx.CommitCheckpoint(gent.PhaseDecisionReady); err != nil {
-			return nil, err
-		}
-		result, err := r.toolChain.Execute(ctx, content, r.format)
-		if ctx.Context().Err() == nil {
-			ctx.ClearCheckpointState("gent:toolchain_active")
-		}
-		return result, err
-	}
-	return r.executeToolPlan(ctx, frame, func() (*gent.ToolPlan, error) {
-		return chain.Prepare(ctx, content)
-	}, chain.ExecuteNext)
-}
-
-// executeToolPlan keeps one recovery path for text and native calls.
+// executeToolPlan keeps the saved execution path for native calls.
 func (r *Agent) executeToolPlan(
 	ctx *gent.ExecutionContext, frame *iterationFrame,
 	prepare func() (*gent.ToolPlan, error),

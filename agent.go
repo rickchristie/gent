@@ -3,8 +3,6 @@ package gent
 import (
 	"sync"
 	"time"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 // Loop runs one iteration of the agent's think-act-observe cycle.
@@ -192,18 +190,18 @@ const ImportanceScorePinned float64 = 10.0
 // constructs or modifies a HistoryEntry must ensure every
 // element in Messages is a valid, non-nil pointer.
 type HistoryEntry struct {
-	Id EntryId `json:"id"`
-	Order uint64 `json:"order"`
-	RunId string `json:"runId"`
-	ContextId string `json:"contextId"`
-	Iteration int `json:"iteration"`
-	AttemptId string `json:"attemptId"`
-	Kind HistoryEntryKind `json:"kind"`
-	ModelCallId string `json:"modelCallId,omitempty"`
-	ToolCallIds []string `json:"toolCallIds,omitempty"`
-	Compaction *CompactionRecord `json:"compaction,omitempty"`
-	Replaces []EntryId `json:"replaces,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	Id          EntryId           `json:"id"`
+	Order       uint64            `json:"order"`
+	RunId       string            `json:"runId"`
+	ContextId   string            `json:"contextId"`
+	Iteration   int               `json:"iteration"`
+	AttemptId   string            `json:"attemptId"`
+	Kind        HistoryEntryKind  `json:"kind"`
+	ModelCallId string            `json:"modelCallId,omitempty"`
+	ToolCallIds []string          `json:"toolCallIds,omitempty"`
+	Compaction  *CompactionRecord `json:"compaction,omitempty"`
+	Replaces    []EntryId         `json:"replaces,omitempty"`
+	CreatedAt   time.Time         `json:"createdAt"`
 
 	Messages []*MessageContent
 
@@ -298,11 +296,12 @@ type MessageContentMetadataKey string
 // to deduplicate repeated stateless tool calls.
 const MMKToolChainResult MessageContentMetadataKey = "gent:tool_chain_result"
 
-// MessageContent is wrapper around [llms.MessageContent] used
+// MessageContent is wrapper around [ModelMessage] used
 // in AgentLoop.
 type MessageContent struct {
-	Role  llms.ChatMessageType
-	Parts []ContentPart
+	Continuation *ProviderContinuation
+	Role         ChatMessageType
+	Parts        []ContentPart
 
 	// Metadata contains optional key-value pairs for this
 	// message. The framework defines standard keys (MMK*
@@ -340,12 +339,6 @@ func (m *MessageContent) GetMetadata(
 	return val, ok
 }
 
-// ContentPart is just a wrapper interface around [llms.ContentPart], just in case we want to add
-// new interface method later, it will be easy.
-type ContentPart interface {
-	llms.ContentPart
-}
-
 // Task represents the input to an agent loop.
 // The client is responsible for formatting the Text field (including chat history if applicable).
 type Task struct {
@@ -362,7 +355,7 @@ type Task struct {
 func (t *Task) AsContentParts() []ContentPart {
 	var parts []ContentPart
 	if t.Text != "" {
-		parts = append(parts, llms.TextContent{Text: t.Text})
+		parts = append(parts, TextContent{Text: t.Text})
 	}
 	return append(parts, t.Media...)
 }
@@ -385,4 +378,7 @@ type AgentLoopResult struct {
 	// Result is only set when Action is [LATerminate].
 	// This is a slice of ContentPart to support multimodal outputs.
 	Result []ContentPart
+
+	// ContentSource optionally identifies the provisional messages replaced by this result.
+	ContentSource *ContentSource
 }

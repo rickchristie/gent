@@ -108,25 +108,21 @@ func run() error {
 		ptcChoice, err := promptMenu(rl,
 			"Programmatic Tool Calling (PTC)",
 			[]menuOption{
-				{label: "No  — standard tool calls", value: "no"},
-				{label: "Yes — hybrid (direct_call + code)", value: "hybrid"},
-				{label: "Yes — code only (no direct_call)", value: "code_only"},
+				{label: "No  — direct tool calls", value: "no"},
+				{label: "Yes — direct tools and JavaScript", value: "hybrid"},
+				{label: "Yes — JavaScript only", value: "code_only"},
 			},
 		)
 		if err != nil {
 			return handleMenuErr(err)
 		}
 
-		// Step 4: ToolChain
+		// Step 4: Tool availability. Both choices use native tool calls.
 		tcType, err := promptMenu(rl,
-			"ToolChain",
+			"Tool availability",
 			[]menuOption{
-				{label: "YAML", value: "yaml"},
-				{label: "JSON", value: "json"},
-				{
-					label: "ToolSearchToolChain",
-					value: "search",
-				},
+				{label: "All tools available", value: "registry"},
+				{label: "Search tools on demand", value: "search"},
 			},
 		)
 		if err != nil {
@@ -334,10 +330,6 @@ func buildConfig(
 ) testutil.TestConfig {
 	var config testutil.TestConfig
 	switch tcType {
-	case "yaml":
-		config = testutil.InteractiveConfig()
-	case "json":
-		config = testutil.InteractiveConfigJSON()
 	case "search":
 		config = testutil.InteractiveConfigSearch()
 	default:
@@ -521,7 +513,7 @@ func promptSlidingWindow(
 	}
 
 	cfg := testutil.CompactionConfig{
-		Type: testutil.CompactionSlidingWindow,
+		Type:              testutil.CompactionSlidingWindow,
 		TriggerIterations: int64(triggerIter),
 		WindowSize:        windowSize,
 	}
@@ -563,7 +555,7 @@ func promptSummarization(
 	}
 
 	cfg := testutil.CompactionConfig{
-		Type: testutil.CompactionSummarization,
+		Type:              testutil.CompactionSummarization,
 		TriggerIterations: int64(triggerIter),
 		KeepRecent:        keepRecent,
 	}
@@ -807,24 +799,6 @@ func (c *ColoredWriter) Write(
 		return fmt.Fprintf(os.Stdout,
 			"%s%s%s%s",
 			colorBold, colorRed, text, colorReset)
-
-	case trimmed == "<thinking>" ||
-		trimmed == "</thinking>":
-		return fmt.Fprintf(os.Stdout,
-			"%s%s%s",
-			colorDim, text, colorReset)
-
-	case trimmed == "<action>" ||
-		trimmed == "</action>":
-		return fmt.Fprintf(os.Stdout,
-			"%s%s%s",
-			colorBlue, text, colorReset)
-
-	case trimmed == "<answer>" ||
-		trimmed == "</answer>":
-		return fmt.Fprintf(os.Stdout,
-			"%s%s%s",
-			colorGreen, text, colorReset)
 
 	default:
 		return os.Stdout.Write(p)

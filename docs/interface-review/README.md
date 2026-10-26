@@ -19,7 +19,7 @@ to explore and repeat, without credentials or an external service. A lesson can 
 `#view=learn&lesson=save` (or `loop`, `memory`, `restart`, `search`). Experiment state is temporary;
 review notes persist separately. The existing field guide is preserved.
 
-The guide contains every named interface in non-test Go source, six structural capability checks,
+The guide contains every named interface in non-test Go source, eight structural capability checks,
 and selected concrete types that explain ownership and continuation. The contract browser includes
 exact declarations, source locations, method comments, embedded interfaces, signature comparisons,
 and per-contract review notes. Notes stay in local browser storage, keyed by source fingerprint;
@@ -89,11 +89,11 @@ CGO_ENABLED=0 go test ./... -count=1 -timeout 300s > /tmp/gent-interface-portabl
 go test -race ./... -count=1 -timeout 300s > /tmp/gent-interface-race-test.log 2>&1
 ```
 
-Browser coverage includes all 53 interface declarations, the 18 supporting types, source locations,
+Browser coverage includes all 52 interface declarations, the 18 supporting types, source locations,
 filters, embedded contracts, comparison views, every recovery phase, all save outcomes, keyboard
 navigation, persistent notes, exact Markdown export, and widths down to 320px. Networking is
 disabled. Screenshots and reports are written to `/tmp/gent-interface-*` and `/tmp/gent-learning-*`.
-Lesson checks also verify all 53 contextual signatures, earlier prompt selections, cursor
+Lesson checks also verify all 52 contextual signatures, earlier prompt selections, cursor
 divergence and reconciliation, compatibility failures, duplicate effects, ranking, and paging.
 
 Changing the interface set requires updating the explicit inventory expectations in the browser

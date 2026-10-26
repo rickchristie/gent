@@ -3,8 +3,6 @@ package gent
 import (
 	"context"
 	"time"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 // Model is a provider adapter. The framework owns request capture, IDs, statistics and streaming.
@@ -28,11 +26,11 @@ type ModelCall struct {
 
 // NewModelCallRequest resolves option functions exactly once, before mutable request hooks.
 func NewModelCallRequest(
-	messages []llms.MessageContent,
-	options ...llms.CallOption,
+	messages []ModelMessage,
+	options ...CallOption,
 ) ModelCallRequest {
-	var resolved llms.CallOptions
-	llms.WithStreamThinking(true)(&resolved)
+	var resolved CallOptions
+	WithStreamThinking(true)(&resolved)
 	for _, option := range options {
 		if option != nil {
 			option(&resolved)
@@ -41,7 +39,7 @@ func NewModelCallRequest(
 	return ModelCallRequest{Messages: messages, Options: resolved, OptionCaptureComplete: true}
 }
 
-// ContentResponse is the response from a GenerateContent call.
+// ContentResponse is a provider response. It does not establish execution success.
 type ContentResponse struct {
 	// Choices contains the generated content choices.
 	Choices []*ContentChoice
@@ -52,20 +50,17 @@ type ContentResponse struct {
 
 // ContentChoice is a single content choice from the model.
 type ContentChoice struct {
-	// Content is the textual content of the response.
-	Content string
+	Continuation *ProviderContinuation
 
-	// StopReason is the reason the model stopped generating.
-	StopReason string
+	// CandidateContent is provider text to consider after tools and completion checks.
+	// It is not an accepted execution answer. Stream it as intermediary metadata.
+	CandidateContent string
+	CandidateSource  *ContentSource
 
-	// FuncCall is non-nil when the model asks to invoke a function/tool.
-	FuncCall *llms.FunctionCall
-
-	// ToolCalls is a list of tool calls the model asks to invoke.
-	ToolCalls []llms.ToolCall
-
-	// ReasoningContent contains reasoning/thinking content if supported.
-	ReasoningContent string
+	// MetaContent preserves ordered provider-visible metadata. Unknown types remain readable.
+	MetaContent []*MetaContent
+	StopReason  string
+	ToolCalls   []ModelToolCall
 }
 
 // GenerationInfo contains metadata about the generation including normalized token counts.
@@ -120,8 +115,8 @@ type GenerationInfo struct {
 // Options contains meaningful resolved call options when the model wrapper can capture them.
 // OptionCaptureComplete must be false when provider-specific options cannot be fully introspected.
 type ModelCallRequest struct {
-	Messages          []llms.MessageContent
-	Options           llms.CallOptions
+	Messages          []ModelMessage
+	Options           CallOptions
 	SelectionRevision HistoryRevision
 	ActiveEntryIds    []EntryId
 
@@ -131,16 +126,15 @@ type ModelCallRequest struct {
 
 // Stream represents a streaming response from the model.
 // It provides access to content chunks as they arrive and the final response.
-// Currently [Stream] interface only supports text content streaming. In the future, we may add
-// support for othe modalities by adding more fields to [StreamChunk].
+// Text uses MetaContent. Tools and opaque continuation items are available in Response.
 type Stream interface {
 	// Chunks returns a channel that receives content chunks as they stream in.
 	// The channel is closed when streaming completes (either successfully or with error).
-	// Each chunk may contain content, reasoning content, or an error.
+	// Provider chunks contain metadata or an error; execution completion publishes Content.
 	Chunks() <-chan StreamChunk
 
 	// Response blocks until streaming completes and returns the final ContentResponse.
-	// This aggregates all streamed content into a single response.
+	// Provider responses contain candidates and completion data, not an accepted execution answer.
 	// If an error occurred during streaming, it is returned here.
 	Response() (*ContentResponse, error)
 
@@ -151,11 +145,19 @@ type Stream interface {
 
 // StreamChunk represents a single chunk of streamed content with metadata.
 type StreamChunk struct {
-	// Content is the text content delta for this chunk.
+	// Content is the complete accepted execution answer. Only terminal publication sets it.
 	Content string
 
-	// ReasoningContent is the reasoning/thinking content delta for this chunk.
-	ReasoningContent string
+	// MetaContent contains provisional text deltas, reasoning, and provider commentary.
+	MetaContent []*MetaContent
+
+	// MessageId identifies the final answer. SourceMessageIds identify its provisional messages.
+	MessageId        string
+	SourceMessageIds []string
+
+	// EventNumber is the accepted event cursor. Use RunId and EventNumber to deduplicate delivery.
+	RunId       string
+	EventNumber uint64
 
 	// Err is set if an error occurred during streaming.
 	// When Err is non-nil, the stream should be considered terminated.
@@ -187,8 +189,7 @@ type StreamChunk struct {
 	// ModelCallId identifies the model call that emitted this chunk.
 	ModelCallId string
 
-	// StreamId uniquely identifies this stream (caller-provided).
-	// This should be unique per LLM call to avoid interleaving confusion.
+	// StreamId is a caller-defined stream label. Use MessageId and ContextId for display identity.
 	StreamId string
 
 	// StreamTopicId groups related streams (caller-provided).

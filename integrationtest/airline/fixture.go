@@ -780,7 +780,7 @@ func (f *AirlineFixture) RegisterAllTools(tc gent.ToolChain) {
 }
 
 // RegisterAllToolsSearch registers all airline tools with
-// IndexableTool metadata for use with SearchJSON toolchain.
+// IndexableTool metadata for use with SearchChain toolchain.
 func (f *AirlineFixture) RegisterAllToolsSearch(
 	tc gent.ToolChain,
 ) {

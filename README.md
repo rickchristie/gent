@@ -1,7 +1,7 @@
 # Gent
 
 Gent is a Go framework for building LLM agents that can be adapted to your own agent loop,
-tool format, retrieval strategy, limits, and observability requirements.
+tool selection, retrieval strategy, limits, and observability requirements.
 
 The default ReAct agent is ready to use, but Gent is intentionally not a closed agent product.
 It is a set of small interfaces and production-oriented building blocks for teams that want to
@@ -14,7 +14,8 @@ Gent is built around a few design choices.
 - Library first. Your application owns the process, storage, models, tools, and deployment.
 - Custom loops are normal. ReAct is included, but `Loop` is the core abstraction.
 - Tools stay typed. Tools receive typed Go input and return typed Go output.
-- Call transport is separate. Native API calls and text formats use the same typed tools.
+- Tools use native API calls. A single contract covers direct tools, search, and JavaScript.
+- Code stays simple. Remove unused code and interfaces instead of keeping compatibility paths.
 - Limits are first-class. Iterations, tokens, tool calls, parse errors, and validators are tracked.
 - Streaming is always on. Model chunks can be observed in real time.
 - Retrieval is local-friendly. Optional ONNX embedding support runs on CPU.
@@ -46,9 +47,7 @@ you use zsh.
 
 ## Quick Start: Native Agent With A Typed Tool
 
-Create a provider model with LangChainGo, wrap it with Gent, register typed tools, and run the
-executor. Use a model and provider adapter that support native tool calls. This example describes
-the current source; check the API in your installed release before changing an existing application.
+Create a provider model, register typed tools, and run the executor.
 
 ```go
 package main
@@ -64,7 +63,6 @@ import (
     "github.com/rickchristie/gent/schema"
     "github.com/rickchristie/gent/termination"
     "github.com/rickchristie/gent/toolchain"
-    "github.com/tmc/langchaingo/llms"
 )
 
 type LookupOrderInput struct {
@@ -76,8 +74,8 @@ type OrderStatus struct {
     Status string `json:"status"`
 }
 
-func runAgent(ctx context.Context, llm llms.Model) error {
-    model := models.NewLCGWrapper(llm).WithModelName("support-model")
+func runAgent(ctx context.Context, apiKey, modelName string) error {
+    model := models.NewOpenAI(apiKey, modelName)
 
     lookupOrder := gent.NewToolFunc(
         "lookup_order",
@@ -85,16 +83,16 @@ func runAgent(ctx context.Context, llm llms.Model) error {
         schema.Object(map[string]*schema.Property{
             "order_id": schema.String("Order ID, for example ORD-123"),
         }, "order_id"),
-        func(ctx context.Context, input LookupOrderInput) (OrderStatus, error) {
-            return OrderStatus{ID: input.OrderID, Status: "shipped"}, nil
+        func(ctx context.Context, input *LookupOrderInput) (*OrderStatus, error) {
+            return &OrderStatus{ID: input.OrderID, Status: "shipped"}, nil
         },
     )
 
-    tc := toolchain.NewJSON().RegisterTool(lookupOrder)
+    tc := toolchain.New().RegisterTool(lookupOrder)
     term := termination.NewText("answer").
         WithGuidance("Write a concise answer for the user.")
 
-    agent := react.NewNativeAgent(model).
+    agent := react.NewAgent(model).
         WithBehaviorAndContext("You are a careful customer support agent.").
         WithToolChain(tc).
         WithTermination(term)
@@ -116,7 +114,7 @@ func runAgent(ctx context.Context, llm llms.Model) error {
     }
 
     for _, part := range execCtx.FinalResult() {
-        if text, ok := part.(llms.TextContent); ok {
+        if text, ok := part.(gent.TextContent); ok {
             fmt.Println(text.Text)
         }
     }
@@ -124,18 +122,10 @@ func runAgent(ctx context.Context, llm llms.Model) error {
 }
 ```
 
-The `llm` value can be any LangChainGo `llms.Model`, such as an OpenAI, Anthropic, Google,
-Ollama, or GitHub Models client. Gent's `models.LCGWrapper` adapts it to Gent's streaming model
-interface and normalizes model-call stats.
-
-`NewNativeAgent` sends tool schemas in the API request and uses the returned tool calls. It does
-not request THINK, ACTION, or ANSWER separators. It keeps Gent's validation, limits, history,
-recovery, and local tool execution. Model and adapter support can differ; see
-[native calls, local search, and local JavaScript](docs/native-tools.md) for details and limits.
-
-`react.NewAgent` keeps its existing XML/YAML defaults and all text-format options. Use it for
-existing applications or an explicit text-only fallback. Neither constructor changes a provider
-automatically after an API error.
+`NewAgent` sends native tool schemas and reads structured calls. It preserves typed validation,
+limits, history, recovery, and local execution. `models.NewGrok` uses the same Responses contract.
+`models.NewLCGWrapper` remains available where the SDK can preserve the required provider data.
+See [native calls, search, JavaScript, and recovery](docs/native-tools.md).
 
 ## Main Concepts
 
@@ -197,14 +187,19 @@ with diagrams and simulations. See its [source and build instructions](docs/code
 
 ### Model
 
-Gent models stream content through `GenerateContentStream`. The LangChainGo wrapper is the common
-starting point:
+Gent models stream content through `GenerateContentStream`. OpenAI and Grok use direct Responses
+adapters that preserve provider continuation items:
 
 ```go
-model := models.NewLCGWrapper(llm).WithModelName("gpt-4.1")
+model := models.NewOpenAI(apiKey, modelName)
 ```
 
-You can implement `gent.Model` directly if you use another provider SDK.
+You can implement `gent.Model` directly if you use another provider SDK. Provider text streams as
+ordered `MetaContent` entries (`intermediary`, `reasoning`, `commentary`, or a new string type).
+`ContentChoice.CandidateContent` is the candidate that the agent must check. The executor publishes
+one complete `StreamChunk.Content` after answer acceptance and the terminal save. Source message IDs
+let a frontend replace the provisional answer. See the [streaming
+contract](docs/native-tools.md#frontend-and-storage-contract).
 
 ### Tools
 
@@ -231,15 +226,16 @@ tool = tool.WithPolicy("Only search by the exact email supplied by the current u
 
 ### ToolChain
 
-Toolchains define how model text becomes tool calls. The default ReAct agent uses YAML tool calls,
-which are forgiving for LLMs:
+Toolchains expose native definitions and execute saved call plans:
 
 ```go
-tc := toolchain.NewYAML().RegisterTool(tool)
+tc := toolchain.New().RegisterTool(tool)
 ```
 
-Use JSON toolchains when you want stricter syntax or `SearchJSON` when the tool catalog is too
-large to show in every prompt.
+Use `toolchain.NewSearch` for a large catalog or wrap a chain with `NewJsToolChainWrapper` for
+programmatic calls. Custom chains can embed `Registry` and override selection. All chains use native
+calls, hooks, typed inputs, and recovery. Tools can add `gent.WithRecoveryMessage` callbacks with
+`*gent.RecoveryInfo` to guide the model after an unknown outcome.
 
 ### Termination
 
@@ -384,7 +380,7 @@ For large tool catalogs, avoid placing every tool schema in every prompt. Use se
 
 ```go
 searcher := toolchain.NewFusedToolSearcher(embedder)
-tc := toolchain.NewSearchJSON(toolchain.SearchHintDomainCategories).
+tc := toolchain.NewSearch(toolchain.SearchHintDomainCategories).
     RegisterEngine(searcher)
 
 tc.RegisterTool(indexableTool)
@@ -395,7 +391,7 @@ if err := tc.Initialize(); err != nil {
 agent := react.NewAgent(model).WithToolChain(tc)
 ```
 
-Tools registered with `SearchJSON` must implement both `gent.Tool[I, O]` and
+Tools registered with `SearchChain` must implement both `gent.Tool[I, O]` and
 `gent.IndexableTool`. The extra metadata lets Gent index the tool by domain, category, keyword,
 description, and synthetic example queries.
 
@@ -404,7 +400,7 @@ description, and synthetic example queries.
 Start with the default ReAct stack, then replace only the layer you need.
 
 - Replace the model when you change providers or want a custom SDK integration.
-- Replace the toolchain when you want YAML, JSON, searchable tools, or programmatic tool calling.
+- Replace tool selection when you need search, custom visibility, or programmatic tool calling.
 - Replace termination when the final output should be plain text, typed JSON, or validator-gated.
 - Replace the system prompt builder when your domain needs a different prompt structure.
 - Replace `Loop` when ReAct is not the right control flow.
@@ -440,9 +436,9 @@ require `WithRecoveryVersion`; set it before the original run when you need reco
 - `context.go`: execution context, events, stats, limits, streams, and children.
 - `executor/`: executor lifecycle implementation.
 - `agents/react/`: default ReAct agent.
-- `toolchain/`: YAML, JSON, searchable, and programmatic toolchains.
+- `toolchain/`: native registry, search, and JavaScript toolchains.
 - `termination/`: text and JSON answer termination.
-- `models/`: LangChainGo model wrapper.
+- `models/`: direct Responses adapters and the LangChainGo wrapper.
 - `search/`: ONNX embeddings, vector search, BM25, fusion, and chunking.
 - `cmd/gent/`: setup and model download CLI.
 

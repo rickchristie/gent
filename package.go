@@ -24,7 +24,7 @@
 //
 //	func main() {
 //	    // 1. Create a model
-//	    model := models.NewLangChainGoModel(llm, "gpt-4")
+//	    model := models.NewOpenAI(apiKey, modelName)
 //
 //	    // 2. Create tools
 //	    lookupOrder := gent.NewToolFunc(
@@ -43,7 +43,7 @@
 //	    )
 //
 //	    // 3. Create toolchain and register tools
-//	    tc := toolchain.NewYAML().RegisterTool(lookupOrder)
+//	    tc := toolchain.New().RegisterTool(lookupOrder)
 //
 //	    // 4. Create termination with optional validator
 //	    term := termination.NewText("answer").
@@ -64,7 +64,7 @@
 //
 //	    // 7. Create execution context with task
 //	    task := &gent.Task{Text: "What's the status of order #12345?"}
-//	    data := gent.NewLoopData(task)
+//	    data := gent.NewBasicLoopData(task)
 //	    execCtx := gent.NewExecutionContext(context.Background(), "customer-service", data)
 //	    execCtx.SetLimits(limits)
 //
@@ -93,11 +93,11 @@
 //	    },
 //	)
 //
-// ToolChain manages tool registration, parsing tool calls from LLM output, executing tools,
-// and formatting results. Different implementations (YAML, JSON) parse different formats:
+// ToolChain exposes native definitions, validates structured calls, and executes saved plans.
+// Registry, SearchChain, and JsToolChainWrapper use the same hooks and recovery contract:
 //
-//	// YAML toolchain (recommended for readability)
-//	tc := toolchain.NewYAML().
+//	// Native registry
+//	tc := toolchain.New().
 //	    RegisterTool(searchTool).
 //	    RegisterTool(emailTool)
 //
@@ -106,7 +106,7 @@
 // # Termination
 //
 // Termination defines when and how the agent produces its final answer. The termination
-// checks each iteration for an answer section and can validate answers before accepting.
+// checks final assistant content and can validate answers before accepting.
 //
 //	// Simple text termination
 //	term := termination.NewText("answer").
@@ -127,8 +127,8 @@
 //
 // # TextFormat
 //
-// TextFormat defines how sections are structured in LLM output. It handles parsing
-// LLM responses into sections and formatting sections for prompts.
+// TextFormat renders prompt and result sections. Independent parsing helpers remain available
+// for application documents; the native agent does not parse tool calls with TextFormat.
 //
 //	// XML format (default)
 //	format := format.NewXML()
@@ -136,7 +136,7 @@
 //	// Parse LLM output into sections
 //	sections, err := format.Parse(execCtx, llmOutput)
 //	// sections["thinking"] = ["Let me analyze..."]
-//	// sections["action"] = ["tool: search\nquery: foo"]
+//	// sections["report"] = ["Five records were found."]
 //
 //	// Format sections for prompts
 //	text := format.FormatSections([]gent.FormattedSection{
@@ -147,8 +147,8 @@
 //
 // # TextSection
 //
-// TextSection defines individual sections within LLM output. Both ToolChain and
-// Termination implement TextSection, allowing them to be registered with TextFormat.
+// TextSection defines individual text sections. Termination and section parsers implement
+// this contract. ToolChain is independent and accepts only native calls.
 //
 //	// Sections have a name and guidance
 //	type TextSection interface {

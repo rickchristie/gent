@@ -10,7 +10,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/internal/tt"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms"
 )
 
 type drainRequiredSummaryModel struct{}
@@ -23,8 +22,20 @@ func (m *drainRequiredSummaryModel) GenerateContentStream(
 		responseDone: make(chan struct{}),
 	}
 	go func() {
-		stream.chunks <- gent.StreamChunk{Content: "drained"}
-		stream.chunks <- gent.StreamChunk{Content: " summary"}
+		stream.chunks <- gent.StreamChunk{
+			MetaContent: []*gent.MetaContent{
+				{
+					Type: gent.MetaContentIntermediary, Text: "drained",
+				},
+			},
+		}
+		stream.chunks <- gent.StreamChunk{
+			MetaContent: []*gent.MetaContent{
+				{
+					Type: gent.MetaContentIntermediary, Text: " summary",
+				},
+			},
+		}
 		close(stream.chunks)
 		close(stream.responseDone)
 	}()
@@ -43,7 +54,7 @@ func (s *drainRequiredSummaryStream) Chunks() <-chan gent.StreamChunk {
 func (s *drainRequiredSummaryStream) Response() (*gent.ContentResponse, error) {
 	<-s.responseDone
 	return &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{Content: "drained summary"}},
+		Choices: []*gent.ContentChoice{{CandidateContent: "drained summary"}},
 		Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
 	}, nil
 }
@@ -100,9 +111,9 @@ func TestSummarization_Compact(t *testing.T) {
 	existingSynthetic := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeAI,
+				Role: gent.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
-					llms.TextContent{
+					gent.TextContent{
 						Text: mockFmt.FormatSections(
 							[]gent.FormattedSection{
 								{
@@ -121,12 +132,12 @@ func TestSummarization_Compact(t *testing.T) {
 	imageIter := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeAI,
+				Role: gent.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
-					llms.TextContent{
+					gent.TextContent{
 						Text: "text part",
 					},
-					llms.BinaryContent{
+					gent.BinaryContent{
 						MIMEType: "image/png",
 						Data:     []byte("fake-img"),
 					},
@@ -528,9 +539,9 @@ func TestSummarization_PromptContent(t *testing.T) {
 	existingSynthetic := &gent.HistoryEntry{
 		Messages: []*gent.MessageContent{
 			{
-				Role: llms.ChatMessageTypeAI,
+				Role: gent.ChatMessageTypeAI,
 				Parts: []gent.ContentPart{
-					llms.TextContent{
+					gent.TextContent{
 						Text: mockFmt.FormatSections(
 							[]gent.FormattedSection{
 								{
@@ -676,12 +687,12 @@ func TestSummarization_PromptContent(t *testing.T) {
 			// System message at index 0
 			if tc.expected.messageCount == 2 {
 				assert.Equal(t,
-					llms.ChatMessageTypeSystem,
+					gent.ChatMessageTypeSystem,
 					msgs[0].Role,
 					"first message should be system",
 				)
 				sysText := msgs[0].
-					Parts[0].(llms.TextContent)
+					Parts[0].(gent.TextContent)
 				for _, s := range tc.expected.systemContains {
 					assert.Contains(t,
 						sysText.Text, s,
@@ -695,12 +706,12 @@ func TestSummarization_PromptContent(t *testing.T) {
 			// index 0 without)
 			userIdx := tc.expected.messageCount - 1
 			assert.Equal(t,
-				llms.ChatMessageTypeHuman,
+				gent.ChatMessageTypeHuman,
 				msgs[userIdx].Role,
 				"last message should be user",
 			)
 			userText := msgs[userIdx].
-				Parts[0].(llms.TextContent)
+				Parts[0].(gent.TextContent)
 			for _, s := range tc.expected.userContains {
 				assert.Contains(t,
 					userText.Text, s,
@@ -768,11 +779,11 @@ func TestSummarization_WithPromptSingleMessage(
 		"WithPrompt should send single message",
 	)
 	assert.Equal(t,
-		llms.ChatMessageTypeHuman,
+		gent.ChatMessageTypeHuman,
 		msgs[0].Role,
 	)
 
-	userText := msgs[0].Parts[0].(llms.TextContent)
+	userText := msgs[0].Parts[0].(gent.TextContent)
 	assert.Contains(t, userText.Text, "Custom:")
 	assert.Contains(t, userText.Text, "test data")
 }
@@ -809,9 +820,9 @@ func TestSummarization_DefaultTwoMessages(t *testing.T) {
 
 	// System message contains static instructions
 	assert.Equal(t,
-		llms.ChatMessageTypeSystem, msgs[0].Role,
+		gent.ChatMessageTypeSystem, msgs[0].Role,
 	)
-	sysText := msgs[0].Parts[0].(llms.TextContent)
+	sysText := msgs[0].Parts[0].(gent.TextContent)
 	assert.Equal(t,
 		DefaultSummarizationSystemPrompt,
 		sysText.Text,
@@ -821,9 +832,9 @@ func TestSummarization_DefaultTwoMessages(t *testing.T) {
 
 	// User message contains dynamic content only
 	assert.Equal(t,
-		llms.ChatMessageTypeHuman, msgs[1].Role,
+		gent.ChatMessageTypeHuman, msgs[1].Role,
 	)
-	userText := msgs[1].Parts[0].(llms.TextContent)
+	userText := msgs[1].Parts[0].(gent.TextContent)
 	assert.Contains(t, userText.Text,
 		"None (first compaction)",
 	)

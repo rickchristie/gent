@@ -15,7 +15,6 @@ func TestHistoryExample(t *testing.T) {
 	assert.Equal(
 		t,
 		`tool_completed: P10 permits the refund.; tool executions: 1; saved terminal result reused.
-Uncertain tool: continuation waits for a recovery decision.
 tool_ready: P10 permits the refund.; tool executions: 1; saved terminal result reused.
 `,
 		output.String(),
