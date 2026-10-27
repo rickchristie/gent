@@ -19,11 +19,6 @@ func (ctx *ExecutionContext) CommitCheckpoint(phase ExecutionPhase) error {
 }
 
 func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
-	if phase != "" && ctx.Parent() == nil {
-		if err := ctx.captureExtensions(); err != nil {
-			return ctx.stopRecording(err)
-		}
-	}
 	run := ctx.run
 	run.flushMu.Lock()
 	locked := true
@@ -34,6 +29,13 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 	}()
 	if err := ctx.RecordingError(); err != nil {
 		return err
+	}
+	// Parallel tool calls can checkpoint together. Capture extension state under the same lock
+	// as acceptance so concurrent saves cannot replace it with an older snapshot.
+	if phase != "" && ctx.Parent() == nil {
+		if err := ctx.captureExtensions(); err != nil {
+			return ctx.stopRecording(err)
+		}
 	}
 	contexts := run.root.allContexts()
 	runtimeState := RuntimeState{}

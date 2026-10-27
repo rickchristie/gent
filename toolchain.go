@@ -60,7 +60,7 @@ type ToolCallResult struct {
 
 // ToolChainResult is the result of parsing and executing tool calls.
 // Each element in Results corresponds to one parsed tool call,
-// preserving execution order.
+// preserving input order, including when calls execute concurrently.
 type ToolChainResult struct {
 	Results []*ToolCallResult
 }
@@ -78,4 +78,12 @@ type ToolChain interface {
 	RecoveryMessage(*RecoveryInfo) string
 	RegisterCodecs(*CodecRegistry) error
 	RecoveryConfig() any
+}
+
+// ParallelToolChain declares whether ExecuteNext can run concurrently with independent plans
+// in the same context. Each plan must have a distinct checkpoint key. The JavaScript wrapper
+// always calls ExecuteNext on the supplied chain, including overrides on an embedding type.
+type ParallelToolChain interface {
+	ToolChain
+	SupportsParallelCalls() bool
 }

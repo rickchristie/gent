@@ -308,7 +308,12 @@ func (c *SearchChain) executeParsed(
 
 	seenTools := make(map[string]bool)
 
-	saved, ok, err := execCtx.CheckpointState("gent:search_seen")
+	// Parallel plans keep separate search output so one call cannot hide another call's schemas.
+	seenKey := "gent:search_seen"
+	if len(calls) > 0 && calls[0].CheckpointKey != "" {
+		seenKey = calls[0].CheckpointKey + ":search_seen"
+	}
+	saved, ok, err := execCtx.CheckpointState(seenKey)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +346,7 @@ func (c *SearchChain) executeParsed(
 		}
 	}
 
-	if err := execCtx.SetCheckpointState("gent:search_seen", seenTools); err != nil {
+	if err := execCtx.SetCheckpointState(seenKey, seenTools); err != nil {
 		return nil, err
 	}
 
@@ -370,7 +375,7 @@ func (c *SearchChain) executeSearch(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", err),
 			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, err, result)
+			publishFailedToolAttempt(execCtx, call, err, result)
 			return
 		}
 	}
@@ -388,7 +393,7 @@ func (c *SearchChain) executeSearch(
 	var toolCallSource string
 
 	beforeEvent := execCtx.PublishBeforeToolCall(
-		call.Name, call.Args,
+		call.Name, call.Args, gent.WithToolCallId(call.Id),
 	)
 	toolCallId = beforeEvent.ToolCallId
 	toolCallSource = beforeEvent.Source
@@ -577,7 +582,7 @@ func (c *SearchChain) executeGetSchema(
 	var toolCallId string
 	var toolCallSource string
 
-	beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args)
+	beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args, gent.WithToolCallId(call.Id))
 	toolCallId = beforeEvent.ToolCallId
 	toolCallSource = beforeEvent.Source
 	result.ToolCallId = toolCallId

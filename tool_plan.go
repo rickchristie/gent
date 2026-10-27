@@ -74,12 +74,42 @@ func (ctx *ExecutionContext) SavedToolPlan() (*ToolPlan, bool, error) {
 	return plan, true, nil
 }
 
-// SelectToolCall associates an invocation with its durable plan. Built-in chains serialize calls
-// within one execution context; child executions carry their own plans.
+// SelectToolCall selects the default plan for sequential calls. Concurrent calls must use
+// BindToolCall and pass their logical ID to PublishBeforeToolCall.
 func (ctx *ExecutionContext) SelectToolCall(plan *ToolPlan) {
 	ctx.run.mu.Lock()
 	defer ctx.run.mu.Unlock()
 	ctx.currentToolPlan = plan
+}
+
+// BindToolCall associates an explicit call ID with its plan until the returned function runs.
+// Each concurrent call must own a separate plan and checkpoint key.
+func (ctx *ExecutionContext) BindToolCall(plan *ToolPlan) func() {
+	id := plan.Calls[plan.NextCall].Id
+	ctx.run.mu.Lock()
+	if ctx.boundToolPlans == nil {
+		ctx.boundToolPlans = make(map[string]*ToolPlan)
+	}
+	ctx.boundToolPlans[id] = plan
+	ctx.run.mu.Unlock()
+	return func() {
+		ctx.run.mu.Lock()
+		delete(ctx.boundToolPlans, id)
+		ctx.run.mu.Unlock()
+	}
+}
+
+func (ctx *ExecutionContext) toolPlanFor(id string) *ToolPlan {
+	ctx.run.mu.RLock()
+	defer ctx.run.mu.RUnlock()
+	if plan := ctx.boundToolPlans[id]; plan != nil {
+		return plan
+	}
+	plan := ctx.currentToolPlan
+	if plan != nil && plan.NextCall < len(plan.Calls) && plan.Calls[plan.NextCall].Id == id {
+		return plan
+	}
+	return nil
 }
 
 func (ctx *ExecutionContext) selectedToolCallId() string {
@@ -93,26 +123,21 @@ func (ctx *ExecutionContext) selectedToolCallId() string {
 }
 
 func (ctx *ExecutionContext) isRetryingTool(event Event) bool {
-	if _, ok := event.(*BeforeToolCallEvent); !ok {
+	before, ok := event.(*BeforeToolCallEvent)
+	if !ok {
 		return false
 	}
-	ctx.run.mu.RLock()
-	defer ctx.run.mu.RUnlock()
-	plan := ctx.currentToolPlan
-	return plan != nil && plan.ReadyCall != nil && plan.ReadyCall.AttemptId != ctx.run.attempt
+	plan := ctx.toolPlanFor(before.ToolCallId)
+	return plan != nil && plan.ReadyCall != nil && plan.ReadyCall.AttemptId != ctx.AttemptId()
 }
 
-func (ctx *ExecutionContext) retryToolInput() (any, error) {
-	ctx.run.mu.RLock()
-	value := cloneWire(ctx.currentToolPlan.ReadyCall.Input)
-	ctx.run.mu.RUnlock()
+func (ctx *ExecutionContext) retryToolInput(id string) (any, error) {
+	value := cloneWire(ctx.toolPlanFor(id).ReadyCall.Input)
 	return ctx.Codecs().Decode(value)
 }
 
 func (ctx *ExecutionContext) saveToolReady(event *BeforeToolCallEvent) error {
-	ctx.run.mu.RLock()
-	plan := ctx.currentToolPlan
-	ctx.run.mu.RUnlock()
+	plan := ctx.toolPlanFor(event.ToolCallId)
 	if plan == nil {
 		return ctx.FlushProgress()
 	}

@@ -12,7 +12,8 @@ import (
 	"github.com/rickchristie/gent/schema"
 )
 
-// ToolCallFn sends JavaScript calls through the native tool plan.
+// ToolCallFn sends JavaScript calls through native plans. The callback runs a batch concurrently
+// and returns results in input order. It must not use the JavaScript VM from worker goroutines.
 type ToolCallFn func(calls []gent.ModelToolCall) (*gent.ToolChainResult, error)
 
 // RegisterToolBridge registers tool.call() and

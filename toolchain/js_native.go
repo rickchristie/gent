@@ -71,6 +71,9 @@ func (w *JsToolChainWrapper) RegisterCodecs(registry *gent.CodecRegistry) error 
 	if err := registry.RegisterValueType(reflect.TypeOf(programState{})); err != nil {
 		return err
 	}
+	if err := registry.RegisterValueType(reflect.TypeOf(parallelProgramCalls{})); err != nil {
+		return err
+	}
 	return w.wrapped.RegisterCodecs(registry)
 }
 

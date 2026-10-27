@@ -197,6 +197,18 @@ identities, positions, raw arguments, effective typed input, completed results, 
 SearchChain derives discovered definitions from active history. Equal calls at different positions
 have different logical IDs. Results retain typed data, text, media, instructions, errors, and
 summaries.
+
+JavaScript parallel batches save one plan per call under separate checkpoint keys before starting
+goroutines. `gent:program_calls` holds their keys in input order. Each ready input and completed
+result is saved independently, so a later call can finish before an earlier call. Recovery checks
+every saved plan and keeps the input order without restarting the script. The JavaScript VM and
+result collector stay on the caller goroutine. Custom parallel chains must use `BindToolCall` with
+an explicit event call ID, give each plan a separate checkpoint key, and wait for all started calls
+before returning. `SelectToolCall` remains the default-plan API for sequential execution.
+The parallel wrapper calls the supplied chain's `ExecuteNext` method so embedded chains retain
+their execution checks. A tool panic calls `Interrupt`, waits for all workers, and then propagates
+the first panic. This leaves the last accepted checkpoint open for recovery.
+
 Provider continuation items are saved with model responses and assistant messages. Adapters must
 replay the exact provider items or reject incompatible data.
 

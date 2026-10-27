@@ -35,19 +35,18 @@ func formatSectionText(
 // to spend a tool-call turn, even if the name or arguments were invalid.
 func publishFailedToolAttempt(
 	execCtx *gent.ExecutionContext,
-	toolName string,
-	args any,
+	call *parsedCall,
 	err error,
 	result *gent.ToolCallResult,
 ) {
 
-	beforeEvent := execCtx.PublishBeforeToolCall(toolName, args)
+	beforeEvent := execCtx.PublishBeforeToolCall(call.Name, call.Args, gent.WithToolCallId(call.Id))
 	result.ToolCallId = beforeEvent.ToolCallId
 	result.AttemptId = execCtx.AttemptId()
 	result.Input = beforeEvent.Args
 	result.SummaryCaptured = true
 	execCtx.PublishAfterToolCall(
-		toolName, beforeEvent.Args, result, 0, err,
+		call.Name, beforeEvent.Args, result, 0, err,
 		gent.WithToolCallId(beforeEvent.ToolCallId),
 		gent.WithToolCallSource(beforeEvent.Source),
 	)

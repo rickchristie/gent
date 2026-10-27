@@ -9,8 +9,10 @@ import (
 )
 
 type parsedCall struct {
-	Name string
-	Args map[string]any
+	Id            string
+	Name          string
+	Args          map[string]any
+	CheckpointKey string
 }
 
 func nativeDefinitions(tools []any, outputSchema bool) ([]gent.ToolDefinition, error) {

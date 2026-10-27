@@ -237,6 +237,28 @@ Inner calls use the same native preparation and execution path. Search inside a 
 later tool definitions. Each program increments code statistics; its inner calls increment tool
 statistics. `run_code` does not add an extra business-tool count.
 
+`tool.call` waits for one call. With `Registry` and `SearchChain`, `tool.parallelCall` starts one
+goroutine per call and waits for all calls. Results and the tool log keep the input order, even when
+calls finish in a different order. A tool error is returned in that call's `error` field; other
+calls can finish. Use parallel calls only for independent work. Tools, search engines, hooks,
+summary callbacks, and custom text formats used here must be safe for concurrent use. Tools must
+check their Go context so cancellation can stop them. The wrapper waits for started calls before
+it returns, including after cancellation or a checkpoint failure. The JavaScript VM stays on one
+goroutine.
+
+Each concurrent call has its own saved plan, logical ID, effective input, and result. Parallel
+searches keep separate lists of returned schemas so each search result is complete. A worker
+restart keeps completed results, reports uncertain calls, and marks calls that did not start.
+It does not restart the script. Custom chains must implement `gent.ParallelToolChain` and return
+true from `SupportsParallelCalls` to accept batches with more than one call. The wrapper returns
+an error before tool effects if this support is absent or disabled. The wrapper calls `ExecuteNext`
+on the supplied chain, so an override on a type that embeds `Registry` or `SearchChain` still runs.
+An override that requires sequential use must return false from `SupportsParallelCalls`.
+
+If a parallel call panics, the wrapper interrupts the worker context and waits for the other calls
+to stop. It then propagates the first panic to the caller. A panic during a sibling's cleanup does
+not replace that value. The last accepted checkpoint remains available for recovery.
+
 ## Recovery guidance
 
 ```go

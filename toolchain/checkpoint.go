@@ -68,8 +68,8 @@ func executeNextTool(
 	if plan.Abandoned {
 		return completePlannedTool(ctx, plan, skippedTool(plan))
 	}
-	ctx.SelectToolCall(plan)
-	defer ctx.SelectToolCall(nil)
+	unbind := ctx.BindToolCall(plan)
+	defer unbind()
 	result, completed, err := ctx.RecoverTool(plan)
 	if errors.Is(err, gent.ErrUncertainTool) {
 		result, err = unknownTool(ctx, plan.ReadyCall, chain)
@@ -85,7 +85,8 @@ func executeNextTool(
 		if err := ctx.SetToolPlan(plan); err != nil {
 			return nil, err
 		}
-		calls := []*parsedCall{{Name: call.Name, Args: call.Args}}
+		calls := []*parsedCall{{Id: call.Id, Name: call.Name, Args: call.Args,
+			CheckpointKey: plan.CheckpointKey}}
 		output, err := execute(ctx, calls, format)
 		if recordErr := ctx.RecordingError(); recordErr != nil {
 			return nil, recordErr

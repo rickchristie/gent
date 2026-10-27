@@ -73,6 +73,7 @@ type ExecutionContext struct {
 	restored           bool
 	runCanceled        bool
 	currentToolPlan    *ToolPlan
+	boundToolPlans     map[string]*ToolPlan
 
 	// Go context for cancellation (created via context.WithCancelCause)
 	goCtx  context.Context
@@ -210,6 +211,12 @@ func (ctx *ExecutionContext) SetEventPublisher(publisher EventPublisher) {
 // Context and Limits
 // -----------------------------------------------------------------------------
 
+// Interrupt stops work in this context and its children. It keeps the run open for recovery
+// from the last accepted checkpoint. The cause is available through context.Cause.
+func (ctx *ExecutionContext) Interrupt(cause error) {
+	ctx.cancel(cause)
+}
+
 // Release stops execution work and closes its stream subscriptions after queued chunks drain.
 // It does not change the result or save an outcome. Executors call it on every return path;
 // callers that manage an ExecutionContext directly should defer it. Repeated calls are safe.
@@ -232,6 +239,7 @@ var errExecutionReleased = errors.New("gent: execution resources released")
 // The context is cancelled when:
 //   - A configured limit is exceeded
 //   - The parent context is cancelled
+//   - Interrupt or CancelRun is called
 //   - The execution terminates
 func (ctx *ExecutionContext) Context() context.Context {
 	return ctx.goCtx
@@ -1258,7 +1266,7 @@ func (ctx *ExecutionContext) PublishBeforeToolCall(
 		ToolCallId: options.toolCallId,
 	}
 	if ctx.isRetryingTool(event) {
-		input, err := ctx.retryToolInput()
+		input, err := ctx.retryToolInput(event.ToolCallId)
 		if err != nil {
 			ctx.stopRecording(err)
 			return event

@@ -526,7 +526,7 @@ const result2 = tool.call(
 );
 if (result2.error) return;
 
-// Parallel calls:
+// Parallel calls run together and return results in input order:
 const results = tool.parallelCall([
   {tool: "tool3", args: {name: result2.output.name}},
   {tool: "tool4",

@@ -93,7 +93,7 @@ func (c *Registry) executeParsed(
 				"Error: unknown tool %q. Use a function from the current native tool definitions.",
 				call.Name,
 			))
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, toolErr, results[i])
+			publishFailedToolAttempt(execCtx, call, toolErr, results[i])
 			continue
 		}
 
@@ -105,7 +105,7 @@ func (c *Registry) executeParsed(
 					textFormat, call.Name,
 					fmt.Sprintf("Error: %v", validationErr),
 				)
-				publishFailedToolAttempt(execCtx, call.Name, call.Args, validationErr, results[i])
+				publishFailedToolAttempt(execCtx, call, validationErr, results[i])
 				continue
 			}
 		}
@@ -118,7 +118,7 @@ func (c *Registry) executeParsed(
 				textFormat, call.Name,
 				fmt.Sprintf("Error: %v", transformErr),
 			)
-			publishFailedToolAttempt(execCtx, call.Name, call.Args, transformErr, results[i])
+			publishFailedToolAttempt(execCtx, call, transformErr, results[i])
 			continue
 		}
 		results[i].Input = typedInput
@@ -128,7 +128,8 @@ func (c *Registry) executeParsed(
 		var toolCallId string
 		var toolCallSource string
 
-		beforeEvent := execCtx.PublishBeforeToolCall(call.Name, typedInput)
+		beforeEvent := execCtx.PublishBeforeToolCall(call.Name, typedInput,
+			gent.WithToolCallId(call.Id))
 		inputToUse = beforeEvent.Args
 		toolCallId = beforeEvent.ToolCallId
 		toolCallSource = beforeEvent.Source
