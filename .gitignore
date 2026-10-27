@@ -31,6 +31,3 @@ Thumbs.db
 
 # Log files
 .logs/
-
-# Local lessons and their tests
-/.learn/

@@ -1,0 +1,592 @@
+{
+  "final": {
+    "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+    "lastEventNumber": "24",
+    "status": "succeeded",
+    "previews": [
+      {
+        "id": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:1",
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "status": "succeeded",
+        "parts": []
+      },
+      {
+        "id": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "status": "succeeded",
+        "parts": [
+          {
+            "type": "intermediary",
+            "text": "Order order-1001 has shipped. ",
+            "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer"
+          }
+        ]
+      }
+    ],
+    "answers": [
+      {
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:answer",
+        "sourceMessageIds": [
+          "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer"
+        ],
+        "text": "Order order-1001 has shipped."
+      }
+    ]
+  },
+  "frames": [
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "1",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 1,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.282060558+07:00",
+        "type": "execution_started",
+        "eventName": "gent:execution:before",
+        "source": "order-helper/0",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {
+          "name": "order-helper"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "2",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 2,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.287190606+07:00",
+        "type": "iteration_started",
+        "eventName": "gent:iteration:before",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root"
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "3",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 3,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.291957042+07:00",
+        "type": "system_prompt",
+        "eventName": "gent:system_prompt:before",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {
+          "sectionCount": 4,
+          "sectionNames": [
+            "behavior",
+            "instructions",
+            "critical_rules",
+            "answer_requirements"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "4",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 4,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.293045479+07:00",
+        "type": "model_call_started",
+        "eventName": "gent:model_call:before",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:1",
+        "streamId": "iter-1",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "model": "",
+          "provider": "",
+          "streamId": "iter-1",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "5",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 5,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.302745237+07:00",
+        "type": "model_call_finished",
+        "eventName": "gent:model_call:after",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:1",
+        "streamId": "iter-1",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "durationMs": 0,
+          "model": "",
+          "provider": "",
+          "streamId": "iter-1",
+          "streamTopicId": "llm-response",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "6",
+      "event": {
+        "eventNumber": 6,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.314588319+07:00",
+        "type": "checkpoint"
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "7",
+      "event": {
+        "eventNumber": 7,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.324369956+07:00",
+        "type": "checkpoint"
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "8",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 8,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.334031875+07:00",
+        "type": "tool_call_started",
+        "eventName": "gent:tool_call:before",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "toolCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:tool:1",
+        "payload": {
+          "name": "lookup_order"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "9",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 9,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.345535004+07:00",
+        "type": "tool_call_finished",
+        "eventName": "gent:tool_call:after",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "toolCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:tool:1",
+        "payload": {
+          "durationMs": 0,
+          "name": "lookup_order"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "10",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 10,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.36042227+07:00",
+        "type": "state_change",
+        "eventName": "gent:state_change",
+        "iteration": 1,
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {}
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "11",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 11,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.360232134+07:00",
+        "type": "iteration_finished",
+        "eventName": "gent:iteration:after",
+        "iteration": 1,
+        "source": "order-helper/1",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {
+          "action": "c",
+          "durationMs": 68
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "12",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 12,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.382360942+07:00",
+        "type": "iteration_started",
+        "eventName": "gent:iteration:before",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root"
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "13",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 13,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.398147528+07:00",
+        "type": "system_prompt",
+        "eventName": "gent:system_prompt:before",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {
+          "sectionCount": 4,
+          "sectionNames": [
+            "behavior",
+            "instructions",
+            "critical_rules",
+            "answer_requirements"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "14",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 14,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.399277553+07:00",
+        "type": "model_call_started",
+        "eventName": "gent:model_call:before",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "model": "",
+          "provider": "",
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "15",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 15,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.458681778+07:00",
+        "type": "model_stream_chunk",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "messageId": "",
+          "metaContent": [
+            {
+              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
+              "text": "Order ",
+              "type": "intermediary"
+            }
+          ],
+          "sourceMessageIds": null,
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "16",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 16,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.498733675+07:00",
+        "type": "model_stream_chunk",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "messageId": "",
+          "metaContent": [
+            {
+              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
+              "text": "order-1001 ",
+              "type": "intermediary"
+            }
+          ],
+          "sourceMessageIds": null,
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "17",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 17,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.538879289+07:00",
+        "type": "model_stream_chunk",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "messageId": "",
+          "metaContent": [
+            {
+              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
+              "text": "has ",
+              "type": "intermediary"
+            }
+          ],
+          "sourceMessageIds": null,
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "18",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 18,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.579249259+07:00",
+        "type": "model_stream_chunk",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "messageId": "",
+          "metaContent": [
+            {
+              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
+              "text": "shipped. ",
+              "type": "intermediary"
+            }
+          ],
+          "sourceMessageIds": null,
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "19",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 19,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.597019312+07:00",
+        "type": "model_call_finished",
+        "eventName": "gent:model_call:after",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "durationMs": 178,
+          "model": "",
+          "provider": "",
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "20",
+      "event": {
+        "eventNumber": 20,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.620496401+07:00",
+        "type": "checkpoint"
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "21",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 21,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.642272286+07:00",
+        "type": "state_change",
+        "eventName": "gent:state_change",
+        "iteration": 2,
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {}
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "22",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 22,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.641887754+07:00",
+        "type": "iteration_finished",
+        "eventName": "gent:iteration:after",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {
+          "action": "t",
+          "durationMs": 243,
+          "result": [
+            {
+              "Text": "Order order-1001 has shipped."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "23",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 23,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.642142209+07:00",
+        "type": "execution_finished",
+        "eventName": "gent:execution:after",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "payload": {
+          "durationMs": 360,
+          "result": {
+            "output": [
+              {
+                "Text": "Order order-1001 has shipped."
+              }
+            ],
+            "terminationReason": "success"
+          },
+          "status": "succeeded",
+          "terminationReason": "success"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "eventNumber": "24",
+      "event": {
+        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "eventNumber": 24,
+        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+        "ts": "2026-10-26T22:50:56.642134069+07:00",
+        "type": "execution_content",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "content": "Order order-1001 has shipped.",
+          "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:answer",
+          "metaContent": null,
+          "sourceMessageIds": [
+            "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer"
+          ],
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    }
+  ],
+  "initial": {
+    "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+    "lastEventNumber": "0",
+    "status": "pending",
+    "previews": [],
+    "answers": []
+  }
+}

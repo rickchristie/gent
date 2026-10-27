@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="Offline Gent lessons: ReAct and hybrid policy search." />
+    <title>Gent / Policy search lab</title>
+    <style>
+      @@CSS@@
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to lesson</a>
+    <aside class="sidebar">
+      <a class="brand" href="#start" aria-label="Gent lessons home">gent<span> / lab</span></a>
+      <div class="side-title">FIELD NOTES / 01</div>
+      <p class="side-intro">From a question<br />to a policy-backed answer.</p>
+      <nav aria-label="Lessons">
+        <a href="#start" data-page="start"><span>01</span> The complete path <b></b></a>
+        <a href="#contracts" data-page="contracts"><span>02</span> The interfaces <b></b></a>
+        <a href="#documents" data-page="documents"><span>03</span> Prepare the policies <b></b></a>
+        <a href="#ranking" data-page="ranking"><span>04</span> Mix the two signals <b></b></a>
+        <a href="#loop" data-page="loop"><span>05</span> Follow the loop <b></b></a>
+        <a href="#code" data-page="code"><span>06</span> Connect the code <b></b></a>
+        <a href="#operation" data-page="operation"><span>07</span> Run it reliably <b></b></a>
+        <a href="#check" data-page="check"><span>08</span> Check your model <b></b></a>
+      </nav>
+      <div class="progress-block">
+        <div class="small-row">
+          <span>Your progress</span><output id="progress-text">0 / 8</output>
+        </div>
+        <progress id="progress" max="8" value="0" aria-label="Lessons completed"></progress>
+        <p id="save-state" class="tiny">Progress stays in this browser.</p>
+        <button class="text-button" id="reset-progress">Reset progress</button>
+      </div>
+      <div class="side-bottom"><span class="status-dot"></span> Works offline · One HTML file</div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <span>GENT / INTERACTIVE LESSONS</span>
+        <div>
+          <span class="tag">GO</span><span class="tag">BM25 + VECTOR</span>
+          <button id="print" class="text-button">Print lessons</button>
+        </div>
+      </header>
+      <main id="main" tabindex="-1">
+        <noscript
+          >Enable JavaScript to use the experiments. The lesson text and Go example remain
+          below.</noscript
+        >
+        <section class="lesson" id="start" aria-labelledby="start-title">
+          <div class="eyebrow">01 / THE COMPLETE PATH <span>6 MIN</span></div>
+          <h1 id="start-title">A normal loop.<br /><em>Two ways to find a policy.</em></h1>
+          <p class="lead">
+            Use Gent’s standard ReAct loop. Give it a policy tool that combines full-text search
+            with vector search. Keep the loop, retrieval, and answer checks separate.
+          </p>
+          <div class="scenario">
+            <span class="label">OUR EXAMPLE QUESTION</span>
+            <blockquote>“An unused item arrived 10 days ago. Can I return it?”</blockquote>
+            <p>
+              The store rules in these lessons are invented. The Go interfaces come from this
+              working copy.
+            </p>
+          </div>
+          <div class="section-heading">
+            <h2>Follow the contracts</h2>
+            <span>Select a block to inspect it.</span>
+          </div>
+          <div class="architecture" aria-label="Interactive architecture map">
+            <div class="map-row">
+              <button data-node="runner">
+                <small>LIFECYCLE</small><strong>Runner</strong>
+                <span>executor.NewRunner</span></button
+              ><span class="arrow" aria-hidden="true">→</span>
+              <button data-node="loop">
+                <small>LOOP</small><strong>ReAct agent</strong> <span>gent.Loop</span></button
+              ><span class="arrow" aria-hidden="true">⇄</span>
+              <button data-node="model">
+                <small>GENERATION</small><strong>Model adapter</strong> <span>gent.Model</span>
+              </button>
+            </div>
+            <div class="map-caption">Native tool call ↓</div>
+            <div class="map-row">
+              <button data-node="registry">
+                <small>TOOL EXECUTION</small><strong>Registry</strong>
+                <span>gent.ToolChain</span></button
+              ><span class="arrow" aria-hidden="true">→</span>
+              <button data-node="policy">
+                <small>POLICY RETRIEVAL</small><strong>search_policy</strong>
+                <span>gent.Tool[I, string]</span></button
+              ><span class="arrow" aria-hidden="true">→</span>
+              <button data-node="index">
+                <small>RANKING</small><strong>FusedIndex</strong> <span>search.SearchIndex</span>
+              </button>
+            </div>
+            <div class="branches">
+              <span><i class="dot bm"></i> BleveIndex / BM25 / 40%</span>
+              <span><i class="dot vector"></i> FlatIndex / vectors / 60%</span>
+            </div>
+          </div>
+          <div id="map-detail" class="detail" aria-live="polite"></div>
+          <div class="split note-grid">
+            <div>
+              <h3>Configure the standard pieces</h3>
+              <p>
+                <code>react.NewAgent(model)</code>, <code>toolchain.New()</code>, and
+                <code>policy.NewPolicySearchTool(...)</code> cover this path. You supply the model,
+                an initialized embedder, and your policy documents.
+              </p>
+            </div>
+            <div>
+              <h3>Keep the two searches distinct</h3>
+              <p>
+                <strong>Policy search</strong> finds rules in documents.
+                <strong>Tool search</strong> finds callable tools. You do not need
+                <code>SearchChain</code> just to use hybrid policy retrieval.
+              </p>
+            </div>
+          </div>
+          <p class="callout">
+            <strong>Current API:</strong> <code>gent.Loop</code> and
+            <code>executor.NewRunner</code> are the current names in this working copy.
+            <code>AgentLoop[Data]</code> and <code>executor.New[Data]</code> remain compatibility
+            APIs.
+          </p>
+        </section>
+
+        <section class="lesson" id="contracts" aria-labelledby="contracts-title">
+          <div class="eyebrow">02 / THE INTERFACES <span>REFERENCE</span></div>
+          <h1 id="contracts-title">Know where<br /><em>each responsibility lives.</em></h1>
+          <p class="lead">
+            Most interfaces already have a standard implementation. Select a contract to see its
+            exact methods, its role, and the piece you use in this application.
+          </p>
+          <div class="filters">
+            <label
+              >Find an interface<input
+                id="contract-search"
+                type="search"
+                placeholder="Try Embedder, Tool, or Termination"
+                autocomplete="off"
+            /></label>
+            <label
+              >Area<select id="contract-group" aria-label="Area">
+                <option>All</option>
+                <option>Run</option>
+                <option>Tools</option>
+                <option>Search</option>
+                <option>Answer</option>
+                <option>Optional</option>
+              </select></label
+            >
+          </div>
+          <div class="contract-layout">
+            <div>
+              <p id="contract-count" class="tiny" aria-live="polite"></p>
+              <div id="contract-list" aria-label="Interface list"></div>
+            </div>
+            <article id="contract-detail" class="contract-detail" aria-live="polite"></article>
+          </div>
+          <p class="source-note">
+            Declarations are copied from the local Go source, with comments removed.
+            <code>ExecutionContext</code>, <code>Policy</code>, and <code>SearchResult</code> are
+            concrete types. They connect these interfaces.
+          </p>
+        </section>
+
+        <section class="lesson" id="documents" aria-labelledby="documents-title">
+          <div class="eyebrow">03 / PREPARE THE POLICIES <span>TRY IT</span></div>
+          <h1 id="documents-title">One document.<br /><em>Two index inputs.</em></h1>
+          <p class="lead">
+            Edit this policy. Watch which fields go to the keyword index and which go to the vector
+            path. Keep each policy focused on one topic.
+          </p>
+          <div class="split document-layout">
+            <form id="policy-form" class="panel" onsubmit="return false">
+              <div class="small-row">
+                <h2>policy.Policy</h2>
+                <button type="button" id="reset-policy" class="text-button">Reset example</button>
+              </div>
+              <label>Id<input id="policy-id" value="return-window" /></label>
+              <label
+                >Description<input
+                  id="policy-description"
+                  value="Return unused items within 30 days of delivery."
+              /></label>
+              <label
+                >FullContent<textarea id="policy-body" aria-label="FullContent" rows="5">
+## Returns
+
+An unused item can be returned within 30 days of delivery.
+Supply the order ID. The refund uses the original payment method.</textarea
+                >
+              </label>
+              <label
+                >Keywords <span class="muted">/ comma separated</span>
+                <input id="policy-keywords" value="return, refund, unused, 30 days"
+              /></label>
+              <label
+                >SyntheticQueries <span class="muted">/ one per line</span>
+                <textarea id="policy-queries" rows="2" aria-label="SyntheticQueries / one per line">
+I changed my mind about an item I bought</textarea
+                >
+              </label>
+              <p id="policy-warning" role="status" class="tiny"></p>
+            </form>
+            <div class="index-previews" aria-live="polite">
+              <article class="panel">
+                <div class="small-row">
+                  <h3><i class="dot bm"></i> BM25 input</h3>
+                  <span class="tag">BLEVE ADAPTER</span>
+                </div>
+                <pre id="bm25-document"></pre>
+              </article>
+              <article class="panel">
+                <div class="small-row">
+                  <h3><i class="dot vector"></i> Vector input</h3>
+                  <span class="tag">CHUNK ADAPTER</span>
+                </div>
+                <p class="tiny">Primary Markdown before token-aware chunking:</p>
+                <pre id="vector-document"></pre>
+                <p class="tiny">Separate synthetic-query chunk:</p>
+                <pre id="vector-queries"></pre>
+              </article>
+            </div>
+          </div>
+          <div class="split note-grid">
+            <div>
+              <h3>Description is display text</h3>
+              <p>
+                It appears in title-mode results. <code>PolicyBleveAdapter</code> and
+                <code>PolicyChunkAdapter</code> do not index this field. Put searchable wording in
+                the body, keywords, or synthetic queries.
+              </p>
+            </div>
+            <div>
+              <h3>Chunk size uses the embedder’s tokenizer</h3>
+              <p>
+                The real adapter calls <code>MarkdownChunker</code> with <code>TokenCount</code> and
+                <code>MaxTokens</code>. This preview shows input text; it does not run the Go
+                chunker or an embedding model.
+              </p>
+            </div>
+          </div>
+          <p class="callout">
+            Use unique policy IDs. Duplicate IDs replace entries when the constructor builds its
+            maps. Keep synthetic queries short: the current adapter joins them into one extra chunk.
+            Long text can exceed the embedding model’s token limit.
+          </p>
+        </section>
+
+        <section class="lesson" id="ranking" aria-labelledby="ranking-title">
+          <div class="eyebrow">04 / MIX THE TWO SIGNALS <span>EXPERIMENT</span></div>
+          <h1 id="ranking-title">
+            Words find matches.<br /><em>Vectors find related meaning.</em>
+          </h1>
+          <p class="lead">
+            Change the weight and watch the order change. Policy search uses a weighted sum of
+            scores. A result can still rank well when only one source finds it.
+          </p>
+          <div class="lab-label">
+            TEACHING DATA / Scores are fixed examples after source filtering. This browser does not
+            run Bleve or ONNX.
+          </div>
+          <div class="rank-controls panel">
+            <label
+              >Query example<select id="query-preset" aria-label="Query example">
+                <option value="intent">“I changed my mind about my purchase”</option>
+                <option value="keyword">“return refund unused”</option>
+                <option value="id">“return-window”</option>
+              </select></label
+            >
+            <label
+              >Return at most<select id="top-k" aria-label="Return at most">
+                <option>1</option>
+                <option>2</option>
+                <option selected>3</option>
+                <option>4</option>
+              </select></label
+            >
+            <div class="weight-control">
+              <label for="bm25-weight"
+                >BM25 weight <output id="weight-label">40% BM25 / 60% vector</output></label
+              >
+              <input id="bm25-weight" type="range" min="0" max="100" step="5" value="40" />
+              <div class="small-row tiny"><span>All vector</span><span>All BM25</span></div>
+            </div>
+            <button id="reset-ranking" class="secondary">Use policy defaults</button>
+          </div>
+          <div class="formula" id="formula" aria-live="polite"></div>
+          <div class="table-wrap">
+            <table class="ranking-table">
+              <caption>
+                Ranked policies · select a row for the score calculation
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Policy</th>
+                  <th scope="col">BM25 raw</th>
+                  <th scope="col">Normalized</th>
+                  <th scope="col">Cosine</th>
+                  <th scope="col">Weighted contributions</th>
+                  <th scope="col">Score</th>
+                </tr>
+              </thead>
+              <tbody id="ranking-rows"></tbody>
+            </table>
+          </div>
+          <div class="small-row legend">
+            <span><i class="dot bm"></i> BM25 contribution</span>
+            <span><i class="dot vector"></i> Vector contribution</span>
+            <span>BM25 maximum for these examples: 10</span>
+          </div>
+          <div id="rank-detail" class="detail" aria-live="polite"></div>
+          <div class="split note-grid">
+            <div>
+              <h3>Normalize before you add</h3>
+              <p>
+                Raw BM25 scores depend on the query. With a positive theoretical maximum, Gent
+                divides by that maximum and caps the result at 1. It does not stretch the best
+                observed hit to 1. Without that metadata, scores pass through.
+              </p>
+            </div>
+            <div>
+              <h3>Retrieve candidates before final top-K</h3>
+              <p>
+                The policy helper requests up to <strong>20 results per source</strong>, then fuses
+                and returns <strong>3 by default</strong>. Bleve can remove weak matches first.
+                <code>WithTopK</code> changes the final count.
+              </p>
+            </div>
+          </div>
+          <details>
+            <summary>What the browser experiment leaves out</summary>
+            <p>
+              Bleve’s default confidence threshold is 0.001 of the theoretical maximum, with knee
+              truncation enabled. FlatIndex scans chunk vectors and keeps each policy’s best chunk.
+              The supplied cosine scores are illustrative, not probabilities or quality guarantees.
+              Cosine can be negative; the fuser passes semantic scores through unchanged. The demo
+              sorts tied scores by ID. The Go fuser does not define a tie order.
+            </p>
+            <p>
+              The slider is a teaching control. <code>PolicySearchTool</code> has no weight setter.
+              To change 40/60, compose the search indexes and expose them through your own tool.
+            </p>
+          </details>
+        </section>
+
+        <section class="lesson" id="loop" aria-labelledby="loop-title">
+          <div class="eyebrow">05 / FOLLOW THE LOOP <span>WALKTHROUGH</span></div>
+          <h1 id="loop-title">Search is one action.<br /><em>The loop connects the rest.</em></h1>
+          <p class="lead">
+            Advance through a scripted run. Native tool calls carry structured arguments. Tool
+            results enter history, and the next model call can use them.
+          </p>
+          <div class="panel loop-controls">
+            <label
+              >Run path<select id="run-path" aria-label="Run path">
+                <option value="full">Full policy → answer</option>
+                <option value="snippet">Snippet → get_policy → answer</option>
+                <option value="reject">Validator rejects → corrected answer</option>
+                <option value="error">Empty query → tool error → retry</option>
+                <option value="limit">Iteration limit stops an unfinished run</option>
+              </select></label
+            >
+            <div class="button-row">
+              <button id="run-back" class="secondary">Back</button>
+              <button id="run-next" class="primary">Next step →</button>
+              <button id="run-reset" class="text-button">Restart</button>
+            </div>
+            <label class="run-range"
+              >Position <output id="run-position"></output>
+              <input id="run-step" type="range" min="0" max="7" value="0"
+            /></label>
+          </div>
+          <div class="run-stage">
+            <div class="run-story" aria-live="polite">
+              <div id="run-owner" class="eyebrow"></div>
+              <h2 id="run-title"></h2>
+              <p id="run-description"></p>
+              <div class="run-stats">
+                <div><small>ITERATION</small><strong id="run-iteration"></strong></div>
+                <div><small>TOOL ATTEMPTS</small><strong id="run-tools"></strong></div>
+              </div>
+              <p class="tiny">
+                Counts describe this scripted path. No model calls run in this file.
+              </p>
+            </div>
+            <div class="run-payload">
+              <div id="run-code-label" class="code-label"></div>
+              <pre id="run-code"></pre>
+            </div>
+          </div>
+          <ol id="run-timeline" class="timeline" aria-label="Run steps"></ol>
+          <p class="callout">
+            <strong>Tool calls take priority.</strong> If a response has tool calls and answer text,
+            ReAct executes the calls first. Only a response with no tool calls reaches final-answer
+            checks. A truncated response is handled before either route.
+          </p>
+          <p class="source-note">
+            The native path passes plain final content to Termination. The default XML format shapes
+            prompt sections and tool output; it does not require the model to write XML tool calls
+            or an <code>&lt;answer&gt;</code> envelope.
+          </p>
+        </section>
+
+        <section class="lesson" id="code" aria-labelledby="code-title">
+          <div class="eyebrow">06 / CONNECT THE CODE <span>WORKED EXAMPLE</span></div>
+          <h1 id="code-title">Build once.<br /><em>Give each question a context.</em></h1>
+          <p class="lead">
+            This complete Go example uses the standard loop and the built-in hybrid policy tool. The
+            model and embedder are separate dependencies.
+          </p>
+          <div class="assembly-strip">
+            <span>1 · Embedder + policies</span><span>2 · Policy tool</span>
+            <span>3 · Registry + ReAct</span><span>4 · Runner + context</span>
+          </div>
+          <div class="code-toolbar">
+            <span>main.go / current local API</span>
+            <div>
+              <button id="copy-code" class="secondary">Copy Go</button>
+              <button id="download-code" class="secondary">Download main.go</button>
+            </div>
+          </div>
+          <pre class="full-code"><code id="go-example"
+>@@EXAMPLE@@</code></pre>
+          <p id="copy-status" class="tiny" role="status"></p>
+          <div class="split note-grid">
+            <div>
+              <h3>Run from this checkout</h3>
+              <p>
+                Install the native libraries and model first. These setup commands can download
+                files and change your local setup.
+              </p>
+              <pre>
+go run ./cmd/gent setup onnx
+go run ./cmd/gent model download multilingual-e5-small
+go run ./docs/quickstart/policy-search-lessons/example</pre
+              >
+              <p>
+                Before the last command, set <code>OPENAI_API_KEY</code> and
+                <code>GENT_MODEL</code> in your shell. Select a model that supports native tool
+                calls. The final command makes live API requests and can incur usage charges.
+              </p>
+            </div>
+            <div>
+              <h3>Use the downloaded source</h3>
+              <p>
+                Place <code>main.go</code> in an application module that uses a matching Gent
+                revision. This guide reflects the current working copy, including local API changes.
+                It does not claim compatibility with a released version.
+              </p>
+              <p>
+                The included tests inject a scripted model and a deterministic embedder. They run
+                the real registry, policy index, ReAct loop, and runner without API credentials.
+              </p>
+            </div>
+          </div>
+          <details>
+            <summary>Why the code keeps these pieces separate</summary>
+            <p>
+              <code>BuildRunner</code> builds the indexes once. <code>Answer</code> creates a fresh
+              ExecutionContext for each question. This avoids repeat indexing and keeps run history
+              and limits separate. The application owns the embedder and closes it after all runs
+              finish.
+            </p>
+            <p>
+              Switch to <code>policy.SearchResultSnippet</code> or
+              <code>policy.SearchResultTitle</code> in the builder to register
+              <code>get_policy</code>. The prompt asks the model to read the full text before
+              answering. Add a validator or application rule if that sequence must be enforced.
+            </p>
+          </details>
+        </section>
+
+        <section class="lesson" id="operation" aria-labelledby="operation-title">
+          <div class="eyebrow">07 / RUN IT RELIABLY <span>DESIGN CHOICES</span></div>
+          <h1 id="operation-title">Use the right boundary<br /><em>for each check.</em></h1>
+          <p class="lead">
+            Retrieval gives the model evidence. Your application still owns configuration, policy
+            quality, resource lifetime, and the rules for any action.
+          </p>
+          <div class="mode-picker" role="group" aria-label="Policy output mode">
+            <button data-mode="full">Full content</button
+            ><button data-mode="snippet">Snippet</button>
+            <button data-mode="title">Title</button>
+          </div>
+          <div class="split panel">
+            <div>
+              <h2 id="mode-title"></h2>
+              <p id="mode-description"></p>
+              <code id="mode-code"></code>
+            </div>
+            <pre id="mode-result"></pre>
+          </div>
+          <div class="practice-list">
+            <article>
+              <span>01</span>
+              <div>
+                <h3>Freeze configuration before shared use</h3>
+                <p>
+                  Register tools, set result mode, and prepare policies before concurrent runs.
+                  SearchIndex and Embedder implementations must support concurrent use. The helper
+                  keeps policy pointers; do not change their content during a run.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span>02</span>
+              <div>
+                <h3>Put limits on the execution context</h3>
+                <p>
+                  <code>SetLimits</code> replaces the list. Start with
+                  <code>DefaultLimits()</code> if you want to keep its error limits. Use
+                  <code>SCIterations.Self()</code> for this context. An unfinished run stops after
+                  the completed iteration reaches that limit. Most other limits stop when the value
+                  exceeds the maximum.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span>03</span>
+              <div>
+                <h3>Check both errors and the final reason</h3>
+                <p>
+                  Handle the error from <code>Execute</code>, then inspect
+                  <code>ExecutionResult.TerminationReason</code>. Tool errors can become
+                  observations and allow a retry. Cancellation, limits, and recording errors can end
+                  the run.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span>04</span>
+              <div>
+                <h3>Keep the embedder alive for all searches</h3>
+                <p>
+                  ONNX requires CGO, native libraries, and downloaded model files. With CGO
+                  disabled, the built-in constructor returns an error. A custom
+                  <code>Embedder</code> is an alternative. Always handle errors from
+                  <code>Close</code>.
+                </p>
+              </div>
+            </article>
+          </div>
+          <details>
+            <summary>When a result is missing or the wrong policy ranks first</summary>
+            <p>
+              Check unique IDs and the indexed fields. Test an exact ID, a keyword query, and an
+              intent query. Inspect source scores through a custom SearchIndex setup: the policy
+              tool returns text and does not expose its private index. Compare expected policy IDs
+              with full results. A high similarity score does not confirm that the policy applies.
+            </p>
+          </details>
+          <details>
+            <summary>When you need custom weights, updates, or explicit index cleanup</summary>
+            <p>
+              The convenience PolicySearchTool has no public index setter, weight setter, update
+              method, or Close method. Compose <code>BleveIndex</code>, <code>FlatIndex</code>, and
+              <code>FusedIndex</code>, then expose <code>Search</code> through your own Gent tool.
+              Keep the Bleve handle so you can close it.
+            </p>
+            <p>
+              FusedIndex calls its sources sequentially. Its update lock excludes searches during an
+              update, but it does not roll back a partial backend failure. After a failed update,
+              stop serving that index until a successful <code>Swap</code> restores the full
+              document set.
+            </p>
+          </details>
+          <details>
+            <summary>When you need policy compliance or recovery across workers</summary>
+            <p>
+              Use <code>AnswerValidator</code> for answer checks and application code for
+              authorization or mutations. A prompt is guidance; the default text termination accepts
+              any non-empty answer. Policy search does not approve refunds.
+            </p>
+            <p>
+              ExecutionContext owns append-only history and the active message selection. Durable
+              recovery needs a Recorder and the checkpoint contract in <code>docs/history.md</code>.
+              The standard runner and ReAct loop already use checkpoint barriers.
+            </p>
+          </details>
+        </section>
+
+        <section class="lesson" id="check" aria-labelledby="check-title">
+          <div class="eyebrow">08 / CHECK YOUR MODEL <span>5 QUESTIONS</span></div>
+          <h1 id="check-title">Can you explain<br /><em>the handoffs?</em></h1>
+          <p class="lead">
+            Choose one answer for each question. Check the result to see why each boundary matters.
+            You can change your answers and try again.
+          </p>
+          <form id="quiz-form">
+            <div id="quiz-questions"></div>
+            <div class="button-row">
+              <button class="primary" type="submit">Check answers</button>
+              <button id="quiz-reset" class="secondary" type="button">Clear answers</button>
+            </div>
+          </form>
+          <div id="quiz-result" role="status" class="quiz-result"></div>
+          <details class="source-details">
+            <summary>Source snapshot and scope</summary>
+            <p id="source-version"></p>
+            <p>
+              This file has no external scripts, fonts, images, or data requests. It runs from a
+              local file. Progress uses browser storage when available. The browser lessons are
+              simulations; the Go example runs Gent. No credentials are stored in this file.
+            </p>
+            <p>
+              Method declarations are included so a shared copy remains useful without the
+              repository. The following local files supplied the lesson facts:
+            </p>
+            <ul id="source-files"></ul>
+          </details>
+        </section>
+
+        <footer class="lesson-footer">
+          <button id="previous-lesson" class="text-button">← Previous lesson</button>
+          <div>
+            <button id="complete-lesson" class="secondary">Mark as complete</button>
+            <button id="next-lesson" class="primary">Next lesson →</button>
+          </div>
+        </footer>
+        <div class="page-foot">
+          GENT / POLICY SEARCH LAB <span>Local source · 26 October 2026</span>
+        </div>
+      </main>
+    </div>
+    <script id="lesson-data">
+      const lessonData = @@DATA@@;
+    </script>
+    <script>
+      @@JS@@
+    </script>
+  </body>
+</html>

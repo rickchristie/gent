@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Four coding quick starts for Gent agents and web streaming."
+    />
+    <link rel="icon" href="data:," />
+    <title>Gent / Coding quick starts</title>
+    <style>
+      @@CSS@@
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to the current step</a>
+    <aside class="site-nav">
+      <a class="brand" href="#basic/setup">gent<span> / start</span></a>
+      <div class="eyebrow side-label" id="side-label"></div>
+      <p class="side-summary" id="side-summary"></p>
+      <nav id="steps" aria-label="Coding steps"></nav>
+      <a class="file-link" id="file-link" href="#basic/files">↗ Complete files</a>
+      <div class="side-foot">READ · COPY · BUILD</div>
+    </aside>
+    <div class="workspace">
+      <header>
+        <span>GENT / WHAT SHOULD I CODE?</span>
+        <div><button id="download-top" class="primary">Download source</button></div>
+      </header>
+      <nav id="scenarios" class="scenario-tabs" aria-label="Quick start scenarios"></nav>
+      <main id="main" tabindex="-1">
+        <div class="goal"><strong>You will build:</strong><span id="goal-text"></span></div>
+        <noscript
+          >Enable JavaScript for scenario navigation and source downloads. The coding steps are also
+          included below as plain HTML.</noscript
+        >
+        @@STEPS@@
+        <div id="copy-status" role="status" aria-live="polite"></div>
+        <footer class="step-footer">
+          <button id="previous" class="text-button">← Previous step</button>
+          <div>
+            <a id="files-footer" class="secondary" href="#basic/files">Complete files</a>
+            <button id="next" class="primary">Next step →</button>
+          </div>
+        </footer>
+        <details class="sources">
+          <summary>Source and verification</summary>
+          <p id="source-note"></p>
+          <p>
+            Snippets come from the complete example files. The server tests use the real registry,
+            ReAct loop, database, and WebSocket API with a local model. The React reducer is checked
+            against a real Gent trace. No live provider request is needed for those tests.
+          </p>
+          <p>
+            The current Gent contracts are in run.go, checkpoint.go, trace/types.go,
+            trace/subscription.go, executor/checkpoint.go, and docs/history.md.
+          </p>
+          <p>
+            External API references:
+            <a href="https://react.dev/reference/react/useEffect">React Effect cleanup</a>,
+            <a href="https://pkg.go.dev/github.com/gorilla/websocket">Gorilla WebSocket</a>,
+            <a href="https://pkg.go.dev/go.etcd.io/bbolt">bbolt transactions</a>, and
+            <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/message_event"
+              >browser WebSocket messages</a
+            >.
+          </p>
+          <p>
+            Syntax highlighting uses <a href="https://prismjs.com/">Prism</a> with a custom dark
+            theme. The highlighter and its MIT license are embedded in this file.
+          </p>
+          <button id="print" class="text-button">Print all scenarios</button>
+        </details>
+        <div class="page-foot">
+          GENT / CODING QUICK STARTS <span>One file · Works offline</span>
+        </div>
+      </main>
+    </div>
+    <script>
+      const guideData = @@DATA@@;
+    </script>
+    <script>
+      window.Prism = { manual: true };
+      @@PRISM@@
+    </script>
+    <script>
+      @@READING@@
+    </script>
+    <script>
+      @@JS@@
+    </script>
+  </body>
+</html>

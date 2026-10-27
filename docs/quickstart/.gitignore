@@ -1,0 +1,7 @@
+# Keep the standalone guides in dist/ available to Git.
+# These files are local dependencies, builds, and test output.
+node_modules/
+__pycache__/
+/client/dist/
+/screenshots/
+/server/runs.db

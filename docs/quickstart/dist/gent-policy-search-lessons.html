@@ -1,0 +1,3249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="Offline Gent lessons: ReAct and hybrid policy search." />
+    <title>Gent / Policy search lab</title>
+    <style>
+      :root {
+  --paper: #f5f3ec;
+  --white: #fffef9;
+  --ink: #203b35;
+  --muted: #5b6b62;
+  --line: #d5dcd0;
+  --green: #315c4e;
+  --lime: #d7eb9c;
+  --bm: #ad552d;
+  --vector: #477d69;
+  --mono: ui-monospace, "Cascadia Code", "DejaVu Sans Mono", monospace;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font:
+    16px/1.6 system-ui,
+    sans-serif;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+a {
+  touch-action: manipulation;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+a {
+  color: inherit;
+}
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #8d552a;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #91b187;
+  outline-offset: 2px;
+}
+.skip {
+  position: fixed;
+  z-index: 10;
+  top: -80px;
+  left: 20px;
+  padding: 10px;
+  background: white;
+}
+.skip:focus {
+  top: 10px;
+}
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 252px;
+  background: #e9ede2;
+  border-right: 1px solid var(--line);
+  padding: 35px 22px 22px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.brand {
+  font-size: 34px;
+  font-weight: 750;
+  text-decoration: none;
+  letter-spacing: -2px;
+}
+.brand span {
+  font:
+    italic 27px Georgia,
+    serif;
+  color: #61715c;
+  letter-spacing: -1px;
+}
+.side-title {
+  margin-top: 30px;
+  font: 11px var(--mono);
+  letter-spacing: 1.7px;
+}
+.side-intro {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 10px 0 25px;
+}
+nav {
+  display: grid;
+  gap: 5px;
+}
+nav a {
+  text-decoration: none;
+  font-size: 13px;
+  padding: 12px 10px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+}
+nav a:hover {
+  background: #dfe6d4;
+}
+nav a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--white);
+}
+nav a span {
+  font: 10px var(--mono);
+  opacity: 0.75;
+}
+nav a b {
+  margin-left: auto;
+  font-size: 12px;
+}
+.progress-block {
+  border-top: 1px solid #cbd4c1;
+  margin-top: 35px;
+  padding-top: 18px;
+}
+.small-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.progress-block .small-row {
+  font-size: 12px;
+}
+progress {
+  width: 100%;
+  height: 5px;
+  border: 0;
+  margin-top: 12px;
+  accent-color: var(--green);
+}
+progress::-webkit-progress-bar {
+  background: #d0d8c7;
+  border-radius: 4px;
+}
+progress::-webkit-progress-value {
+  background: var(--green);
+  border-radius: 4px;
+}
+.side-bottom {
+  margin-top: auto;
+  padding-top: 25px;
+  font: 10px var(--mono);
+}
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #56754d;
+  border-radius: 50%;
+}
+.workspace {
+  margin-left: 252px;
+}
+.topbar {
+  border-bottom: 1px solid var(--line);
+  padding: 20px 4.4%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  font: 10px var(--mono);
+  letter-spacing: 1.3px;
+  min-height: 75px;
+}
+.topbar > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.tag {
+  display: inline-block;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font: 10px var(--mono);
+  letter-spacing: 0.2px;
+}
+main {
+  max-width: 1270px;
+  margin: auto;
+  padding: 52px 4.4% 20px;
+}
+main:focus {
+  outline: none;
+}
+.lesson {
+  scroll-margin-top: 20px;
+}
+.js .lesson[hidden] {
+  display: none;
+}
+.eyebrow {
+  font: 11px var(--mono);
+  letter-spacing: 1.5px;
+  display: flex;
+  gap: 20px;
+}
+.eyebrow > span {
+  color: var(--muted);
+}
+h1 {
+  font-size: clamp(35px, 3.35vw, 56px);
+  line-height: 1.12;
+  font-weight: 560;
+  letter-spacing: -2px;
+  margin: 22px 0;
+}
+h1 em {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  color: var(--green);
+}
+h2 {
+  font-size: 22px;
+  line-height: 1.3;
+  letter-spacing: -0.5px;
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+h3 {
+  font-size: 16px;
+  line-height: 1.4;
+  margin: 0 0 9px;
+  font-weight: 650;
+}
+p {
+  margin: 0 0 14px;
+}
+.lead {
+  max-width: 760px;
+  font-size: 17px;
+  color: #52635a;
+  line-height: 1.75;
+  margin-bottom: 30px;
+}
+.tiny,
+.source-note {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+.source-note {
+  margin-top: 20px;
+}
+.label {
+  font: 10px var(--mono);
+  letter-spacing: 1.5px;
+}
+.scenario {
+  background: var(--ink);
+  color: var(--white);
+  padding: 23px 28px;
+  border-radius: 6px;
+}
+blockquote {
+  font:
+    25px/1.5 Georgia,
+    serif;
+  margin: 12px 0;
+}
+.scenario p {
+  font-size: 12px;
+  color: #bfcdbb;
+  margin: 0;
+}
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 32px 0 14px;
+}
+.section-heading h2 {
+  margin: 0;
+}
+.section-heading > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.architecture {
+  padding: 22px;
+  background: #e7ebdf;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.map-row {
+  display: grid;
+  grid-template-columns: 1fr 20px 1fr 20px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.map-row button {
+  border: 1px solid #bbc8b5;
+  background: var(--white);
+  padding: 16px 12px;
+  text-align: left;
+  border-radius: 4px;
+  color: var(--ink);
+  min-width: 0;
+}
+.map-row button:hover,
+.map-row button[aria-pressed="true"] {
+  background: var(--lime);
+  border-color: #667d51;
+}
+.map-row small {
+  display: block;
+  font: 9px var(--mono);
+  letter-spacing: 0.6px;
+}
+.map-row strong {
+  display: block;
+  font-size: 18px;
+  margin: 7px 0 3px;
+}
+.map-row button span {
+  display: block;
+  font: 10px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+.arrow {
+  text-align: center;
+  color: #71856b;
+}
+.map-caption {
+  text-align: center;
+  padding: 9px;
+  font: 11px/1.6 var(--mono);
+  color: var(--muted);
+}
+.branches {
+  display: flex;
+  justify-content: flex-end;
+  gap: 20px;
+  padding-top: 18px;
+  font: 11px var(--mono);
+}
+.dot {
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+  margin-right: 4px;
+}
+.bm {
+  background: var(--bm);
+}
+.vector {
+  background: var(--vector);
+  border-radius: 50%;
+}
+.detail {
+  background: #eaf0dd;
+  border-left: 3px solid #77904f;
+  padding: 19px 23px;
+  margin: 15px 0 24px;
+}
+.detail p {
+  margin: 7px 0 0;
+  font-size: 14px;
+}
+.detail h3 {
+  margin: 0;
+}
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+.note-grid {
+  margin: 28px 0;
+}
+.note-grid p {
+  font-size: 14px;
+}
+.callout {
+  border-top: 1px solid var(--line);
+  padding: 18px 0;
+  font-size: 14px;
+}
+code {
+  font: 0.83em/1.6 var(--mono);
+  overflow-wrap: anywhere;
+  background: #e5eadf;
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+pre {
+  font: 12px/1.8 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  tab-size: 4;
+}
+pre code {
+  padding: 0;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+}
+button.primary,
+button.secondary {
+  padding: 10px 17px;
+  border-radius: 4px;
+  font-size: 13px;
+  min-height: 44px;
+  border: 1px solid var(--ink);
+}
+.primary {
+  background: var(--ink);
+  color: var(--white);
+}
+.primary:hover {
+  background: #315b4c;
+}
+.secondary {
+  background: transparent;
+  color: var(--ink);
+}
+.secondary:hover {
+  background: #e2e8d7;
+}
+.text-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 8px 0;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  min-height: 36px;
+}
+.button-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+label {
+  font-size: 12px;
+  font-weight: 600;
+  display: block;
+}
+input:not([type="radio"]),
+select,
+textarea {
+  width: 100%;
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid #bcc9b6;
+  border-radius: 4px;
+  padding: 10px;
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  min-height: 44px;
+}
+textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+input[type="range"] {
+  padding: 0;
+  accent-color: var(--green);
+  min-height: 30px;
+  border: 0;
+}
+.filters {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.contract-layout {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 22px;
+}
+#contract-list {
+  display: grid;
+  gap: 5px;
+  max-height: 590px;
+  overflow-y: auto;
+  padding-right: 7px;
+}
+#contract-list button {
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 10px 12px;
+  color: var(--ink);
+  border-radius: 4px;
+  min-height: 55px;
+}
+#contract-list button span {
+  display: block;
+  font: 13px var(--mono);
+}
+#contract-list button small {
+  font-size: 11px;
+  color: var(--muted);
+}
+#contract-list button[aria-pressed="true"] {
+  background: #dee8c7;
+  border-color: #99ae7c;
+}
+#contract-list button:hover {
+  background: #e3ead9;
+}
+.contract-detail {
+  background: var(--white);
+  border: 1px solid var(--line);
+  padding: 25px;
+  border-radius: 6px;
+  align-self: start;
+  min-width: 0;
+}
+.contract-detail h2 {
+  font-family: var(--mono);
+  margin: 12px 0;
+  font-size: 23px;
+  overflow-wrap: anywhere;
+}
+.contract-detail p {
+  font-size: 14px;
+}
+.contract-detail pre {
+  background: #203b35;
+  color: #edf2df;
+  padding: 20px;
+  border-radius: 4px;
+  margin: 20px -8px;
+  font-size: 11px;
+}
+.contract-detail .contract-use {
+  padding-left: 13px;
+  border-left: 3px solid #9bae78;
+}
+.panel {
+  background: var(--white);
+  border: 1px solid var(--line);
+  padding: 24px;
+  border-radius: 6px;
+}
+.document-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+.panel label {
+  margin-bottom: 16px;
+}
+.panel label:last-child {
+  margin-bottom: 0;
+}
+.panel .small-row h2 {
+  font: 17px var(--mono);
+  margin: 0;
+}
+.panel .small-row {
+  margin-bottom: 18px;
+}
+.index-previews {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+.index-previews .panel {
+  padding: 20px;
+}
+.index-previews h3 {
+  margin: 0;
+}
+.index-previews pre {
+  background: #f1f4eb;
+  padding: 13px;
+  font-size: 11px;
+}
+.index-previews .tiny {
+  margin: 12px 0 6px;
+}
+.lab-label {
+  font: 11px/1.7 var(--mono);
+  padding: 10px 14px;
+  border-left: 2px solid var(--bm);
+  margin: 20px 0;
+  background: #ece8db;
+}
+.rank-controls {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 15px 26px;
+  align-items: center;
+}
+.rank-controls label {
+  margin-bottom: 0;
+}
+.weight-control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.weight-control output {
+  font-weight: 400;
+}
+.formula {
+  font: 16px/1.7 var(--mono);
+  padding: 24px 0;
+}
+.formula .bm-text {
+  color: var(--bm);
+}
+.formula .vector-text {
+  color: var(--vector);
+}
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+caption {
+  text-align: left;
+  font-size: 12px;
+  padding: 14px 18px;
+  background: #e7ebdf;
+}
+th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  font-weight: 650;
+  background: #eff1e7;
+}
+td,
+th {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+td {
+  font-variant-numeric: tabular-nums;
+}
+tr:last-child td {
+  border-bottom: 0;
+}
+tr.selected {
+  background: #e8efdc;
+}
+td button {
+  background: transparent;
+  border: 0;
+  padding: 5px 0;
+  color: var(--ink);
+  text-align: left;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.score-bar {
+  display: flex;
+  width: 120px;
+  height: 12px;
+  background: #e0e6d8;
+}
+.score-bar span {
+  height: 100%;
+  transition: width 0.18s ease;
+}
+.score-bm {
+  background: var(--bm);
+}
+.score-vector {
+  background: var(--vector);
+}
+.legend {
+  margin: 14px 0;
+  font-size: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 20px;
+}
+details {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+  font-size: 14px;
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+details p {
+  margin: 13px 0 0;
+}
+.loop-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px 24px;
+  align-items: end;
+}
+.loop-controls label {
+  margin: 0;
+}
+.run-range {
+  grid-column: 1/-1;
+}
+.run-range output {
+  float: right;
+  font-weight: 400;
+}
+.run-stage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 23px 0;
+  min-height: 330px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.run-story {
+  padding: 28px;
+  background: #e8eedb;
+}
+.run-story h2 {
+  font:
+    28px/1.25 Georgia,
+    serif;
+  margin: 18px 0;
+}
+.run-story p {
+  font-size: 14px;
+}
+.run-story .tiny {
+  font-size: 11px;
+  margin-top: 20px;
+}
+.run-stats {
+  display: flex;
+  gap: 35px;
+  border-top: 1px solid #cbd5ba;
+  padding-top: 15px;
+}
+.run-stats small {
+  display: block;
+  font: 9px var(--mono);
+}
+.run-stats strong {
+  font: 27px/1.6 var(--mono);
+}
+.run-payload {
+  background: var(--ink);
+  color: #e8f1d8;
+  padding: 25px;
+  min-width: 0;
+}
+.code-label {
+  font: 10px var(--mono);
+  color: #adc39e;
+  margin-bottom: 18px;
+}
+.run-payload pre {
+  font-size: 12px;
+}
+.timeline {
+  display: flex;
+  padding: 0;
+  list-style: none;
+  gap: 6px;
+}
+.timeline li {
+  flex: 1;
+}
+.timeline button {
+  width: 100%;
+  border: 0;
+  background: #dfe5d6;
+  padding: 8px 4px;
+  font: 11px var(--mono);
+  min-height: 36px;
+  color: var(--ink);
+  border-radius: 3px;
+}
+.timeline button[aria-current="step"] {
+  background: var(--ink);
+  color: var(--white);
+}
+.timeline .passed {
+  background: #c7d7ac;
+}
+.assembly-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 0;
+  font: 11px/1.8 var(--mono);
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+}
+.code-toolbar {
+  background: #314c42;
+  color: var(--white);
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-radius: 6px 6px 0 0;
+}
+.code-toolbar > span {
+  font: 11px var(--mono);
+}
+.code-toolbar > div {
+  display: flex;
+  gap: 9px;
+}
+.code-toolbar .secondary {
+  color: var(--white);
+  border-color: #8d9f89;
+  font-size: 11px;
+}
+.code-toolbar .secondary:hover {
+  background: #486652;
+}
+.full-code {
+  padding: 26px;
+  background: #1d332d;
+  color: #e4edda;
+  max-height: 650px;
+  overflow-y: auto;
+  border-radius: 0 0 6px 6px;
+  font-size: 12px;
+}
+.note-grid pre {
+  background: #e7ecdf;
+  padding: 13px;
+  margin-bottom: 15px;
+  font-size: 11px;
+}
+.mode-picker {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 18px;
+}
+.mode-picker button {
+  border: 1px solid #bac8ae;
+  padding: 10px 18px;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 13px;
+  background: transparent;
+}
+.mode-picker button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--white);
+}
+#mode-result {
+  padding: 20px;
+  background: #e9efdf;
+}
+.practice-list {
+  margin: 28px 0;
+}
+.practice-list article {
+  display: flex;
+  gap: 25px;
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+.practice-list article > span {
+  font:
+    18px Georgia,
+    serif;
+  color: #7c8e70;
+}
+.practice-list p {
+  font-size: 14px;
+  margin: 0;
+}
+.quiz-card {
+  border: 1px solid var(--line);
+  padding: 25px;
+  border-radius: 6px;
+  background: var(--white);
+  margin: 0 0 18px;
+  min-width: 0;
+}
+.quiz-card legend {
+  float: left;
+  width: 100%;
+  font-weight: 600;
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+.quiz-card label {
+  display: flex;
+  clear: both;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 400;
+  border-radius: 4px;
+}
+.quiz-card label:has(input:checked) {
+  background: #e4edce;
+}
+input[type="radio"] {
+  accent-color: var(--green);
+  flex-shrink: 0;
+}
+.quiz-feedback {
+  clear: both;
+  font-size: 13px;
+  margin: 12px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  color: #385b36;
+}
+.quiz-feedback.wrong {
+  color: #8b4328;
+}
+.quiz-feedback:empty {
+  display: none;
+}
+.quiz-result {
+  margin: 20px 0;
+  font:
+    24px Georgia,
+    serif;
+}
+.source-details {
+  margin-top: 35px;
+}
+#source-files {
+  columns: 2;
+  font: 11px/1.9 var(--mono);
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+.lesson-footer {
+  margin-top: 40px;
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lesson-footer > div {
+  display: flex;
+  gap: 10px;
+}
+.page-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  color: #6e7d69;
+  font: 9px/1.8 var(--mono);
+  padding: 20px 0 8px;
+  letter-spacing: 0.5px;
+}
+@media (min-width: 1600px) {
+  main {
+    padding-top: 65px;
+  }
+}
+@media (max-width: 1100px) {
+  .sidebar {
+    width: 215px;
+    padding-inline: 14px;
+  }
+  .workspace {
+    margin-left: 215px;
+  }
+  .contract-layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .map-row strong {
+    font-size: 15px;
+  }
+  .map-row button span {
+    font-size: 9px;
+  }
+  .loop-controls {
+    grid-template-columns: 1fr;
+  }
+  .loop-controls .button-row {
+    margin: 5px 0;
+  }
+  h1 {
+    font-size: 42px;
+  }
+}
+@media (max-width: 800px) {
+  .sidebar {
+    position: static;
+    width: 100%;
+    padding: 17px 20px;
+  }
+  .brand {
+    font-size: 29px;
+  }
+  .side-title,
+  .side-intro,
+  .side-bottom,
+  .progress-block {
+    display: none;
+  }
+  nav {
+    display: flex;
+    overflow-x: auto;
+    gap: 4px;
+    padding-top: 12px;
+  }
+  nav a {
+    flex-shrink: 0;
+    padding: 10px;
+  }
+  .workspace {
+    margin-left: 0;
+  }
+  .topbar {
+    padding: 15px 20px;
+    min-height: 55px;
+    letter-spacing: 0.3px;
+  }
+  .topbar .tag {
+    display: none;
+  }
+  main {
+    padding: 32px 20px 18px;
+  }
+  .contract-layout {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .split {
+    gap: 18px;
+  }
+}
+@media (max-width: 580px) {
+  h1 {
+    font-size: 35px;
+    letter-spacing: -1.4px;
+  }
+  .lead {
+    font-size: 15px;
+  }
+  .eyebrow {
+    font-size: 10px;
+    gap: 10px;
+  }
+  .scenario {
+    padding: 20px;
+  }
+  blockquote {
+    font-size: 22px;
+  }
+  .section-heading {
+    display: block;
+  }
+  .section-heading > span {
+    display: block;
+    margin-top: 7px;
+  }
+  .architecture {
+    padding: 14px 10px;
+  }
+  .map-row {
+    gap: 8px;
+    grid-template-columns: 1fr;
+  }
+  .map-row button {
+    padding: 13px 16px;
+    min-height: 85px;
+  }
+  .map-row small {
+    font-size: 10px;
+    letter-spacing: .5px;
+  }
+  .map-row strong {
+    font-size: 17px;
+  }
+  .map-row button span {
+    font-size: 11px;
+  }
+  .map-row .arrow {
+    transform: rotate(90deg);
+    line-height: 18px;
+  }
+  .branches {
+    flex-direction: column;
+    gap: 10px;
+    padding-left: 5px;
+    font-size: 10px;
+  }
+  .split,
+  .document-layout,
+  .run-stage {
+    grid-template-columns: 1fr;
+  }
+  .filters {
+    grid-template-columns: 1fr 115px;
+    gap: 10px;
+  }
+  .contract-layout {
+    grid-template-columns: 1fr;
+  }
+  #contract-list {
+    grid-template-columns: 1fr 1fr;
+    max-height: 210px;
+    border-bottom: 1px solid var(--line);
+  }
+  #contract-list button span {
+    font-size: 11px;
+  }
+  .contract-detail {
+    padding: 20px;
+  }
+  .panel {
+    padding: 18px;
+  }
+  .rank-controls {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .ranking-table {
+    min-width: 670px;
+  }
+  .formula {
+    font-size: 12px;
+  }
+  .timeline {
+    flex-wrap: wrap;
+  }
+  .timeline li {
+    flex: 0 0 calc(20% - 6px);
+  }
+  .run-story {
+    padding: 22px;
+  }
+  .code-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 15px;
+  }
+  .full-code {
+    padding: 15px;
+    font-size: 10px;
+  }
+  .mode-picker button {
+    padding-inline: 12px;
+    font-size: 12px;
+  }
+  .quiz-card {
+    padding: 18px;
+  }
+  .lesson-footer {
+    flex-wrap: wrap;
+  }
+  .lesson-footer > div {
+    margin-left: auto;
+  }
+  .lesson-footer button {
+    font-size: 11px;
+    padding-inline: 12px;
+  }
+  .page-foot {
+    flex-wrap: wrap;
+    font-size: 8px;
+  }
+  #source-files {
+    columns: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    scroll-behavior: auto;
+  }
+}
+@media print {
+  body {
+    background: white;
+    color: black;
+    font-size: 11pt;
+  }
+  .sidebar,
+  .topbar,
+  .lesson-footer,
+  .page-foot,
+  .filters,
+  .button-row,
+  .code-toolbar,
+  .mode-picker,
+  #contract-list,
+  .progress-block,
+  .skip,
+  .text-button,
+  .timeline {
+    display: none;
+  }
+  .workspace {
+    margin: 0;
+  }
+  main {
+    padding: 0;
+    max-width: none;
+  }
+  .js .lesson[hidden],
+  .lesson {
+    display: block;
+    break-before: page;
+  }
+  .lesson:first-of-type {
+    break-before: auto;
+  }
+  h1 {
+    font-size: 30pt;
+  }
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+  .panel,
+  .detail,
+  .run-stage,
+  .quiz-card {
+    break-inside: avoid;
+  }
+  .full-code {
+    max-height: none;
+    overflow: visible;
+    color: black;
+    background: #f6f6f6;
+  }
+  .contract-layout {
+    display: block;
+  }
+  .rank-controls,
+  .loop-controls {
+    display: none;
+  }
+  .table-wrap {
+    overflow: visible;
+  }
+}
+
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to lesson</a>
+    <aside class="sidebar">
+      <a class="brand" href="#start" aria-label="Gent lessons home">gent<span> / lab</span></a>
+      <div class="side-title">FIELD NOTES / 01</div>
+      <p class="side-intro">From a question<br />to a policy-backed answer.</p>
+      <nav aria-label="Lessons">
+        <a href="#start" data-page="start"><span>01</span> The complete path <b></b></a>
+        <a href="#contracts" data-page="contracts"><span>02</span> The interfaces <b></b></a>
+        <a href="#documents" data-page="documents"><span>03</span> Prepare the policies <b></b></a>
+        <a href="#ranking" data-page="ranking"><span>04</span> Mix the two signals <b></b></a>
+        <a href="#loop" data-page="loop"><span>05</span> Follow the loop <b></b></a>
+        <a href="#code" data-page="code"><span>06</span> Connect the code <b></b></a>
+        <a href="#operation" data-page="operation"><span>07</span> Run it reliably <b></b></a>
+        <a href="#check" data-page="check"><span>08</span> Check your model <b></b></a>
+      </nav>
+      <div class="progress-block">
+        <div class="small-row">
+          <span>Your progress</span><output id="progress-text">0 / 8</output>
+        </div>
+        <progress id="progress" max="8" value="0" aria-label="Lessons completed"></progress>
+        <p id="save-state" class="tiny">Progress stays in this browser.</p>
+        <button class="text-button" id="reset-progress">Reset progress</button>
+      </div>
+      <div class="side-bottom"><span class="status-dot"></span> Works offline · One HTML file</div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <span>GENT / INTERACTIVE LESSONS</span>
+        <div>
+          <span class="tag">GO</span><span class="tag">BM25 + VECTOR</span>
+          <button id="print" class="text-button">Print lessons</button>
+        </div>
+      </header>
+      <main id="main" tabindex="-1">
+        <noscript
+          >Enable JavaScript to use the experiments. The lesson text and Go example remain
+          below.</noscript
+        >
+        <section class="lesson" id="start" aria-labelledby="start-title">
+          <div class="eyebrow">01 / THE COMPLETE PATH <span>6 MIN</span></div>
+          <h1 id="start-title">A normal loop.<br /><em>Two ways to find a policy.</em></h1>
+          <p class="lead">
+            Use Gent’s standard ReAct loop. Give it a policy tool that combines full-text search
+            with vector search. Keep the loop, retrieval, and answer checks separate.
+          </p>
+          <div class="scenario">
+            <span class="label">OUR EXAMPLE QUESTION</span>
+            <blockquote>“An unused item arrived 10 days ago. Can I return it?”</blockquote>
+            <p>
+              The store rules in these lessons are invented. The Go interfaces come from this
+              working copy.
+            </p>
+          </div>
+          <div class="section-heading">
+            <h2>Follow the contracts</h2>
+            <span>Select a block to inspect it.</span>
+          </div>
+          <div class="architecture" aria-label="Interactive architecture map">
+            <div class="map-row">
+              <button data-node="runner">
+                <small>LIFECYCLE</small><strong>Runner</strong>
+                <span>executor.NewRunner</span></button
+              ><span class="arrow" aria-hidden="true">→</span>
+              <button data-node="loop">
+                <small>LOOP</small><strong>ReAct agent</strong> <span>gent.Loop</span></button
+              ><span class="arrow" aria-hidden="true">⇄</span>
+              <button data-node="model">
+                <small>GENERATION</small><strong>Model adapter</strong> <span>gent.Model</span>
+              </button>
+            </div>
+            <div class="map-caption">Native tool call ↓</div>
+            <div class="map-row">
+              <button data-node="registry">
+                <small>TOOL EXECUTION</small><strong>Registry</strong>
+                <span>gent.ToolChain</span></button
+              ><span class="arrow" aria-hidden="true">→</span>
+              <button data-node="policy">
+                <small>POLICY RETRIEVAL</small><strong>search_policy</strong>
+                <span>gent.Tool[I, string]</span></button
+              ><span class="arrow" aria-hidden="true">→</span>
+              <button data-node="index">
+                <small>RANKING</small><strong>FusedIndex</strong> <span>search.SearchIndex</span>
+              </button>
+            </div>
+            <div class="branches">
+              <span><i class="dot bm"></i> BleveIndex / BM25 / 40%</span>
+              <span><i class="dot vector"></i> FlatIndex / vectors / 60%</span>
+            </div>
+          </div>
+          <div id="map-detail" class="detail" aria-live="polite"></div>
+          <div class="split note-grid">
+            <div>
+              <h3>Configure the standard pieces</h3>
+              <p>
+                <code>react.NewAgent(model)</code>, <code>toolchain.New()</code>, and
+                <code>policy.NewPolicySearchTool(...)</code> cover this path. You supply the model,
+                an initialized embedder, and your policy documents.
+              </p>
+            </div>
+            <div>
+              <h3>Keep the two searches distinct</h3>
+              <p>
+                <strong>Policy search</strong> finds rules in documents.
+                <strong>Tool search</strong> finds callable tools. You do not need
+                <code>SearchChain</code> just to use hybrid policy retrieval.
+              </p>
+            </div>
+          </div>
+          <p class="callout">
+            <strong>Current API:</strong> <code>gent.Loop</code> and
+            <code>executor.NewRunner</code> are the current names in this working copy.
+            <code>AgentLoop[Data]</code> and <code>executor.New[Data]</code> remain compatibility
+            APIs.
+          </p>
+        </section>
+
+        <section class="lesson" id="contracts" aria-labelledby="contracts-title">
+          <div class="eyebrow">02 / THE INTERFACES <span>REFERENCE</span></div>
+          <h1 id="contracts-title">Know where<br /><em>each responsibility lives.</em></h1>
+          <p class="lead">
+            Most interfaces already have a standard implementation. Select a contract to see its
+            exact methods, its role, and the piece you use in this application.
+          </p>
+          <div class="filters">
+            <label
+              >Find an interface<input
+                id="contract-search"
+                type="search"
+                placeholder="Try Embedder, Tool, or Termination"
+                autocomplete="off"
+            /></label>
+            <label
+              >Area<select id="contract-group" aria-label="Area">
+                <option>All</option>
+                <option>Run</option>
+                <option>Tools</option>
+                <option>Search</option>
+                <option>Answer</option>
+                <option>Optional</option>
+              </select></label
+            >
+          </div>
+          <div class="contract-layout">
+            <div>
+              <p id="contract-count" class="tiny" aria-live="polite"></p>
+              <div id="contract-list" aria-label="Interface list"></div>
+            </div>
+            <article id="contract-detail" class="contract-detail" aria-live="polite"></article>
+          </div>
+          <p class="source-note">
+            Declarations are copied from the local Go source, with comments removed.
+            <code>ExecutionContext</code>, <code>Policy</code>, and <code>SearchResult</code> are
+            concrete types. They connect these interfaces.
+          </p>
+        </section>
+
+        <section class="lesson" id="documents" aria-labelledby="documents-title">
+          <div class="eyebrow">03 / PREPARE THE POLICIES <span>TRY IT</span></div>
+          <h1 id="documents-title">One document.<br /><em>Two index inputs.</em></h1>
+          <p class="lead">
+            Edit this policy. Watch which fields go to the keyword index and which go to the vector
+            path. Keep each policy focused on one topic.
+          </p>
+          <div class="split document-layout">
+            <form id="policy-form" class="panel" onsubmit="return false">
+              <div class="small-row">
+                <h2>policy.Policy</h2>
+                <button type="button" id="reset-policy" class="text-button">Reset example</button>
+              </div>
+              <label>Id<input id="policy-id" value="return-window" /></label>
+              <label
+                >Description<input
+                  id="policy-description"
+                  value="Return unused items within 30 days of delivery."
+              /></label>
+              <label
+                >FullContent<textarea id="policy-body" aria-label="FullContent" rows="5">
+## Returns
+
+An unused item can be returned within 30 days of delivery.
+Supply the order ID. The refund uses the original payment method.</textarea
+                >
+              </label>
+              <label
+                >Keywords <span class="muted">/ comma separated</span>
+                <input id="policy-keywords" value="return, refund, unused, 30 days"
+              /></label>
+              <label
+                >SyntheticQueries <span class="muted">/ one per line</span>
+                <textarea id="policy-queries" rows="2" aria-label="SyntheticQueries / one per line">
+I changed my mind about an item I bought</textarea
+                >
+              </label>
+              <p id="policy-warning" role="status" class="tiny"></p>
+            </form>
+            <div class="index-previews" aria-live="polite">
+              <article class="panel">
+                <div class="small-row">
+                  <h3><i class="dot bm"></i> BM25 input</h3>
+                  <span class="tag">BLEVE ADAPTER</span>
+                </div>
+                <pre id="bm25-document"></pre>
+              </article>
+              <article class="panel">
+                <div class="small-row">
+                  <h3><i class="dot vector"></i> Vector input</h3>
+                  <span class="tag">CHUNK ADAPTER</span>
+                </div>
+                <p class="tiny">Primary Markdown before token-aware chunking:</p>
+                <pre id="vector-document"></pre>
+                <p class="tiny">Separate synthetic-query chunk:</p>
+                <pre id="vector-queries"></pre>
+              </article>
+            </div>
+          </div>
+          <div class="split note-grid">
+            <div>
+              <h3>Description is display text</h3>
+              <p>
+                It appears in title-mode results. <code>PolicyBleveAdapter</code> and
+                <code>PolicyChunkAdapter</code> do not index this field. Put searchable wording in
+                the body, keywords, or synthetic queries.
+              </p>
+            </div>
+            <div>
+              <h3>Chunk size uses the embedder’s tokenizer</h3>
+              <p>
+                The real adapter calls <code>MarkdownChunker</code> with <code>TokenCount</code> and
+                <code>MaxTokens</code>. This preview shows input text; it does not run the Go
+                chunker or an embedding model.
+              </p>
+            </div>
+          </div>
+          <p class="callout">
+            Use unique policy IDs. Duplicate IDs replace entries when the constructor builds its
+            maps. Keep synthetic queries short: the current adapter joins them into one extra chunk.
+            Long text can exceed the embedding model’s token limit.
+          </p>
+        </section>
+
+        <section class="lesson" id="ranking" aria-labelledby="ranking-title">
+          <div class="eyebrow">04 / MIX THE TWO SIGNALS <span>EXPERIMENT</span></div>
+          <h1 id="ranking-title">
+            Words find matches.<br /><em>Vectors find related meaning.</em>
+          </h1>
+          <p class="lead">
+            Change the weight and watch the order change. Policy search uses a weighted sum of
+            scores. A result can still rank well when only one source finds it.
+          </p>
+          <div class="lab-label">
+            TEACHING DATA / Scores are fixed examples after source filtering. This browser does not
+            run Bleve or ONNX.
+          </div>
+          <div class="rank-controls panel">
+            <label
+              >Query example<select id="query-preset" aria-label="Query example">
+                <option value="intent">“I changed my mind about my purchase”</option>
+                <option value="keyword">“return refund unused”</option>
+                <option value="id">“return-window”</option>
+              </select></label
+            >
+            <label
+              >Return at most<select id="top-k" aria-label="Return at most">
+                <option>1</option>
+                <option>2</option>
+                <option selected>3</option>
+                <option>4</option>
+              </select></label
+            >
+            <div class="weight-control">
+              <label for="bm25-weight"
+                >BM25 weight <output id="weight-label">40% BM25 / 60% vector</output></label
+              >
+              <input id="bm25-weight" type="range" min="0" max="100" step="5" value="40" />
+              <div class="small-row tiny"><span>All vector</span><span>All BM25</span></div>
+            </div>
+            <button id="reset-ranking" class="secondary">Use policy defaults</button>
+          </div>
+          <div class="formula" id="formula" aria-live="polite"></div>
+          <div class="table-wrap">
+            <table class="ranking-table">
+              <caption>
+                Ranked policies · select a row for the score calculation
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Policy</th>
+                  <th scope="col">BM25 raw</th>
+                  <th scope="col">Normalized</th>
+                  <th scope="col">Cosine</th>
+                  <th scope="col">Weighted contributions</th>
+                  <th scope="col">Score</th>
+                </tr>
+              </thead>
+              <tbody id="ranking-rows"></tbody>
+            </table>
+          </div>
+          <div class="small-row legend">
+            <span><i class="dot bm"></i> BM25 contribution</span>
+            <span><i class="dot vector"></i> Vector contribution</span>
+            <span>BM25 maximum for these examples: 10</span>
+          </div>
+          <div id="rank-detail" class="detail" aria-live="polite"></div>
+          <div class="split note-grid">
+            <div>
+              <h3>Normalize before you add</h3>
+              <p>
+                Raw BM25 scores depend on the query. With a positive theoretical maximum, Gent
+                divides by that maximum and caps the result at 1. It does not stretch the best
+                observed hit to 1. Without that metadata, scores pass through.
+              </p>
+            </div>
+            <div>
+              <h3>Retrieve candidates before final top-K</h3>
+              <p>
+                The policy helper requests up to <strong>20 results per source</strong>, then fuses
+                and returns <strong>3 by default</strong>. Bleve can remove weak matches first.
+                <code>WithTopK</code> changes the final count.
+              </p>
+            </div>
+          </div>
+          <details>
+            <summary>What the browser experiment leaves out</summary>
+            <p>
+              Bleve’s default confidence threshold is 0.001 of the theoretical maximum, with knee
+              truncation enabled. FlatIndex scans chunk vectors and keeps each policy’s best chunk.
+              The supplied cosine scores are illustrative, not probabilities or quality guarantees.
+              Cosine can be negative; the fuser passes semantic scores through unchanged. The demo
+              sorts tied scores by ID. The Go fuser does not define a tie order.
+            </p>
+            <p>
+              The slider is a teaching control. <code>PolicySearchTool</code> has no weight setter.
+              To change 40/60, compose the search indexes and expose them through your own tool.
+            </p>
+          </details>
+        </section>
+
+        <section class="lesson" id="loop" aria-labelledby="loop-title">
+          <div class="eyebrow">05 / FOLLOW THE LOOP <span>WALKTHROUGH</span></div>
+          <h1 id="loop-title">Search is one action.<br /><em>The loop connects the rest.</em></h1>
+          <p class="lead">
+            Advance through a scripted run. Native tool calls carry structured arguments. Tool
+            results enter history, and the next model call can use them.
+          </p>
+          <div class="panel loop-controls">
+            <label
+              >Run path<select id="run-path" aria-label="Run path">
+                <option value="full">Full policy → answer</option>
+                <option value="snippet">Snippet → get_policy → answer</option>
+                <option value="reject">Validator rejects → corrected answer</option>
+                <option value="error">Empty query → tool error → retry</option>
+                <option value="limit">Iteration limit stops an unfinished run</option>
+              </select></label
+            >
+            <div class="button-row">
+              <button id="run-back" class="secondary">Back</button>
+              <button id="run-next" class="primary">Next step →</button>
+              <button id="run-reset" class="text-button">Restart</button>
+            </div>
+            <label class="run-range"
+              >Position <output id="run-position"></output>
+              <input id="run-step" type="range" min="0" max="7" value="0"
+            /></label>
+          </div>
+          <div class="run-stage">
+            <div class="run-story" aria-live="polite">
+              <div id="run-owner" class="eyebrow"></div>
+              <h2 id="run-title"></h2>
+              <p id="run-description"></p>
+              <div class="run-stats">
+                <div><small>ITERATION</small><strong id="run-iteration"></strong></div>
+                <div><small>TOOL ATTEMPTS</small><strong id="run-tools"></strong></div>
+              </div>
+              <p class="tiny">
+                Counts describe this scripted path. No model calls run in this file.
+              </p>
+            </div>
+            <div class="run-payload">
+              <div id="run-code-label" class="code-label"></div>
+              <pre id="run-code"></pre>
+            </div>
+          </div>
+          <ol id="run-timeline" class="timeline" aria-label="Run steps"></ol>
+          <p class="callout">
+            <strong>Tool calls take priority.</strong> If a response has tool calls and answer text,
+            ReAct executes the calls first. Only a response with no tool calls reaches final-answer
+            checks. A truncated response is handled before either route.
+          </p>
+          <p class="source-note">
+            The native path passes plain final content to Termination. The default XML format shapes
+            prompt sections and tool output; it does not require the model to write XML tool calls
+            or an <code>&lt;answer&gt;</code> envelope.
+          </p>
+        </section>
+
+        <section class="lesson" id="code" aria-labelledby="code-title">
+          <div class="eyebrow">06 / CONNECT THE CODE <span>WORKED EXAMPLE</span></div>
+          <h1 id="code-title">Build once.<br /><em>Give each question a context.</em></h1>
+          <p class="lead">
+            This complete Go example uses the standard loop and the built-in hybrid policy tool. The
+            model and embedder are separate dependencies.
+          </p>
+          <div class="assembly-strip">
+            <span>1 · Embedder + policies</span><span>2 · Policy tool</span>
+            <span>3 · Registry + ReAct</span><span>4 · Runner + context</span>
+          </div>
+          <div class="code-toolbar">
+            <span>main.go / current local API</span>
+            <div>
+              <button id="copy-code" class="secondary">Copy Go</button>
+              <button id="download-code" class="secondary">Download main.go</button>
+            </div>
+          </div>
+          <pre class="full-code"><code id="go-example"
+>// This example builds the policy index once and gives each question its own context.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/agents/react"
+	"github.com/rickchristie/gent/common"
+	"github.com/rickchristie/gent/executor"
+	"github.com/rickchristie/gent/models"
+	"github.com/rickchristie/gent/policy"
+	"github.com/rickchristie/gent/search"
+	"github.com/rickchristie/gent/termination"
+	"github.com/rickchristie/gent/toolchain"
+)
+
+// SamplePolicies contains invented rules for this lesson. Replace them with your own rules.
+func SamplePolicies() []*policy.Policy {
+	return []*policy.Policy{
+		{
+			Id:          "return-window",
+			Description: "Return unused items within 30 days of delivery.",
+			FullContent: `## Returns
+
+An unused item can be returned within 30 days of delivery.
+The customer must supply the order ID. Check the delivery date and item condition.
+The refund uses the original payment method after the return is checked.`,
+			Keywords:         []string{"return", "refund", "unused", "30 days"},
+			SyntheticQueries: []string{"I changed my mind about an item I bought"},
+		},
+		{
+			Id:          "damaged-delivery",
+			Description: "Report an item that arrived damaged.",
+			FullContent: `## Damage on delivery
+
+Report damage within 7 days of delivery. Supply the order ID and a photo of the damage.
+After the report is checked, the customer can request a replacement or a refund.`,
+			Keywords:         []string{"damaged", "broken", "replacement"},
+			SyntheticQueries: []string{"my parcel arrived with a broken item"},
+		},
+	}
+}
+
+// BuildRunner indexes the policies at startup. Keep the embedder open while the runner is in use.
+func BuildRunner(
+	ctx context.Context, model gent.Model, embedder search.Embedder, mode policy.SearchResultMode,
+) (*executor.Runner, error) {
+	policies := SamplePolicies()
+	lookup, err := policy.NewPolicySearchTool(ctx, embedder, policies)
+	if err != nil {
+		return nil, err
+	}
+	lookup.WithTopK(3).WithResultMode(mode)
+	chain := toolchain.New()
+	chain.RegisterTool(lookup)
+	if mode != policy.SearchResultFull {
+		chain.RegisterTool(policy.NewGetPolicyTool(policies))
+	}
+	term := termination.NewText("answer").WithGuidance(
+		"State the policy ID and the conditions that apply. Ask for any missing facts.",
+	)
+	loop := react.NewAgent(model).
+		WithToolChain(chain).
+		WithTermination(term).
+		WithBehaviorAndContext("Help a customer understand the store's return rules.").
+		WithCriticalRules(`Search the policies before you answer a policy question.
+If search returns a title or a snippet, use get_policy to read the full policy first.
+Use only the policy text you read. Do not approve a refund or invent missing facts.`)
+	return executor.NewRunner(loop, executor.DefaultConfig()), nil
+}
+
+// Answer uses a new execution context so history and limits belong to this question.
+func Answer(ctx context.Context, runner *executor.Runner, question string) (string, error) {
+	data := gent.NewBasicLoopData(&amp;gent.Task{Text: question})
+	execCtx := gent.NewExecutionContext(ctx, "policy-help", data)
+	limits := gent.DefaultLimits()
+	for i := range limits {
+		if limits[i].Key == gent.SCIterations.Self() {
+			limits[i].MaxValue = 6
+		}
+	}
+	execCtx.SetLimits(limits)
+	result, err := runner.Execute(execCtx)
+	if err != nil {
+		return "", err
+	}
+	if result.TerminationReason != gent.TerminationSuccess {
+		return "", fmt.Errorf("run ended with %s: %v", result.TerminationReason, result.Error)
+	}
+	if len(result.Output) != 1 {
+		return "", fmt.Errorf("expected one text answer, got %d parts", len(result.Output))
+	}
+	text, ok := result.Output[0].(gent.TextContent)
+	if !ok {
+		return "", fmt.Errorf("expected text answer, got %T", result.Output[0])
+	}
+	return text.Text, nil
+}
+
+func NewEmbedder() (search.Embedder, error) {
+	cfg := common.FindConfig("multilingual-e5-small")
+	if cfg == nil {
+		return nil, fmt.Errorf("embedding configuration not found")
+	}
+	dir, err := common.ModelDir(cfg.Model.Name)
+	if err != nil {
+		return nil, err
+	}
+	return search.NewOnnxEmbedder(*cfg, search.OnnxOptions{
+		ModelPath:     filepath.Join(dir, cfg.Model.ModelFile),
+		TokenizerPath: filepath.Join(dir, "tokenizer.json"), NumThreads: 2, MaxConcurrency: 2,
+	})
+}
+
+func run() (runErr error) {
+	key, modelName := os.Getenv("OPENAI_API_KEY"), os.Getenv("GENT_MODEL")
+	if key == "" || modelName == "" {
+		return fmt.Errorf("set OPENAI_API_KEY and GENT_MODEL to use this example")
+	}
+	embedder, err := NewEmbedder()
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, embedder.Close()) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	model := models.NewOpenAI(key, modelName)
+	runner, err := BuildRunner(ctx, model, embedder, policy.SearchResultFull)
+	if err != nil {
+		return err
+	}
+	answer, err := Answer(ctx, runner, "An unused item arrived 10 days ago. Can I return it?")
+	if err != nil {
+		return err
+	}
+	fmt.Println(answer)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+</code></pre>
+          <p id="copy-status" class="tiny" role="status"></p>
+          <div class="split note-grid">
+            <div>
+              <h3>Run from this checkout</h3>
+              <p>
+                Install the native libraries and model first. These setup commands can download
+                files and change your local setup.
+              </p>
+              <pre>
+go run ./cmd/gent setup onnx
+go run ./cmd/gent model download multilingual-e5-small
+go run ./docs/quickstart/policy-search-lessons/example</pre
+              >
+              <p>
+                Before the last command, set <code>OPENAI_API_KEY</code> and
+                <code>GENT_MODEL</code> in your shell. Select a model that supports native tool
+                calls. The final command makes live API requests and can incur usage charges.
+              </p>
+            </div>
+            <div>
+              <h3>Use the downloaded source</h3>
+              <p>
+                Place <code>main.go</code> in an application module that uses a matching Gent
+                revision. This guide reflects the current working copy, including local API changes.
+                It does not claim compatibility with a released version.
+              </p>
+              <p>
+                The included tests inject a scripted model and a deterministic embedder. They run
+                the real registry, policy index, ReAct loop, and runner without API credentials.
+              </p>
+            </div>
+          </div>
+          <details>
+            <summary>Why the code keeps these pieces separate</summary>
+            <p>
+              <code>BuildRunner</code> builds the indexes once. <code>Answer</code> creates a fresh
+              ExecutionContext for each question. This avoids repeat indexing and keeps run history
+              and limits separate. The application owns the embedder and closes it after all runs
+              finish.
+            </p>
+            <p>
+              Switch to <code>policy.SearchResultSnippet</code> or
+              <code>policy.SearchResultTitle</code> in the builder to register
+              <code>get_policy</code>. The prompt asks the model to read the full text before
+              answering. Add a validator or application rule if that sequence must be enforced.
+            </p>
+          </details>
+        </section>
+
+        <section class="lesson" id="operation" aria-labelledby="operation-title">
+          <div class="eyebrow">07 / RUN IT RELIABLY <span>DESIGN CHOICES</span></div>
+          <h1 id="operation-title">Use the right boundary<br /><em>for each check.</em></h1>
+          <p class="lead">
+            Retrieval gives the model evidence. Your application still owns configuration, policy
+            quality, resource lifetime, and the rules for any action.
+          </p>
+          <div class="mode-picker" role="group" aria-label="Policy output mode">
+            <button data-mode="full">Full content</button
+            ><button data-mode="snippet">Snippet</button>
+            <button data-mode="title">Title</button>
+          </div>
+          <div class="split panel">
+            <div>
+              <h2 id="mode-title"></h2>
+              <p id="mode-description"></p>
+              <code id="mode-code"></code>
+            </div>
+            <pre id="mode-result"></pre>
+          </div>
+          <div class="practice-list">
+            <article>
+              <span>01</span>
+              <div>
+                <h3>Freeze configuration before shared use</h3>
+                <p>
+                  Register tools, set result mode, and prepare policies before concurrent runs.
+                  SearchIndex and Embedder implementations must support concurrent use. The helper
+                  keeps policy pointers; do not change their content during a run.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span>02</span>
+              <div>
+                <h3>Put limits on the execution context</h3>
+                <p>
+                  <code>SetLimits</code> replaces the list. Start with
+                  <code>DefaultLimits()</code> if you want to keep its error limits. Use
+                  <code>SCIterations.Self()</code> for this context. An unfinished run stops after
+                  the completed iteration reaches that limit. Most other limits stop when the value
+                  exceeds the maximum.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span>03</span>
+              <div>
+                <h3>Check both errors and the final reason</h3>
+                <p>
+                  Handle the error from <code>Execute</code>, then inspect
+                  <code>ExecutionResult.TerminationReason</code>. Tool errors can become
+                  observations and allow a retry. Cancellation, limits, and recording errors can end
+                  the run.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span>04</span>
+              <div>
+                <h3>Keep the embedder alive for all searches</h3>
+                <p>
+                  ONNX requires CGO, native libraries, and downloaded model files. With CGO
+                  disabled, the built-in constructor returns an error. A custom
+                  <code>Embedder</code> is an alternative. Always handle errors from
+                  <code>Close</code>.
+                </p>
+              </div>
+            </article>
+          </div>
+          <details>
+            <summary>When a result is missing or the wrong policy ranks first</summary>
+            <p>
+              Check unique IDs and the indexed fields. Test an exact ID, a keyword query, and an
+              intent query. Inspect source scores through a custom SearchIndex setup: the policy
+              tool returns text and does not expose its private index. Compare expected policy IDs
+              with full results. A high similarity score does not confirm that the policy applies.
+            </p>
+          </details>
+          <details>
+            <summary>When you need custom weights, updates, or explicit index cleanup</summary>
+            <p>
+              The convenience PolicySearchTool has no public index setter, weight setter, update
+              method, or Close method. Compose <code>BleveIndex</code>, <code>FlatIndex</code>, and
+              <code>FusedIndex</code>, then expose <code>Search</code> through your own Gent tool.
+              Keep the Bleve handle so you can close it.
+            </p>
+            <p>
+              FusedIndex calls its sources sequentially. Its update lock excludes searches during an
+              update, but it does not roll back a partial backend failure. After a failed update,
+              stop serving that index until a successful <code>Swap</code> restores the full
+              document set.
+            </p>
+          </details>
+          <details>
+            <summary>When you need policy compliance or recovery across workers</summary>
+            <p>
+              Use <code>AnswerValidator</code> for answer checks and application code for
+              authorization or mutations. A prompt is guidance; the default text termination accepts
+              any non-empty answer. Policy search does not approve refunds.
+            </p>
+            <p>
+              ExecutionContext owns append-only history and the active message selection. Durable
+              recovery needs a Recorder and the checkpoint contract in <code>docs/history.md</code>.
+              The standard runner and ReAct loop already use checkpoint barriers.
+            </p>
+          </details>
+        </section>
+
+        <section class="lesson" id="check" aria-labelledby="check-title">
+          <div class="eyebrow">08 / CHECK YOUR MODEL <span>5 QUESTIONS</span></div>
+          <h1 id="check-title">Can you explain<br /><em>the handoffs?</em></h1>
+          <p class="lead">
+            Choose one answer for each question. Check the result to see why each boundary matters.
+            You can change your answers and try again.
+          </p>
+          <form id="quiz-form">
+            <div id="quiz-questions"></div>
+            <div class="button-row">
+              <button class="primary" type="submit">Check answers</button>
+              <button id="quiz-reset" class="secondary" type="button">Clear answers</button>
+            </div>
+          </form>
+          <div id="quiz-result" role="status" class="quiz-result"></div>
+          <details class="source-details">
+            <summary>Source snapshot and scope</summary>
+            <p id="source-version"></p>
+            <p>
+              This file has no external scripts, fonts, images, or data requests. It runs from a
+              local file. Progress uses browser storage when available. The browser lessons are
+              simulations; the Go example runs Gent. No credentials are stored in this file.
+            </p>
+            <p>
+              Method declarations are included so a shared copy remains useful without the
+              repository. The following local files supplied the lesson facts:
+            </p>
+            <ul id="source-files"></ul>
+          </details>
+        </section>
+
+        <footer class="lesson-footer">
+          <button id="previous-lesson" class="text-button">← Previous lesson</button>
+          <div>
+            <button id="complete-lesson" class="secondary">Mark as complete</button>
+            <button id="next-lesson" class="primary">Next lesson →</button>
+          </div>
+        </footer>
+        <div class="page-foot">
+          GENT / POLICY SEARCH LAB <span>Local source · 26 October 2026</span>
+        </div>
+      </main>
+    </div>
+    <script id="lesson-data">
+      const lessonData = {
+  "contracts": [
+    {
+      "name": "Loop",
+      "path": "agent.go",
+      "group": "Run",
+      "use": "Use react.Agent",
+      "summary": "Runs one model-and-tool iteration. The runner calls Next until the loop st" +
+        "ops.",
+      "advice": "Use react.NewAgent(model). You do not need to write a loop for policy retr" +
+        "ieval.",
+      "signature": "type Loop interface {\n\tNext(execCtx *ExecutionContext) (*AgentLoopResult" +
+        ", error)\n}",
+      "line": 30
+    },
+    {
+      "name": "AgentLoop",
+      "path": "agent.go",
+      "group": "Run",
+      "use": "Compatibility API",
+      "summary": "The older generic interface embeds Loop and adds no methods.",
+      "advice": "Use gent.Loop and executor.NewRunner in new code in this working copy.",
+      "signature": "type AgentLoop[Data LoopData] interface {\n\tLoop\n}",
+      "line": 52
+    },
+    {
+      "name": "LoopData",
+      "path": "agent.go",
+      "group": "Run",
+      "use": "Use BasicLoopData",
+      "summary": "Supplies the initial Task. ExecutionContext owns history and the active se" +
+        "lection.",
+      "advice": "Use gent.NewBasicLoopData. Add custom data only if the application needs i" +
+        "t.",
+      "signature": "type LoopData interface {\n\tGetTask() *Task\n}",
+      "line": 60
+    },
+    {
+      "name": "Model",
+      "path": "model.go",
+      "group": "Run",
+      "use": "Supply an adapter",
+      "summary": "Converts a Gent request into a provider call and returns a stream.",
+      "advice": "Use a provider adapter that supports native tool calls. ReAct uses managed" +
+        " model calls.",
+      "signature": "type Model interface {\n\tGenerateContentStream(context.Context, ModelCall" +
+        "Request) (Stream, error)\n}",
+      "line": 10
+    },
+    {
+      "name": "Stream",
+      "path": "model.go",
+      "group": "Run",
+      "use": "Adapter boundary",
+      "summary": "Supplies chunks, the final response, and cancellation.",
+      "advice": "An adapter must finish its producer before the final response completes.",
+      "signature": "type Stream interface {\n\tChunks() \u003c-chan StreamChunk\n\tResponse() " +
+        "(*ContentResponse, error)\n\tClose()\n}",
+      "line": 130
+    },
+    {
+      "name": "Tool",
+      "path": "tool.go",
+      "group": "Tools",
+      "use": "Use PolicySearchTool",
+      "summary": "Defines typed input, schema, execution, and text output for one operation.",
+      "advice": "PolicySearchTool implements Tool[PolicySearchInput, string]. Its result is" +
+        " Markdown text.",
+      "signature": "type Tool[I, TextOutput any] interface {\n\tName() string\n\tDescription()" +
+        " string\n\tPolicy() string\n\tParameterSchema() map[string]any\n\tCall(ctx" +
+        " context.Context, input I) (*ToolResult[TextOutput], error)\n\tDeduplicate" +
+        "Summary(input I, output TextOutput) string\n}",
+      "line": 70
+    },
+    {
+      "name": "ToolChain",
+      "path": "toolchain.go",
+      "group": "Tools",
+      "use": "Use Registry",
+      "summary": "Selects native definitions, prepares a saved plan, and executes one call a" +
+        "t a time.",
+      "advice": "Use toolchain.New(). Register the policy tool before you share the runner.",
+      "signature": "type ToolChain interface {\n\tRegisterTool(any, ...ToolOption) ToolChain\n" +
+        "\tNativeTools(*ExecutionContext) ([]ToolDefinition, error)\n\tPrepareCalls" +
+        "(*ExecutionContext, []ModelToolCall) (*ToolPlan, error)\n\tExecuteNext(*Ex" +
+        "ecutionContext, *ToolPlan, TextFormat) (*ToolCallResult, error)\n\tGetTool" +
+        "Schema(string) *schema.Schema\n\tDeduplicateSummary(*ToolCallResult) strin" +
+        "g\n\tRecoveryMessage(*RecoveryInfo) string\n\tRegisterCodecs(*CodecRegistr" +
+        "y) error\n\tRecoveryConfig() any\n}",
+      "line": 71
+    },
+    {
+      "name": "SearchIndex",
+      "path": "search/search.go",
+      "group": "Search",
+      "use": "Built by the policy tool",
+      "summary": "Stores documents and returns ranked SearchResult values. Implementations m" +
+        "ust be concurrent.",
+      "advice": "BleveIndex, FlatIndex, and FusedIndex implement SearchIndex[*policy.Policy" +
+        "].",
+      "signature": "type SearchIndex[Doc any] interface {\n\tSearch(ctx context.Context, query" +
+        " string, topK int) ([]SearchResult, error)\n\tAdd(ctx context.Context, id " +
+        "string, doc Doc) error\n\tRemove(id string) error\n\tSwap(ctx context.Cont" +
+        "ext, docs map[string]Doc) error\n}",
+      "line": 78
+    },
+    {
+      "name": "BleveAdapter",
+      "path": "search/bleve_adapter.go",
+      "group": "Search",
+      "use": "Use PolicyBleveAdapter",
+      "summary": "Defines fields, document conversion, and the full-text query.",
+      "advice": "Policy fields use boosts of 10 for ID, 3 for keywords, and 1 for body text" +
+        ".",
+      "signature": "type BleveAdapter[Doc any] interface {\n\tMapping() mapping.IndexMapping\n" +
+        "\tConvert(doc Doc) (any, error)\n\tQuery(queryText string) (query.Query, e" +
+        "rror)\n}",
+      "line": 47
+    },
+    {
+      "name": "BleveIDFProvider",
+      "path": "search/bleve_adapter.go",
+      "group": "Search",
+      "use": "Optional normalization metadata",
+      "summary": "Supplies the text fields and analyzer used for the theoretical BM25 maximu" +
+        "m.",
+      "advice": "PolicyBleveAdapter supplies this. Without maximum metadata, raw scores pas" +
+        "s through.",
+      "signature": "type BleveIDFProvider interface {\n\tIDFFields() (analyzerName string, fie" +
+        "lds []IDFField)\n}",
+      "line": 86
+    },
+    {
+      "name": "ChunkAdapter",
+      "path": "search/flat_adapter.go",
+      "group": "Search",
+      "use": "Use PolicyChunkAdapter",
+      "summary": "Converts each policy into token-aware chunks before vector embedding.",
+      "advice": "The policy adapter uses Markdown headings and adds a separate synthetic-qu" +
+        "ery chunk.",
+      "signature": "type ChunkAdapter[Doc any] interface {\n\tChunks(doc Doc, tokenCounter Tok" +
+        "enCounter, maxTokens int) ([]Chunk, error)\n}",
+      "line": 40
+    },
+    {
+      "name": "TokenCounter",
+      "path": "search/embedder.go",
+      "group": "Search",
+      "use": "Part of Embedder",
+      "summary": "Counts tokens with the tokenizer used by the embedding model.",
+      "advice": "A character count is not a replacement for the model tokenizer in producti" +
+        "on chunking.",
+      "signature": "type TokenCounter interface {\n\tTokenCount(text string) int\n}",
+      "line": 12
+    },
+    {
+      "name": "Embedder",
+      "path": "search/embedder.go",
+      "group": "Search",
+      "use": "Supply and own one",
+      "summary": "Embeds queries and text. It also supplies token counts, dimensions, and re" +
+        "source cleanup.",
+      "advice": "Keep it open across searches. Close it after all calls finish. Custom embe" +
+        "dders work too.",
+      "signature": "type Embedder interface {\n\tTokenCounter\n\tEmbedQuery(ctx context.Contex" +
+        "t, text string) ([]float32, error)\n\tEmbedText(ctx context.Context, text " +
+        "string) ([]float32, error)\n\tEmbedTextBatch(ctx context.Context, texts []" +
+        "string) ([][]float32, error)\n\tMaxTokens() int\n\tDimensions() int\n\tClo" +
+        "se() error\n}",
+      "line": 40
+    },
+    {
+      "name": "Fuser",
+      "path": "search/fuser.go",
+      "group": "Search",
+      "use": "Use WeightedLinearFuser",
+      "summary": "Combines named result lists into a single ranked list.",
+      "advice": "The policy helper uses 0.4 BM25 plus 0.6 semantic. A missing source contri" +
+        "butes zero.",
+      "signature": "type Fuser interface {\n\tFuse(results map[string][]SearchResult, topK int" +
+        ") ([]SearchResult, error)\n}",
+      "line": 14
+    },
+    {
+      "name": "Termination",
+      "path": "termination.go",
+      "group": "Answer",
+      "use": "Use termination.Text",
+      "summary": "Parses and checks final content, then accepts it, rejects it, or asks the " +
+        "loop to continue.",
+      "advice": "The current native ReAct path passes assistant content directly. No answer" +
+        " XML is required.",
+      "signature": "type Termination interface {\n\tTextSection\n\tShouldTerminate(execCtx *Ex" +
+        "ecutionContext, content string) *TerminationResult\n\tSetValidator(validat" +
+        "or AnswerValidator)\n}",
+      "line": 189
+    },
+    {
+      "name": "AnswerValidator",
+      "path": "termination.go",
+      "group": "Answer",
+      "use": "Optional check",
+      "summary": "Checks a parsed answer and returns acceptance or feedback.",
+      "advice": "Add a validator for checks you can test. Search alone does not prove polic" +
+        "y compliance.",
+      "signature": "type AnswerValidator interface {\n\tName() string\n\tValidate(execCtx *Exe" +
+        "cutionContext, answer any) *ValidationResult\n}",
+      "line": 80
+    },
+    {
+      "name": "TextFormat",
+      "path": "format.go",
+      "group": "Answer",
+      "use": "Default XML formatter",
+      "summary": "Formats structured prompt sections and tool output. It also has a section " +
+        "parser.",
+      "advice": "The current ReAct path does not call this parser on native model responses" +
+        ".",
+      "signature": "type TextFormat interface {\n\tRegisterSection(section TextSection) TextFo" +
+        "rmat\n\tDescribeStructure() string\n\tParse(execCtx *ExecutionContext, out" +
+        "put string) (map[string][]string, error)\n\tFormatSections(sections []Form" +
+        "attedSection) string\n}",
+      "line": 103
+    },
+    {
+      "name": "TextSection",
+      "path": "section.go",
+      "group": "Answer",
+      "use": "Embedded by Termination",
+      "summary": "Gives a section a name, guidance, and a content parser.",
+      "advice": "Text termination parses a string. JSON termination parses a typed answer.",
+      "signature": "type TextSection interface {\n\tName() string\n\tGuidance() string\n\tPars" +
+        "eSection(execCtx *ExecutionContext, content string) (any, error)\n}",
+      "line": 78
+    },
+    {
+      "name": "IndexableTool",
+      "path": "tool_search.go",
+      "group": "Optional",
+      "use": "For tool discovery",
+      "summary": "Adds domain, categories, keywords, and example queries to a tool definitio" +
+        "n.",
+      "advice": "PolicySearchTool already implements it. The standard Registry does not nee" +
+        "d it.",
+      "signature": "type IndexableTool interface {\n\tName() string\n\tDescription() string\n" +
+        "\tDomain() string\n\tCategories() []string\n\tKeywords() []string\n\tSynth" +
+        "eticQueries() []string\n}",
+      "line": 24
+    },
+    {
+      "name": "ToolSearcher",
+      "path": "tool_search.go",
+      "group": "Optional",
+      "use": "For tool discovery",
+      "summary": "Searches registered tool definitions and returns ranked tool names.",
+      "advice": "This is different from searching policy documents. Add SearchChain only wh" +
+        "en needed.",
+      "signature": "type ToolSearcher interface {\n\tId() string\n\tSearchGuidance() string\n" +
+        "\tIndexAll(tools []IndexableTool) error\n\tSearch(ctx context.Context, que" +
+        "ry string) ([]string, error)\n}",
+      "line": 61
+    },
+    {
+      "name": "Recorder",
+      "path": "run.go",
+      "group": "Optional",
+      "use": "For durable runs",
+      "summary": "Accepts a SaveBatch containing run evidence and checkpoints.",
+      "advice": "Use the history storage contract for worker recovery. The demo uses the de" +
+        "fault store.",
+      "signature": "type Recorder interface {\n\tSave(context.Context, *SaveBatch) error\n}",
+      "line": 62
+    }
+  ],
+  "revision": "1d93f48",
+  "digest": "f8746f4e4faec053",
+  "sources": [
+    "agent.go",
+    "agents/react/agent.go",
+    "agents/react/native.go",
+    "executor/executor.go",
+    "format.go",
+    "limit.go",
+    "model.go",
+    "policy/policy.go",
+    "policy/search.go",
+    "run.go",
+    "search/README.md",
+    "search/bleve_adapter.go",
+    "search/bleve_index.go",
+    "search/embedder.go",
+    "search/flat_adapter.go",
+    "search/flat_index.go",
+    "search/fused_index.go",
+    "search/fuser.go",
+    "search/normalize.go",
+    "search/search.go",
+    "section.go",
+    "termination.go",
+    "termination/text.go",
+    "tool.go",
+    "tool_search.go",
+    "toolchain.go",
+    "toolchain/native.go",
+    "toolchain/output.go",
+    "toolchain/registry.go"
+  ],
+  "example": "// This example builds the policy index once and gives each question its o" +
+        "wn context.\npackage main\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"fm" +
+        "t\"\n\t\"log\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"time\"\n\n\t\"github.co" +
+        "m/rickchristie/gent\"\n\t\"github.com/rickchristie/gent/agents/react\"\n\t" +
+        "\"github.com/rickchristie/gent/common\"\n\t\"github.com/rickchristie/gent/" +
+        "executor\"\n\t\"github.com/rickchristie/gent/models\"\n\t\"github.com/rick" +
+        "christie/gent/policy\"\n\t\"github.com/rickchristie/gent/search\"\n\t\"git" +
+        "hub.com/rickchristie/gent/termination\"\n\t\"github.com/rickchristie/gent/" +
+        "toolchain\"\n)\n\n// SamplePolicies contains invented rules for this lesso" +
+        "n. Replace them with your own rules.\nfunc SamplePolicies() []*policy.Poli" +
+        "cy {\n\treturn []*policy.Policy{\n\t\t{\n\t\t\tId:          \"return-windo" +
+        "w\",\n\t\t\tDescription: \"Return unused items within 30 days of delivery." +
+        "\",\n\t\t\tFullContent: `## Returns\n\nAn unused item can be returned with" +
+        "in 30 days of delivery.\nThe customer must supply the order ID. Check the " +
+        "delivery date and item condition.\nThe refund uses the original payment me" +
+        "thod after the return is checked.`,\n\t\t\tKeywords:         []string{\"re" +
+        "turn\", \"refund\", \"unused\", \"30 days\"},\n\t\t\tSyntheticQueries: []s" +
+        "tring{\"I changed my mind about an item I bought\"},\n\t\t},\n\t\t{\n\t\t" +
+        "\tId:          \"damaged-delivery\",\n\t\t\tDescription: \"Report an item " +
+        "that arrived damaged.\",\n\t\t\tFullContent: `## Damage on delivery\n\nRep" +
+        "ort damage within 7 days of delivery. Supply the order ID and a photo of t" +
+        "he damage.\nAfter the report is checked, the customer can request a replac" +
+        "ement or a refund.`,\n\t\t\tKeywords:         []string{\"damaged\", \"brok" +
+        "en\", \"replacement\"},\n\t\t\tSyntheticQueries: []string{\"my parcel arri" +
+        "ved with a broken item\"},\n\t\t},\n\t}\n}\n\n// BuildRunner indexes the p" +
+        "olicies at startup. Keep the embedder open while the runner is in use.\nfu" +
+        "nc BuildRunner(\n\tctx context.Context, model gent.Model, embedder search." +
+        "Embedder, mode policy.SearchResultMode,\n) (*executor.Runner, error) {\n\t" +
+        "policies := SamplePolicies()\n\tlookup, err := policy.NewPolicySearchTool(" +
+        "ctx, embedder, policies)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tl" +
+        "ookup.WithTopK(3).WithResultMode(mode)\n\tchain := toolchain.New()\n\tchai" +
+        "n.RegisterTool(lookup)\n\tif mode != policy.SearchResultFull {\n\t\tchain." +
+        "RegisterTool(policy.NewGetPolicyTool(policies))\n\t}\n\tterm := terminatio" +
+        "n.NewText(\"answer\").WithGuidance(\n\t\t\"State the policy ID and the con" +
+        "ditions that apply. Ask for any missing facts.\",\n\t)\n\tloop := react.Ne" +
+        "wAgent(model).\n\t\tWithToolChain(chain).\n\t\tWithTermination(term).\n\t" +
+        "\tWithBehaviorAndContext(\"Help a customer understand the store's return r" +
+        "ules.\").\n\t\tWithCriticalRules(`Search the policies before you answer a " +
+        "policy question.\nIf search returns a title or a snippet, use get_policy t" +
+        "o read the full policy first.\nUse only the policy text you read. Do not a" +
+        "pprove a refund or invent missing facts.`)\n\treturn executor.NewRunner(lo" +
+        "op, executor.DefaultConfig()), nil\n}\n\n// Answer uses a new execution co" +
+        "ntext so history and limits belong to this question.\nfunc Answer(ctx cont" +
+        "ext.Context, runner *executor.Runner, question string) (string, error) {\n" +
+        "\tdata := gent.NewBasicLoopData(&gent.Task{Text: question})\n\texecCtx := " +
+        "gent.NewExecutionContext(ctx, \"policy-help\", data)\n\tlimits := gent.Def" +
+        "aultLimits()\n\tfor i := range limits {\n\t\tif limits[i].Key == gent.SCIt" +
+        "erations.Self() {\n\t\t\tlimits[i].MaxValue = 6\n\t\t}\n\t}\n\texecCtx.Set" +
+        "Limits(limits)\n\tresult, err := runner.Execute(execCtx)\n\tif err != nil " +
+        "{\n\t\treturn \"\", err\n\t}\n\tif result.TerminationReason != gent.Termin" +
+        "ationSuccess {\n\t\treturn \"\", fmt.Errorf(\"run ended with %s: %v\", res" +
+        "ult.TerminationReason, result.Error)\n\t}\n\tif len(result.Output) != 1 {" +
+        "\n\t\treturn \"\", fmt.Errorf(\"expected one text answer, got %d parts\", " +
+        "len(result.Output))\n\t}\n\ttext, ok := result.Output[0].(gent.TextContent" +
+        ")\n\tif !ok {\n\t\treturn \"\", fmt.Errorf(\"expected text answer, got %T" +
+        "\", result.Output[0])\n\t}\n\treturn text.Text, nil\n}\n\nfunc NewEmbedder" +
+        "() (search.Embedder, error) {\n\tcfg := common.FindConfig(\"multilingual-e" +
+        "5-small\")\n\tif cfg == nil {\n\t\treturn nil, fmt.Errorf(\"embedding conf" +
+        "iguration not found\")\n\t}\n\tdir, err := common.ModelDir(cfg.Model.Name)" +
+        "\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn search.NewOnnxEmbe" +
+        "dder(*cfg, search.OnnxOptions{\n\t\tModelPath:     filepath.Join(dir, cfg." +
+        "Model.ModelFile),\n\t\tTokenizerPath: filepath.Join(dir, \"tokenizer.json" +
+        "\"), NumThreads: 2, MaxConcurrency: 2,\n\t})\n}\n\nfunc run() (runErr erro" +
+        "r) {\n\tkey, modelName := os.Getenv(\"OPENAI_API_KEY\"), os.Getenv(\"GENT_" +
+        "MODEL\")\n\tif key == \"\" || modelName == \"\" {\n\t\treturn fmt.Errorf(" +
+        "\"set OPENAI_API_KEY and GENT_MODEL to use this example\")\n\t}\n\tembedde" +
+        "r, err := NewEmbedder()\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer f" +
+        "unc() { runErr = errors.Join(runErr, embedder.Close()) }()\n\tctx, cancel " +
+        ":= context.WithTimeout(context.Background(), 90*time.Second)\n\tdefer canc" +
+        "el()\n\tmodel := models.NewOpenAI(key, modelName)\n\trunner, err := BuildR" +
+        "unner(ctx, model, embedder, policy.SearchResultFull)\n\tif err != nil {\n" +
+        "\t\treturn err\n\t}\n\tanswer, err := Answer(ctx, runner, \"An unused item" +
+        " arrived 10 days ago. Can I return it?\")\n\tif err != nil {\n\t\treturn e" +
+        "rr\n\t}\n\tfmt.Println(answer)\n\treturn nil\n}\n\nfunc main() {\n\tif err" +
+        " := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n"
+};
+    </script>
+    <script>
+      "use strict";
+
+// Keep every lesson local so the shared file has no runtime dependencies.
+const data = lessonData;
+const byId = (id) => document.getElementById(id);
+const all = (selector) => [...document.querySelectorAll(selector)];
+const escapeHtml = (text) =>
+  String(text).replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[char],
+  );
+const pages = ["start", "contracts", "documents", "ranking", "loop", "code", "operation", "check"];
+const storageKey = "gent-policy-search-lessons-v1";
+let complete = new Set();
+let currentPage = "start";
+let storageAvailable = true;
+
+try {
+  const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
+  if (!Array.isArray(saved)) throw new Error("Invalid saved progress");
+  complete = new Set(saved.filter((id) => pages.includes(id)));
+} catch (error) {
+  storageAvailable = false;
+  byId("save-state").textContent = `Progress is session-only: ${error.message}`;
+}
+
+function saveProgress() {
+  if (!storageAvailable) return;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...complete]));
+  } catch (error) {
+    storageAvailable = false;
+    byId("save-state").textContent = `Progress is session-only: ${error.message}`;
+  }
+}
+
+function showProgress() {
+  byId("progress").value = complete.size;
+  byId("progress-text").textContent = `${complete.size} / 8`;
+  all("nav [data-page]").forEach((link) => {
+    const done = complete.has(link.dataset.page);
+    link.querySelector("b").textContent = done ? "✓" : "";
+    link.querySelector("b").setAttribute("aria-label", done ? "Complete" : "");
+  });
+  byId("complete-lesson").textContent = complete.has(currentPage)
+    ? "Completed ✓"
+    : "Mark as complete";
+  byId("complete-lesson").setAttribute("aria-pressed", String(complete.has(currentPage)));
+}
+
+function showPage(moveFocus = false) {
+  const target = location.hash.slice(1);
+  currentPage = pages.includes(target) ? target : "start";
+  all(".lesson").forEach((section) => {
+    section.hidden = section.id !== currentPage;
+  });
+  all("nav [data-page]").forEach((link) => {
+    if (link.dataset.page === currentPage) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  const index = pages.indexOf(currentPage);
+  byId("previous-lesson").disabled = index === 0;
+  byId("next-lesson").disabled = index === pages.length - 1;
+  byId("next-lesson").textContent = index === pages.length - 1 ? "End of lessons" : "Next lesson →";
+  showProgress();
+  if (moveFocus) {
+    byId("main").focus({ preventScroll: true });
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+}
+
+byId("previous-lesson").onclick = () => {
+  location.hash = pages[pages.indexOf(currentPage) - 1];
+};
+byId("next-lesson").onclick = () => {
+  location.hash = pages[pages.indexOf(currentPage) + 1];
+};
+byId("complete-lesson").onclick = () => {
+  if (complete.has(currentPage)) complete.delete(currentPage);
+  else complete.add(currentPage);
+  saveProgress();
+  showProgress();
+};
+byId("reset-progress").onclick = () => {
+  complete.clear();
+  saveProgress();
+  showProgress();
+};
+window.addEventListener("hashchange", () => showPage(true));
+byId("print").onclick = () => window.print();
+
+const mapItems = {
+  runner: [
+    "Runner owns the run",
+    "It publishes lifecycle events, calls Loop.Next, checks cancellation, " +
+      "and commits the final result. It does not choose a policy.",
+    "Loop",
+  ],
+  loop: [
+    "ReAct connects model decisions to tools",
+    "It builds messages, sends native definitions, " +
+      "executes calls, and checks final content through Termination.",
+    "Loop",
+  ],
+  model: [
+    "Model is the provider boundary",
+    "It receives Gent messages and tool definitions. " +
+      "Its stream supplies content, native calls, and usage to the managed execution context.",
+    "Model",
+  ],
+  registry: [
+    "Registry handles the tool contract",
+    "It validates arguments, converts typed input, " +
+      "runs hooks, and preserves tool results. Register the policy tool before runs start.",
+    "ToolChain",
+  ],
+  policy: [
+    "PolicySearchTool is a normal typed tool",
+    "It receives a query and returns Markdown. " +
+      "Its constructor builds the BM25 index, vector index, and 40/60 fuser for you.",
+    "Tool",
+  ],
+  index: [
+    "FusedIndex combines two result lists",
+    "BleveIndex finds text matches. FlatIndex finds " +
+      "the best vector chunk for each policy. WeightedLinearFuser merges scores by policy ID.",
+    "Fuser",
+  ],
+};
+
+function selectMap(id) {
+  const [title, text, name] = mapItems[id];
+  all("[data-node]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.node === id));
+  });
+  byId("map-detail").innerHTML = `<h3>${title}</h3><p>${text}</p>
+    <button class="text-button" data-inspect="${name}">Open ${name} contract →</button>`;
+}
+all("[data-node]").forEach((button) => {
+  button.onclick = () => selectMap(button.dataset.node);
+});
+byId("map-detail").onclick = (event) => {
+  const button = event.target.closest("[data-inspect]");
+  if (!button) return;
+  byId("contract-search").value = "";
+  byId("contract-group").value = "All";
+  selectedContract = button.dataset.inspect;
+  renderContracts();
+  location.hash = "contracts";
+};
+
+let selectedContract = "Loop";
+function renderContracts() {
+  const query = byId("contract-search").value.trim().toLowerCase();
+  const group = byId("contract-group").value;
+  const results = data.contracts.filter((item) => {
+    return (
+      (group === "All" || item.group === group) &&
+      `${item.name} ${item.summary} ${item.advice}`.toLowerCase().includes(query)
+    );
+  });
+  byId("contract-count").textContent = `${results.length} interfaces`;
+  if (!results.some((item) => item.name === selectedContract)) selectedContract = results[0]?.name;
+  byId("contract-list").innerHTML = results
+    .map(
+      (item) => `<button data-contract="${item.name}"
+    aria-pressed="${item.name === selectedContract}"><span>${item.name}</span>
+    <small>${escapeHtml(item.use)}</small></button>`,
+    )
+    .join("");
+  if (!results.length) {
+    byId("contract-detail").innerHTML =
+      "<h2>No matching interface</h2><p>Use a shorter query or select All.</p>";
+    return;
+  }
+  const item = results.find((entry) => entry.name === selectedContract);
+  byId("contract-detail").innerHTML = `<span class="tag">${item.group.toUpperCase()}</span>
+    <h2>${item.name}</h2><p>${escapeHtml(item.summary)}</p>
+    <pre><code>${escapeHtml(item.signature)}</code></pre>
+    <p class="contract-use"><strong>${escapeHtml(item.use)}.</strong> ${escapeHtml(item.advice)}</p>
+    <div class="tiny">Source: ${item.path}:${item.line} · exact declaration</div>`;
+}
+byId("contract-search").oninput = renderContracts;
+byId("contract-group").onchange = renderContracts;
+byId("contract-list").onclick = (event) => {
+  const button = event.target.closest("[data-contract]");
+  if (!button) return;
+  selectedContract = button.dataset.contract;
+  renderContracts();
+  byId("contract-list").querySelector(`[data-contract="${selectedContract}"]`).focus();
+};
+
+const policyFields = ["id", "description", "body", "keywords", "queries"];
+const initialPolicy = Object.fromEntries(
+  policyFields.map((name) => [name, byId(`policy-${name}`).value]),
+);
+function renderPolicy() {
+  const value = Object.fromEntries(
+    policyFields.map((name) => [name, byId(`policy-${name}`).value]),
+  );
+  const keywords = value.keywords
+    .split(",")
+    .map((word) => word.trim())
+    .filter(Boolean);
+  const queries = value.queries
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  byId("bm25-document").textContent = JSON.stringify(
+    {
+      id: value.id,
+      keywords: keywords.join(" "),
+      fullcontent: value.body,
+    },
+    null,
+    2,
+  );
+  byId("vector-document").textContent = `# ${value.id}
+
+${value.body}`;
+  byId("vector-queries").textContent = queries.length
+    ? `# ${value.id}
+
+${queries.join(String.fromCharCode(10))}`
+    : "No synthetic-query chunk.";
+  byId("policy-warning").textContent = value.id.trim()
+    ? "Preview only. Use a unique ID and keep the rule text complete."
+    : "Add an ID so each result can refer to one policy.";
+}
+policyFields.forEach((name) => {
+  byId(`policy-${name}`).oninput = renderPolicy;
+});
+byId("reset-policy").onclick = () => {
+  policyFields.forEach((name) => {
+    byId(`policy-${name}`).value = initialPolicy[name];
+  });
+  renderPolicy();
+};
+
+const scoreData = {
+  intent: [
+    ["return-window", 1, 0.92],
+    ["order-cancel", 7, 0.48],
+    ["damaged-delivery", 0, 0.58],
+    ["warranty", 0, 0.3],
+  ],
+  keyword: [
+    ["return-window", 8, 0.85],
+    ["order-cancel", 1, 0.35],
+    ["damaged-delivery", 2, 0.6],
+    ["warranty", 0.4, 0.28],
+  ],
+  id: [
+    ["return-window", 10, 0.73],
+    ["order-cancel", 0, 0.2],
+    ["damaged-delivery", 0, 0.29],
+    ["warranty", 0, 0.19],
+  ],
+};
+let selectedPolicy = "return-window";
+function renderRanking() {
+  const weight = Number(byId("bm25-weight").value) / 100;
+  const topK = Number(byId("top-k").value);
+  const rows = scoreData[byId("query-preset").value]
+    .map(([id, raw, semantic]) => {
+      const normalized = Math.min(raw / 10, 1);
+      const bm = weight * normalized;
+      const vector = (1 - weight) * semantic;
+      return { id, raw, semantic, normalized, bm, vector, score: bm + vector };
+    })
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
+    .slice(0, topK);
+  if (!rows.some((row) => row.id === selectedPolicy)) selectedPolicy = rows[0].id;
+  const weights = `${Math.round(weight * 100)}% BM25 / ${Math.round((1 - weight) * 100)}% vector`;
+  byId("weight-label").textContent = weights;
+  byId("bm25-weight").setAttribute("aria-valuetext", weights);
+  byId("formula").innerHTML =
+    `score = <span class="bm-text">${weight.toFixed(2)} × BM25 normalized</span>
+    + <span class="vector-text">${(1 - weight).toFixed(2)} × cosine</span>`;
+  byId("ranking-rows").innerHTML = rows
+    .map(
+      (row, index) => `<tr
+    class="${row.id === selectedPolicy ? "selected" : ""}"><td><button data-policy="${row.id}"
+    aria-pressed="${row.id === selectedPolicy}">${index + 1}. ${row.id}</button></td>
+    <td>${row.raw ? row.raw.toFixed(2) : "—"}</td><td>${row.normalized.toFixed(2)}</td>
+    <td>${row.semantic.toFixed(2)}</td><td><div class="score-bar" role="img"
+    aria-label="BM25 ${row.bm.toFixed(3)} plus vector ${row.vector.toFixed(3)}">
+    <span class="score-bm" style="width:${row.bm * 100}%"></span>
+    <span class="score-vector" style="width:${row.vector * 100}%"></span></div></td>
+    <td><strong>${row.score.toFixed(3)}</strong></td></tr>`,
+    )
+    .join("");
+  const row = rows.find((item) => item.id === selectedPolicy);
+  const winner = row.bm > row.vector ? "BM25" : "vector";
+  let snippet = `The ${winner} source has the larger contribution and supplies the fused snippet.`;
+  if (row.bm === row.vector) {
+    snippet =
+      row.bm === 0
+        ? "Neither source has a positive contribution, so the fuser leaves this snippet empty."
+        : "The contributions tie. The Go fuser does not define which snippet wins this tie.";
+  }
+  byId("rank-detail").innerHTML = `<h3>${row.id}: ${row.score.toFixed(3)}</h3>
+    <p><code>${weight.toFixed(2)} × (${row.raw.toFixed(2)} / 10) +
+    ${(1 - weight).toFixed(2)} × ${row.semantic.toFixed(2)} = ${row.score.toFixed(3)}</code></p>
+    <p>${
+      row.raw
+        ? "This policy appears in both result lists."
+        : "This policy is absent from the BM25 list, so that contribution is zero."
+    }
+    ${snippet}
+    Full result mode still returns the complete policy body.</p>`;
+}
+byId("query-preset").onchange = renderRanking;
+byId("top-k").onchange = renderRanking;
+byId("bm25-weight").oninput = renderRanking;
+byId("ranking-rows").onclick = (event) => {
+  const button = event.target.closest("[data-policy]");
+  if (!button) return;
+  selectedPolicy = button.dataset.policy;
+  renderRanking();
+  byId("ranking-rows").querySelector(`[data-policy="${selectedPolicy}"]`).focus();
+};
+byId("reset-ranking").onclick = () => {
+  byId("bm25-weight").value = "40";
+  byId("top-k").value = "3";
+  byId("query-preset").value = "intent";
+  selectedPolicy = "return-window";
+  renderRanking();
+};
+
+function step(owner, title, description, iteration, tools, codeLabel, code) {
+  return { owner, title, description, iteration, tools, codeLabel, code };
+}
+const startStep = step(
+  "RUNNER + CONTEXT",
+  "Start with a task",
+  "Create BasicLoopData and a fresh " +
+    "ExecutionContext. The runner publishes BeforeExecution and commits the initial checkpoint.",
+  0,
+  0,
+  "APPLICATION",
+  `data := gent.NewBasicLoopData(&gent.Task{
+    Text: "Can I return an unused item after 10 days?",
+})
+execCtx := gent.NewExecutionContext(ctx, "policy-help", data)
+result, err := runner.Execute(execCtx)`,
+);
+const requestStep = step(
+  "REACT → MODEL",
+  "Send messages and native tools",
+  "The runner starts " +
+    "iteration 1. ReAct builds the system prompt, task, and active history. NativeTools supplies " +
+    "the available definitions to the managed model call.",
+  1,
+  0,
+  "KEY CONTRACTS",
+  `ToolChain.NativeTools(execCtx)
+ExecutionContext.GenerateContentStream(...)
+Model.GenerateContentStream(ctx, request)
+
+Tool name: search_policy
+Required argument: query (string)`,
+);
+const callStep = step(
+  "MODEL → REACT",
+  "The model requests a policy search",
+  "The response has a " +
+    "native call. ReAct saves the decision. It does not accept answer text in this response.",
+  1,
+  0,
+  "MODEL TOOL CALL / ILLUSTRATIVE",
+  `{
+  "id": "call-policy-1",
+  "type": "function",
+  "function": {
+    "name": "search_policy",
+    "arguments": "{\"query\":\"return refund unused\"}"
+  }
+}`,
+);
+const toolStep = step(
+  "REGISTRY → POLICY TOOL",
+  "Validate, plan, execute",
+  "PrepareCalls saves " +
+    "the plan. ExecuteNext checks JSON, runs hooks, and calls the policy tool. FusedIndex " +
+    "queries both sources and combines their results.",
+  1,
+  1,
+  "POLICY SEARCH",
+  `PolicySearchInput{Query: "return refund unused"}
+
+BleveIndex: up to 20 candidates
+FlatIndex: up to 20 candidates
+WeightedLinearFuser: 0.4 BM25 + 0.6 semantic
+PolicySearchTool: up to 3 results`,
+);
+const historyStep = step(
+  "REACT → HISTORY",
+  "Save the observation",
+  "The native call and its " +
+    "tool response enter append-only history and the active selection. ReAct returns LAContinue. " +
+    "The model can read the result in the next iteration.",
+  1,
+  1,
+  "FULL POLICY RESULT / EXCERPT",
+  `# return-window
+
+## Returns
+
+An unused item can be returned within 30 days of delivery.
+The customer must supply the order ID.
+
+Loop action: LAContinue`,
+);
+const answerText =
+  "Policy return-window allows an unused item to be returned within 30 days of " +
+  "delivery. At 10 days, it is within that window. Please supply the order ID.";
+function answerStep(iteration, tools) {
+  return step(
+    "MODEL → TERMINATION",
+    "Check final assistant content",
+    "The next response has no " +
+      "tool calls. ReAct uses ParseSection and ShouldTerminate. Text termination " +
+      "accepts non-empty content unless a validator rejects it.",
+    iteration,
+    tools,
+    "PLAIN FINAL CONTENT",
+    answerText,
+  );
+}
+function finishStep(iteration, tools) {
+  return step(
+    "REACT → RUNNER",
+    "Return the accepted answer",
+    "ReAct returns LATerminate. " +
+      "The runner saves the terminal result and releases resources. The caller checks " +
+      "the error and TerminationReason before using Output.",
+    iteration,
+    tools,
+    "EXECUTION RESULT",
+    `TerminationReason: TerminationSuccess
+Output: []ContentPart{TextContent{Text: answer}}
+
+Loop action: LATerminate`,
+  );
+}
+function runSteps(path) {
+  const base = [startStep, requestStep, callStep, toolStep, historyStep];
+  if (path === "snippet") {
+    base[4] = step(
+      "REACT → HISTORY",
+      "Save IDs and snippets",
+      "Snippet mode returns policy IDs " +
+        "and snippets. Register get_policy with the same documents to read the full rule.",
+      1,
+      1,
+      "SNIPPET RESULT / ILLUSTRATIVE",
+      `id: return-window
+An unused item can be returned within 30 days of delivery.`,
+    );
+    return [
+      ...base,
+      step(
+        "MODEL → GET_POLICY",
+        "Read the full policy",
+        "In iteration 2 the model " +
+          "requests get_policy. The registry checks policy_id and saves the result. A snippet " +
+          "can omit a condition, so the prompt asks the model to read this before answering.",
+        2,
+        2,
+        "SECOND TOOL CALL",
+        `get_policy({"policy_id":"return-window"})
+
+Result: full policy Markdown
+Loop action: LAContinue`,
+      ),
+      answerStep(3, 2),
+      finishStep(3, 2),
+    ];
+  }
+  if (path === "reject") {
+    return [
+      ...base,
+      step(
+        "TERMINATION → VALIDATOR",
+        "Reject an incomplete answer",
+        "An optional " +
+          "validator rejects an answer with no policy ID. ReAct saves feedback and continues. " +
+          "The answer rejection counter increases.",
+        2,
+        1,
+        "VALIDATOR RESULT / ILLUSTRATIVE",
+        `ValidationResult{
+    Accepted: false,
+    Feedback: []FormattedSection{
+        {Name: "error", Content: "Include the policy ID."},
+    },
+}
+
+Loop action: LAContinue`,
+      ),
+      answerStep(3, 1),
+      finishStep(3, 1),
+    ];
+  }
+  if (path === "error") {
+    return [
+      startStep,
+      requestStep,
+      step(
+        "MODEL → POLICY TOOL",
+        "The query is empty",
+        "The query " +
+          "field is a string, so schema validation passes. The policy tool rejects the empty " +
+          "string. The registry records an error observation.",
+        1,
+        1,
+        "TOOL CALL AND ERROR",
+        `search_policy({"query":""})
+
+Tool error: query is required
+Loop action: LAContinue`,
+      ),
+      step(
+        "MODEL → REGISTRY",
+        "Retry with useful search text",
+        "The next " +
+          "model call uses the error to choose a query. Success resets the consecutive " +
+          "tool-error gauges. Errors still remain in history and total error counts.",
+        2,
+        2,
+        "RETRY",
+        `search_policy({"query":"return refund unused"})
+
+Result: full policy Markdown
+Loop action: LAContinue`,
+      ),
+      answerStep(3, 2),
+      finishStep(3, 2),
+    ];
+  }
+  if (path === "limit") {
+    return [
+      ...base,
+      step(
+        "RUNNER → LIMIT",
+        "Stop the unfinished run",
+        "For this path the " +
+          "SCIterations.Self() maximum is 1. Iteration 1 finished with LAContinue, so the runner " +
+          "stops before a second model call. Retrieved text is not a final answer.",
+        1,
+        1,
+        "EXECUTION RESULT",
+        `TerminationReason: TerminationLimitExceeded
+Output: nil
+ExceededLimit.Key: SCIterations.Self()
+ExceededLimit.MaxValue: 1`,
+      ),
+    ];
+  }
+  return [...base, answerStep(2, 1), finishStep(2, 1)];
+}
+let position = 0;
+function renderRun() {
+  const steps = runSteps(byId("run-path").value);
+  position = Math.min(position, steps.length - 1);
+  const current = steps[position];
+  byId("run-owner").textContent = current.owner;
+  byId("run-title").textContent = current.title;
+  byId("run-description").textContent = current.description;
+  byId("run-iteration").textContent = current.iteration;
+  byId("run-tools").textContent = current.tools;
+  byId("run-code-label").textContent = current.codeLabel;
+  byId("run-code").textContent = current.code;
+  byId("run-position").textContent = `${position + 1} / ${steps.length}`;
+  byId("run-step").max = steps.length - 1;
+  byId("run-step").value = position;
+  byId("run-step").setAttribute("aria-valuetext", `${position + 1}: ${current.title}`);
+  byId("run-back").disabled = position === 0;
+  byId("run-next").disabled = position === steps.length - 1;
+  byId("run-timeline").innerHTML = steps
+    .map(
+      (item, index) => `<li><button data-step="${index}"
+    aria-label="Step ${index + 1}: ${item.title}" ${index === position ? 'aria-current="step"' : ""}
+    class="${index < position ? "passed" : ""}">
+    ${String(index + 1).padStart(2, "0")}</button></li>`,
+    )
+    .join("");
+}
+byId("run-next").onclick = () => {
+  position++;
+  renderRun();
+};
+byId("run-back").onclick = () => {
+  position--;
+  renderRun();
+};
+byId("run-reset").onclick = () => {
+  position = 0;
+  renderRun();
+};
+byId("run-path").onchange = () => {
+  position = 0;
+  renderRun();
+};
+byId("run-step").oninput = (event) => {
+  position = Number(event.target.value);
+  renderRun();
+};
+byId("run-timeline").onclick = (event) => {
+  const button = event.target.closest("[data-step]");
+  if (!button) return;
+  position = Number(button.dataset.step);
+  renderRun();
+  byId("run-timeline").querySelector(`[data-step="${position}"]`).focus();
+};
+
+byId("copy-code").onclick = async () => {
+  try {
+    if (!navigator.clipboard?.writeText)
+      throw new Error("Clipboard is unavailable on this file URL");
+    await navigator.clipboard.writeText(data.example);
+    byId("copy-status").textContent = "Go source copied.";
+  } catch (error) {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(byId("go-example"));
+    selection.removeAllRanges();
+    selection.addRange(range);
+    byId("copy-status").textContent =
+      `${error.message}. Source selected; copy it or use Download main.go.`;
+  }
+};
+byId("download-code").onclick = () => {
+  const url = URL.createObjectURL(new Blob([data.example], { type: "text/plain;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "main.go";
+  link.click();
+  // Delay cleanup until the browser has started the local download.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const modes = {
+  full: [
+    "Full content is the default",
+    "Returns the policy ID as a heading and the complete body. " +
+      "Use it when the policies are short. The next model request can read the whole rule.",
+    "policy.SearchResultFull",
+    `# return-window
+
+## Returns
+
+An unused item can be returned within 30 days of delivery.
+Supply the order ID. The refund uses the original payment method.`,
+  ],
+  snippet: [
+    "Snippets reduce the first result size",
+    "Returns an ID and the snippet selected by " +
+      "the search index. Register get_policy and read the full text before using the rule.",
+    "policy.SearchResultSnippet",
+    `id: return-window
+An unused item can be returned within 30 days of delivery.
+
+Then call: get_policy({"policy_id":"return-window"})`,
+  ],
+  title: [
+    "Title mode includes the description",
+    "The implementation returns the ID and " +
+      "Description. It does not return the rule body. Use get_policy to retrieve that body.",
+    "policy.SearchResultTitle",
+    `id: return-window
+description: Return unused items within 30 days of delivery.
+
+Then call: get_policy({"policy_id":"return-window"})`,
+  ],
+};
+function renderMode(mode) {
+  const [title, description, code, result] = modes[mode];
+  byId("mode-title").textContent = title;
+  byId("mode-description").textContent = description;
+  byId("mode-code").textContent = `.WithResultMode(${code})`;
+  byId("mode-result").textContent = result;
+  all("[data-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+  });
+}
+all("[data-mode]").forEach((button) => {
+  button.onclick = () => renderMode(button.dataset.mode);
+});
+
+const questions = [
+  {
+    question: "Which piece must you write to add standard hybrid policy search?",
+    correct: 1,
+    options: [
+      "A new AgentLoop implementation",
+      "Your policy documents and dependency setup",
+      "A SearchChain that discovers every policy as a tool",
+    ],
+    why: "ReAct, Registry, and PolicySearchTool already implement the required behavior.",
+  },
+  {
+    question: "Where does Policy.Description affect search?",
+    correct: 2,
+    options: [
+      "It is the highest-boost BM25 field",
+      "It is embedded as a separate vector chunk",
+      "It is display text in title mode; the adapters do not index it",
+    ],
+    why: "BM25 uses ID, keywords, and body. Vectors use ID, body, and synthetic queries.",
+  },
+  {
+    question: "A hit has no BM25 match and cosine 0.80. What is its default fused score?",
+    correct: 0,
+    options: ["0.48", "0.80", "0.00 because both sources must match"],
+    why: "The missing source contributes zero: 0.4 × 0 + 0.6 × 0.80 = 0.48.",
+  },
+  {
+    question: "The response has both a native tool call and final-answer text. What happens?",
+    correct: 0,
+    options: [
+      "ReAct runs the tool calls first",
+      "The runner accepts the answer immediately",
+      "TextFormat must parse an XML action section",
+    ],
+    why: "Native calls take priority. Answer validation runs when there are no tool calls.",
+  },
+  {
+    question: "How do you change the built-in 40/60 weights in this working copy?",
+    correct: 1,
+    options: [
+      "Call PolicySearchTool.WithWeights",
+      "Compose indexes and a fuser behind your own tool",
+      "Change the loop iteration limit",
+    ],
+    why: "PolicySearchTool has no weight setter. SearchIndex and Fuser are the extension points.",
+  },
+];
+byId("quiz-questions").innerHTML = questions
+  .map(
+    (item, index) => `<fieldset class="quiz-card">
+  <legend>${String(index + 1).padStart(2, "0")} / ${escapeHtml(item.question)}</legend>
+  ${item.options
+    .map(
+      (option, choice) => `<label><input type="radio" name="question-${index}"
+    value="${choice}">${escapeHtml(option)}</label>`,
+    )
+    .join("")}
+  <p class="quiz-feedback" id="feedback-${index}" aria-live="polite"></p></fieldset>`,
+  )
+  .join("");
+byId("quiz-form").onsubmit = (event) => {
+  event.preventDefault();
+  const values = new FormData(event.target);
+  let score = 0;
+  questions.forEach((item, index) => {
+    const raw = values.get(`question-${index}`);
+    const correct = raw !== null && Number(raw) === item.correct;
+    if (correct) score++;
+    const feedback = byId(`feedback-${index}`);
+    feedback.classList.toggle("wrong", !correct);
+    const status = raw === null ? "No answer selected." : correct ? "Correct." : "Try again.";
+    feedback.textContent = `${status} ${item.why}`;
+  });
+  byId("quiz-result").textContent =
+    score === questions.length
+      ? "5 / 5 — You have the complete path."
+      : `${score} / 5 — Read the feedback and try again.`;
+};
+byId("quiz-reset").onclick = () => {
+  byId("quiz-form").reset();
+  all(".quiz-feedback").forEach((element) => {
+    element.textContent = "";
+  });
+  byId("quiz-result").textContent = "";
+};
+byId("source-version").textContent =
+  `Checked against the local working copy on 26 October 2026. ` +
+  `Base commit: ${data.revision}; source digest: ${data.digest}. Local changes are included. ` +
+  `The digest identifies the source bytes used to build these lessons.`;
+byId("source-files").innerHTML = data.sources
+  .map((path) => `<li>${escapeHtml(path)}</li>`)
+  .join("");
+
+// Initialize hidden sections too so print output includes the current experiment states.
+selectMap("policy");
+renderContracts();
+renderPolicy();
+renderRanking();
+renderRun();
+renderMode("full");
+document.documentElement.classList.add("js");
+showPage();
+
+    </script>
+  </body>
+</html>

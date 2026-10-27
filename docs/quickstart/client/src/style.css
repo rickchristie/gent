@@ -1,0 +1,59 @@
+:root {
+  font:
+    17px/1.6 system-ui,
+    sans-serif;
+  color: #203d35;
+  background: #f6f5ee;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 800px;
+  margin: 60px auto;
+  padding: 0 24px;
+}
+h1 {
+  font-size: clamp(30px, 5vw, 48px);
+  line-height: 1.15;
+}
+h2 {
+  font-size: 20px;
+}
+.eyebrow,
+small {
+  letter-spacing: 1px;
+  font-size: 11px;
+}
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+button {
+  background: #203d35;
+  color: white;
+  border: 0;
+  padding: 14px 18px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+section {
+  background: white;
+  border: 1px solid #ced9c5;
+  padding: 20px;
+  margin-top: 20px;
+}
+section p {
+  white-space: pre-wrap;
+}
+code {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+[role="alert"] {
+  color: #a52b26;
+}
