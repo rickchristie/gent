@@ -45,11 +45,11 @@ record
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			var inputs []map[string]any
-			chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+			chain := New().RegisterTool(gent.DefineTool("lookup",
 				func(_ context.Context, args map[string]any) (string, error) {
 					inputs = append(inputs, args)
 					return "record", nil
-				}))
+				}).Description("Read data").ParameterSchema(nil).MustBuild())
 			wrapper := NewJsToolChainWrapper(chain).WithCodeGuidance("Use JavaScript.")
 			if test.input.codeOnly {
 				wrapper.WithDirectCallDisabled()
@@ -81,8 +81,9 @@ record
 }
 
 func TestNativeJavaScript_Descriptions(t *testing.T) {
-	chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
-		func(context.Context, map[string]any) (string, error) { return "record", nil }))
+	chain := New().RegisterTool(gent.DefineTool("lookup",
+		func(context.Context, map[string]any) (string, error) { return "record", nil }).
+		Description("Read data").ParameterSchema(nil).MustBuild())
 	wrapper := NewJsToolChainWrapper(chain).WithDirectCallDisabled().WithCodeGuidance("Use JS.")
 	definitions, err := wrapper.NativeTools(newExecCtx())
 	assert.NoError(t, err)
@@ -145,7 +146,7 @@ func TestNativeJavaScript_CallValidation(t *testing.T) {
 }
 
 func TestNativeJavaScript_SearchDiscovery(t *testing.T) {
-	chain := setupSearchChain([]*indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
+	chain := setupSearchChain([]indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
 		nil, nil, func(context.Context, map[string]any) (string, error) { return "ok", nil })},
 		[]gent.ToolSearcher{&mockToolSearcher{id: "test",
 			searchFn: func(context.Context, string) ([]string, error) { return []string{"lookup"}, nil }}})

@@ -2,15 +2,12 @@
 //
 // # Quick Start
 //
-//	tool := gent.NewToolFunc(
-//	    "search",
-//	    "Search for information",
-//	    schema.Object(map[string]*schema.Property{
-//	        "query": schema.String("Search query"),
-//	        "limit": schema.Integer("Max results").Min(1).Max(100).Default(10),
-//	    }, "query"), // "query" is required
-//	    searchFunc,
-//	)
+//	tool, err := gent.DefineTool("search", searchFunc).
+//	    Description("Search for information").
+//	    Parameters(
+//	        schema.Field("query").Description("Search query").MinLength(1),
+//	        schema.Field("limit").Description("Max results").Min(1).Max(100).Optional(),
+//	    ).Build()
 //
 // ToolChain automatically validates inputs against the schema before execution.
 // See [Object], [Property], and individual builder functions for detailed documentation.
@@ -405,6 +402,7 @@ func Compile(raw map[string]any) (*Schema, error) {
 
 	// Compile the schema
 	c := jsonschema.NewCompiler()
+	c.AssertFormat()
 	if err := c.AddResource("schema.json", schemaData); err != nil {
 		return nil, fmt.Errorf("failed to add schema resource: %w", err)
 	}

@@ -35,12 +35,15 @@ record 7
 			ctx := newExecCtx()
 			chain := test.input.chain()
 			var got []map[string]any
-			tool := gent.NewToolFunc("lookup", "Read a record", nil,
-				func(_ context.Context, args map[string]any) (string, error) {
-					got = append(got, args)
-					return "record 7", nil
-				}).WithPolicy("Read only").WithDeduplicateSummary(
-				func(map[string]any, string) string { return "same record" })
+			tool := gent.DefineTool("lookup", func(_ context.Context, args map[string]any) (string, error) {
+				got = append(got, args)
+				return "record 7", nil
+			}).Description("Read a record").ParameterSchema(nil).Policy("Read only").
+				DeduplicateSummary(func(map[string]any, string) string { return "same record" }).
+				Recovery(func(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
+					return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved,
+						SteeringMessage: "Check the saved record before another attempt."}, nil
+				}).MustBuild()
 			chain.RegisterTool(tool)
 			definitions, err := chain.NativeTools(ctx)
 			if !assert.NoError(t, err) {
@@ -226,7 +229,7 @@ func (hook *nativeCancelHook) OnBeforeToolCall(ctx *gent.ExecutionContext,
 }
 
 func TestNativeSearch_CancelBeforeEffect(t *testing.T) {
-	chain := setupSearchChain([]*indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
+	chain := setupSearchChain([]indexableToolFunc{newIndexableTool("lookup", "Read", "Sales",
 		nil, nil, func(context.Context, map[string]any) (string, error) {
 			t.Error("cancelled tool must not run")
 			return "", nil

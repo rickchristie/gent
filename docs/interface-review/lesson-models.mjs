@@ -20,6 +20,7 @@ export const lessons = [
       'gent.TextSection',
       'gent.Tool',
       'gent.ToolChain',
+      'gent.ParallelToolChain',
       'gent.Termination',
       'gent.AnswerValidator',
     ],
@@ -73,7 +74,6 @@ export const lessons = [
     contracts: [
       'gent.CheckpointState',
       'gent.RecoveryConfig',
-      'gent.ToolRecovery',
       'gent.ValueCodec',
       'gent.CodedError',
     ],

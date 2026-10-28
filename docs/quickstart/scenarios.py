@@ -258,9 +258,9 @@ RECOVERY = {
         step("tools", "Handle uncertain tools", "Do not blindly repeat an external write.",
              "A process can stop after a tool changes an external system but before its result "
              "is saved. A tool-ready checkpoint alone cannot prove whether the tool completed.",
-             "Add recoverTool in agent.go. This example explicitly allows retry only for "
+             "Set Recovery(recoverOrder) on the lookup tool builder in agent.go. This allows retry for "
              "lookup_order because it is a read. Return unresolved for an unknown write outcome.",
-             "server/agent.go", "// Only the named read-only", None, [
+             "server/agent.go", "// The order lookup reads", None, [
                  ("ToolRecoveryCompleted", "Return the complete saved result when an external "
                   "receipt proves the operation finished."),
                  ("ToolRecoveryRetryAllowed", "Use this only when retry is safe, such as this "
@@ -272,7 +272,7 @@ RECOVERY = {
              ], "Completed steps are reused. Each unknown outcome has an explicit policy."),
         step("resume", "Resume the runner", "Call Resume with fresh runtime bindings.",
              "Rebuild the trace with trace.RestoreSequencer(saved, displayConfig(codecs)), then "
-             "pass the new recorder, codecs, observer, and recovery policy to Runner.Resume.",
+             "pass the new recorder, codecs, and observer to Runner.Resume. Tools own recovery.",
              "Add recover.go and call resumeSaved from the resume branch in API.start. Reuse "
              "the stored run ID. Do not create a new Task or call Execute on a new context.",
              "server/recover.go", "func resumeSaved", None, [

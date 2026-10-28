@@ -17,7 +17,7 @@ Each experiment includes a prediction question and connects to its relevant inte
 small teaching models, not a JavaScript port of Gent. Keeping the models local makes failures safe
 to explore and repeat, without credentials or an external service. A lesson can be linked with
 `#view=learn&lesson=save` (or `loop`, `memory`, `restart`, `search`). Experiment state is temporary;
-review notes persist separately. The existing field guide is preserved.
+review notes persist separately. Use [Quickstart](../quickstart/README.md) for tutorials.
 
 The guide contains every named interface in non-test Go source, eight structural capability checks,
 and selected concrete types that explain ownership and continuation. The contract browser includes
@@ -39,8 +39,8 @@ node docs/interface-review/build.mjs > /tmp/gent-interface-build.log 2>&1
 
 Check both exit statuses. If the Go cache is read-only, set `GOCACHE=/tmp/gent-interface-go-cache`.
 The Node build accepts a catalog path as its first argument. It has no npm dependencies.
-Font bytes and license notices are read from the existing `docs/code/assets` directory and embedded
-in the output; that directory is only a build dependency, not a browser dependency.
+Font bytes and license notices are in `assets/` so this page can build on its own. The build embeds
+them in the output for offline use.
 
 `extract.go` uses Go's parser, excludes test/dependency/hidden/documentation directories, and reads
 the current checkout, including uncommitted refactor work. Its build tag keeps it out of `go test`.
@@ -78,8 +78,9 @@ explicit so the interface count remains meaningful.
 
 ## Verify
 
-Browser checks reuse the existing `docs/code` Playwright dependency without editing its package or
-lockfile. Use its installed Chromium, or set `GENT_REVIEW_CHROMIUM` to an available executable.
+Browser checks share Quickstart's Playwright dependency so documentation tests use the same version.
+Run `npm ci --prefix docs/quickstart` from the repository root to install it. Use its installed
+Chromium, or set `GENT_REVIEW_CHROMIUM` to an available executable.
 
 ```sh
 node docs/interface-review/browser.mjs > /tmp/gent-interface-browser-test.log 2>&1

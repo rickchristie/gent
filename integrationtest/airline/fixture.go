@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/rickchristie/gent/integrationtest/testutil"
 	"github.com/rickchristie/gent/policy"
 	"github.com/rickchristie/gent/schema"
 	"github.com/rickchristie/gent/search"
@@ -445,14 +444,8 @@ func (f *AirlineFixture) initializeData() {
 // -----------------------------------------------------------------------------
 
 // GetCustomerInfoTool returns a tool that retrieves customer information.
-func (f *AirlineFixture) GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInput, *Customer] {
-	return gent.NewToolFunc(
-		"get_customer_info",
-		"Retrieve customer information by customer ID or email address",
-		schema.Object(map[string]*schema.Property{
-			"customer_id": schema.String("The customer's unique ID (e.g., C001)"),
-			"email":       schema.String("The customer's email address"),
-		}),
+func (f *AirlineFixture) GetCustomerInfoTool() gent.Tool[GetCustomerInfoInput, *Customer] {
+	return gent.DefineTool("get_customer_info",
 		func(ctx context.Context, input GetCustomerInfoInput) (*Customer, error) {
 			if input.CustomerID != "" {
 				if customer, exists := f.customers[input.CustomerID]; exists {
@@ -469,18 +462,23 @@ func (f *AirlineFixture) GetCustomerInfoTool() *gent.ToolFunc[GetCustomerInfoInp
 				return nil, fmt.Errorf("customer not found with email: %s", input.Email)
 			}
 			return nil, fmt.Errorf("must provide either customer_id or email")
-		},
-	)
+		}).Description("Retrieve customer information by customer ID or email address").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"customer_id": schema.String("The customer's unique ID (e.g., C001)"),
+			"email":       schema.String("The customer's email address"),
+		})).Domain("Customer").Categories("lookup", "customer").Keywords(
+		"customer", "passenger", "profile",
+		"email", "frequent flyer",
+	).SyntheticQueries(
+		"find customer by email",
+		"look up passenger information",
+		"get customer profile",
+	).MustBuild()
 }
 
 // GetBookingInfoTool returns a tool that retrieves booking details.
-func (f *AirlineFixture) GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput, *Booking] {
-	return gent.NewToolFunc(
-		"get_booking_info",
-		"Retrieve booking details by booking ID",
-		schema.Object(map[string]*schema.Property{
-			"booking_id": schema.String("The booking reference ID (e.g., BK001)"),
-		}, "booking_id"),
+func (f *AirlineFixture) GetBookingInfoTool() gent.Tool[GetBookingInfoInput, *Booking] {
+	return gent.DefineTool("get_booking_info",
 		func(ctx context.Context, input GetBookingInfoInput) (*Booking, error) {
 			if input.BookingID == "" {
 				return nil, fmt.Errorf("booking_id is required")
@@ -489,18 +487,22 @@ func (f *AirlineFixture) GetBookingInfoTool() *gent.ToolFunc[GetBookingInfoInput
 				return booking, nil
 			}
 			return nil, fmt.Errorf("booking not found: %s", input.BookingID)
-		},
-	)
+		}).Description("Retrieve booking details by booking ID").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"booking_id": schema.String("The booking reference ID (e.g., BK001)"),
+		}, "booking_id")).Domain("Booking").Categories("lookup", "booking").Keywords(
+		"booking", "reservation", "itinerary",
+		"confirmation",
+	).SyntheticQueries(
+		"find booking details",
+		"look up reservation by ID",
+		"check booking status",
+	).MustBuild()
 }
 
 // GetFlightInfoTool returns a tool that retrieves flight information.
-func (f *AirlineFixture) GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, *Flight] {
-	return gent.NewToolFunc(
-		"get_flight_info",
-		"Retrieve flight information by flight number",
-		schema.Object(map[string]*schema.Property{
-			"flight_number": schema.String("The flight number (e.g., AA100)"),
-		}, "flight_number"),
+func (f *AirlineFixture) GetFlightInfoTool() gent.Tool[GetFlightInfoInput, *Flight] {
+	return gent.DefineTool("get_flight_info",
 		func(ctx context.Context, input GetFlightInfoInput) (*Flight, error) {
 			if input.FlightNumber == "" {
 				return nil, fmt.Errorf("flight_number is required")
@@ -509,20 +511,23 @@ func (f *AirlineFixture) GetFlightInfoTool() *gent.ToolFunc[GetFlightInfoInput, 
 				return flight, nil
 			}
 			return nil, fmt.Errorf("flight not found: %s", input.FlightNumber)
-		},
-	)
+		}).Description("Retrieve flight information by flight number").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"flight_number": schema.String("The flight number (e.g., AA100)"),
+		}, "flight_number")).Domain("Flight").Categories("lookup", "flight").
+		Keywords(
+			"flight", "departure", "arrival",
+			"status", "aircraft",
+		).SyntheticQueries(
+		"check flight status",
+		"get flight departure time",
+		"look up flight information",
+	).MustBuild()
 }
 
 // GetFlightSeatsInfoTool returns a tool that retrieves seat availability for a flight.
-func (f *AirlineFixture) GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsInfoInput, []Seat] {
-	return gent.NewToolFunc(
-		"get_flight_seats_info",
-		"Retrieve seat availability and details for a specific flight",
-		schema.Object(map[string]*schema.Property{
-			"flight_number":  schema.String("The flight number (e.g., AA100)"),
-			"class":          schema.String("Filter by class: economy, business, or first (optional)"),
-			"available_only": schema.Boolean("If true, only return available seats"),
-		}, "flight_number"),
+func (f *AirlineFixture) GetFlightSeatsInfoTool() gent.Tool[GetFlightSeatsInfoInput, []Seat] {
+	return gent.DefineTool("get_flight_seats_info",
 		func(ctx context.Context, input GetFlightSeatsInfoInput) ([]Seat, error) {
 			if input.FlightNumber == "" {
 				return nil, fmt.Errorf("flight_number is required")
@@ -543,20 +548,26 @@ func (f *AirlineFixture) GetFlightSeatsInfoTool() *gent.ToolFunc[GetFlightSeatsI
 				filtered = append(filtered, seat)
 			}
 			return filtered, nil
-		},
-	)
+		}).Description("Retrieve seat availability and details for a specific flight").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"flight_number":  schema.String("The flight number (e.g., AA100)"),
+			"class":          schema.String("Filter by class: economy, business, or first (optional)"),
+			"available_only": schema.Boolean("If true, only return available seats"),
+		}, "flight_number")).Domain("Flight").Categories("lookup", "seat").Keywords(
+		"seat", "availability", "window",
+		"aisle", "legroom", "class",
+	).SyntheticQueries(
+		"check available seats",
+		"find window seat",
+		"seat availability on flight",
+	).MustBuild()
 }
 
 // SearchFlightScheduleTool returns a tool that searches for available flights.
-func (f *AirlineFixture) SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightScheduleInput, []*Flight] {
-	return gent.NewToolFunc(
-		"search_flight_schedule",
-		"Search for available flights between two airports on a specific date",
-		schema.Object(map[string]*schema.Property{
-			"origin":      schema.String("Origin airport code (e.g., JFK)"),
-			"destination": schema.String("Destination airport code (e.g., LAX)"),
-			"date":        schema.String("Travel date in YYYY-MM-DD format"),
-		}, "origin", "destination", "date"),
+func (f *AirlineFixture) SearchFlightScheduleTool() gent.Tool[
+	SearchFlightScheduleInput, []*Flight,
+] {
+	return gent.DefineTool("search_flight_schedule",
 		func(ctx context.Context, input SearchFlightScheduleInput) ([]*Flight, error) {
 			if input.Origin == "" || input.Destination == "" || input.Date == "" {
 				return nil, fmt.Errorf("origin, destination, and date are required")
@@ -582,21 +593,26 @@ func (f *AirlineFixture) SearchFlightScheduleTool() *gent.ToolFunc[SearchFlightS
 					input.Origin, input.Destination, input.Date)
 			}
 			return results, nil
-		},
-	)
+		}).Description("Search for available flights between two airports on a specific date").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"origin":      schema.String("Origin airport code (e.g., JFK)"),
+			"destination": schema.String("Destination airport code (e.g., LAX)"),
+			"date":        schema.String("Travel date in YYYY-MM-DD format"),
+		}, "origin", "destination", "date")).Domain("Flight").
+		Categories("search", "schedule").Keywords(
+		"schedule", "availability", "route",
+		"date", "origin", "destination",
+	).SyntheticQueries(
+		"search for flights between airports",
+		"find available flights on date",
+		"flight schedule search",
+	).MustBuild()
 }
 
 // RescheduleBookingTool returns a tool that reschedules a booking to a new flight.
-func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookingInput,
+func (f *AirlineFixture) RescheduleBookingTool() gent.Tool[RescheduleBookingInput,
 	*RescheduleBookingResult] {
-	return gent.NewToolFunc(
-		"reschedule_booking",
-		"Reschedule an existing booking to a different flight",
-		schema.Object(map[string]*schema.Property{
-			"booking_id":        schema.String("The booking ID to reschedule"),
-			"new_flight_number": schema.String("The new flight number to reschedule to"),
-			"new_seat_number":   schema.String("The desired seat on the new flight (optional)"),
-		}, "booking_id", "new_flight_number"),
+	return gent.DefineTool("reschedule_booking",
 		func(ctx context.Context, input RescheduleBookingInput) (*RescheduleBookingResult, error) {
 			booking, exists := f.bookings[input.BookingID]
 			if !exists {
@@ -685,19 +701,25 @@ func (f *AirlineFixture) RescheduleBookingTool() *gent.ToolFunc[RescheduleBookin
 				TotalCharge:    changeFee + fareDiff,
 				Message:        msg,
 			}, nil
-		},
-	)
+		}).Description("Reschedule an existing booking to a different flight").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"booking_id":        schema.String("The booking ID to reschedule"),
+			"new_flight_number": schema.String("The new flight number to reschedule to"),
+			"new_seat_number":   schema.String("The desired seat on the new flight (optional)"),
+		}, "booking_id", "new_flight_number")).Domain("Booking").
+		Categories("mutation", "reschedule").Keywords(
+		"reschedule", "change", "modify",
+		"move", "rebook",
+	).SyntheticQueries(
+		"reschedule my flight",
+		"change booking to different flight",
+		"move reservation to later time",
+	).MustBuild()
 }
 
 // CancelBookingTool returns a tool that cancels a booking.
-func (f *AirlineFixture) CancelBookingTool() *gent.ToolFunc[CancelBookingInput, *CancelBookingResult] {
-	return gent.NewToolFunc(
-		"cancel_booking",
-		"Cancel an existing booking and process refund",
-		schema.Object(map[string]*schema.Property{
-			"booking_id": schema.String("The booking ID to cancel"),
-			"reason":     schema.String("Reason for cancellation"),
-		}, "booking_id"),
+func (f *AirlineFixture) CancelBookingTool() gent.Tool[CancelBookingInput, *CancelBookingResult] {
+	return gent.DefineTool("cancel_booking",
 		func(ctx context.Context, input CancelBookingInput) (*CancelBookingResult, error) {
 			booking, exists := f.bookings[input.BookingID]
 			if !exists {
@@ -724,22 +746,24 @@ func (f *AirlineFixture) CancelBookingTool() *gent.ToolFunc[CancelBookingInput, 
 				Message: fmt.Sprintf("Booking %s cancelled. Travel credit of $%.2f issued.",
 					input.BookingID, refundAmount),
 			}, nil
-		},
-	)
+		}).Description("Cancel an existing booking and process refund").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"booking_id": schema.String("The booking ID to cancel"),
+			"reason":     schema.String("Reason for cancellation"),
+		}, "booking_id")).Domain("Booking").Categories("mutation", "cancel").
+		Keywords(
+			"cancel", "refund", "void",
+		).SyntheticQueries(
+		"cancel my booking",
+		"request booking cancellation",
+		"cancel flight reservation",
+	).MustBuild()
 }
 
 // SendNotificationTool returns a tool that sends notifications to customers.
-func (f *AirlineFixture) SendNotificationTool() *gent.ToolFunc[SendNotificationInput,
+func (f *AirlineFixture) SendNotificationTool() gent.Tool[SendNotificationInput,
 	*SendNotificationResult] {
-	return gent.NewToolFunc(
-		"send_notification",
-		"Send email or SMS notification to customer about booking changes",
-		schema.Object(map[string]*schema.Property{
-			"customer_id": schema.String("Customer ID to notify"),
-			"method":      schema.String("Notification method: email or sms").Enum("email", "sms"),
-			"subject":     schema.String("Subject of the notification"),
-			"message":     schema.String("The notification message content"),
-		}, "customer_id", "method", "message"),
+	return gent.DefineTool("send_notification",
 		func(ctx context.Context, input SendNotificationInput) (*SendNotificationResult, error) {
 			customer, exists := f.customers[input.CustomerID]
 			if !exists {
@@ -761,8 +785,21 @@ func (f *AirlineFixture) SendNotificationTool() *gent.ToolFunc[SendNotificationI
 				Message: fmt.Sprintf("Notification sent via %s to %s: %s",
 					input.Method, destination, input.Message),
 			}, nil
-		},
-	)
+		}).Description("Send email or SMS notification to customer about booking changes").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
+			"customer_id": schema.String("Customer ID to notify"),
+			"method":      schema.String("Notification method: email or sms").Enum("email", "sms"),
+			"subject":     schema.String("Subject of the notification"),
+			"message":     schema.String("The notification message content"),
+		}, "customer_id", "method", "message")).Domain("Communication").
+		Categories("notification", "communication").Keywords(
+		"email", "sms", "notify", "message",
+		"send", "alert",
+	).SyntheticQueries(
+		"send email to customer",
+		"notify passenger about changes",
+		"send booking confirmation",
+	).MustBuild()
 }
 
 // RegisterAllTools registers all airline tools from this fixture to a toolchain.
@@ -784,120 +821,17 @@ func (f *AirlineFixture) RegisterAllTools(tc gent.ToolChain) {
 func (f *AirlineFixture) RegisterAllToolsSearch(
 	tc gent.ToolChain,
 ) {
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.GetCustomerInfoTool(),
-		"Customer",
-		[]string{"lookup", "customer"},
-		[]string{
-			"customer", "passenger", "profile",
-			"email", "frequent flyer",
-		},
-		[]string{
-			"find customer by email",
-			"look up passenger information",
-			"get customer profile",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.GetBookingInfoTool(),
-		"Booking",
-		[]string{"lookup", "booking"},
-		[]string{
-			"booking", "reservation", "itinerary",
-			"confirmation",
-		},
-		[]string{
-			"find booking details",
-			"look up reservation by ID",
-			"check booking status",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.GetFlightInfoTool(),
-		"Flight",
-		[]string{"lookup", "flight"},
-		[]string{
-			"flight", "departure", "arrival",
-			"status", "aircraft",
-		},
-		[]string{
-			"check flight status",
-			"get flight departure time",
-			"look up flight information",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.GetFlightSeatsInfoTool(),
-		"Flight",
-		[]string{"lookup", "seat"},
-		[]string{
-			"seat", "availability", "window",
-			"aisle", "legroom", "class",
-		},
-		[]string{
-			"check available seats",
-			"find window seat",
-			"seat availability on flight",
-		},
-	))
+	tc.RegisterTool(f.GetCustomerInfoTool())
+	tc.RegisterTool(f.GetBookingInfoTool())
+	tc.RegisterTool(f.GetFlightInfoTool())
+	tc.RegisterTool(f.GetFlightSeatsInfoTool())
 	// PolicySearchTool implements IndexableTool — register directly.
 	tc.RegisterTool(f.policySearch)
 	tc.RegisterTool(f.policyGet)
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.SearchFlightScheduleTool(),
-		"Flight",
-		[]string{"search", "schedule"},
-		[]string{
-			"schedule", "availability", "route",
-			"date", "origin", "destination",
-		},
-		[]string{
-			"search for flights between airports",
-			"find available flights on date",
-			"flight schedule search",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.RescheduleBookingTool(),
-		"Booking",
-		[]string{"mutation", "reschedule"},
-		[]string{
-			"reschedule", "change", "modify",
-			"move", "rebook",
-		},
-		[]string{
-			"reschedule my flight",
-			"change booking to different flight",
-			"move reservation to later time",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.CancelBookingTool(),
-		"Booking",
-		[]string{"mutation", "cancel"},
-		[]string{
-			"cancel", "refund", "void",
-		},
-		[]string{
-			"cancel my booking",
-			"request booking cancellation",
-			"cancel flight reservation",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.SendNotificationTool(),
-		"Communication",
-		[]string{"notification", "communication"},
-		[]string{
-			"email", "sms", "notify", "message",
-			"send", "alert",
-		},
-		[]string{
-			"send email to customer",
-			"notify passenger about changes",
-			"send booking confirmation",
-		},
-	))
+	tc.RegisterTool(f.SearchFlightScheduleTool())
+	tc.RegisterTool(f.RescheduleBookingTool())
+	tc.RegisterTool(f.CancelBookingTool())
+	tc.RegisterTool(f.SendNotificationTool())
 }
 
 // TomorrowDate returns tomorrow's date in YYYY-MM-DD format.

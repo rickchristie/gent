@@ -89,7 +89,7 @@ const fonts = [
 ];
 let fontCSS = '';
 for (const [family, file, weight] of fonts) {
-  const bytes = await readFile(resolve(directory, '../code/assets', file));
+  const bytes = await readFile(resolve(directory, 'assets', file));
   fontCSS +=
     `@font-face{font-family:${family};font-weight:${weight};font-display:swap;` +
     `src:url(data:font/woff2;base64,${bytes.toString('base64')}) format('woff2');}\n`;
@@ -97,7 +97,7 @@ for (const [family, file, weight] of fonts) {
 const licenses = await Promise.all(
   ['dm-sans', 'ibm-plex-mono', 'instrument-serif'].map(async (name) => ({
     name,
-    text: await read(`../code/assets/${name}-LICENSE.txt`),
+    text: await read(`assets/${name}-LICENSE.txt`),
   })),
 );
 const payload = {

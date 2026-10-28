@@ -53,10 +53,9 @@ func TestHistoryCompaction_PreservesBothSummariesAndResumes(t *testing.T) {
 	}}
 	newAgent := func(model gent.Model) *react.Agent {
 		return react.NewAgent(model).WithRecoveryVersion("summaries/v1").RegisterTool(
-			gent.NewToolFunc("policy", "Read policy text", nil,
-				func(context.Context, recoveryInput) (string, error) {
-					return "Policy P10 permits refunds within 30 days.", nil
-				}))
+			gent.DefineTool("policy", func(context.Context, recoveryInput) (string, error) {
+				return "Policy P10 permits refunds within 30 days.", nil
+			}).Description("Read policy text").ParameterSchema(nil).MustBuild())
 	}
 	configure := func(ctx *gent.ExecutionContext, model gent.Model) {
 		ctx.SetLimits(nil)

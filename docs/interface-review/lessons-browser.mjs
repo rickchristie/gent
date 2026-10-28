@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { lessons } from './lesson-models.mjs';
 
-const require = createRequire(new URL('../code/package.json', import.meta.url));
+const require = createRequire(new URL('../quickstart/package.json', import.meta.url));
 const { chromium } = require('playwright');
 const launch = { headless: true };
 if (process.env.GENT_REVIEW_CHROMIUM) launch.executablePath = process.env.GENT_REVIEW_CHROMIUM;

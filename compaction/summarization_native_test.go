@@ -77,10 +77,10 @@ record 8
 							Name: "lookup", Arguments: `{"id":8}`}},
 					}}},
 			})
-			agent := react.NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read",
-				nil, func(_ context.Context, args map[string]any) (string, error) {
+			agent := react.NewAgent(model).RegisterTool(gent.DefineTool("lookup",
+				func(_ context.Context, args map[string]any) (string, error) {
 					return fmt.Sprintf("record %v", args["id"]), nil
-				}))
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "summary", gent.NewBasicLoopData(
 				&gent.Task{Text: "Read both records."}))
 			result, err := agent.Next(ctx)

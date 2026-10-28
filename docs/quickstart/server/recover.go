@@ -15,7 +15,6 @@ func resumeSaved(worker context.Context, saved gent.RunView, agent *react.Agent,
 	runner := executor.NewRunner(agent, executor.DefaultConfig())
 	return runner.Resume(worker, saved, gent.RestoreBindings{
 		Recorder: writer, Codecs: codecs,
-		Observers:    []gent.RecordedEventObserver{seq},
-		ToolRecovery: gent.ToolRecoveryFunc(recoverTool),
+		Observers: []gent.RecordedEventObserver{seq},
 	})
 }

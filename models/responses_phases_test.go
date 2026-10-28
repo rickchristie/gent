@@ -60,11 +60,11 @@ record
 				})},
 			})
 			calls := 0
-			agent := react.NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
+			agent := react.NewAgent(model).RegisterTool(gent.DefineTool("lookup",
 				func(context.Context, map[string]any) (string, error) {
 					calls++
 					return "record", nil
-				}))
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "phases",
 				gent.NewBasicLoopData(&gent.Task{Text: "Read the record."}))
 			result, err := agent.Next(ctx)

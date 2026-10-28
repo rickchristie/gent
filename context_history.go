@@ -58,7 +58,6 @@ type executionRun struct {
 	err             error
 	compatibility   CompatibilityManifest
 	root            *ExecutionContext
-	toolRecovery    ToolRecovery
 	components      map[string]CheckpointState
 	extensions      map[string]SavedCheckpointState
 	archived        []ContextCheckpoint

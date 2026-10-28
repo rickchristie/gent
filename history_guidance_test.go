@@ -102,7 +102,8 @@ func (s *guidanceStore) Save(_ context.Context, batch *gent.SaveBatch) error {
 			}
 		}
 	}
-	if !s.afterEffect && batch.Checkpoint != nil && batch.Checkpoint.Phase == gent.PhaseToolReady {
+	if s.cancel != nil && !s.afterEffect && batch.Checkpoint != nil &&
+		batch.Checkpoint.Phase == gent.PhaseToolReady {
 		for _, value := range batch.Checkpoint.Contexts[0].State {
 			decoded, err := s.codecs.Decode(value)
 			if err != nil {
@@ -118,10 +119,9 @@ func (s *guidanceStore) Save(_ context.Context, batch *gent.SaveBatch) error {
 }
 
 func TestNativeRecoveryGuidance(t *testing.T) {
-	type input struct{ program, afterEffect, loseRecoveryAck bool }
+	type input struct{ program, afterEffect, loseRecoveryAck, search bool }
 	type expected struct {
-		effects                       map[string]int
-		toolMessages, programMessages int
+		effects map[string]int
 	}
 	type testCase struct {
 		name     string
@@ -129,41 +129,58 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"batch before effect", input{}, expected{map[string]int{"lookup": 1}, 1, 0}},
+		{"batch before effect", input{}, expected{map[string]int{"lookup": 1}}},
 		{"batch lost result", input{afterEffect: true},
-			expected{map[string]int{"lookup": 1, "book": 1}, 1, 0}},
-		{"program before effect", input{program: true}, expected{map[string]int{"lookup": 1}, 1, 1}},
+			expected{map[string]int{"lookup": 1, "book": 1}}},
+		{"program before effect", input{program: true}, expected{map[string]int{"lookup": 1}}},
 		{"program lost result", input{program: true, afterEffect: true},
-			expected{map[string]int{"lookup": 1, "book": 1}, 1, 1}},
+			expected{map[string]int{"lookup": 1, "book": 1}}},
 		{"batch recovery acknowledgement lost", input{afterEffect: true, loseRecoveryAck: true},
-			expected{map[string]int{"lookup": 1, "book": 1}, 1, 0}},
+			expected{map[string]int{"lookup": 1, "book": 1}}},
 		{"program recovery acknowledgement lost",
 			input{program: true, afterEffect: true, loseRecoveryAck: true},
-			expected{map[string]int{"lookup": 1, "book": 1}, 1, 1}},
+			expected{map[string]int{"lookup": 1, "book": 1}}},
+		{"search batch lost result", input{search: true, afterEffect: true},
+			expected{map[string]int{"lookup": 1, "book": 1}}},
+		{"search program lost result", input{search: true, program: true, afterEffect: true},
+			expected{map[string]int{"lookup": 1, "book": 1}}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			effects := map[string]int{}
-			var toolInfo, programInfo []*gent.RecoveryInfo
 			build := func(model *guidanceModel) *react.Agent {
-				chain := toolchain.New()
+				var chain gent.ToolChain = toolchain.New()
+				if test.input.search {
+					chain = toolchain.NewSearch(toolchain.SearchHintSimpleList).
+						RegisterEngine(toolchain.NewRegexToolSearcher())
+				}
+				messages := map[string]string{
+					"lookup": "Look up the saved request ID again.",
+					"book":   "Check the saved request ID with the booking service before booking again.",
+					"later":  "Check whether the later operation completed.",
+				}
 				for _, name := range []string{"lookup", "book", "later"} {
-					chain.RegisterTool(gent.NewToolFunc(name, "Booking operation", nil,
-						func(_ context.Context, input *bookingInput) (string, error) {
-							effects[name]++
-							return name + ":" + input.RequestID, nil
-						}), gent.WithRecoveryMessage(func(info *gent.RecoveryInfo) string {
-						toolInfo = append(toolInfo, info)
-						return "Check request-7 with the booking service before booking again."
-					}))
+					tool := gent.DefineTool(name, func(_ context.Context, input *bookingInput) (string, error) {
+						effects[name]++
+						return name + ":" + input.RequestID, nil
+					}).Description("Booking operation").ParameterSchema(nil).
+						Recovery(func(context.Context, *gent.ToolRecoveryRequest) (
+							*gent.ToolRecoveryResponse, error,
+						) {
+							return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved,
+								SteeringMessage: messages[name]}, nil
+						}).MustBuild()
+					chain.RegisterTool(&recoverySearchTool{tool})
+				}
+				if search, ok := chain.(*toolchain.SearchChain); ok {
+					search.Pin("lookup").Pin("book").Pin("later")
+					if !assert.NoError(t, search.Initialize()) {
+						t.FailNow()
+					}
 				}
 				var selected gent.ToolChain = chain
 				if test.input.program {
-					selected = toolchain.NewJsToolChainWrapper(chain).WithRecoveryMessage(
-						func(info *gent.RecoveryInfo) string {
-							programInfo = append(programInfo, info)
-							return "Keep completed lookup results. Resolve the booking before the later operation."
-						})
+					selected = toolchain.NewJsToolChainWrapper(chain)
 				}
 				return react.NewAgent(model).WithToolChain(selected).WithRecoveryVersion("guidance/v1")
 			}
@@ -176,6 +193,7 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 			data := gent.NewBasicLoopData(&gent.Task{Text: "Book once."})
 			ctx := gent.NewExecutionContext(worker, "booking", data,
 				gent.WithRunId("guidance"), gent.WithRecorder(store), gent.WithCodecs(store.codecs))
+			defer ctx.Release()
 			_, err := executor.New[gent.LoopData](build(model), executor.DefaultConfig()).Execute(ctx)
 			assert.Error(t, err)
 			assert.Equal(t, test.expected.effects, effects)
@@ -208,21 +226,9 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
+			defer restored.Release()
 			assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
-			assert.Equal(t, test.expected, expected{effects, len(toolInfo), len(programInfo)})
-			if !assert.Len(t, toolInfo, 1) {
-				return
-			}
-			info := toolInfo[0]
-			assert.Equal(t, "book", info.Name)
-			assert.Equal(t, &bookingInput{RequestID: "request-7"}, info.Input)
-			assert.Equal(t, map[string]any{"request_id": "request-7"}, info.Args)
-			if test.input.program {
-				assert.Equal(t, interruptedScript, programInfo[0].Script)
-				assert.Len(t, programInfo[0].Completed, 1)
-				assert.Equal(t, "lookup", programInfo[0].Completed[0].Name)
-				assert.Len(t, programInfo[0].Uncertain, 1)
-			}
+			assert.Equal(t, test.expected, expected{effects})
 			var outputs []gent.ToolCallResponse
 			for _, message := range freshModel.requests[0].Messages {
 				for _, part := range message.Parts {
@@ -231,29 +237,72 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 					}
 				}
 			}
+			bookNumber := 2
 			if test.input.program {
-				assert.Equal(t, "provider-program", outputs[0].ToolCallID)
-			} else {
-				assert.Equal(t, gent.ToolCallResponse{ToolCallID: "provider-book", Name: "book",
-					Content: fmt.Sprintf(`Tool book (call %s):
+				bookNumber = 3
+			}
+			bookID := fmt.Sprintf("%s:tool:%d", ctx.ContextId(), bookNumber)
+			bookText := fmt.Sprintf(`Tool book (call %s):
 %s
 
 Recovery guidance:
-Check request-7 with the booking service before booking again.`,
-						info.ToolCallId, gent.DefaultRecoveryMessage)}, outputs[1])
-				assert.Equal(t, gent.ToolCallResponse{ToolCallID: "provider-later", Name: "later",
-					Content: "This call did not start. Review the interrupted operation before making a new plan.",
-				}, outputs[2])
+Check the saved request ID with the booking service before booking again.`,
+				bookID, `The operation was interrupted. Its outcome is unknown.
+It may have completed. Check the current state before you decide whether to repeat it.`)
+			lookupText := `<lookup>
+lookup:request-7
+</lookup>`
+			laterText := "This call did not start. " +
+				"Review the interrupted operation before making a new plan."
+			wantOutputs := []gent.ToolCallResponse{
+				{ToolCallID: "provider-lookup", Name: "lookup", Content: lookupText},
+				{ToolCallID: "provider-book", Name: "book", Content: bookText},
+				{ToolCallID: "provider-later", Name: "later", Content: laterText},
 			}
+			if test.input.program {
+				// The last script call was never prepared, so it has no saved call result.
+				wantOutputs = []gent.ToolCallResponse{{ToolCallID: "provider-program", Name: "run_code",
+					Content: fmt.Sprintf(`JavaScript execution was interrupted. The script will not be restarted.
+Script:
+%s
+
+%s
+
+%s
+
+Review these results and make a new plan.`,
+						interruptedScript, lookupText, bookText)}}
+			}
+			assert.Equal(t, wantOutputs, outputs)
 			view, err := restored.Export()
 			assert.NoError(t, err)
 			assert.NoError(t, gent.ValidateBundle(view, restored.Codecs()))
+			var unknown []*gent.ToolCallResult
+			for _, event := range view.Activity {
+				if event.Type != "tool_call_finished" {
+					continue
+				}
+				value, err := restored.DecodeEvent(event)
+				if !assert.NoError(t, err) {
+					return
+				}
+				call := value.(*gent.AfterToolCallEvent).Output.(*gent.ToolCallResult)
+				if call.Outcome == "unknown" {
+					unknown = append(unknown, call)
+				}
+			}
+			assert.Equal(t, []*gent.ToolCallResult{{Name: "book", ToolCallId: bookID,
+				AttemptId: ctx.AttemptId(), Args: map[string]any{"request_id": "request-7"},
+				Input: &bookingInput{RequestID: "request-7"}, Outcome: "unknown",
+				Error: gent.SaveError(gent.ErrUncertainTool), Text: bookText, SummaryCaptured: true,
+				Instructions: "Check the saved request ID with the booking service before booking again.",
+			}}, unknown)
 		})
 	}
 }
 
 type recoverySearchTool struct {
-	*gent.ToolFunc[*bookingInput, string]
+	gent.Tool[*bookingInput, string]
 }
 
 func (*recoverySearchTool) Domain() string             { return "bookings" }
@@ -266,8 +315,9 @@ func TestInterruptedProgramKeepsSearchDiscovery(t *testing.T) {
 	build := func(model *guidanceModel) *react.Agent {
 		chain := toolchain.NewSearch(toolchain.SearchHintSimpleList).
 			RegisterEngine(toolchain.NewRegexToolSearcher())
-		chain.RegisterTool(&recoverySearchTool{gent.NewToolFunc("book", "Book a flight", nil,
-			func(context.Context, *bookingInput) (string, error) { effects++; return "booked", nil })})
+		chain.RegisterTool(&recoverySearchTool{gent.DefineTool("book",
+			func(context.Context, *bookingInput) (string, error) { effects++; return "booked", nil }).
+			Description("Book a flight").ParameterSchema(nil).MustBuild()})
 		if !assert.NoError(t, chain.Initialize()) {
 			t.FailNow()
 		}

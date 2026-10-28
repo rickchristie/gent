@@ -53,13 +53,13 @@ func (model *nativeFinalModel) GenerateContentStream(_ context.Context,
 }
 
 type nativeMediaTool struct {
-	*gent.ToolFunc[map[string]any, string]
+	gent.Tool[map[string]any, string]
 }
 
 func (tool *nativeMediaTool) Call(ctx context.Context, args map[string]any) (
 	*gent.ToolResult[string], error,
 ) {
-	result, err := tool.ToolFunc.Call(ctx, args)
+	result, err := tool.Tool.Call(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +70,12 @@ func (tool *nativeMediaTool) Call(ctx context.Context, args map[string]any) (
 
 func TestNativeAgent_RequestAndToolHistory(t *testing.T) {
 	var inputs []map[string]any
-	tool := &nativeMediaTool{gent.NewToolFunc("lookup", "Read a record", nil,
+	tool := &nativeMediaTool{gent.DefineTool("lookup",
 		func(_ context.Context, args map[string]any) (string, error) {
 			inputs = append(inputs, args)
 			return "record", nil
-		}).WithDeduplicateSummary(func(map[string]any, string) string { return "same record" })}
+		}).Description("Read a record").ParameterSchema(nil).
+		DeduplicateSummary(func(map[string]any, string) string { return "same record" }).MustBuild()}
 	calls := []gent.ModelToolCall{nativeTestCall("call-a", "lookup", `{"id":7}`),
 		nativeTestCall("call-b", "lookup", `{"id":8}`)}
 	model := newMockModel(nativeTestResponse(&gent.ContentChoice{CandidateContent: "I will check.",
@@ -186,11 +187,11 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			model := newMockModel(nativeTestResponse(test.input.choice),
 				nativeTestResponse(&gent.ContentChoice{CandidateContent: "Done."}))
-			agent := NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
+			agent := NewAgent(model).RegisterTool(gent.DefineTool("lookup",
 				func(context.Context, map[string]any) (string, error) {
 					t.Error("invalid response must not execute tools")
 					return "", nil
-				}))
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
 			result, err := agent.Next(ctx)
 			if !assert.NoError(t, err) {
@@ -283,11 +284,11 @@ func TestNativeAgent_FinalOnlySizeAndRepetition(t *testing.T) {
 			config.Enabled = test.input.repetition
 			config.BlockSize = 50
 			agent := NewAgent(&nativeFinalModel{model}).WithMaxResponseChars(test.input.max).
-				WithRepetitionConfig(config).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
+				WithRepetitionConfig(config).RegisterTool(gent.DefineTool("lookup",
 				func(context.Context, map[string]any) (string, error) {
 					t.Error("truncated response must not execute tools")
 					return "", nil
-				}))
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
 			result, err := agent.Next(ctx)
 			assert.NoError(t, err)
@@ -329,11 +330,10 @@ func TestNativeAgent_ToolLimits(t *testing.T) {
 					nativeTestCall("c", "second", "{}"), nativeTestCall("d", "first", "{}")}}))
 			agent := NewAgent(model)
 			for _, name := range []string{"first", "second"} {
-				agent.RegisterTool(gent.NewToolFunc(name, "Read", nil,
-					func(context.Context, map[string]any) (string, error) {
-						effects = append(effects, name)
-						return "ok", nil
-					}))
+				agent.RegisterTool(gent.DefineTool(name, func(context.Context, map[string]any) (string, error) {
+					effects = append(effects, name)
+					return "ok", nil
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			}
 			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
 			ctx.SetLimits([]gent.Limit{{Type: gent.LimitKeyPrefix,
@@ -355,8 +355,9 @@ func TestNativeAgent_MissingCallID(t *testing.T) {
 		nativeTestResponse(&gent.ContentChoice{ToolCalls: []gent.ModelToolCall{call}}),
 		nativeTestResponse(&gent.ContentChoice{CandidateContent: "Done."}))
 	agent := NewAgent(model).WithToolChain(toolchain.New().RegisterTool(
-		gent.NewToolFunc("lookup", "Read", nil,
-			func(context.Context, map[string]any) (string, error) { return "ok", nil })))
+		gent.DefineTool("lookup",
+			func(context.Context, map[string]any) (string, error) { return "ok", nil }).Description("Read").
+			ParameterSchema(nil).MustBuild()))
 	ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
 	_, err := agent.Next(ctx)
 	if !assert.NoError(t, err) {

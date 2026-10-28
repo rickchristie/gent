@@ -16,16 +16,8 @@ import (
 //
 // # Implementing a Tool
 //
-// For simple cases, use [NewToolFunc] instead of implementing this interface directly:
-//
-//	tool := gent.NewToolFunc(
-//	    "search",
-//	    "Search the knowledge base",
-//	    schema,
-//	    func(ctx context.Context, input SearchInput) (SearchResult, error) {
-//	        return doSearch(input.Query)
-//	    },
-//	)
+// Use [DefineTool] for function tools. It infers parameters from Go types and accepts field
+// descriptions, constraints, search metadata, and a recovery handler before Build.
 //
 // For complex tools that need media output or instructions, implement the full interface:
 //
@@ -33,6 +25,19 @@ import (
 //
 //	func (t *ImageGeneratorTool) Name() string { return "generate_image" }
 //	func (t *ImageGeneratorTool) Description() string { return "Generate an image from a prompt" }
+//	func (t *ImageGeneratorTool) Policy() string { return "" }
+//	func (t *ImageGeneratorTool) Domain() string { return "Images" }
+//	func (t *ImageGeneratorTool) Categories() []string { return nil }
+//	func (t *ImageGeneratorTool) Keywords() []string { return nil }
+//	func (t *ImageGeneratorTool) SyntheticQueries() []string { return nil }
+//	func (t *ImageGeneratorTool) Strict() bool { return false }
+//	func (t *ImageGeneratorTool) OutputSchema() map[string]any { return nil }
+//	func (t *ImageGeneratorTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+//	    *gent.ToolRecoveryResponse, error,
+//	) {
+//	    return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved}, nil
+//	}
+//	func (t *ImageGeneratorTool) DeduplicateSummary(ImageInput, ImageMeta) string { return "" }
 //	func (t *ImageGeneratorTool) ParameterSchema() map[string]any {
 //	    return map[string]any{
 //	        "type": "object",
@@ -50,7 +55,7 @@ import (
 //	    }
 //	    return &gent.ToolResult[ImageMeta]{
 //	        Text:  meta, // Will be formatted by ToolChain
-//	        Media: []gent.ContentPart{BinaryPart{Data: imageBytes, MIMEType: "image/png"}},
+//	        Media: []gent.ContentPart{gent.BinaryContent{Data: imageBytes, MIMEType: "image/png"}},
 //	    }, nil
 //	}
 //
@@ -68,6 +73,9 @@ import (
 //
 // The ToolChain will format errors as observations for the LLM.
 type Tool[I, TextOutput any] interface {
+	// Search metadata is part of every tool. Empty values are valid.
+	IndexableTool
+
 	// Name returns the tool's identifier used in tool calls.
 	// Must be unique within a ToolChain. Use lowercase with underscores (e.g., "lookup_order").
 	Name() string
@@ -90,12 +98,24 @@ type Tool[I, TextOutput any] interface {
 	// Return empty string if no policy is needed.
 	Policy() string
 
+	// Recover checks an interrupted operation when no saved result exists. Return Completed
+	// with its output, RetryAllowed only when another attempt is safe, or Unresolved.
+	// Recovery may run again after a process failure, so the check must be safe to repeat.
+	Recover(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)
+
+	// Strict requests provider-side schema enforcement. Local validation always applies.
+	Strict() bool
+
+	// OutputSchema describes the text output. Nil omits output documentation.
+	// The tool builder infers it from the output type unless explicitly set.
+	OutputSchema() map[string]any
+
 	// ParameterSchema returns the JSON Schema for the tool's parameters.
 	// The ToolChain uses this for:
 	//   - Documenting parameters in the tool catalog
 	//   - Validating arguments before calling the tool
 	//
-	// Return nil if the tool takes no parameters.
+	// Nil omits schema constraints. The chain still requires a JSON object.
 	// See https://json-schema.org for schema format.
 	ParameterSchema() map[string]any
 
@@ -152,7 +172,7 @@ type Tool[I, TextOutput any] interface {
 //
 //	return &gent.ToolResult[ImageMeta]{
 //	    Text:  ImageMeta{Width: 1024, Height: 768},
-//	    Media: []gent.ContentPart{BinaryPart{Data: imageBytes, MIMEType: "image/png"}},
+//	    Media: []gent.ContentPart{gent.BinaryContent{Data: imageBytes, MIMEType: "image/png"}},
 //	}, nil
 //
 // Result with follow-up instructions:
@@ -172,8 +192,8 @@ type ToolResult[TextOutput any] struct {
 	// These are passed through by the ToolChain and included in the observation.
 	//
 	// Common types:
-	//   - BinaryPart: Raw binary data with MIME type
-	//   - ImageURLPart: Image URL reference
+	//   - BinaryContent: Raw binary data with MIME type
+	//   - ImageURLContent: Image URL reference
 	Media []ContentPart
 
 	// Instructions are optional follow-up instructions for the LLM.
@@ -191,94 +211,4 @@ type ToolResult[TextOutput any] struct {
 	//
 	// Leave empty if no special instructions are needed.
 	Instructions string
-}
-
-// ToolFunc is a convenience type for creating tools from functions with typed I/O.
-type ToolFunc[I, TextOutput any] struct {
-	name        string
-	description string
-	policy      string
-	schema      map[string]any
-	fn          func(ctx context.Context, input I) (TextOutput, error)
-	dedupFn     func(input I, output TextOutput) string
-}
-
-// NewToolFunc creates a new ToolFunc with typed input and output.
-// Output formatting is handled by the ToolChain during execution.
-// The schema is explicit: nil advertises no parameters. Supply each input field in the schema
-// so native callers know which arguments to send. The Go input type alone does not define it.
-func NewToolFunc[I, TextOutput any](
-	name, description string,
-	schema map[string]any,
-	fn func(ctx context.Context, input I) (TextOutput, error),
-) *ToolFunc[I, TextOutput] {
-	return &ToolFunc[I, TextOutput]{
-		name:        name,
-		description: description,
-		schema:      schema,
-		fn:          fn,
-	}
-}
-
-// Name returns the tool's identifier.
-func (t *ToolFunc[I, TextOutput]) Name() string {
-	return t.name
-}
-
-// Description returns a human-readable description for the LLM.
-func (t *ToolFunc[I, TextOutput]) Description() string {
-	return t.description
-}
-
-// Policy returns optional usage policy instructions for the LLM.
-func (t *ToolFunc[I, TextOutput]) Policy() string {
-	return t.policy
-}
-
-// WithPolicy sets the usage policy for this tool and returns self for chaining.
-func (t *ToolFunc[I, TextOutput]) WithPolicy(policy string) *ToolFunc[I, TextOutput] {
-	t.policy = policy
-	return t
-}
-
-// ParameterSchema returns the JSON Schema for the tool's parameters.
-func (t *ToolFunc[I, TextOutput]) ParameterSchema() map[string]any {
-	return t.schema
-}
-
-// Call executes the tool function with the given typed input.
-// Media is left nil for functions; use a full Tool implementation for media-producing tools.
-func (t *ToolFunc[I, TextOutput]) Call(
-	ctx context.Context,
-	input I,
-) (*ToolResult[TextOutput], error) {
-	output, err := t.fn(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	return &ToolResult[TextOutput]{
-		Text:  output,
-		Media: nil,
-	}, nil
-}
-
-// DeduplicateSummary returns an abbreviated observation text
-// for deduplication. Returns "" (no dedup) unless a custom
-// function was set via [ToolFunc.WithDeduplicateSummary].
-func (t *ToolFunc[I, TextOutput]) DeduplicateSummary(
-	input I, output TextOutput,
-) string {
-	if t.dedupFn == nil {
-		return ""
-	}
-	return t.dedupFn(input, output)
-}
-
-// WithDeduplicateSummary sets the deduplication summary
-// function and returns self for chaining.
-func (t *ToolFunc[I, TextOutput]) WithDeduplicateSummary(
-	fn func(input I, output TextOutput) string,
-) *ToolFunc[I, TextOutput] {
-	t.dedupFn = fn
-	return t
 }

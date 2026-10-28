@@ -20,61 +20,25 @@ func searchTestFormat() gent.TextFormat {
 	return format.NewXML()
 }
 
-// indexableToolFunc wraps a ToolFunc with IndexableTool
-// metadata. It implements both Tool[I,O] and IndexableTool.
-type indexableToolFunc struct {
-	*gent.ToolFunc[map[string]any, string]
-	domain           string
-	categories       []string
-	keywords         []string
-	syntheticQueries []string
-}
+// Use the same builder as application tools. Nil functions in catalog tests are read stubs.
+type indexableToolFunc = gent.Tool[map[string]any, string]
 
-func (t *indexableToolFunc) Domain() string {
-	return t.domain
-}
-func (t *indexableToolFunc) Categories() []string {
-	return t.categories
-}
-func (t *indexableToolFunc) Keywords() []string {
-	return t.keywords
-}
-func (t *indexableToolFunc) SyntheticQueries() []string {
-	return t.syntheticQueries
-}
-
-// newIndexableTool creates an indexable tool for testing.
 func newIndexableTool(
-	name, description, domain string,
-	categories, keywords []string,
-	fn func(ctx context.Context, args map[string]any) (string, error),
-) *indexableToolFunc {
-	return &indexableToolFunc{
-		ToolFunc: gent.NewToolFunc(
-			name, description, nil, fn,
-		),
-		domain:     domain,
-		categories: categories,
-		keywords:   keywords,
-	}
+	name, description, domain string, categories, keywords []string,
+	fn func(context.Context, map[string]any) (string, error),
+) indexableToolFunc {
+	return newIndexableToolWithSchema(name, description, domain, categories, keywords, nil, fn)
 }
 
-// newIndexableToolWithSchema creates an indexable tool with
-// a parameter schema for testing.
 func newIndexableToolWithSchema(
-	name, description, domain string,
-	categories, keywords []string,
-	s map[string]any,
-	fn func(ctx context.Context, args map[string]any) (string, error),
-) *indexableToolFunc {
-	return &indexableToolFunc{
-		ToolFunc: gent.NewToolFunc(
-			name, description, s, fn,
-		),
-		domain:     domain,
-		categories: categories,
-		keywords:   keywords,
+	name, description, domain string, categories, keywords []string, raw map[string]any,
+	fn func(context.Context, map[string]any) (string, error),
+) indexableToolFunc {
+	if fn == nil {
+		fn = func(context.Context, map[string]any) (string, error) { return "", nil }
 	}
+	return gent.DefineTool(name, fn).Description(description).ParameterSchema(raw).
+		Domain(domain).Categories(categories...).Keywords(keywords...).MustBuild()
 }
 
 // mockToolSearcher is a mock search engine for testing.
@@ -118,7 +82,7 @@ func newExecCtx() *gent.ExecutionContext {
 // setupSearchChain creates a fully initialized SearchChain
 // with the given tools and engines.
 func setupSearchChain(
-	tools []*indexableToolFunc,
+	tools []indexableToolFunc,
 	engines []gent.ToolSearcher,
 ) *SearchChain {
 	tc := NewSearch(SearchHintDomainCategories)
@@ -220,15 +184,12 @@ func TestSearchChain_RegisterTool(t *testing.T) {
 		assert.Len(t, tc.indexableTools, 1)
 	})
 
-	t.Run("panics on non-IndexableTool", func(t *testing.T) {
+	t.Run("accepts builder with empty search metadata", func(t *testing.T) {
 		tc := NewSearch(SearchHintDomainCategories)
-		tool := gent.NewToolFunc(
-			"test", "Test tool", nil,
-			func(_ context.Context, _ map[string]any) (string, error) {
-				return "ok", nil
-			},
-		)
-		assert.Panics(t, func() {
+		tool := gent.DefineTool("test", func(_ context.Context, _ map[string]any) (string, error) {
+			return "ok", nil
+		}).Description("Test tool").ParameterSchema(nil).MustBuild()
+		assert.NotPanics(t, func() {
 			tc.RegisterTool(tool)
 		})
 	})
@@ -581,7 +542,7 @@ func TestSearchChain_Execute_Search(t *testing.T) {
 		return "ok", nil
 	}
 
-	tools := []*indexableToolFunc{
+	tools := []indexableToolFunc{
 		newIndexableToolWithSchema(
 			"order_lookup",
 			"Look up order details",
@@ -839,7 +800,7 @@ func TestSearchChain_Execute_RegularTool(t *testing.T) {
 				id: "m", guidance: "g",
 			}
 			tc := setupSearchChain(
-				[]*indexableToolFunc{tool},
+				[]indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -869,7 +830,7 @@ func TestSearchChain_Execute_RegularTool(t *testing.T) {
 			},
 		)
 		tc := setupSearchChain(
-			[]*indexableToolFunc{tool},
+			[]indexableToolFunc{tool},
 			[]gent.ToolSearcher{eng},
 		)
 
@@ -906,7 +867,7 @@ Error: unknown tool "nonexistent". Use a function from the current native tool d
 			id: "m", guidance: "g",
 		}
 		tc := setupSearchChain(
-			[]*indexableToolFunc{tool},
+			[]indexableToolFunc{tool},
 			[]gent.ToolSearcher{eng},
 		)
 
@@ -932,7 +893,7 @@ Error: unknown tool "nonexistent". Use a function from the current native tool d
 			id: "m", guidance: "g",
 		}
 		tc := setupSearchChain(
-			[]*indexableToolFunc{tool},
+			[]indexableToolFunc{tool},
 			[]gent.ToolSearcher{eng},
 		)
 
@@ -979,7 +940,7 @@ Error: unknown tool "nonexistent". Use a function from the current native tool d
 
 // instructionToolImpl is a tool that returns instructions.
 type instructionToolImpl struct {
-	*indexableToolFunc
+	indexableToolFunc
 }
 
 func (t *instructionToolImpl) Call(
@@ -1001,7 +962,7 @@ func TestSearchChain_Execute_Mixed(t *testing.T) {
 		return "regular_result", nil
 	}
 
-	tools := []*indexableToolFunc{
+	tools := []indexableToolFunc{
 		newIndexableTool(
 			"regular_tool", "A regular tool",
 			"General", nil, nil, okFn,
@@ -1092,7 +1053,7 @@ func TestSearchChain_Execute_Stats(t *testing.T) {
 				"t", "d", "D", nil, nil, okFn,
 			)
 			tc := setupSearchChain(
-				[]*indexableToolFunc{tool},
+				[]indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -1130,7 +1091,7 @@ func TestSearchChain_Execute_Stats(t *testing.T) {
 				"my_tool", "d", "D", nil, nil, okFn,
 			)
 			tc := setupSearchChain(
-				[]*indexableToolFunc{tool},
+				[]indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -1162,7 +1123,7 @@ func TestSearchChain_Execute_Stats(t *testing.T) {
 				id: "m", guidance: "g",
 			}
 			tc := setupSearchChain(
-				[]*indexableToolFunc{},
+				[]indexableToolFunc{},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -1213,7 +1174,7 @@ func TestSearchChain_Execute_Stats(t *testing.T) {
 				"t", "d", "D", nil, nil, okFn,
 			)
 			tc := setupSearchChain(
-				[]*indexableToolFunc{tool},
+				[]indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -1261,7 +1222,7 @@ func TestSearchChain_Execute_Stats(t *testing.T) {
 				"t", "d", "D", nil, nil, okFn,
 			)
 			tc := setupSearchChain(
-				[]*indexableToolFunc{tool},
+				[]indexableToolFunc{tool},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -1311,7 +1272,7 @@ func TestSearchChain_Execute_Stats(t *testing.T) {
 				"ok_tool", "d", "D", nil, nil, okFn,
 			)
 			tc := setupSearchChain(
-				[]*indexableToolFunc{failTool, okTool},
+				[]indexableToolFunc{failTool, okTool},
 				[]gent.ToolSearcher{eng},
 			)
 
@@ -1367,7 +1328,7 @@ func TestSearchChain_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 				content: `{"tool": "missing_tool", "args": {}}`,
 				setup: func() *SearchChain {
 					return setupSearchChain(
-						[]*indexableToolFunc{},
+						[]indexableToolFunc{},
 						[]gent.ToolSearcher{&mockToolSearcher{id: "mock", guidance: "g"}},
 					)
 				},
@@ -1388,7 +1349,7 @@ func TestSearchChain_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 }`,
 				setup: func() *SearchChain {
 					return setupSearchChain(
-						[]*indexableToolFunc{},
+						[]indexableToolFunc{},
 						[]gent.ToolSearcher{&mockToolSearcher{id: "mock", guidance: "g"}},
 					)
 				},
@@ -1430,7 +1391,7 @@ func TestSearchChain_Execute_Pagination(t *testing.T) {
 	}
 
 	// Create 7 tools for pagination testing
-	var tools []*indexableToolFunc
+	var tools []indexableToolFunc
 	for i := range 7 {
 		name := fmt.Sprintf("tool_%d", i)
 		tools = append(tools, newIndexableTool(
@@ -1555,7 +1516,7 @@ func TestSearchChain_Execute_SearchDedup(t *testing.T) {
 		return "ok", nil
 	}
 
-	tools := []*indexableToolFunc{
+	tools := []indexableToolFunc{
 		newIndexableToolWithSchema(
 			"tool_a",
 			"Tool A description",
@@ -1854,7 +1815,7 @@ func TestSearchChain_ConcurrentAccess(t *testing.T) {
 		return "ok", nil
 	}
 
-	tools := []*indexableToolFunc{
+	tools := []indexableToolFunc{
 		newIndexableTool(
 			"tool_a", "Tool A", "D",
 			nil, nil, okFn,

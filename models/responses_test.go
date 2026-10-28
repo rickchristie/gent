@@ -101,16 +101,16 @@ tool.call({tool:"read",args:{id:first.output.next_id}});`
 				model := NewResponses(&ResponsesConfig{
 					Provider: test.input.provider, BaseURL: "https://fixture.test/v1",
 					APIKey: "fixture-key", Model: "fixture", HTTPClient: &http.Client{Transport: transport}})
-				registry := toolchain.New().RegisterTool(gent.NewToolFunc(
-					"lookup", "Get the next record ID", responseInputSchema(),
+				registry := toolchain.New().RegisterTool(gent.DefineTool("lookup",
 					func(_ context.Context, input *responseInput) (*responseOutput, error) {
 						calls = append(calls, "lookup:"+input.ID)
 						return &responseOutput{NextID: "record-9"}, nil
-					})).RegisterTool(gent.NewToolFunc("read", "Read the next record", responseInputSchema(),
-					func(_ context.Context, input *responseInput) (string, error) {
-						calls = append(calls, "read:"+input.ID)
-						return "record", nil
-					}))
+					}).Description("Get the next record ID").ParameterSchema(responseInputSchema()).MustBuild()).
+					RegisterTool(gent.DefineTool("read",
+						func(_ context.Context, input *responseInput) (string, error) {
+							calls = append(calls, "read:"+input.ID)
+							return "record", nil
+						}).Description("Read the next record").ParameterSchema(responseInputSchema()).MustBuild())
 				chain := toolchain.NewJsToolChainWrapper(registry).WithDirectCallDisabled()
 				return react.NewAgent(model).WithToolChain(chain).WithRecoveryVersion("responses/v1")
 			}

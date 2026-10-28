@@ -1,0 +1,11 @@
+{
+  "name": "gent-quickstart",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

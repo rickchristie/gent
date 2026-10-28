@@ -58,11 +58,11 @@ record
 			}
 			model := newMockModel(nativeTestResponse(choice))
 			calls := 0
-			agent := NewAgent(model).RegisterTool(gent.NewToolFunc("lookup", "Read", nil,
+			agent := NewAgent(model).RegisterTool(gent.DefineTool("lookup",
 				func(context.Context, map[string]any) (string, error) {
 					calls++
 					return "record", nil
-				}))
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
 			result, err := agent.Next(ctx)
 			want := test.expected

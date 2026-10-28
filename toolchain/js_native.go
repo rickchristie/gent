@@ -120,7 +120,7 @@ func (w *JsToolChainWrapper) ExecuteNext(
 		return nil, err
 	}
 	if found {
-		return w.recoverProgram(ctx, plan, program)
+		return w.recoverProgram(ctx, plan, program, format)
 	}
 	program = &programState{AttemptId: ctx.AttemptId(), CallId: call.Id,
 		Script: call.Args["code"].(string)}

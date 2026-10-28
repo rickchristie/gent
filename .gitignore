@@ -31,3 +31,7 @@ Thumbs.db
 
 # Log files
 .logs/
+
+# Documentation dependencies and test output
+node_modules/
+screenshots/

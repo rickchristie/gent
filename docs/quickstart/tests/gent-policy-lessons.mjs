@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../../../", import.meta.url);
-const require = createRequire(new URL("docs/code/package.json", root));
+const require = createRequire(new URL("docs/quickstart/package.json", root));
 const { chromium, expect } = require("playwright/test");
 const file = new URL("docs/quickstart/dist/gent-policy-search-lessons.html", root);
 const shots = new URL("docs/quickstart/screenshots/", root);
@@ -57,19 +57,39 @@ try {
   });
   await check("all interface declarations and empty search", async () => {
     await expect(page.locator("#contract-list button")).toHaveCount(21);
+    // Check every displayed declaration against Go source so a missed rebuild fails this test.
+    const names = await page.locator("#contract-list [data-contract]").evaluateAll((elements) =>
+      elements.map((element) => element.dataset.contract),
+    );
+    for (const name of names) {
+      await page.locator(`#contract-list [data-contract="${name}"]`).click();
+      const reference = await page.locator("#contract-detail .tiny").textContent();
+      const match = reference.match(/^Source: (.+\.go):(\d+) · exact declaration$/);
+      assert.ok(match, `${name} must show its source file and line`);
+      const source = await readFile(new URL(match[1], root), "utf8");
+      const declaration = source.match(
+        new RegExp(`^type ${name}(?:\\[[\\s\\S]*?\\])? interface \\{[\\s\\S]*?^}`, "m"),
+      );
+      assert.ok(declaration, `${name} must exist in ${match[1]}`);
+      const signature = declaration[0]
+        .split(String.fromCharCode(10))
+        .filter((line) => line.trim() && !line.trim().startsWith("//"))
+        .join(String.fromCharCode(10));
+      assert.equal(await page.locator("#contract-detail code").textContent(), signature, name);
+      const line = source.slice(0, declaration.index).split(String.fromCharCode(10)).length;
+      assert.equal(reference, `Source: ${match[1]}:${line} · exact declaration`, name);
+    }
+    await page.locator('#contract-list [data-contract="IndexableTool"]').click();
+    await expect(page.locator("#contract-detail .contract-use")).toHaveText(
+      "Part of Tool. Tool includes these methods. Registry requires them. Empty metadata is valid.",
+    );
     await page.getByLabel("Find an interface").fill("no such interface");
     await expect(page.locator("#contract-detail h2")).toHaveText("No matching interface");
     await page.getByLabel("Find an interface").fill("");
     await page.getByLabel("Area", { exact: true }).selectOption("Search");
     await expect(page.locator("#contract-list button")).toHaveCount(7);
     await page.getByRole("button", { name: "Embedder Supply and own one" }).click();
-    const source = await readFile(new URL("search/embedder.go", root), "utf8");
-    const signature = source
-      .match(/^type Embedder interface \{[\s\S]*?^}/m)[0]
-      .split(String.fromCharCode(10))
-      .filter((line) => line.trim() && !line.trim().startsWith("//"))
-      .join(String.fromCharCode(10));
-    assert.equal(await page.locator("#contract-detail code").textContent(), signature);
+    await expect(page.locator("#contract-detail h2")).toHaveText("Embedder");
     await page.getByLabel("Area", { exact: true }).selectOption("All");
   });
   await check("policy fields go to the correct index input", async () => {
@@ -284,6 +304,21 @@ Then call: get_policy({"policy_id":"return-window"})`);
       "check",
     ]) {
       await page.locator(`nav [data-page="${id}"]`).click();
+      if (id === "contracts") {
+        for (const name of ["Tool", "ToolChain", "IndexableTool"]) {
+          await page.locator(`#contract-list [data-contract="${name}"]`).click();
+          const size = await page.evaluate(() => ({
+            viewport: document.documentElement.clientWidth,
+            content: document.documentElement.scrollWidth,
+          }));
+          assert.equal(size.content, size.viewport, `${name} must fit a narrow screen`);
+        }
+        await page.locator('#contract-list [data-contract="Tool"]').click();
+        await page.screenshot({
+          path: fileURLToPath(new URL("gent-policy-lessons-tool-mobile.png", shots)),
+          fullPage: true,
+        });
+      }
       const size = await page.evaluate(() => ({
         viewport: document.documentElement.clientWidth,
         content: document.documentElement.scrollWidth,

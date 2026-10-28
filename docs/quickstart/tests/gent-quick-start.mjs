@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = new URL("../../../", import.meta.url);
 const sourceRoot = new URL("docs/quickstart/", root);
-const require = createRequire(new URL("docs/code/package.json", root));
+const require = createRequire(new URL("docs/quickstart/package.json", root));
 const { chromium, expect } = require("playwright/test");
 const html = await readFile(new URL("docs/quickstart/dist/gent-quick-start.html", root), "utf8");
 const shots = new URL("docs/quickstart/screenshots/", root);

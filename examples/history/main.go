@@ -103,15 +103,20 @@ func (m *demoModel) GenerateContentStream(
 }
 
 func newAgent(answer bool, calls *int) *react.Agent {
+	// This tool is a pure read, so an explicit retry is safe. Writing tools must consult
+	// durable receipts and reconcile effects, or let the model receive unknown-outcome guidance.
 	return react.NewAgent(&demoModel{answer: answer}).WithRecoveryVersion("history-example/v1").
-		RegisterTool(gent.NewToolFunc("read_policy", "Read policy evidence", nil,
+		RegisterTool(gent.DefineTool("read_policy",
 			func(ctx context.Context, input policyInput) (string, error) {
 				if _, ok := gent.ToolIdentityFromContext(ctx); !ok {
 					return "", errors.New("missing tool identity")
 				}
 				*calls++
 				return input.Id + ": refunds are permitted within 30 days", nil
-			}))
+			}).Description("Read policy evidence").ParameterSchema(nil).
+			Recovery(func(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
+				return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+			}).MustBuild())
 }
 
 func run(out io.Writer) error {
@@ -157,13 +162,7 @@ func demonstrate(out io.Writer, stop gent.ExecutionPhase) error {
 	freshAgent := newAgent(true, &toolCalls)
 	freshExecutor := executor.NewRunner(freshAgent, executor.DefaultConfig())
 	bindings := gent.RestoreBindings{Codecs: store.codecs}
-	// This tool is a pure read, so an explicit retry is safe. Writing tools must consult
-	// durable receipts and reconcile effects, or let the model receive unknown-outcome guidance.
-	bindings.ToolRecovery = gent.ToolRecoveryFunc(func(context.Context, *gent.ToolRecoveryRequest) (
-		*gent.ToolRecoveryResult, error,
-	) {
-		return &gent.ToolRecoveryResult{Status: gent.ToolRecoveryRetryAllowed}, nil
-	})
+
 	newWriter := &writer{store: store, lease: store.nextLease()}
 	restoredSeq, err := trace.RestoreSequencer(bundle, trace.Config{Codecs: bindings.Codecs})
 	if err != nil {

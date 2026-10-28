@@ -27,20 +27,8 @@
 //	    model := models.NewOpenAI(apiKey, modelName)
 //
 //	    // 2. Create tools
-//	    lookupOrder := gent.NewToolFunc(
-//	        "lookup_order",
-//	        "Look up order details by order ID",
-//	        map[string]any{
-//	            "type": "object",
-//	            "properties": map[string]any{
-//	                "order_id": map[string]any{"type": "string"},
-//	            },
-//	            "required": []string{"order_id"},
-//	        },
-//	        func(ctx context.Context, input OrderLookupInput) (OrderDetails, error) {
-//	            return lookupOrderFromDB(input.OrderID)
-//	        },
-//	    )
+//	    lookupOrder := gent.DefineTool("lookup_order", lookupOrderFromDB).
+//	        Description("Look up order details by order ID").MustBuild()
 //
 //	    // 3. Create toolchain and register tools
 //	    tc := toolchain.New().RegisterTool(lookupOrder)
@@ -84,14 +72,9 @@
 // purely on business logic - formatting is handled by the ToolChain.
 //
 //	// Define a tool with typed I/O
-//	tool := gent.NewToolFunc(
-//	    "search",
-//	    "Search for information",
-//	    schema, // JSON Schema for parameters
-//	    func(ctx context.Context, input SearchInput) (SearchResult, error) {
-//	        return doSearch(input.Query)
-//	    },
-//	)
+//	tool := gent.DefineTool("search", searchFunc).
+//	    Description("Search for information").
+//	    Policy("Use the query supplied by the user.").MustBuild()
 //
 // ToolChain exposes native definitions, validates structured calls, and executes saved plans.
 // Registry, SearchChain, and JsToolChainWrapper use the same hooks and recovery contract:

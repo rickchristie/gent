@@ -1,34 +1,59 @@
 package gent
 
-// RecoveryInfo is an owned snapshot of an interrupted operation. Input is the effective input
-// after before-call hooks. A ready call may have completed even when no result was saved.
-type RecoveryInfo struct {
-	RunId      string
-	ContextId  string
-	ToolCallId string
-	AttemptId  string
-	Name       string
-	Args       map[string]any
-	Input      any
-	Script     string
-	Completed  []*ToolCallResult
-	Uncertain  []*SavedToolCall
-}
+import (
+	"errors"
+	"fmt"
+)
 
-// RecoveryMessageProvider adds application guidance to the framework's recovery facts.
-// The callback receives a non-nil snapshot. It must not change external state.
-type RecoveryMessageProvider func(*RecoveryInfo) string
-
-// ToolOptions contains optional behavior for a registered tool.
-type ToolOptions struct {
-	RecoveryMessage RecoveryMessageProvider
-}
-
-type ToolOption func(*ToolOptions)
-
-func WithRecoveryMessage(provider RecoveryMessageProvider) ToolOption {
-	return func(options *ToolOptions) { options.RecoveryMessage = provider }
-}
-
-const DefaultRecoveryMessage = `The operation was interrupted. Its outcome is unknown.
+const defaultRecoveryMessage = `The operation was interrupted. Its outcome is unknown.
 It may have completed. Check the current state before you decide whether to repeat it.`
+
+func validateToolRecovery(response *ToolRecoveryResponse) error {
+	if response == nil {
+		return errors.New("gent: tool recovery returned no response")
+	}
+	switch response.Result {
+	case ToolRecoveryCompleted:
+		if response.Output == nil {
+			return errors.New("gent: completed tool recovery has no output")
+		}
+		if response.Output.Outcome != "" {
+			return errors.New("gent: completed tool recovery cannot have an unknown or unstarted outcome")
+		}
+	case ToolRecoveryRetryAllowed, ToolRecoveryUnresolved:
+		if response.Output != nil {
+			return errors.New("gent: only completed tool recovery can return output")
+		}
+	default:
+		return fmt.Errorf("gent: invalid tool recovery result %q", response.Result)
+	}
+	return nil
+}
+
+func joinSteering(before, next string) string {
+	if before == "" {
+		return next
+	}
+	if next == "" {
+		return before
+	}
+	return before + "\n\n" + next
+}
+
+// Add steering before result evidence is frozen, so a resumed run sees the same observation.
+func (ctx *ExecutionContext) addRecoverySteering(id string, output any) {
+	plan := ctx.toolPlanFor(id)
+	if plan == nil || plan.RecoverySteering == "" {
+		return
+	}
+	result, ok := output.(*ToolCallResult)
+	if !ok {
+		return
+	}
+	result.Instructions = joinSteering(result.Instructions, plan.RecoverySteering)
+	result.Text += "\n\nRecovery guidance:\n" + plan.RecoverySteering
+	// Recovery instructions must remain visible if an older identical result is shortened.
+	if result.DeduplicationSummary != "" {
+		result.DeduplicationSummary += "\n\nRecovery guidance:\n" + plan.RecoverySteering
+	}
+}

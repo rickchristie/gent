@@ -80,7 +80,7 @@ func TestNativeTakeoverStopsOldWorker(t *testing.T) {
 			build := func(finish bool) *react.Agent {
 				chain := toolchain.New()
 				for _, name := range []string{"lookup", "book", "later"} {
-					chain.RegisterTool(gent.NewToolFunc(name, "Operation", nil,
+					chain.RegisterTool(gent.DefineTool(name,
 						func(ctx context.Context, _ *bookingInput) (string, error) {
 							effects.Add(1)
 							if name == "lookup" {
@@ -92,7 +92,7 @@ func TestNativeTakeoverStopsOldWorker(t *testing.T) {
 								}
 							}
 							return name, nil
-						}))
+						}).Description("Operation").ParameterSchema(nil).MustBuild())
 				}
 				var selected gent.ToolChain = chain
 				if test.input.program {

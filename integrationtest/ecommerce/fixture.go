@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
-	"github.com/rickchristie/gent/integrationtest/testutil"
 	"github.com/rickchristie/gent/policy"
 	"github.com/rickchristie/gent/schema"
 	"github.com/rickchristie/gent/search"
@@ -369,304 +368,324 @@ func (f *EcommerceFixture) initializeData() {
 // Tool Methods
 // -------------------------------------------------------------------------
 
-func (f *EcommerceFixture) getCustomerInfoTool() *gent.ToolFunc[
+func (f *EcommerceFixture) getCustomerInfoTool() gent.Tool[
 	getCustomerInfoInput, *Customer,
 ] {
-	return gent.NewToolFunc(
-		"get_customer_info",
-		"Retrieve customer information by email address",
-		schema.Object(map[string]*schema.Property{
+	return gent.DefineTool("get_customer_info", func(
+		ctx context.Context,
+		input getCustomerInfoInput,
+	) (*Customer, error) {
+		for _, c := range f.customers {
+			if c.Email == input.Email {
+				return c, nil
+			}
+		}
+		return nil, fmt.Errorf(
+			"customer not found with email: %s",
+			input.Email,
+		)
+	}).Description("Retrieve customer information by email address").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"email": schema.String(
 				"The customer's email address",
 			),
-		}, "email"),
-		func(
-			ctx context.Context,
-			input getCustomerInfoInput,
-		) (*Customer, error) {
-			for _, c := range f.customers {
-				if c.Email == input.Email {
-					return c, nil
-				}
-			}
-			return nil, fmt.Errorf(
-				"customer not found with email: %s",
-				input.Email,
-			)
-		},
-	)
+		}, "email")).Domain("Customer").Categories("lookup", "customer").Keywords(
+		"customer", "profile", "email",
+		"account",
+	).SyntheticQueries(
+		"find customer by email",
+		"look up customer information",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) getOrdersTool() *gent.ToolFunc[
+func (f *EcommerceFixture) getOrdersTool() gent.Tool[
 	getOrdersInput, *OrderPage,
 ] {
-	return gent.NewToolFunc(
-		"get_orders",
-		"Retrieve customer orders with cursor-based "+
-			"pagination. Pass an empty cursor for the "+
-			"first page. Use the next_cursor from the "+
-			"response to fetch subsequent pages.",
-		schema.Object(map[string]*schema.Property{
-			"customer_id": schema.String(
-				"The customer's unique ID",
-			),
-			"cursor": schema.String(
-				"Pagination cursor. Empty string for " +
-					"the first page.",
-			),
-		}, "customer_id"),
-		func(
-			ctx context.Context,
-			input getOrdersInput,
-		) (*OrderPage, error) {
-			if input.CustomerID == "" {
-				return nil, fmt.Errorf(
-					"customer_id is required",
-				)
-			}
-			if _, exists := f.customers[input.CustomerID]; !exists {
-				return nil, fmt.Errorf(
-					"customer not found: %s",
-					input.CustomerID,
-				)
-			}
-			page, exists := f.orderPages[input.Cursor]
-			if !exists {
-				return nil, fmt.Errorf(
-					"invalid cursor: %s", input.Cursor,
-				)
-			}
-			return page, nil
-		},
-	)
+	return gent.DefineTool("get_orders", func(
+		ctx context.Context,
+		input getOrdersInput,
+	) (*OrderPage, error) {
+		if input.CustomerID == "" {
+			return nil, fmt.Errorf(
+				"customer_id is required",
+			)
+		}
+		if _, exists := f.customers[input.CustomerID]; !exists {
+			return nil, fmt.Errorf(
+				"customer not found: %s",
+				input.CustomerID,
+			)
+		}
+		page, exists := f.orderPages[input.Cursor]
+		if !exists {
+			return nil, fmt.Errorf(
+				"invalid cursor: %s", input.Cursor,
+			)
+		}
+		return page, nil
+	}).Description("Retrieve customer orders with cursor-based "+
+		"pagination. Pass an empty cursor for the "+
+		"first page. Use the next_cursor from the "+
+		"response to fetch subsequent pages.").ParameterSchema(schema.Object(map[string]*schema.Property{
+		"customer_id": schema.String(
+			"The customer's unique ID",
+		),
+		"cursor": schema.String(
+			"Pagination cursor. Empty string for " +
+				"the first page.",
+		),
+	}, "customer_id")).Domain("Orders").Categories("lookup", "orders").Keywords(
+		"order", "purchase", "history",
+		"cursor", "pagination",
+	).SyntheticQueries(
+		"get customer orders",
+		"list order history",
+		"look up purchases",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) getOrderPaymentsTool() *gent.ToolFunc[
+func (f *EcommerceFixture) getOrderPaymentsTool() gent.Tool[
 	getOrderPaymentsInput, *OrderPaymentsResult,
 ] {
-	return gent.NewToolFunc(
-		"get_order_payments",
-		"Retrieve all payment records for a specific order",
-		schema.Object(map[string]*schema.Property{
+	return gent.DefineTool("get_order_payments", func(
+		ctx context.Context,
+		input getOrderPaymentsInput,
+	) (*OrderPaymentsResult, error) {
+		if input.OrderID == "" {
+			return nil, fmt.Errorf(
+				"order_id is required",
+			)
+		}
+		result, exists := f.payments[input.OrderID]
+		if !exists {
+			return nil, fmt.Errorf(
+				"no payments found for order: %s",
+				input.OrderID,
+			)
+		}
+		return result, nil
+	}).Description("Retrieve all payment records for a specific order").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"order_id": schema.String("The order ID"),
-		}, "order_id"),
-		func(
-			ctx context.Context,
-			input getOrderPaymentsInput,
-		) (*OrderPaymentsResult, error) {
-			if input.OrderID == "" {
-				return nil, fmt.Errorf(
-					"order_id is required",
-				)
-			}
-			result, exists := f.payments[input.OrderID]
-			if !exists {
-				return nil, fmt.Errorf(
-					"no payments found for order: %s",
-					input.OrderID,
-				)
-			}
-			return result, nil
-		},
-	)
+		}, "order_id")).Domain("Payments").Categories("lookup", "payment").Keywords(
+		"payment", "charge", "transaction",
+		"billing",
+	).SyntheticQueries(
+		"get payments for an order",
+		"check payment status",
+		"look up charges on order",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) gatewayGetTxDetailTool() *gent.ToolFunc[
+func (f *EcommerceFixture) gatewayGetTxDetailTool() gent.Tool[
 	gatewayGetTxDetailInput, *GatewayTx,
 ] {
-	return gent.NewToolFunc(
-		"gateway_get_tx_detail",
-		"Get real-time transaction details from the "+
-			"payment gateway. Use this to verify the "+
-			"actual status of a payment transaction.",
-		schema.Object(map[string]*schema.Property{
+	return gent.DefineTool("gateway_get_tx_detail", func(
+		ctx context.Context,
+		input gatewayGetTxDetailInput,
+	) (*GatewayTx, error) {
+		if input.TxID == "" {
+			return nil, fmt.Errorf(
+				"tx_id is required",
+			)
+		}
+		tx, exists := f.gatewayTxs[input.TxID]
+		if !exists {
+			return nil, fmt.Errorf(
+				"transaction not found: %s",
+				input.TxID,
+			)
+		}
+		return tx, nil
+	}).Description("Get real-time transaction details from the "+
+		"payment gateway. Use this to verify the "+
+		"actual status of a payment transaction.").
+		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"tx_id": schema.String(
 				"The gateway transaction ID",
 			),
-		}, "tx_id"),
-		func(
-			ctx context.Context,
-			input gatewayGetTxDetailInput,
-		) (*GatewayTx, error) {
-			if input.TxID == "" {
-				return nil, fmt.Errorf(
-					"tx_id is required",
-				)
-			}
-			tx, exists := f.gatewayTxs[input.TxID]
-			if !exists {
-				return nil, fmt.Errorf(
-					"transaction not found: %s",
-					input.TxID,
-				)
-			}
-			return tx, nil
-		},
-	)
+		}, "tx_id")).Domain("Payments").Categories("lookup", "gateway").Keywords(
+		"gateway", "transaction", "real-time",
+		"verify", "status",
+	).SyntheticQueries(
+		"verify transaction with gateway",
+		"check real-time payment status",
+		"get gateway transaction details",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) gatewayCancelTxTool() *gent.ToolFunc[
+func (f *EcommerceFixture) gatewayCancelTxTool() gent.Tool[
 	gatewayCancelTxInput, *GatewayCancelResult,
 ] {
-	return gent.NewToolFunc(
-		"gateway_cancel_tx",
-		"Attempt to cancel a payment gateway "+
-			"transaction. Only works for transactions "+
-			"that have not yet settled.",
-		schema.Object(map[string]*schema.Property{
-			"tx_id": schema.String(
-				"The gateway transaction ID to cancel",
-			),
-		}, "tx_id"),
-		func(
-			ctx context.Context,
-			input gatewayCancelTxInput,
-		) (*GatewayCancelResult, error) {
-			if input.TxID == "" {
-				return nil, fmt.Errorf(
-					"tx_id is required",
-				)
-			}
-			if _, exists := f.gatewayTxs[input.TxID]; !exists {
-				return nil, fmt.Errorf(
-					"transaction not found: %s",
-					input.TxID,
-				)
-			}
-			return &GatewayCancelResult{
-				Success: false,
-				Reason: "Transaction has already " +
-					"settled and cannot be cancelled",
-			}, nil
-		},
-	)
+	return gent.DefineTool("gateway_cancel_tx", func(
+		ctx context.Context,
+		input gatewayCancelTxInput,
+	) (*GatewayCancelResult, error) {
+		if input.TxID == "" {
+			return nil, fmt.Errorf(
+				"tx_id is required",
+			)
+		}
+		if _, exists := f.gatewayTxs[input.TxID]; !exists {
+			return nil, fmt.Errorf(
+				"transaction not found: %s",
+				input.TxID,
+			)
+		}
+		return &GatewayCancelResult{
+			Success: false,
+			Reason: "Transaction has already " +
+				"settled and cannot be cancelled",
+		}, nil
+	}).Description("Attempt to cancel a payment gateway "+
+		"transaction. Only works for transactions "+
+		"that have not yet settled.").ParameterSchema(schema.Object(map[string]*schema.Property{
+		"tx_id": schema.String(
+			"The gateway transaction ID to cancel",
+		),
+	}, "tx_id")).Domain("Payments").Categories("mutation", "gateway").Keywords(
+		"cancel", "void", "transaction",
+		"gateway",
+	).SyntheticQueries(
+		"cancel a payment transaction",
+		"void gateway transaction",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) processRefundTool() *gent.ToolFunc[
+func (f *EcommerceFixture) processRefundTool() gent.Tool[
 	processRefundInput, *RefundResult,
 ] {
-	return gent.NewToolFunc(
-		"process_refund",
-		"Attempt to process a refund for a payment. "+
-			"Refund goes back to the original payment "+
-			"method.",
-		schema.Object(map[string]*schema.Property{
-			"payment_id": schema.String(
-				"The payment ID to refund",
-			),
-		}, "payment_id"),
-		func(
-			ctx context.Context,
-			input processRefundInput,
-		) (*RefundResult, error) {
-			if input.PaymentID == "" {
-				return nil, fmt.Errorf(
-					"payment_id is required",
-				)
-			}
-			if input.PaymentID == "PAY-2001" {
-				return &RefundResult{
-					Success: false,
-					Reason: "Refund rejected by bank: " +
-						"card ending in 4242 is no " +
-						"longer active. Please use " +
-						"an alternative resolution " +
-						"method.",
-				}, nil
-			}
+	return gent.DefineTool("process_refund", func(
+		ctx context.Context,
+		input processRefundInput,
+	) (*RefundResult, error) {
+		if input.PaymentID == "" {
 			return nil, fmt.Errorf(
-				"payment not found: %s",
-				input.PaymentID,
+				"payment_id is required",
 			)
-		},
-	)
+		}
+		if input.PaymentID == "PAY-2001" {
+			return &RefundResult{
+				Success: false,
+				Reason: "Refund rejected by bank: " +
+					"card ending in 4242 is no " +
+					"longer active. Please use " +
+					"an alternative resolution " +
+					"method.",
+			}, nil
+		}
+		return nil, fmt.Errorf(
+			"payment not found: %s",
+			input.PaymentID,
+		)
+	}).Description("Attempt to process a refund for a payment. "+
+		"Refund goes back to the original payment "+
+		"method.").ParameterSchema(schema.Object(map[string]*schema.Property{
+		"payment_id": schema.String(
+			"The payment ID to refund",
+		),
+	}, "payment_id")).Domain("Payments").Categories("mutation", "refund").
+		Keywords(
+			"refund", "return", "reimburse",
+			"credit",
+		).SyntheticQueries(
+		"process a refund",
+		"refund a payment",
+		"return money to customer",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) createCaseTool() *gent.ToolFunc[
+func (f *EcommerceFixture) createCaseTool() gent.Tool[
 	createCaseInput, *CaseResult,
 ] {
-	return gent.NewToolFunc(
-		"create_case",
-		"Create a support case for issues that "+
-			"cannot be resolved automatically",
-		schema.Object(map[string]*schema.Property{
-			"order_id": schema.String(
-				"The order ID related to the case",
-			),
-			"details": schema.String(
-				"Description of the issue and " +
-					"resolution steps attempted",
-			),
-		}, "order_id", "details"),
-		func(
-			ctx context.Context,
-			input createCaseInput,
-		) (*CaseResult, error) {
-			if input.OrderID == "" || input.Details == "" {
-				return nil, fmt.Errorf(
-					"order_id and details are required",
-				)
-			}
-			return &CaseResult{
-				CaseID:  "CASE-3001",
-				OrderID: input.OrderID,
-				Status:  "open",
-				Message: "Support case created " +
-					"successfully. A billing " +
-					"specialist will review " +
-					"within 24 hours.",
-			}, nil
-		},
-	)
+	return gent.DefineTool("create_case", func(
+		ctx context.Context,
+		input createCaseInput,
+	) (*CaseResult, error) {
+		if input.OrderID == "" || input.Details == "" {
+			return nil, fmt.Errorf(
+				"order_id and details are required",
+			)
+		}
+		return &CaseResult{
+			CaseID:  "CASE-3001",
+			OrderID: input.OrderID,
+			Status:  "open",
+			Message: "Support case created " +
+				"successfully. A billing " +
+				"specialist will review " +
+				"within 24 hours.",
+		}, nil
+	}).Description("Create a support case for issues that "+
+		"cannot be resolved automatically").ParameterSchema(schema.Object(map[string]*schema.Property{
+		"order_id": schema.String(
+			"The order ID related to the case",
+		),
+		"details": schema.String(
+			"Description of the issue and " +
+				"resolution steps attempted",
+		),
+	}, "order_id", "details")).Domain("Support").Categories("mutation", "support").
+		Keywords(
+			"case", "ticket", "escalate",
+			"support", "issue",
+		).SyntheticQueries(
+		"create a support case",
+		"escalate issue to support",
+		"open a ticket",
+	).MustBuild()
 }
 
-func (f *EcommerceFixture) createCreditRequestTool() *gent.ToolFunc[
+func (f *EcommerceFixture) createCreditRequestTool() gent.Tool[
 	createCreditRequestInput, *CreditRequestResult,
 ] {
-	return gent.NewToolFunc(
-		"create_credit_request",
-		"Create a store credit request associated "+
-			"with a support case. Credit is applied "+
-			"immediately if approved.",
-		schema.Object(map[string]*schema.Property{
-			"case_id": schema.String(
-				"The support case ID",
+	return gent.DefineTool("create_credit_request", func(
+		ctx context.Context,
+		input createCreditRequestInput,
+	) (*CreditRequestResult, error) {
+		if input.CaseID == "" {
+			return nil, fmt.Errorf(
+				"case_id is required",
+			)
+		}
+		if input.Amount <= 0 {
+			return nil, fmt.Errorf(
+				"amount must be positive",
+			)
+		}
+		return &CreditRequestResult{
+			RequestID: "CR-4001",
+			CaseID:    input.CaseID,
+			Amount:    input.Amount,
+			Status:    "approved",
+			Message: fmt.Sprintf(
+				"Store credit of $%.2f has been "+
+					"approved and applied to "+
+					"the customer's account. "+
+					"The credit is available "+
+					"immediately for use on "+
+					"any future purchase.",
+				input.Amount,
 			),
-			"amount": schema.Number(
-				"The credit amount in dollars",
-			),
-		}, "case_id", "amount"),
-		func(
-			ctx context.Context,
-			input createCreditRequestInput,
-		) (*CreditRequestResult, error) {
-			if input.CaseID == "" {
-				return nil, fmt.Errorf(
-					"case_id is required",
-				)
-			}
-			if input.Amount <= 0 {
-				return nil, fmt.Errorf(
-					"amount must be positive",
-				)
-			}
-			return &CreditRequestResult{
-				RequestID: "CR-4001",
-				CaseID:    input.CaseID,
-				Amount:    input.Amount,
-				Status:    "approved",
-				Message: fmt.Sprintf(
-					"Store credit of $%.2f has been "+
-						"approved and applied to "+
-						"the customer's account. "+
-						"The credit is available "+
-						"immediately for use on "+
-						"any future purchase.",
-					input.Amount,
-				),
-			}, nil
-		},
-	)
+		}, nil
+	}).Description("Create a store credit request associated "+
+		"with a support case. Credit is applied "+
+		"immediately if approved.").ParameterSchema(schema.Object(map[string]*schema.Property{
+		"case_id": schema.String(
+			"The support case ID",
+		),
+		"amount": schema.Number(
+			"The credit amount in dollars",
+		),
+	}, "case_id", "amount")).Domain("Support").Categories("mutation", "credit").
+		Keywords(
+			"credit", "store credit", "compensation",
+			"account credit",
+		).SyntheticQueries(
+		"issue store credit",
+		"create credit request",
+		"compensate customer",
+	).MustBuild()
 }
 
 // RegisterAllTools registers all e-commerce tools to a toolchain.
@@ -690,117 +709,15 @@ func (f *EcommerceFixture) RegisterAllTools(
 func (f *EcommerceFixture) RegisterAllToolsSearch(
 	tc gent.ToolChain,
 ) {
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.getCustomerInfoTool(),
-		"Customer",
-		[]string{"lookup", "customer"},
-		[]string{
-			"customer", "profile", "email",
-			"account",
-		},
-		[]string{
-			"find customer by email",
-			"look up customer information",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.getOrdersTool(),
-		"Orders",
-		[]string{"lookup", "orders"},
-		[]string{
-			"order", "purchase", "history",
-			"cursor", "pagination",
-		},
-		[]string{
-			"get customer orders",
-			"list order history",
-			"look up purchases",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.getOrderPaymentsTool(),
-		"Payments",
-		[]string{"lookup", "payment"},
-		[]string{
-			"payment", "charge", "transaction",
-			"billing",
-		},
-		[]string{
-			"get payments for an order",
-			"check payment status",
-			"look up charges on order",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.gatewayGetTxDetailTool(),
-		"Payments",
-		[]string{"lookup", "gateway"},
-		[]string{
-			"gateway", "transaction", "real-time",
-			"verify", "status",
-		},
-		[]string{
-			"verify transaction with gateway",
-			"check real-time payment status",
-			"get gateway transaction details",
-		},
-	))
+	tc.RegisterTool(f.getCustomerInfoTool())
+	tc.RegisterTool(f.getOrdersTool())
+	tc.RegisterTool(f.getOrderPaymentsTool())
+	tc.RegisterTool(f.gatewayGetTxDetailTool())
 	// PolicySearchTool implements IndexableTool — register directly.
 	tc.RegisterTool(f.policySearch)
 	tc.RegisterTool(f.policyGet)
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.gatewayCancelTxTool(),
-		"Payments",
-		[]string{"mutation", "gateway"},
-		[]string{
-			"cancel", "void", "transaction",
-			"gateway",
-		},
-		[]string{
-			"cancel a payment transaction",
-			"void gateway transaction",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.processRefundTool(),
-		"Payments",
-		[]string{"mutation", "refund"},
-		[]string{
-			"refund", "return", "reimburse",
-			"credit",
-		},
-		[]string{
-			"process a refund",
-			"refund a payment",
-			"return money to customer",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.createCaseTool(),
-		"Support",
-		[]string{"mutation", "support"},
-		[]string{
-			"case", "ticket", "escalate",
-			"support", "issue",
-		},
-		[]string{
-			"create a support case",
-			"escalate issue to support",
-			"open a ticket",
-		},
-	))
-	tc.RegisterTool(testutil.NewIndexableToolFunc(
-		f.createCreditRequestTool(),
-		"Support",
-		[]string{"mutation", "credit"},
-		[]string{
-			"credit", "store credit", "compensation",
-			"account credit",
-		},
-		[]string{
-			"issue store credit",
-			"create credit request",
-			"compensate customer",
-		},
-	))
+	tc.RegisterTool(f.gatewayCancelTxTool())
+	tc.RegisterTool(f.processRefundTool())
+	tc.RegisterTool(f.createCaseTool())
+	tc.RegisterTool(f.createCreditRequestTool())
 }

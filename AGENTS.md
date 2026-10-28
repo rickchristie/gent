@@ -1,5 +1,6 @@
 <critical_behavior>
 # Critical Behavior
+- **IMPORTANT**: Gent is in development. Change APIs freely; no backward compatibility is needed.
 - **ALWAYS fully finish your tasks** when executing anything. Never stop to ask "would you like to continue?" or anything similar.
   You are given tasks, fully complete them, don't waste our time. Exception: Destructive actions with irreversible consequences.
 - **ALWAYS verify your work and assumptions**, don't just read the code, actually test what you're doing.
@@ -79,7 +80,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Validates JSON arguments, converts typed input, runs hooks, and saves results
 - Search derives discovered definitions from active run history; pinned tools stay visible
 - PTC exposes run_code and saves inner calls separately from the outer plan
-- RecoveryMessage uses func(*RecoveryInfo) string callbacks for unknown outcomes
+- Tool.Recover supplies each tool's recovery decision, optional steering, and recovered output
 - Interrupted PTC returns partial evidence and guidance without restarting the script
 - SIDE EFFECT: BeforeToolCallEvent increments tool-call counters; AfterToolCallEvent tracks errors
 - SIDE EFFECT: Success resets consecutive error gauges

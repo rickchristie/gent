@@ -20,6 +20,8 @@ type SavedToolCall struct {
 	Args      map[string]any
 	Input     EncodedValue
 	AttemptId string
+	// Recovery is saved before its decision is used. A new attempt gets a new ReadyCall.
+	Recovery *ToolRecoveryResponse
 }
 
 type ToolPlan struct {
@@ -32,6 +34,8 @@ type ToolPlan struct {
 	ReadyCall     *SavedToolCall
 	Results       []*ToolCallResult
 	State         EncodedValue
+	// RecoverySteering survives an authorized retry until its result is saved.
+	RecoverySteering string
 }
 
 func (ctx *ExecutionContext) NewToolCallId() string { return ctx.nextToolCallId() }
@@ -159,9 +163,11 @@ func (ctx *ExecutionContext) ToolContext(id string) context.Context {
 		ContextId: ctx.ContextId(), ToolCallId: id, AttemptId: ctx.AttemptId()})
 }
 
-// RecoverTool first reuses accepted evidence, then asks the optional recovery adapter.
-// An unresolved result lets the toolchain produce guidance without repeating the operation.
-func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan) (*ToolCallResult, bool, error) {
+// RecoverTool first reuses accepted evidence, then calls the registered tool's recovery method.
+// The decision is saved before another attempt or result publication can start.
+func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan, recover ToolRecoveryFunc) (
+	*ToolCallResult, bool, error,
+) {
 	if plan.ReadyCall == nil || plan.ReadyCall.AttemptId == ctx.AttemptId() {
 		return nil, false, nil
 	}
@@ -185,42 +191,70 @@ func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan) (*ToolCallResult, bool,
 			}
 		}
 	}
-	if ctx.run.toolRecovery == nil {
-		return nil, false, fmt.Errorf("%w: %s (%s)", ErrUncertainTool, ready.Name, ready.Id)
+	if ready.Recovery == nil {
+		if err := ctx.saveToolRecovery(plan, recover); err != nil {
+			return nil, false, err
+		}
+	} else if err := validateToolRecovery(ready.Recovery); err != nil {
+		return nil, false, err
 	}
-	ownedArgs, err := ctx.Codecs().Clone(ready.Args)
+	response := ready.Recovery
+	if response.Result == ToolRecoveryRetryAllowed {
+		return nil, false, nil
+	}
+	input, err := ctx.Codecs().Decode(ready.Input)
 	if err != nil {
 		return nil, false, err
 	}
-	result, err := ctx.run.toolRecovery.Recover(ctx.Context(), &ToolRecoveryRequest{
+	result := response.Output
+	if response.Result == ToolRecoveryUnresolved {
+		result = &ToolCallResult{Outcome: "unknown", Error: ErrUncertainTool,
+			Text: fmt.Sprintf("Tool %s (call %s):\n%s",
+				ready.Name, ready.Id, defaultRecoveryMessage),
+			SummaryCaptured: true}
+	} else {
+		owned, err := ctx.Codecs().Clone(result)
+		if err != nil {
+			return nil, false, err
+		}
+		result = owned.(*ToolCallResult)
+	}
+	result.ToolCallId, result.AttemptId = ready.Id, ready.AttemptId
+	args, err := ctx.Codecs().Clone(ready.Args)
+	if err != nil {
+		return nil, false, err
+	}
+	result.Name, result.Args, result.Input = ready.Name, args.(map[string]any), input
+	result.SummaryCaptured = true
+	ctx.PublishAfterToolCall(ready.Name, input, result, 0, result.Error,
+		WithToolCallId(ready.Id), WithToolCallAttempt(ready.AttemptId))
+	return result, true, ctx.RecordingError()
+}
+
+func (ctx *ExecutionContext) saveToolRecovery(plan *ToolPlan, recover ToolRecoveryFunc) error {
+	ready := plan.ReadyCall
+	args, err := ctx.Codecs().Clone(ready.Args)
+	if err != nil {
+		return err
+	}
+	response, err := recover(ctx.Context(), &ToolRecoveryRequest{
 		RunId: ctx.RunId(), ContextId: ctx.ContextId(), ToolCallId: ready.Id,
-		AttemptId: ready.AttemptId, Name: ready.Name, Args: ownedArgs.(map[string]any),
+		AttemptId: ready.AttemptId, Name: ready.Name, Args: args.(map[string]any),
 		Input: cloneWire(ready.Input)})
 	if err != nil {
-		return nil, false, err
+		return err
 	}
-	switch result.Status {
-	case ToolRecoveryCompleted:
-		if result.Result == nil {
-			return nil, false, errors.New("gent: completed tool recovery has no result")
-		}
-		owned, err := ctx.Codecs().Clone(result.Result)
-		if err != nil {
-			return nil, false, err
-		}
-		result.Result = owned.(*ToolCallResult)
-		input, err := ctx.Codecs().Decode(ready.Input)
-		if err != nil {
-			return nil, false, err
-		}
-		result.Result.ToolCallId = ready.Id
-		result.Result.AttemptId = ready.AttemptId
-		ctx.PublishAfterToolCall(ready.Name, input, result.Result, 0, result.Result.Error,
-			WithToolCallId(ready.Id), WithToolCallAttempt(ready.AttemptId))
-		return result.Result, true, nil
-	case ToolRecoveryRetryAllowed:
-		return nil, false, nil
-	default:
-		return nil, false, fmt.Errorf("%w: %s (%s)", ErrUncertainTool, ready.Name, ready.Id)
+	if err := validateToolRecovery(response); err != nil {
+		return err
 	}
+	owned, err := ctx.Codecs().Clone(response)
+	if err != nil {
+		return err
+	}
+	ready.Recovery = owned.(*ToolRecoveryResponse)
+	plan.RecoverySteering = joinSteering(plan.RecoverySteering, ready.Recovery.SteeringMessage)
+	if err := ctx.SetToolPlan(plan); err != nil {
+		return ctx.stopRecording(err)
+	}
+	return ctx.CommitCheckpoint(PhaseToolReady)
 }

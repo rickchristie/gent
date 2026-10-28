@@ -2125,11 +2125,13 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "summary": "Defines typed input, schema, execution, and text output for one operation.",
       "advice": "PolicySearchTool implements Tool[PolicySearchInput, string]. Its result is" +
         " Markdown text.",
-      "signature": "type Tool[I, TextOutput any] interface {\n\tName() string\n\tDescription()" +
-        " string\n\tPolicy() string\n\tParameterSchema() map[string]any\n\tCall(ctx" +
+      "signature": "type Tool[I, TextOutput any] interface {\n\tIndexableTool\n\tName() string" +
+        "\n\tDescription() string\n\tPolicy() string\n\tRecover(context.Context, *T" +
+        "oolRecoveryRequest) (*ToolRecoveryResponse, error)\n\tStrict() bool\n\tOut" +
+        "putSchema() map[string]any\n\tParameterSchema() map[string]any\n\tCall(ctx" +
         " context.Context, input I) (*ToolResult[TextOutput], error)\n\tDeduplicate" +
         "Summary(input I, output TextOutput) string\n}",
-      "line": 70
+      "line": 75
     },
     {
       "name": "ToolChain",
@@ -2139,14 +2141,14 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "summary": "Selects native definitions, prepares a saved plan, and executes one call a" +
         "t a time.",
       "advice": "Use toolchain.New(). Register the policy tool before you share the runner.",
-      "signature": "type ToolChain interface {\n\tRegisterTool(any, ...ToolOption) ToolChain\n" +
-        "\tNativeTools(*ExecutionContext) ([]ToolDefinition, error)\n\tPrepareCalls" +
-        "(*ExecutionContext, []ModelToolCall) (*ToolPlan, error)\n\tExecuteNext(*Ex" +
-        "ecutionContext, *ToolPlan, TextFormat) (*ToolCallResult, error)\n\tGetTool" +
-        "Schema(string) *schema.Schema\n\tDeduplicateSummary(*ToolCallResult) strin" +
-        "g\n\tRecoveryMessage(*RecoveryInfo) string\n\tRegisterCodecs(*CodecRegistr" +
-        "y) error\n\tRecoveryConfig() any\n}",
-      "line": 71
+      "signature": "type ToolChain interface {\n\tRegisterTool(any) ToolChain\n\tNativeTools(*" +
+        "ExecutionContext) ([]ToolDefinition, error)\n\tPrepareCalls(*ExecutionCont" +
+        "ext, []ModelToolCall) (*ToolPlan, error)\n\tExecuteNext(*ExecutionContext," +
+        " *ToolPlan, TextFormat) (*ToolCallResult, error)\n\tGetToolSchema(string) " +
+        "*schema.Schema\n\tDeduplicateSummary(*ToolCallResult) string\n\tRecover(co" +
+        "ntext.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)\n\tReg" +
+        "isterCodecs(*CodecRegistry) error\n\tRecoveryConfig() any\n}",
+      "line": 74
     },
     {
       "name": "SearchIndex",
@@ -2295,16 +2297,16 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
     {
       "name": "IndexableTool",
       "path": "tool_search.go",
-      "group": "Optional",
-      "use": "For tool discovery",
+      "group": "Tools",
+      "use": "Part of Tool",
       "summary": "Adds domain, categories, keywords, and example queries to a tool definitio" +
         "n.",
-      "advice": "PolicySearchTool already implements it. The standard Registry does not nee" +
-        "d it.",
+      "advice": "Tool includes these methods. Registry requires them. Empty metadata is val" +
+        "id.",
       "signature": "type IndexableTool interface {\n\tName() string\n\tDescription() string\n" +
         "\tDomain() string\n\tCategories() []string\n\tKeywords() []string\n\tSynth" +
         "eticQueries() []string\n}",
-      "line": 24
+      "line": 22
     },
     {
       "name": "ToolSearcher",
@@ -2317,7 +2319,7 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "signature": "type ToolSearcher interface {\n\tId() string\n\tSearchGuidance() string\n" +
         "\tIndexAll(tools []IndexableTool) error\n\tSearch(ctx context.Context, que" +
         "ry string) ([]string, error)\n}",
-      "line": 61
+      "line": 59
     },
     {
       "name": "Recorder",
@@ -2331,8 +2333,8 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "line": 62
     }
   ],
-  "revision": "1d93f48",
-  "digest": "f8746f4e4faec053",
+  "revision": "6695f3c",
+  "digest": "45d56c88c8a4f68b",
   "sources": [
     "agent.go",
     "agents/react/agent.go",

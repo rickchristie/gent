@@ -1,5 +1,7 @@
 # Gent coding quick starts
 
+Use this directory for Gent's interactive documentation.
+
 Share [dist/gent-quick-start.html](dist/gent-quick-start.html). It contains four step-by-step
 guides, the styles and scripts, all example source files, and project ZIP downloads. It needs no
 server or network
@@ -88,10 +90,12 @@ The React reducer is checked against a real Gent event fixture and its complete 
 server tests use bbolt, the real loop and registry, actual HTTP/WebSocket calls, and database
 reopen with fresh runtime objects. They make no live provider calls.
 
-Browser checks use Playwright in `docs/code`. Set `GENT_LESSON_CHROMIUM` to an available Chromium
-executable if needed. There is no `.dev` setup or shared `web/playtest/fixtures.ts` in this repo;
-these probes manage their own servers and close them on exit. Set `GOCACHE` to a writable folder
-if needed. Socket tests and native ONNX tests need the appropriate local permissions and runtime.
+This directory owns the Playwright dependency used by the documentation browser tests.
+Set `GENT_LESSON_CHROMIUM` to a Chromium executable if needed. There is no `.dev` setup or shared
+`web/playtest/fixtures.ts` in this repo. These tests start their own servers and close them on exit.
+Set `GOCACHE` to a writable folder if needed. Socket and native ONNX tests need the appropriate
+local permissions and runtime.
 
-Run `npm ci --prefix docs/code` from the repository root to install the browser test dependency.
+Run `npm ci --prefix docs/quickstart` from the repository root to install Playwright.
+Run `npx --prefix docs/quickstart playwright install chromium` to install its browser.
 Use `npm ci --prefix docs/quickstart/client` before testing or building the React project.

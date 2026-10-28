@@ -39,7 +39,7 @@ func nativeDefinitions(tools []any, outputSchema bool) ([]gent.ToolDefinition, e
 		}
 		definitions = append(definitions, gent.ToolDefinition{Type: "function",
 			Function: &gent.FunctionDefinition{Name: meta.Name(), Description: description,
-				Parameters: parameters}})
+				Parameters: parameters, Strict: meta.strict}})
 	}
 	return definitions, nil
 }

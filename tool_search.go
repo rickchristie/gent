@@ -4,10 +4,8 @@ import "context"
 
 // IndexableTool provides metadata for tool search indexing.
 //
-// Tools that need to be discovered via search should implement
-// both Tool[I, O] and IndexableTool on the same receiver.
-// The Name() and Description() methods are shared between both
-// interfaces.
+// Tool embeds this metadata view. DefineTool supplies empty defaults and builder methods for
+// each value. Search engines consume this view without needing a tool's generic input/output.
 //
 // # Example
 //

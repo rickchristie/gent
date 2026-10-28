@@ -78,11 +78,11 @@ func TestNativeHTTP_ToolRoundTrip(t *testing.T) {
 				WithCallOptions(gent.WithTemperature(0.5), gent.WithTopP(1), gent.WithMaxTokens(100)).
 				WithSystemPromptBuilder(func(*react.SystemPromptContext) []gent.FormattedSection {
 					return []gent.FormattedSection{{Name: "instructions", Content: "Read records."}}
-				}).RegisterTool(gent.NewToolFunc("lookup", "Read a record", nil,
+				}).RegisterTool(gent.DefineTool("lookup",
 				func(_ context.Context, args map[string]any) (string, error) {
 					got = append(got, args)
 					return "record", nil
-				}))
+				}).Description("Read a record").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "http", gent.NewBasicLoopData(
 				&gent.Task{Text: "Read two records."}))
 			first, err := agent.Next(ctx)

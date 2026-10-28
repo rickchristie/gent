@@ -1237,8 +1237,8 @@ record. In your app, this function can call your API.
 </p>
 <div class="instruction"><span>WHAT TO CODE</span>
 <p>
-Add these types and the newOrderTool() function after the imports, outside run(). Keep the JSON
-field name and schema field name the same.
+Add these types and the newOrderTool() function after the imports, outside run(). Use the JSON field
+name in each field setting.
 </p></div>
 
 <div class="code-study" data-reader="code-basic-tool">
@@ -1256,38 +1256,37 @@ type OrderStatus struct {
 	Status  string `json:"status"`
 }
 
-func newOrderTool() *gent.ToolFunc[OrderInput, OrderStatus] {
-	return gent.NewToolFunc(
-		"lookup_order",
-		"Get the current status of an order by its ID.",
-		schema.Object(map[string]*schema.Property{
-			"order_id": schema.String("The order ID, for example order-1001."),
-		}, "order_id"),
-		func(ctx context.Context, input OrderInput) (OrderStatus, error) {
-			if err := ctx.Err(); err != nil {
-				return OrderStatus{}, err
-			}
-			// Use a fixed record so this example needs no database. Replace it with your API.
-			if input.OrderID != "order-1001" {
-				return OrderStatus{}, fmt.Errorf("order not found: %s", input.OrderID)
-			}
-			return OrderStatus{OrderID: input.OrderID, Status: "shipped"}, nil
-		},
-	)
+func newOrderTool() gent.Tool[OrderInput, OrderStatus] {
+	return gent.DefineTool("lookup_order", lookupOrder).
+		Description("Get the current status of an order by its ID.").
+		Parameters(schema.Field("order_id").
+			Description("The order ID, for example order-1001.").MinLength(1)).
+		MustBuild()
+}
+
+func lookupOrder(ctx context.Context, input OrderInput) (OrderStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return OrderStatus{}, err
+	}
+	// Use a fixed record so this example needs no database. Replace it with your API.
+	if input.OrderID != "order-1001" {
+		return OrderStatus{}, fmt.Errorf("order not found: %s", input.OrderID)
+	}
+	return OrderStatus{OrderID: input.OrderID, Status: "shipped"}, nil
 }</code></pre></div>
 <section class="annotation-column" aria-label="Line explanations">
 <div class="annotation-head"><span>READ THE CODE</span><h2>Line by line</h2></div>
 <ol class="annotation-list"><li class="annotation">
 <strong>OrderInput + order_id</strong>
 <p>
-Define the typed input and describe the same field in JSON Schema. The Go struct alone does not
-advertise arguments to the model.
+Define the typed input with JSON field names. The builder uses those names and Go types to create
+the parameter schema.
 </p></li>
 <li class="annotation">
-<strong>gent.NewToolFunc</strong>
+<strong>gent.DefineTool</strong>
 <p>
-Adapt your callback to gent.Tool[OrderInput, OrderStatus]. The registry converts JSON arguments to
-OrderInput.
+Add descriptions and constraints with Parameters, then build gent.Tool[OrderInput, OrderStatus].
+MustBuild checks fixed definitions at startup.
 </p></li>
 <li class="annotation">
 <strong>Return a value or an error</strong>
@@ -1616,24 +1615,23 @@ type OrderStatus struct {
 	Status  string `json:"status"`
 }
 
-func newOrderTool() *gent.ToolFunc[OrderInput, OrderStatus] {
-	return gent.NewToolFunc(
-		"lookup_order",
-		"Get the current status of an order by its ID.",
-		schema.Object(map[string]*schema.Property{
-			"order_id": schema.String("The order ID, for example order-1001."),
-		}, "order_id"),
-		func(ctx context.Context, input OrderInput) (OrderStatus, error) {
-			if err := ctx.Err(); err != nil {
-				return OrderStatus{}, err
-			}
-			// Use a fixed record so this example needs no database. Replace it with your API.
-			if input.OrderID != "order-1001" {
-				return OrderStatus{}, fmt.Errorf("order not found: %s", input.OrderID)
-			}
-			return OrderStatus{OrderID: input.OrderID, Status: "shipped"}, nil
-		},
-	)
+func newOrderTool() gent.Tool[OrderInput, OrderStatus] {
+	return gent.DefineTool("lookup_order", lookupOrder).
+		Description("Get the current status of an order by its ID.").
+		Parameters(schema.Field("order_id").
+			Description("The order ID, for example order-1001.").MinLength(1)).
+		MustBuild()
+}
+
+func lookupOrder(ctx context.Context, input OrderInput) (OrderStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return OrderStatus{}, err
+	}
+	// Use a fixed record so this example needs no database. Replace it with your API.
+	if input.OrderID != "order-1001" {
+		return OrderStatus{}, fmt.Errorf("order not found: %s", input.OrderID)
+	}
+	return OrderStatus{OrderID: input.OrderID, Status: "shipped"}, nil
 }
 
 // Build the tool registry once, before you use the runner for questions.
@@ -1726,14 +1724,14 @@ Describe tool input, register tools, and set answer guidance.
 <li class="annotation">
 <strong>OrderInput + order_id</strong>
 <p>
-Define the typed input and describe the same field in JSON Schema. The Go struct alone does not
-advertise arguments to the model.
+Define the typed input with JSON field names. The builder uses those names and Go types to create
+the parameter schema.
 </p></li>
 <li class="annotation">
-<strong>gent.NewToolFunc</strong>
+<strong>gent.DefineTool</strong>
 <p>
-Adapt your callback to gent.Tool[OrderInput, OrderStatus]. The registry converts JSON arguments to
-OrderInput.
+Add descriptions and constraints with Parameters, then build gent.Tool[OrderInput, OrderStatus].
+MustBuild checks fixed definitions at startup.
 </p></li>
 <li class="annotation">
 <strong>Return a value or an error</strong>
@@ -1846,23 +1844,26 @@ original agent, before the first run is saved.
 }
 
 func newAgent(model gent.Model) *react.Agent {
-	tool := gent.NewToolFunc("lookup_order", "Read an order status.",
-		schema.Object(map[string]*schema.Property{
-			"order_id": schema.String("The order ID, such as order-1001."),
-		}, "order_id"), func(ctx context.Context, input OrderInput) (string, error) {
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-			if input.OrderID != "order-1001" {
-				return "", fmt.Errorf("order not found: %s", input.OrderID)
-			}
-			return "Order order-1001 has shipped.", nil
-		})
+	tool := gent.DefineTool("lookup_order", lookupOrder).
+		Description("Read an order status.").
+		Parameters(schema.Field("order_id").
+			Description("The order ID, such as order-1001.").MinLength(1)).
+		Recovery(recoverOrder).MustBuild()
 	return react.NewAgent(model).RegisterTool(tool).
 		WithRecoveryVersion("order-streaming/v1").
 		WithBehaviorAndContext("Help the user check an order.").
 		WithCriticalRules("Use lookup_order for order facts. Do not invent a status.").
 		WithCallOptions(gent.WithMaxTokens(1024))
+}
+
+func lookupOrder(ctx context.Context, input OrderInput) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if input.OrderID != "order-1001" {
+		return "", fmt.Errorf("order not found: %s", input.OrderID)
+	}
+	return "Order order-1001 has shipped.", nil
 }</code></pre></div>
 <section class="annotation-column" aria-label="Line explanations">
 <div class="annotation-head"><span>READ THE CODE</span><h2>Line by line</h2></div>
@@ -3320,8 +3321,8 @@ tool-ready checkpoint alone cannot prove whether the tool completed.
 </p>
 <div class="instruction"><span>WHAT TO CODE</span>
 <p>
-Add recoverTool in agent.go. This example explicitly allows retry only for lookup_order because it
-is a read. Return unresolved for an unknown write outcome.
+Set Recovery(recoverOrder) on the lookup tool builder in agent.go. This allows retry for
+lookup_order because it is a read. Return unresolved for an unknown write outcome.
 </p></div>
 
 <div class="code-study" data-reader="code-recovery-tools">
@@ -3330,25 +3331,13 @@ is a read. Return unresolved for an unknown write outcome.
 <div class="code-caption"><span>GO</span>
 <span>Source line numbers · Select a note to focus</span></div>
 <pre><code id="code-recovery-tools"
->// Only the named read-only tool can be retried without an external receipt.
-func recoverTool(_ context.Context, request *gent.ToolRecoveryRequest) (
-	*gent.ToolRecoveryResult, error,
-) {
-	status := gent.ToolRecoveryUnresolved
-	if request.Name == "lookup_order" {
-		status = gent.ToolRecoveryRetryAllowed
-	}
-	return &amp;gent.ToolRecoveryResult{Status: status}, nil
+>// The order lookup reads current state and has no external side effects.
+func recoverOrder(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
+	return &amp;gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
 }</code></pre></div>
 <section class="annotation-column" aria-label="Line explanations">
 <div class="annotation-head"><span>READ THE CODE</span><h2>Line by line</h2></div>
 <ol class="annotation-list"><li class="annotation">
-<strong>ToolRecoveryUnresolved</strong>
-<p>
-Keep the unknown outcome visible to the model. Gent does not promise exactly-once external side
-effects.
-</p></li>
-<li class="annotation">
 <strong>ToolRecoveryRetryAllowed</strong>
 <p>
 Use this only when retry is safe, such as this read-only tool or an operation protected by a stable
@@ -3358,6 +3347,12 @@ idempotency key.
 <strong>ToolRecoveryCompleted</strong>
 <p>
 Return the complete saved result when an external receipt proves the operation finished.
+</p></li>
+<li class="annotation">
+<strong>ToolRecoveryUnresolved</strong>
+<p>
+Keep the unknown outcome visible to the model. Gent does not promise exactly-once external side
+effects.
 </p></li>
 <li class="annotation">
 <strong>ToolIdentityFromContext</strong>
@@ -3379,7 +3374,7 @@ Completed steps are reused. Each unknown outcome has an explicit policy.
 <h1 id="title-recovery-resume">Call Resume with fresh runtime bindings.</h1>
 <p class="lead">
 Rebuild the trace with trace.RestoreSequencer(saved, displayConfig(codecs)), then pass the new
-recorder, codecs, observer, and recovery policy to Runner.Resume.
+recorder, codecs, and observer to Runner.Resume. Tools own recovery.
 </p>
 <div class="instruction"><span>WHAT TO CODE</span>
 <p>
@@ -3399,8 +3394,7 @@ not create a new Task or call Execute on a new context.
 	runner := executor.NewRunner(agent, executor.DefaultConfig())
 	return runner.Resume(worker, saved, gent.RestoreBindings{
 		Recorder: writer, Codecs: codecs,
-		Observers:    []gent.RecordedEventObserver{seq},
-		ToolRecovery: gent.ToolRecoveryFunc(recoverTool),
+		Observers: []gent.RecordedEventObserver{seq},
 	})
 }</code></pre></div>
 <section class="annotation-column" aria-label="Line explanations">
@@ -3838,58 +3832,58 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
         "ub.com/rickchristie/gent/toolchain\"\n)\n\ntype OrderInput s" +
         "truct {\n\tOrderID string `json:\"order_id\"`\n}\n\ntype Ord" +
         "erStatus struct {\n\tOrderID string `json:\"order_id\"`\n\tS" +
-        "tatus  string `json:\"status\"`\n}\n\nfunc newOrderTool() *g" +
-        "ent.ToolFunc[OrderInput, OrderStatus] {\n\treturn gent.NewTo" +
-        "olFunc(\n\t\t\"lookup_order\",\n\t\t\"Get the current status" +
-        " of an order by its ID.\",\n\t\tschema.Object(map[string]*sc" +
-        "hema.Property{\n\t\t\t\"order_id\": schema.String(\"The orde" +
-        "r ID, for example order-1001.\"),\n\t\t}, \"order_id\"),\n\t" +
-        "\tfunc(ctx context.Context, input OrderInput) (OrderStatus, " +
-        "error) {\n\t\t\tif err := ctx.Err(); err != nil {\n\t\t\t\tr" +
-        "eturn OrderStatus{}, err\n\t\t\t}\n\t\t\t// Use a fixed reco" +
-        "rd so this example needs no database. Replace it with your A" +
-        "PI.\n\t\t\tif input.OrderID != \"order-1001\" {\n\t\t\t\tret" +
-        "urn OrderStatus{}, fmt.Errorf(\"order not found: %s\", input" +
-        ".OrderID)\n\t\t\t}\n\t\t\treturn OrderStatus{OrderID: input." +
-        "OrderID, Status: \"shipped\"}, nil\n\t\t},\n\t)\n}\n\n// Bui" +
-        "ld the tool registry once, before you use the runner for que" +
-        "stions.\nfunc newRunner(model gent.Model) *executor.Runner {" +
-        "\n\tchain := toolchain.New()\n\tchain.RegisterTool(newOrderT" +
-        "ool())\n\n\tterm := termination.NewText(\"answer\").WithGuid" +
-        "ance(\n\t\t\"Give a short answer with the order ID and its s" +
-        "tatus.\",\n\t)\n\tloop := react.NewAgent(model).\n\t\tWithTo" +
-        "olChain(chain).\n\t\tWithTermination(term).\n\t\tWithBehavio" +
-        "rAndContext(\"Help the user check an order.\").\n\t\tWithCri" +
-        "ticalRules(\"Use lookup_order for order facts. Do not invent" +
-        " a status.\")\n\n\treturn executor.NewRunner(loop, executor." +
-        "DefaultConfig())\n}\n\nfunc ask(ctx context.Context, runner " +
-        "*executor.Runner, question string) (string, error) {\n\t// E" +
-        "ach question gets its own history, counters, and cancellatio" +
-        "n state.\n\tdata := gent.NewBasicLoopData(&gent.Task{Text: q" +
-        "uestion})\n\texecCtx := gent.NewExecutionContext(ctx, \"orde" +
-        "r-helper\", data)\n\tlimits := gent.DefaultLimits()\n\tfor i" +
-        " := range limits {\n\t\tif limits[i].Key == gent.SCIteration" +
-        "s.Self() {\n\t\t\tlimits[i].MaxValue = 6\n\t\t}\n\t}\n\texec" +
-        "Ctx.SetLimits(limits)\n\n\tresult, err := runner.Execute(exe" +
-        "cCtx)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tif re" +
-        "sult.TerminationReason != gent.TerminationSuccess {\n\t\tret" +
-        "urn \"\", fmt.Errorf(\"run ended with %s\", result.Terminati" +
-        "onReason)\n\t}\n\tif len(result.Output) != 1 {\n\t\treturn " +
-        "\"\", fmt.Errorf(\"expected one text answer, got %d parts\"," +
-        " len(result.Output))\n\t}\n\tanswer, ok := result.Output[0]." +
-        "(gent.TextContent)\n\tif !ok {\n\t\treturn \"\", fmt.Errorf(" +
-        "\"expected text, got %T\", result.Output[0])\n\t}\n\treturn " +
-        "answer.Text, nil\n}\n\nfunc run() error {\n\tkey, modelName " +
-        ":= os.Getenv(\"OPENAI_API_KEY\"), os.Getenv(\"GENT_MODEL\")" +
-        "\n\tif key == \"\" || modelName == \"\" {\n\t\treturn fmt.Er" +
-        "rorf(\"set OPENAI_API_KEY and GENT_MODEL first\")\n\t}\n\tmo" +
-        "del := models.NewOpenAI(key, modelName)\n\trunner := newRunn" +
-        "er(model)\n\n\tctx, cancel := context.WithTimeout(context.Ba" +
-        "ckground(), 60*time.Second)\n\tdefer cancel()\n\tanswer, err" +
-        " := ask(ctx, runner, \"What is the status of order-1001?\")" +
-        "\n\tif err != nil {\n\t\treturn err\n\t}\n\tfmt.Println(answ" +
-        "er)\n\treturn nil\n}\n\nfunc main() {\n\tif err := run(); er" +
-        "r != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n",
+        "tatus  string `json:\"status\"`\n}\n\nfunc newOrderTool() ge" +
+        "nt.Tool[OrderInput, OrderStatus] {\n\treturn gent.DefineTool" +
+        "(\"lookup_order\", lookupOrder).\n\t\tDescription(\"Get the " +
+        "current status of an order by its ID.\").\n\t\tParameters(sc" +
+        "hema.Field(\"order_id\").\n\t\t\tDescription(\"The order ID," +
+        " for example order-1001.\").MinLength(1)).\n\t\tMustBuild()" +
+        "\n}\n\nfunc lookupOrder(ctx context.Context, input OrderInpu" +
+        "t) (OrderStatus, error) {\n\tif err := ctx.Err(); err != nil" +
+        " {\n\t\treturn OrderStatus{}, err\n\t}\n\t// Use a fixed rec" +
+        "ord so this example needs no database. Replace it with your " +
+        "API.\n\tif input.OrderID != \"order-1001\" {\n\t\treturn Ord" +
+        "erStatus{}, fmt.Errorf(\"order not found: %s\", input.OrderI" +
+        "D)\n\t}\n\treturn OrderStatus{OrderID: input.OrderID, Status" +
+        ": \"shipped\"}, nil\n}\n\n// Build the tool registry once, b" +
+        "efore you use the runner for questions.\nfunc newRunner(mode" +
+        "l gent.Model) *executor.Runner {\n\tchain := toolchain.New()" +
+        "\n\tchain.RegisterTool(newOrderTool())\n\n\tterm := terminat" +
+        "ion.NewText(\"answer\").WithGuidance(\n\t\t\"Give a short an" +
+        "swer with the order ID and its status.\",\n\t)\n\tloop := re" +
+        "act.NewAgent(model).\n\t\tWithToolChain(chain).\n\t\tWithTer" +
+        "mination(term).\n\t\tWithBehaviorAndContext(\"Help the user " +
+        "check an order.\").\n\t\tWithCriticalRules(\"Use lookup_orde" +
+        "r for order facts. Do not invent a status.\")\n\n\treturn ex" +
+        "ecutor.NewRunner(loop, executor.DefaultConfig())\n}\n\nfunc " +
+        "ask(ctx context.Context, runner *executor.Runner, question s" +
+        "tring) (string, error) {\n\t// Each question gets its own hi" +
+        "story, counters, and cancellation state.\n\tdata := gent.New" +
+        "BasicLoopData(&gent.Task{Text: question})\n\texecCtx := gent" +
+        ".NewExecutionContext(ctx, \"order-helper\", data)\n\tlimits " +
+        ":= gent.DefaultLimits()\n\tfor i := range limits {\n\t\tif l" +
+        "imits[i].Key == gent.SCIterations.Self() {\n\t\t\tlimits[i]." +
+        "MaxValue = 6\n\t\t}\n\t}\n\texecCtx.SetLimits(limits)\n\n\tr" +
+        "esult, err := runner.Execute(execCtx)\n\tif err != nil {\n\t" +
+        "\treturn \"\", err\n\t}\n\tif result.TerminationReason != ge" +
+        "nt.TerminationSuccess {\n\t\treturn \"\", fmt.Errorf(\"run e" +
+        "nded with %s\", result.TerminationReason)\n\t}\n\tif len(res" +
+        "ult.Output) != 1 {\n\t\treturn \"\", fmt.Errorf(\"expected o" +
+        "ne text answer, got %d parts\", len(result.Output))\n\t}\n\t" +
+        "answer, ok := result.Output[0].(gent.TextContent)\n\tif !ok " +
+        "{\n\t\treturn \"\", fmt.Errorf(\"expected text, got %T\", re" +
+        "sult.Output[0])\n\t}\n\treturn answer.Text, nil\n}\n\nfunc r" +
+        "un() error {\n\tkey, modelName := os.Getenv(\"OPENAI_API_KEY" +
+        "\"), os.Getenv(\"GENT_MODEL\")\n\tif key == \"\" || modelNam" +
+        "e == \"\" {\n\t\treturn fmt.Errorf(\"set OPENAI_API_KEY and " +
+        "GENT_MODEL first\")\n\t}\n\tmodel := models.NewOpenAI(key, m" +
+        "odelName)\n\trunner := newRunner(model)\n\n\tctx, cancel := " +
+        "context.WithTimeout(context.Background(), 60*time.Second)\n" +
+        "\tdefer cancel()\n\tanswer, err := ask(ctx, runner, \"What i" +
+        "s the status of order-1001?\")\n\tif err != nil {\n\t\tretur" +
+        "n err\n\t}\n\tfmt.Println(answer)\n\treturn nil\n}\n\nfunc m" +
+        "ain() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)" +
+        "\n\t}\n}\n",
         "main_test.go": "package main\n\nimport (\n\t\"context\"\n\t\"testing\"\n\n\t" +
         "\"github.com/rickchristie/gent\"\n\t\"github.com/stretchr/te" +
         "stify/assert\"\n)\n\ntype scriptedModel struct {\n\tanswer  " +
@@ -3973,69 +3967,69 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
         "cHV0IHN0cnVjdCB7CglPcmRlcklEIHN0cmluZyBganNvbjoib3JkZXJfaWQi" +
         "YAp9Cgp0eXBlIE9yZGVyU3RhdHVzIHN0cnVjdCB7CglPcmRlcklEIHN0cmlu" +
         "ZyBganNvbjoib3JkZXJfaWQiYAoJU3RhdHVzICBzdHJpbmcgYGpzb246InN0" +
-        "YXR1cyJgCn0KCmZ1bmMgbmV3T3JkZXJUb29sKCkgKmdlbnQuVG9vbEZ1bmNb" +
-        "T3JkZXJJbnB1dCwgT3JkZXJTdGF0dXNdIHsKCXJldHVybiBnZW50Lk5ld1Rv" +
-        "b2xGdW5jKAoJCSJsb29rdXBfb3JkZXIiLAoJCSJHZXQgdGhlIGN1cnJlbnQg" +
-        "c3RhdHVzIG9mIGFuIG9yZGVyIGJ5IGl0cyBJRC4iLAoJCXNjaGVtYS5PYmpl" +
-        "Y3QobWFwW3N0cmluZ10qc2NoZW1hLlByb3BlcnR5ewoJCQkib3JkZXJfaWQi" +
-        "OiBzY2hlbWEuU3RyaW5nKCJUaGUgb3JkZXIgSUQsIGZvciBleGFtcGxlIG9y" +
-        "ZGVyLTEwMDEuIiksCgkJfSwgIm9yZGVyX2lkIiksCgkJZnVuYyhjdHggY29u" +
-        "dGV4dC5Db250ZXh0LCBpbnB1dCBPcmRlcklucHV0KSAoT3JkZXJTdGF0dXMs" +
-        "IGVycm9yKSB7CgkJCWlmIGVyciA6PSBjdHguRXJyKCk7IGVyciAhPSBuaWwg" +
-        "ewoJCQkJcmV0dXJuIE9yZGVyU3RhdHVze30sIGVycgoJCQl9CgkJCS8vIFVz" +
-        "ZSBhIGZpeGVkIHJlY29yZCBzbyB0aGlzIGV4YW1wbGUgbmVlZHMgbm8gZGF0" +
-        "YWJhc2UuIFJlcGxhY2UgaXQgd2l0aCB5b3VyIEFQSS4KCQkJaWYgaW5wdXQu" +
-        "T3JkZXJJRCAhPSAib3JkZXItMTAwMSIgewoJCQkJcmV0dXJuIE9yZGVyU3Rh" +
-        "dHVze30sIGZtdC5FcnJvcmYoIm9yZGVyIG5vdCBmb3VuZDogJXMiLCBpbnB1" +
-        "dC5PcmRlcklEKQoJCQl9CgkJCXJldHVybiBPcmRlclN0YXR1c3tPcmRlcklE" +
-        "OiBpbnB1dC5PcmRlcklELCBTdGF0dXM6ICJzaGlwcGVkIn0sIG5pbAoJCX0s" +
-        "CgkpCn0KCi8vIEJ1aWxkIHRoZSB0b29sIHJlZ2lzdHJ5IG9uY2UsIGJlZm9y" +
-        "ZSB5b3UgdXNlIHRoZSBydW5uZXIgZm9yIHF1ZXN0aW9ucy4KZnVuYyBuZXdS" +
-        "dW5uZXIobW9kZWwgZ2VudC5Nb2RlbCkgKmV4ZWN1dG9yLlJ1bm5lciB7Cglj" +
-        "aGFpbiA6PSB0b29sY2hhaW4uTmV3KCkKCWNoYWluLlJlZ2lzdGVyVG9vbChu" +
-        "ZXdPcmRlclRvb2woKSkKCgl0ZXJtIDo9IHRlcm1pbmF0aW9uLk5ld1RleHQo" +
-        "ImFuc3dlciIpLldpdGhHdWlkYW5jZSgKCQkiR2l2ZSBhIHNob3J0IGFuc3dl" +
-        "ciB3aXRoIHRoZSBvcmRlciBJRCBhbmQgaXRzIHN0YXR1cy4iLAoJKQoJbG9v" +
-        "cCA6PSByZWFjdC5OZXdBZ2VudChtb2RlbCkuCgkJV2l0aFRvb2xDaGFpbihj" +
-        "aGFpbikuCgkJV2l0aFRlcm1pbmF0aW9uKHRlcm0pLgoJCVdpdGhCZWhhdmlv" +
-        "ckFuZENvbnRleHQoIkhlbHAgdGhlIHVzZXIgY2hlY2sgYW4gb3JkZXIuIiku" +
-        "CgkJV2l0aENyaXRpY2FsUnVsZXMoIlVzZSBsb29rdXBfb3JkZXIgZm9yIG9y" +
-        "ZGVyIGZhY3RzLiBEbyBub3QgaW52ZW50IGEgc3RhdHVzLiIpCgoJcmV0dXJu" +
-        "IGV4ZWN1dG9yLk5ld1J1bm5lcihsb29wLCBleGVjdXRvci5EZWZhdWx0Q29u" +
-        "ZmlnKCkpCn0KCmZ1bmMgYXNrKGN0eCBjb250ZXh0LkNvbnRleHQsIHJ1bm5l" +
-        "ciAqZXhlY3V0b3IuUnVubmVyLCBxdWVzdGlvbiBzdHJpbmcpIChzdHJpbmcs" +
-        "IGVycm9yKSB7CgkvLyBFYWNoIHF1ZXN0aW9uIGdldHMgaXRzIG93biBoaXN0" +
-        "b3J5LCBjb3VudGVycywgYW5kIGNhbmNlbGxhdGlvbiBzdGF0ZS4KCWRhdGEg" +
-        "Oj0gZ2VudC5OZXdCYXNpY0xvb3BEYXRhKCZnZW50LlRhc2t7VGV4dDogcXVl" +
-        "c3Rpb259KQoJZXhlY0N0eCA6PSBnZW50Lk5ld0V4ZWN1dGlvbkNvbnRleHQo" +
-        "Y3R4LCAib3JkZXItaGVscGVyIiwgZGF0YSkKCWxpbWl0cyA6PSBnZW50LkRl" +
-        "ZmF1bHRMaW1pdHMoKQoJZm9yIGkgOj0gcmFuZ2UgbGltaXRzIHsKCQlpZiBs" +
-        "aW1pdHNbaV0uS2V5ID09IGdlbnQuU0NJdGVyYXRpb25zLlNlbGYoKSB7CgkJ" +
-        "CWxpbWl0c1tpXS5NYXhWYWx1ZSA9IDYKCQl9Cgl9CglleGVjQ3R4LlNldExp" +
-        "bWl0cyhsaW1pdHMpCgoJcmVzdWx0LCBlcnIgOj0gcnVubmVyLkV4ZWN1dGUo" +
-        "ZXhlY0N0eCkKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiAiIiwgZXJyCgl9" +
-        "CglpZiByZXN1bHQuVGVybWluYXRpb25SZWFzb24gIT0gZ2VudC5UZXJtaW5h" +
-        "dGlvblN1Y2Nlc3MgewoJCXJldHVybiAiIiwgZm10LkVycm9yZigicnVuIGVu" +
-        "ZGVkIHdpdGggJXMiLCByZXN1bHQuVGVybWluYXRpb25SZWFzb24pCgl9Cglp" +
-        "ZiBsZW4ocmVzdWx0Lk91dHB1dCkgIT0gMSB7CgkJcmV0dXJuICIiLCBmbXQu" +
-        "RXJyb3JmKCJleHBlY3RlZCBvbmUgdGV4dCBhbnN3ZXIsIGdvdCAlZCBwYXJ0" +
-        "cyIsIGxlbihyZXN1bHQuT3V0cHV0KSkKCX0KCWFuc3dlciwgb2sgOj0gcmVz" +
-        "dWx0Lk91dHB1dFswXS4oZ2VudC5UZXh0Q29udGVudCkKCWlmICFvayB7CgkJ" +
-        "cmV0dXJuICIiLCBmbXQuRXJyb3JmKCJleHBlY3RlZCB0ZXh0LCBnb3QgJVQi" +
-        "LCByZXN1bHQuT3V0cHV0WzBdKQoJfQoJcmV0dXJuIGFuc3dlci5UZXh0LCBu" +
-        "aWwKfQoKZnVuYyBydW4oKSBlcnJvciB7CglrZXksIG1vZGVsTmFtZSA6PSBv" +
-        "cy5HZXRlbnYoIk9QRU5BSV9BUElfS0VZIiksIG9zLkdldGVudigiR0VOVF9N" +
-        "T0RFTCIpCglpZiBrZXkgPT0gIiIgfHwgbW9kZWxOYW1lID09ICIiIHsKCQly" +
-        "ZXR1cm4gZm10LkVycm9yZigic2V0IE9QRU5BSV9BUElfS0VZIGFuZCBHRU5U" +
-        "X01PREVMIGZpcnN0IikKCX0KCW1vZGVsIDo9IG1vZGVscy5OZXdPcGVuQUko" +
-        "a2V5LCBtb2RlbE5hbWUpCglydW5uZXIgOj0gbmV3UnVubmVyKG1vZGVsKQoK" +
-        "CWN0eCwgY2FuY2VsIDo9IGNvbnRleHQuV2l0aFRpbWVvdXQoY29udGV4dC5C" +
-        "YWNrZ3JvdW5kKCksIDYwKnRpbWUuU2Vjb25kKQoJZGVmZXIgY2FuY2VsKCkK" +
-        "CWFuc3dlciwgZXJyIDo9IGFzayhjdHgsIHJ1bm5lciwgIldoYXQgaXMgdGhl" +
-        "IHN0YXR1cyBvZiBvcmRlci0xMDAxPyIpCglpZiBlcnIgIT0gbmlsIHsKCQly" +
-        "ZXR1cm4gZXJyCgl9CglmbXQuUHJpbnRsbihhbnN3ZXIpCglyZXR1cm4gbmls" +
-        "Cn0KCmZ1bmMgbWFpbigpIHsKCWlmIGVyciA6PSBydW4oKTsgZXJyICE9IG5p" +
-        "bCB7CgkJbG9nLkZhdGFsKGVycikKCX0KfQo=",
+        "YXR1cyJgCn0KCmZ1bmMgbmV3T3JkZXJUb29sKCkgZ2VudC5Ub29sW09yZGVy" +
+        "SW5wdXQsIE9yZGVyU3RhdHVzXSB7CglyZXR1cm4gZ2VudC5EZWZpbmVUb29s" +
+        "KCJsb29rdXBfb3JkZXIiLCBsb29rdXBPcmRlcikuCgkJRGVzY3JpcHRpb24o" +
+        "IkdldCB0aGUgY3VycmVudCBzdGF0dXMgb2YgYW4gb3JkZXIgYnkgaXRzIElE" +
+        "LiIpLgoJCVBhcmFtZXRlcnMoc2NoZW1hLkZpZWxkKCJvcmRlcl9pZCIpLgoJ" +
+        "CQlEZXNjcmlwdGlvbigiVGhlIG9yZGVyIElELCBmb3IgZXhhbXBsZSBvcmRl" +
+        "ci0xMDAxLiIpLk1pbkxlbmd0aCgxKSkuCgkJTXVzdEJ1aWxkKCkKfQoKZnVu" +
+        "YyBsb29rdXBPcmRlcihjdHggY29udGV4dC5Db250ZXh0LCBpbnB1dCBPcmRl" +
+        "cklucHV0KSAoT3JkZXJTdGF0dXMsIGVycm9yKSB7CglpZiBlcnIgOj0gY3R4" +
+        "LkVycigpOyBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gT3JkZXJTdGF0dXN7fSwg" +
+        "ZXJyCgl9CgkvLyBVc2UgYSBmaXhlZCByZWNvcmQgc28gdGhpcyBleGFtcGxl" +
+        "IG5lZWRzIG5vIGRhdGFiYXNlLiBSZXBsYWNlIGl0IHdpdGggeW91ciBBUEku" +
+        "CglpZiBpbnB1dC5PcmRlcklEICE9ICJvcmRlci0xMDAxIiB7CgkJcmV0dXJu" +
+        "IE9yZGVyU3RhdHVze30sIGZtdC5FcnJvcmYoIm9yZGVyIG5vdCBmb3VuZDog" +
+        "JXMiLCBpbnB1dC5PcmRlcklEKQoJfQoJcmV0dXJuIE9yZGVyU3RhdHVze09y" +
+        "ZGVySUQ6IGlucHV0Lk9yZGVySUQsIFN0YXR1czogInNoaXBwZWQifSwgbmls" +
+        "Cn0KCi8vIEJ1aWxkIHRoZSB0b29sIHJlZ2lzdHJ5IG9uY2UsIGJlZm9yZSB5" +
+        "b3UgdXNlIHRoZSBydW5uZXIgZm9yIHF1ZXN0aW9ucy4KZnVuYyBuZXdSdW5u" +
+        "ZXIobW9kZWwgZ2VudC5Nb2RlbCkgKmV4ZWN1dG9yLlJ1bm5lciB7CgljaGFp" +
+        "biA6PSB0b29sY2hhaW4uTmV3KCkKCWNoYWluLlJlZ2lzdGVyVG9vbChuZXdP" +
+        "cmRlclRvb2woKSkKCgl0ZXJtIDo9IHRlcm1pbmF0aW9uLk5ld1RleHQoImFu" +
+        "c3dlciIpLldpdGhHdWlkYW5jZSgKCQkiR2l2ZSBhIHNob3J0IGFuc3dlciB3" +
+        "aXRoIHRoZSBvcmRlciBJRCBhbmQgaXRzIHN0YXR1cy4iLAoJKQoJbG9vcCA6" +
+        "PSByZWFjdC5OZXdBZ2VudChtb2RlbCkuCgkJV2l0aFRvb2xDaGFpbihjaGFp" +
+        "bikuCgkJV2l0aFRlcm1pbmF0aW9uKHRlcm0pLgoJCVdpdGhCZWhhdmlvckFu" +
+        "ZENvbnRleHQoIkhlbHAgdGhlIHVzZXIgY2hlY2sgYW4gb3JkZXIuIikuCgkJ" +
+        "V2l0aENyaXRpY2FsUnVsZXMoIlVzZSBsb29rdXBfb3JkZXIgZm9yIG9yZGVy" +
+        "IGZhY3RzLiBEbyBub3QgaW52ZW50IGEgc3RhdHVzLiIpCgoJcmV0dXJuIGV4" +
+        "ZWN1dG9yLk5ld1J1bm5lcihsb29wLCBleGVjdXRvci5EZWZhdWx0Q29uZmln" +
+        "KCkpCn0KCmZ1bmMgYXNrKGN0eCBjb250ZXh0LkNvbnRleHQsIHJ1bm5lciAq" +
+        "ZXhlY3V0b3IuUnVubmVyLCBxdWVzdGlvbiBzdHJpbmcpIChzdHJpbmcsIGVy" +
+        "cm9yKSB7CgkvLyBFYWNoIHF1ZXN0aW9uIGdldHMgaXRzIG93biBoaXN0b3J5" +
+        "LCBjb3VudGVycywgYW5kIGNhbmNlbGxhdGlvbiBzdGF0ZS4KCWRhdGEgOj0g" +
+        "Z2VudC5OZXdCYXNpY0xvb3BEYXRhKCZnZW50LlRhc2t7VGV4dDogcXVlc3Rp" +
+        "b259KQoJZXhlY0N0eCA6PSBnZW50Lk5ld0V4ZWN1dGlvbkNvbnRleHQoY3R4" +
+        "LCAib3JkZXItaGVscGVyIiwgZGF0YSkKCWxpbWl0cyA6PSBnZW50LkRlZmF1" +
+        "bHRMaW1pdHMoKQoJZm9yIGkgOj0gcmFuZ2UgbGltaXRzIHsKCQlpZiBsaW1p" +
+        "dHNbaV0uS2V5ID09IGdlbnQuU0NJdGVyYXRpb25zLlNlbGYoKSB7CgkJCWxp" +
+        "bWl0c1tpXS5NYXhWYWx1ZSA9IDYKCQl9Cgl9CglleGVjQ3R4LlNldExpbWl0" +
+        "cyhsaW1pdHMpCgoJcmVzdWx0LCBlcnIgOj0gcnVubmVyLkV4ZWN1dGUoZXhl" +
+        "Y0N0eCkKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiAiIiwgZXJyCgl9Cglp" +
+        "ZiByZXN1bHQuVGVybWluYXRpb25SZWFzb24gIT0gZ2VudC5UZXJtaW5hdGlv" +
+        "blN1Y2Nlc3MgewoJCXJldHVybiAiIiwgZm10LkVycm9yZigicnVuIGVuZGVk" +
+        "IHdpdGggJXMiLCByZXN1bHQuVGVybWluYXRpb25SZWFzb24pCgl9CglpZiBs" +
+        "ZW4ocmVzdWx0Lk91dHB1dCkgIT0gMSB7CgkJcmV0dXJuICIiLCBmbXQuRXJy" +
+        "b3JmKCJleHBlY3RlZCBvbmUgdGV4dCBhbnN3ZXIsIGdvdCAlZCBwYXJ0cyIs" +
+        "IGxlbihyZXN1bHQuT3V0cHV0KSkKCX0KCWFuc3dlciwgb2sgOj0gcmVzdWx0" +
+        "Lk91dHB1dFswXS4oZ2VudC5UZXh0Q29udGVudCkKCWlmICFvayB7CgkJcmV0" +
+        "dXJuICIiLCBmbXQuRXJyb3JmKCJleHBlY3RlZCB0ZXh0LCBnb3QgJVQiLCBy" +
+        "ZXN1bHQuT3V0cHV0WzBdKQoJfQoJcmV0dXJuIGFuc3dlci5UZXh0LCBuaWwK" +
+        "fQoKZnVuYyBydW4oKSBlcnJvciB7CglrZXksIG1vZGVsTmFtZSA6PSBvcy5H" +
+        "ZXRlbnYoIk9QRU5BSV9BUElfS0VZIiksIG9zLkdldGVudigiR0VOVF9NT0RF" +
+        "TCIpCglpZiBrZXkgPT0gIiIgfHwgbW9kZWxOYW1lID09ICIiIHsKCQlyZXR1" +
+        "cm4gZm10LkVycm9yZigic2V0IE9QRU5BSV9BUElfS0VZIGFuZCBHRU5UX01P" +
+        "REVMIGZpcnN0IikKCX0KCW1vZGVsIDo9IG1vZGVscy5OZXdPcGVuQUkoa2V5" +
+        "LCBtb2RlbE5hbWUpCglydW5uZXIgOj0gbmV3UnVubmVyKG1vZGVsKQoKCWN0" +
+        "eCwgY2FuY2VsIDo9IGNvbnRleHQuV2l0aFRpbWVvdXQoY29udGV4dC5CYWNr" +
+        "Z3JvdW5kKCksIDYwKnRpbWUuU2Vjb25kKQoJZGVmZXIgY2FuY2VsKCkKCWFu" +
+        "c3dlciwgZXJyIDo9IGFzayhjdHgsIHJ1bm5lciwgIldoYXQgaXMgdGhlIHN0" +
+        "YXR1cyBvZiBvcmRlci0xMDAxPyIpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1" +
+        "cm4gZXJyCgl9CglmbXQuUHJpbnRsbihhbnN3ZXIpCglyZXR1cm4gbmlsCn0K" +
+        "CmZ1bmMgbWFpbigpIHsKCWlmIGVyciA6PSBydW4oKTsgZXJyICE9IG5pbCB7" +
+        "CgkJbG9nLkZhdGFsKGVycikKCX0KfQo=",
       "reading": {
         "main.go": {
           "path": "example/main.go",
@@ -4066,34 +4060,34 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
             },
             {
               "title": "OrderInput + order_id",
-              "text": "Define the typed input and describe the same field in JSON S" +
-        "chema. The Go struct alone does not advertise arguments to t" +
-        "he model.",
+              "text": "Define the typed input with JSON field names. The builder us" +
+        "es those names and Go types to create the parameter schema.",
               "first": 19,
               "last": 19,
               "anchor": "type OrderInput struct"
             },
             {
-              "title": "gent.NewToolFunc",
-              "text": "Adapt your callback to gent.Tool[OrderInput, OrderStatus]. T" +
-        "he registry converts JSON arguments to OrderInput.",
+              "title": "gent.DefineTool",
+              "text": "Add descriptions and constraints with Parameters, then build" +
+        " gent.Tool[OrderInput, OrderStatus]. MustBuild checks fixed " +
+        "definitions at startup.",
               "first": 29,
               "last": 29,
-              "anchor": "return gent.NewToolFunc("
+              "anchor": "return gent.DefineTool("
             },
             {
               "title": "Return a value or an error",
               "text": "Return OrderStatus on success. The registry formats structur" +
         "ed output as JSON and reports tool errors to the loop.",
-              "first": 40,
-              "last": 43,
+              "first": 41,
+              "last": 44,
               "anchor": "if input.OrderID !="
             },
             {
               "title": "toolchain.New() + RegisterTool",
               "text": "Create a gent.ToolChain and make lookup_order available.",
-              "first": 50,
-              "last": 51,
+              "first": 49,
+              "last": 50,
               "anchor": "chain :="
             },
             {
@@ -4101,39 +4095,39 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
               "text": "Set guidance for a plain text answer. A text termination is " +
         "already the default; this explicit value lets you add your o" +
         "wn guidance.",
-              "first": 53,
-              "last": 54,
+              "first": 52,
+              "last": 53,
               "anchor": "term :="
             },
             {
               "title": "react.NewAgent(model)",
               "text": "Create the standard gent.Loop. You do not implement Next().",
-              "first": 56,
-              "last": 60,
+              "first": 55,
+              "last": 59,
               "anchor": "loop := react.NewAgent"
             },
             {
               "title": "executor.NewRunner",
               "text": "Give the loop to the runner. The runner manages repeated ite" +
         "rations.",
-              "first": 62,
-              "last": 62,
+              "first": 61,
+              "last": 61,
               "anchor": "return executor.NewRunner"
             },
             {
               "title": "NewBasicLoopData",
               "text": "Use the standard gent.LoopData implementation to supply the " +
         "Task.",
-              "first": 67,
-              "last": 67,
+              "first": 66,
+              "last": 66,
               "anchor": "data :="
             },
             {
               "title": "NewExecutionContext",
               "text": "Create a fresh context per question. Do not reuse a complete" +
         "d execution context for a new question.",
-              "first": 68,
-              "last": 68,
+              "first": 67,
+              "last": 67,
               "anchor": "execCtx :="
             },
             {
@@ -4141,64 +4135,64 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
               "text": "Limit this run to six completed iterations. SetLimits replac" +
         "es the whole list, so the code first copies the default list" +
         ".",
-              "first": 71,
-              "last": 75,
+              "first": 70,
+              "last": 74,
               "anchor": "if limits[i].Key"
             },
             {
               "title": "runner.Execute(execCtx)",
               "text": "Run the loop. The runner also releases the execution context" +
         " when it returns.",
-              "first": 77,
-              "last": 79,
+              "first": 76,
+              "last": 78,
               "anchor": "result, err :="
             },
             {
               "title": "TerminationSuccess",
               "text": "Confirm that the run produced an accepted answer before usin" +
         "g it.",
-              "first": 81,
-              "last": 82,
+              "first": 80,
+              "last": 81,
               "anchor": "if result.TerminationReason"
             },
             {
               "title": "gent.TextContent",
               "text": "Read the text part. result.Output is a slice of ContentPart," +
         " so it is not a bare string.",
-              "first": 87,
-              "last": 91,
+              "first": 86,
+              "last": 90,
               "anchor": "answer, ok :="
             },
             {
               "title": "os.Getenv",
               "text": "Read credentials and the model name from the process environ" +
         "ment.",
-              "first": 95,
-              "last": 95,
+              "first": 94,
+              "last": 94,
               "anchor": "key, modelName :="
             },
             {
               "title": "models.NewOpenAI(key, modelName)",
               "text": "Create an adapter that implements gent.Model. Select a model" +
         " that supports native tool calls.",
-              "first": 99,
-              "last": 99,
+              "first": 98,
+              "last": 98,
               "anchor": "model := models.NewOpenAI"
             },
             {
               "title": "newRunner(model)",
               "text": "Build the configuration once. A service can keep this runner" +
         " and call ask() with a new context for each request.",
-              "first": 100,
-              "last": 100,
+              "first": 99,
+              "last": 99,
               "anchor": "runner := newRunner"
             },
             {
               "title": "context.WithTimeout",
               "text": "Set a deadline for the question. Pass the request context in" +
         "stead of context.Background() when you use this in a server.",
-              "first": 102,
-              "last": 103,
+              "first": 101,
+              "last": 102,
               "anchor": "ctx, cancel :="
             }
           ]
@@ -4299,59 +4293,57 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
         "\"github.com/rickchristie/gent/agents/react\"\n\t\"github.co" +
         "m/rickchristie/gent/schema\"\n)\n\ntype OrderInput struct {" +
         "\n\tOrderID string `json:\"order_id\"`\n}\n\nfunc newAgent(m" +
-        "odel gent.Model) *react.Agent {\n\ttool := gent.NewToolFunc(" +
-        "\"lookup_order\", \"Read an order status.\",\n\t\tschema.Obj" +
-        "ect(map[string]*schema.Property{\n\t\t\t\"order_id\": schema" +
-        ".String(\"The order ID, such as order-1001.\"),\n\t\t}, \"or" +
-        "der_id\"), func(ctx context.Context, input OrderInput) (stri" +
-        "ng, error) {\n\t\t\tif err := ctx.Err(); err != nil {\n\t\t" +
-        "\t\treturn \"\", err\n\t\t\t}\n\t\t\tif input.OrderID != \"o" +
-        "rder-1001\" {\n\t\t\t\treturn \"\", fmt.Errorf(\"order not f" +
-        "ound: %s\", input.OrderID)\n\t\t\t}\n\t\t\treturn \"Order or" +
-        "der-1001 has shipped.\", nil\n\t\t})\n\treturn react.NewAgen" +
-        "t(model).RegisterTool(tool).\n\t\tWithRecoveryVersion(\"orde" +
-        "r-streaming/v1\").\n\t\tWithBehaviorAndContext(\"Help the us" +
-        "er check an order.\").\n\t\tWithCriticalRules(\"Use lookup_o" +
-        "rder for order facts. Do not invent a status.\").\n\t\tWithC" +
-        "allOptions(gent.WithMaxTokens(1024))\n}\n\n// The demo provi" +
-        "der makes the complete example usable without credentials or" +
-        " API calls.\ntype DemoModel struct{ Delay time.Duration }\n" +
-        "\nfunc (m *DemoModel) GenerateContentStream(\n\tparent conte" +
-        "xt.Context, request gent.ModelCallRequest,\n) (gent.Stream, " +
-        "error) {\n\tfor _, message := range request.Messages {\n\t\t" +
-        "if message.Role == gent.ChatMessageTypeTool {\n\t\t\treturn " +
-        "m.answer(parent)\n\t\t}\n\t}\n\treturn gent.NewCompletedStre" +
-        "am(&gent.ContentResponse{\n\t\tChoices: []*gent.ContentChoic" +
-        "e{{ToolCalls: []gent.ModelToolCall{{\n\t\t\tID: \"order-read" +
-        "\", Type: \"function\", FunctionCall: &gent.FunctionCall{\n" +
-        "\t\t\t\tName: \"lookup_order\", Arguments: `{\"order_id\":\"" +
-        "order-1001\"}`,\n\t\t\t},\n\t\t}}}},\n\t}, nil), nil\n}\n\nf" +
-        "unc (m *DemoModel) answer(parent context.Context) (gent.Stre" +
-        "am, error) {\n\tctx, cancel := context.WithCancel(parent)\n" +
-        "\tstream, err := gent.NewBoundedStreamWithDuration(ctx, 16, " +
-        "cancel)\n\tif err != nil {\n\t\tcancel()\n\t\treturn nil, er" +
-        "r\n\t}\n\tgo func() {\n\t\tdefer cancel()\n\t\tanswer := \"O" +
-        "rder order-1001 has shipped.\"\n\t\tfor _, word := range str" +
-        "ings.Split(answer, \" \") {\n\t\t\ttimer := time.NewTimer(m." +
-        "Delay)\n\t\t\tselect {\n\t\t\tcase \u003c-ctx.Done():\n\t\t" +
-        "\t\ttimer.Stop()\n\t\t\t\tstream.Complete(nil, ctx.Err())\n" +
-        "\t\t\t\treturn\n\t\t\tcase \u003c-timer.C:\n\t\t\t}\n\t\t\ti" +
-        "f !stream.SendMeta(&gent.MetaContent{\n\t\t\t\tType: gent.Me" +
-        "taContentIntermediary, MessageId: \"answer\", Text: word + " +
-        "\" \",\n\t\t\t}) {\n\t\t\t\tstream.Complete(nil, context.Can" +
-        "celed)\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t\tstream.Complete(" +
-        "&gent.ContentResponse{Choices: []*gent.ContentChoice{{\n\t\t" +
-        "\tCandidateContent: answer,\n\t\t\t// The accepted answer mu" +
-        "st name the same local message as its preview chunks.\n\t\t" +
-        "\tCandidateSource: &gent.ContentSource{MessageIds: []string{" +
-        "\"answer\"}},\n\t\t}}}, nil)\n\t}()\n\treturn stream, nil\n}" +
-        "\n\n// Only the named read-only tool can be retried without " +
-        "an external receipt.\nfunc recoverTool(_ context.Context, re" +
-        "quest *gent.ToolRecoveryRequest) (\n\t*gent.ToolRecoveryResu" +
-        "lt, error,\n) {\n\tstatus := gent.ToolRecoveryUnresolved\n\t" +
-        "if request.Name == \"lookup_order\" {\n\t\tstatus = gent.Too" +
-        "lRecoveryRetryAllowed\n\t}\n\treturn &gent.ToolRecoveryResul" +
-        "t{Status: status}, nil\n}\n",
+        "odel gent.Model) *react.Agent {\n\ttool := gent.DefineTool(" +
+        "\"lookup_order\", lookupOrder).\n\t\tDescription(\"Read an o" +
+        "rder status.\").\n\t\tParameters(schema.Field(\"order_id\")." +
+        "\n\t\t\tDescription(\"The order ID, such as order-1001.\").M" +
+        "inLength(1)).\n\t\tRecovery(recoverOrder).MustBuild()\n\tret" +
+        "urn react.NewAgent(model).RegisterTool(tool).\n\t\tWithRecov" +
+        "eryVersion(\"order-streaming/v1\").\n\t\tWithBehaviorAndCont" +
+        "ext(\"Help the user check an order.\").\n\t\tWithCriticalRul" +
+        "es(\"Use lookup_order for order facts. Do not invent a statu" +
+        "s.\").\n\t\tWithCallOptions(gent.WithMaxTokens(1024))\n}\n\n" +
+        "func lookupOrder(ctx context.Context, input OrderInput) (str" +
+        "ing, error) {\n\tif err := ctx.Err(); err != nil {\n\t\tretu" +
+        "rn \"\", err\n\t}\n\tif input.OrderID != \"order-1001\" {\n" +
+        "\t\treturn \"\", fmt.Errorf(\"order not found: %s\", input.O" +
+        "rderID)\n\t}\n\treturn \"Order order-1001 has shipped.\", ni" +
+        "l\n}\n\n// The demo provider makes the complete example usab" +
+        "le without credentials or API calls.\ntype DemoModel struct{" +
+        " Delay time.Duration }\n\nfunc (m *DemoModel) GenerateConten" +
+        "tStream(\n\tparent context.Context, request gent.ModelCallRe" +
+        "quest,\n) (gent.Stream, error) {\n\tfor _, message := range " +
+        "request.Messages {\n\t\tif message.Role == gent.ChatMessageT" +
+        "ypeTool {\n\t\t\treturn m.answer(parent)\n\t\t}\n\t}\n\tretu" +
+        "rn gent.NewCompletedStream(&gent.ContentResponse{\n\t\tChoic" +
+        "es: []*gent.ContentChoice{{ToolCalls: []gent.ModelToolCall{{" +
+        "\n\t\t\tID: \"order-read\", Type: \"function\", FunctionCall" +
+        ": &gent.FunctionCall{\n\t\t\t\tName: \"lookup_order\", Argum" +
+        "ents: `{\"order_id\":\"order-1001\"}`,\n\t\t\t},\n\t\t}}}}," +
+        "\n\t}, nil), nil\n}\n\nfunc (m *DemoModel) answer(parent con" +
+        "text.Context) (gent.Stream, error) {\n\tctx, cancel := conte" +
+        "xt.WithCancel(parent)\n\tstream, err := gent.NewBoundedStrea" +
+        "mWithDuration(ctx, 16, cancel)\n\tif err != nil {\n\t\tcance" +
+        "l()\n\t\treturn nil, err\n\t}\n\tgo func() {\n\t\tdefer canc" +
+        "el()\n\t\tanswer := \"Order order-1001 has shipped.\"\n\t\tf" +
+        "or _, word := range strings.Split(answer, \" \") {\n\t\t\tti" +
+        "mer := time.NewTimer(m.Delay)\n\t\t\tselect {\n\t\t\tcase " +
+        "\u003c-ctx.Done():\n\t\t\t\ttimer.Stop()\n\t\t\t\tstream.Com" +
+        "plete(nil, ctx.Err())\n\t\t\t\treturn\n\t\t\tcase \u003c-tim" +
+        "er.C:\n\t\t\t}\n\t\t\tif !stream.SendMeta(&gent.MetaContent{" +
+        "\n\t\t\t\tType: gent.MetaContentIntermediary, MessageId: \"a" +
+        "nswer\", Text: word + \" \",\n\t\t\t}) {\n\t\t\t\tstream.Com" +
+        "plete(nil, context.Canceled)\n\t\t\t\treturn\n\t\t\t}\n\t\t}" +
+        "\n\t\tstream.Complete(&gent.ContentResponse{Choices: []*gent" +
+        ".ContentChoice{{\n\t\t\tCandidateContent: answer,\n\t\t\t// " +
+        "The accepted answer must name the same local message as its " +
+        "preview chunks.\n\t\t\tCandidateSource: &gent.ContentSource{" +
+        "MessageIds: []string{\"answer\"}},\n\t\t}}}, nil)\n\t}()\n\t" +
+        "return stream, nil\n}\n\n// The order lookup reads current s" +
+        "tate and has no external side effects.\nfunc recoverOrder(co" +
+        "ntext.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecover" +
+        "yResponse, error) {\n\treturn &gent.ToolRecoveryResponse{Res" +
+        "ult: gent.ToolRecoveryRetryAllowed}, nil\n}\n",
         "go.mod": "module example.com/gent-streaming\n\ngo 1.24.10\n\nrequire (" +
         "\n\tgithub.com/gorilla/websocket v1.5.3\n\tgithub.com/rickch" +
         "ristie/gent v0.0.0\n\tgithub.com/stretchr/testify v1.11.1\n" +
@@ -4781,9 +4773,8 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
         ".CodecRegistry,\n) (*gent.ExecutionResult, error) {\n\trunne" +
         "r := executor.NewRunner(agent, executor.DefaultConfig())\n\t" +
         "return runner.Resume(worker, saved, gent.RestoreBindings{\n" +
-        "\t\tRecorder: writer, Codecs: codecs,\n\t\tObservers:    []g" +
-        "ent.RecordedEventObserver{seq},\n\t\tToolRecovery: gent.Tool" +
-        "RecoveryFunc(recoverTool),\n\t})\n}\n",
+        "\t\tRecorder: writer, Codecs: codecs,\n\t\tObservers: []gent" +
+        ".RecordedEventObserver{seq},\n\t})\n}\n",
         "recovery_test.go": "package main\n\nimport (\n\t\"context\"\n\t\"path/filepath\"" +
         "\n\t\"testing\"\n\n\t\"github.com/rickchristie/gent\"\n\t\"g" +
         "ithub.com/rickchristie/gent/executor\"\n\t\"github.com/rickc" +
@@ -4843,24 +4834,23 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
         "\tassert.NoError(t, err)\n\t\t\tdefer seq.Close()\n\t\t\tres" +
         "ult, err := freshRunner.Resume(context.Background(), saved, " +
         "gent.RestoreBindings{\n\t\t\t\tRecorder: replacement, Codecs" +
-        ": freshStore.codecs,\n\t\t\t\tObservers:    []gent.RecordedE" +
-        "ventObserver{seq},\n\t\t\t\tToolRecovery: gent.ToolRecoveryF" +
-        "unc(recoverTool),\n\t\t\t})\n\t\t\tif !assert.NoError(t, err" +
-        ") {\n\t\t\t\treturn\n\t\t\t}\n\t\t\tassert.Equal(t, test.exp" +
-        "ected.answer, result.Output)\n\t\t\tassert.Equal(t, test.exp" +
-        "ected.resumedCalls, freshModel.requests)\n\t\t\tterminal, er" +
-        "r := freshStore.load(\"recover\")\n\t\t\tassert.NoError(t, e" +
-        "rr)\n\t\t\tassert.Equal(t, gent.PhaseTerminal, terminal.Chec" +
-        "kpoint.Phase)\n\t\t\tassert.Greater(t, terminal.LastAppliedE" +
-        "ventNumber, saved.LastAppliedEventNumber)\n\t\t\tassert.NoEr" +
-        "ror(t, gent.ValidateBundle(terminal, freshStore.codecs))\n\t" +
-        "\t\tlastModel := &countedModel{}\n\t\t\tlastRunner := execut" +
-        "or.NewRunner(newAgent(lastModel), executor.DefaultConfig())" +
-        "\n\t\t\tresult, err = lastRunner.Resume(context.Background()" +
-        ", terminal,\n\t\t\t\tgent.RestoreBindings{Codecs: freshStore" +
-        ".codecs})\n\t\t\tassert.NoError(t, err)\n\t\t\tassert.Equal(" +
-        "t, test.expected.answer, result.Output)\n\t\t\tassert.Equal(" +
-        "t, 0, lastModel.requests)\n\t\t})\n\t}\n}\n",
+        ": freshStore.codecs,\n\t\t\t\tObservers: []gent.RecordedEven" +
+        "tObserver{seq},\n\t\t\t})\n\t\t\tif !assert.NoError(t, err) " +
+        "{\n\t\t\t\treturn\n\t\t\t}\n\t\t\tassert.Equal(t, test.expec" +
+        "ted.answer, result.Output)\n\t\t\tassert.Equal(t, test.expec" +
+        "ted.resumedCalls, freshModel.requests)\n\t\t\tterminal, err " +
+        ":= freshStore.load(\"recover\")\n\t\t\tassert.NoError(t, err" +
+        ")\n\t\t\tassert.Equal(t, gent.PhaseTerminal, terminal.Checkp" +
+        "oint.Phase)\n\t\t\tassert.Greater(t, terminal.LastAppliedEve" +
+        "ntNumber, saved.LastAppliedEventNumber)\n\t\t\tassert.NoErro" +
+        "r(t, gent.ValidateBundle(terminal, freshStore.codecs))\n\t\t" +
+        "\tlastModel := &countedModel{}\n\t\t\tlastRunner := executor" +
+        ".NewRunner(newAgent(lastModel), executor.DefaultConfig())\n" +
+        "\t\t\tresult, err = lastRunner.Resume(context.Background(), " +
+        "terminal,\n\t\t\t\tgent.RestoreBindings{Codecs: freshStore.c" +
+        "odecs})\n\t\t\tassert.NoError(t, err)\n\t\t\tassert.Equal(t," +
+        " test.expected.answer, result.Output)\n\t\t\tassert.Equal(t," +
+        " 0, lastModel.requests)\n\t\t})\n\t}\n}\n",
         "runtime.go": "package main\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"f" +
         "mt\"\n\t\"log\"\n\t\"sync\"\n\t\"time\"\n\n\t\"github.com/ri" +
         "ckchristie/gent\"\n\t\"github.com/rickchristie/gent/executor" +
@@ -5117,413 +5107,412 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
         "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
-        "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" +
-        "ZXcuZ29QSwUGAAAAAA0ADQAoAwAA5k0AAAAA",
+        "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" +
+        "TQAAAAA=",
       "reading": {
         "main.go": {
           "path": "server/main.go",
@@ -5588,25 +5577,17 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
               "title": "WithRecoveryVersion",
               "text": "Name the application behavior that a fresh worker must match" +
         ". Change the version when tool or prompt behavior changes.",
-              "first": 32,
-              "last": 32,
+              "first": 25,
+              "last": 25,
               "anchor": "WithRecoveryVersion"
-            },
-            {
-              "title": "ToolRecoveryUnresolved",
-              "text": "Keep the unknown outcome visible to the model. Gent does not" +
-        " promise exactly-once external side effects.",
-              "first": 97,
-              "last": 97,
-              "anchor": "status := gent.ToolRecoveryUnresolved"
             },
             {
               "title": "ToolRecoveryRetryAllowed",
               "text": "Use this only when retry is safe, such as this read-only too" +
         "l or an operation protected by a stable idempotency key.",
-              "first": 99,
-              "last": 99,
-              "anchor": "status = gent.ToolRecoveryRetryAllowed"
+              "first": 98,
+              "last": 98,
+              "anchor": "return &gent.ToolRecoveryResponse"
             }
           ]
         },
@@ -8692,23 +8673,23 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
     },
     "code-basic-model": {
       "path": "example/main.go",
-      "start": 95,
+      "start": 94,
       "language": "go",
       "notes": [
         {
           "title": "os.Getenv",
           "text": "Read credentials and the model name from the process environ" +
         "ment.",
-          "first": 95,
-          "last": 95,
+          "first": 94,
+          "last": 94,
           "anchor": "key, modelName :="
         },
         {
           "title": "models.NewOpenAI(key, modelName)",
           "text": "Create an adapter that implements gent.Model. Select a model" +
         " that supports native tool calls.",
-          "first": 99,
-          "last": 99,
+          "first": 98,
+          "last": 98,
           "anchor": "model := models.NewOpenAI"
         },
         {
@@ -8725,41 +8706,41 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
       "notes": [
         {
           "title": "OrderInput + order_id",
-          "text": "Define the typed input and describe the same field in JSON S" +
-        "chema. The Go struct alone does not advertise arguments to t" +
-        "he model.",
+          "text": "Define the typed input with JSON field names. The builder us" +
+        "es those names and Go types to create the parameter schema.",
           "first": 19,
           "last": 19,
           "anchor": "type OrderInput struct"
         },
         {
-          "title": "gent.NewToolFunc",
-          "text": "Adapt your callback to gent.Tool[OrderInput, OrderStatus]. T" +
-        "he registry converts JSON arguments to OrderInput.",
+          "title": "gent.DefineTool",
+          "text": "Add descriptions and constraints with Parameters, then build" +
+        " gent.Tool[OrderInput, OrderStatus]. MustBuild checks fixed " +
+        "definitions at startup.",
           "first": 29,
           "last": 29,
-          "anchor": "return gent.NewToolFunc("
+          "anchor": "return gent.DefineTool("
         },
         {
           "title": "Return a value or an error",
           "text": "Return OrderStatus on success. The registry formats structur" +
         "ed output as JSON and reports tool errors to the loop.",
-          "first": 40,
-          "last": 43,
+          "first": 41,
+          "last": 44,
           "anchor": "if input.OrderID !="
         }
       ]
     },
     "code-basic-agent": {
       "path": "example/main.go",
-      "start": 48,
+      "start": 47,
       "language": "go",
       "notes": [
         {
           "title": "toolchain.New() + RegisterTool",
           "text": "Create a gent.ToolChain and make lookup_order available.",
-          "first": 50,
-          "last": 51,
+          "first": 49,
+          "last": 50,
           "anchor": "chain :="
         },
         {
@@ -8767,46 +8748,46 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
           "text": "Set guidance for a plain text answer. A text termination is " +
         "already the default; this explicit value lets you add your o" +
         "wn guidance.",
-          "first": 53,
-          "last": 54,
+          "first": 52,
+          "last": 53,
           "anchor": "term :="
         },
         {
           "title": "react.NewAgent(model)",
           "text": "Create the standard gent.Loop. You do not implement Next().",
-          "first": 56,
-          "last": 60,
+          "first": 55,
+          "last": 59,
           "anchor": "loop := react.NewAgent"
         },
         {
           "title": "executor.NewRunner",
           "text": "Give the loop to the runner. The runner manages repeated ite" +
         "rations.",
-          "first": 62,
-          "last": 62,
+          "first": 61,
+          "last": 61,
           "anchor": "return executor.NewRunner"
         }
       ]
     },
     "code-basic-task": {
       "path": "example/main.go",
-      "start": 65,
+      "start": 64,
       "language": "go",
       "notes": [
         {
           "title": "NewBasicLoopData",
           "text": "Use the standard gent.LoopData implementation to supply the " +
         "Task.",
-          "first": 67,
-          "last": 67,
+          "first": 66,
+          "last": 66,
           "anchor": "data :="
         },
         {
           "title": "NewExecutionContext",
           "text": "Create a fresh context per question. Do not reuse a complete" +
         "d execution context for a new question.",
-          "first": 68,
-          "last": 68,
+          "first": 67,
+          "last": 67,
           "anchor": "execCtx :="
         },
         {
@@ -8814,62 +8795,62 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
           "text": "Limit this run to six completed iterations. SetLimits replac" +
         "es the whole list, so the code first copies the default list" +
         ".",
-          "first": 71,
-          "last": 75,
+          "first": 70,
+          "last": 74,
           "anchor": "if limits[i].Key"
         }
       ]
     },
     "code-basic-execute": {
       "path": "example/main.go",
-      "start": 77,
+      "start": 76,
       "language": "go",
       "notes": [
         {
           "title": "runner.Execute(execCtx)",
           "text": "Run the loop. The runner also releases the execution context" +
         " when it returns.",
-          "first": 77,
-          "last": 79,
+          "first": 76,
+          "last": 78,
           "anchor": "result, err :="
         },
         {
           "title": "TerminationSuccess",
           "text": "Confirm that the run produced an accepted answer before usin" +
         "g it.",
-          "first": 81,
-          "last": 82,
+          "first": 80,
+          "last": 81,
           "anchor": "if result.TerminationReason"
         },
         {
           "title": "gent.TextContent",
           "text": "Read the text part. result.Output is a slice of ContentPart," +
         " so it is not a bare string.",
-          "first": 87,
-          "last": 91,
+          "first": 86,
+          "last": 90,
           "anchor": "answer, ok :="
         }
       ]
     },
     "code-basic-run": {
       "path": "example/main.go",
-      "start": 94,
+      "start": 93,
       "language": "go",
       "notes": [
         {
           "title": "newRunner(model)",
           "text": "Build the configuration once. A service can keep this runner" +
         " and call ask() with a new context for each request.",
-          "first": 100,
-          "last": 100,
+          "first": 99,
+          "last": 99,
           "anchor": "runner := newRunner"
         },
         {
           "title": "context.WithTimeout",
           "text": "Set a deadline for the question. Pass the request context in" +
         "stead of context.Background() when you use this in a server.",
-          "first": 102,
-          "last": 103,
+          "first": 101,
+          "last": 102,
           "anchor": "ctx, cancel :="
         },
         {
@@ -8896,8 +8877,8 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
           "title": "WithRecoveryVersion",
           "text": "Name the application behavior that a fresh worker must match" +
         ". Change the version when tool or prompt behavior changes.",
-          "first": 32,
-          "last": 32,
+          "first": 25,
+          "last": 25,
           "anchor": "WithRecoveryVersion"
         }
       ]
@@ -9423,29 +9404,26 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
     },
     "code-recovery-tools": {
       "path": "server/agent.go",
-      "start": 93,
+      "start": 96,
       "language": "go",
       "notes": [
-        {
-          "title": "ToolRecoveryUnresolved",
-          "text": "Keep the unknown outcome visible to the model. Gent does not" +
-        " promise exactly-once external side effects.",
-          "first": 97,
-          "last": 97,
-          "anchor": "status := gent.ToolRecoveryUnresolved"
-        },
         {
           "title": "ToolRecoveryRetryAllowed",
           "text": "Use this only when retry is safe, such as this read-only too" +
         "l or an operation protected by a stable idempotency key.",
-          "first": 99,
-          "last": 99,
-          "anchor": "status = gent.ToolRecoveryRetryAllowed"
+          "first": 98,
+          "last": 98,
+          "anchor": "return &gent.ToolRecoveryResponse"
         },
         {
           "title": "ToolRecoveryCompleted",
           "text": "Return the complete saved result when an external receipt pr" +
         "oves the operation finished."
+        },
+        {
+          "title": "ToolRecoveryUnresolved",
+          "text": "Keep the unknown outcome visible to the model. Gent does not" +
+        " promise exactly-once external side effects."
         },
         {
           "title": "ToolIdentityFromContext",
@@ -9530,8 +9508,8 @@ and their dependencies. Scenario 2 includes a local model that needs no API cred
     }
   },
   "checkout": "/absolute/path/to/gent",
-  "revision": "1d93f48",
-  "digest": "35fba93da1bf370d"
+  "revision": "6695f3c",
+  "digest": "8b5c0a6ef66e0710"
 };
     </script>
     <script>

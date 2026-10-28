@@ -27,6 +27,58 @@ server, or template supports every tool feature. Open-weight models can still em
 that their serving layer parses. Gent requires the serving layer to expose structured calls.
 Provider support also does not imply identical schemas, reasoning fields, or replay rules.
 
+## Tool definitions
+
+Use the builder for function tools. A bound method can keep service dependencies on its receiver.
+Use a full `gent.Tool[I, O]` implementation when the tool itself needs fields or a custom `Call`
+result with media and instructions.
+
+```go
+tool, err := gent.DefineTool("lookup_order", service.LookupOrder).
+    Description("Get the current order status.").
+    Parameters(schema.Field("order_id").Description("The order ID.").MinLength(1)).
+    Policy("Use the order ID supplied by the user.").
+    Domain("Orders").Categories("lookup").Keywords("order", "status").
+    SyntheticQueries("Where is my order?").
+    Recovery(service.RecoverOrder).
+    Build()
+if err != nil {
+    return err
+}
+chain.RegisterTool(tool)
+```
+
+`DefineTool` infers generic input and output types from the handler. `Build` returns a tool and an
+error; `MustBuild` panics on invalid fixed configuration. Configure before registration. Built
+schemas and metadata are copied, including values returned by getters. Builder changes cannot
+change an existing tool. The handler and recovery function must protect any shared mutable state.
+
+The builder uses `json` names and Go types. All input fields are required by default, including
+fields with `omitempty`. Add `.Optional()` to a field to permit absence. Pointer fields permit
+null, but remain required unless marked optional. Slices and maps can also be null. No default
+values are inserted. Struct schemas reject unknown properties. A dotted field path such as
+`address.city` selects a nested object field. Fields support descriptions, enums, formats, numeric
+bounds, string lengths and patterns, and array lengths. Formats are checked by local validation.
+Enums accept named Go constants and check their JSON values against the field schema. Schema
+copies use `json.Number` to keep numeric constraints exact, including large integers.
+
+`ParameterSchema(raw)` replaces input inference with a full JSON Schema and cannot be mixed with
+field settings. Use it for recursive types, embedded fields, JSON `string` tags, or custom JSON
+encodings. Map and interface inputs also need an explicit parameter schema. Nil omits schema
+constraints; use an inferred `struct{}` input for a tool that must receive no arguments. `OutputSchema(raw)` replaces output inference; nil omits the output description. Output
+schemas describe the text result; Gent does not validate returned results against them.
+
+`Strict(true)` passes the strict flag to the provider. Provider support and accepted schema
+keywords can differ. Gent validates arguments against the supplied schema before it converts them
+or calls the tool. The builder compiles both schemas to catch invalid definitions during setup. The registry
+keeps a compiled input validator for calls; no schema inference or compilation occurs per call.
+
+Search metadata, policy, recovery, strict mode, output schema, and deduplication are all methods
+on `gent.Tool`. Empty search metadata and policy are valid. `DeduplicateSummary(handler)` is off by
+default. Use it only when the same arguments have the same result; a current-status lookup usually
+needs fresh output. Search pinning, pagination, JavaScript timeouts, and whether to print output
+schemas remain chain settings.
+
 ## Models and saved provider state
 
 ```go
@@ -194,7 +246,7 @@ use. Register each chain's types before decoding saved runs.
 ```go
 chain := toolchain.NewSearch(toolchain.SearchHintDomainCategories).
     RegisterEngine(toolchain.NewRegexToolSearcher())
-chain.RegisterTool(lookupOrder) // Also implements gent.IndexableTool.
+chain.RegisterTool(lookupOrder) // Search metadata is part of gent.Tool.
 chain.Pin("lookup_order")      // Optional.
 if err := chain.Initialize(); err != nil {
     return err
@@ -259,33 +311,55 @@ If a parallel call panics, the wrapper interrupts the worker context and waits f
 to stop. It then propagates the first panic to the caller. A panic during a sibling's cleanup does
 not replace that value. The last accepted checkpoint remains available for recovery.
 
-## Recovery guidance
+## Tool recovery
+
+Each tool implements `Recover(context.Context, *gent.ToolRecoveryRequest)` and returns
+`(*gent.ToolRecoveryResponse, error)`. The builder accepts that function through `.Recovery(...)`.
+Without a handler, it returns `ToolRecoveryUnresolved`. Recovery runs only for an interrupted
+operation with no saved result. Ordinary continuation and known results do not invoke it.
 
 ```go
-chain.RegisterTool(bookFlight, gent.WithRecoveryMessage(func(info *gent.RecoveryInfo) string {
-    return "Check the booking service with the saved request ID before booking again."
-}))
-program := toolchain.NewJsToolChainWrapper(chain).
-    WithRecoveryMessage(func(info *gent.RecoveryInfo) string {
-        return "Keep completed results. Resolve uncertain bookings before making a new plan."
-    })
+builder.Recovery(func(ctx context.Context, request *gent.ToolRecoveryRequest) (
+    *gent.ToolRecoveryResponse, error,
+) {
+    return &gent.ToolRecoveryResponse{
+        Result: gent.ToolRecoveryUnresolved,
+        SteeringMessage: "Check the booking service with the saved call ID before booking again.",
+    }, nil
+})
 ```
 
-`RecoveryMessageProvider` is `func(*RecoveryInfo) string`. Gent supplies a non-nil owned snapshot.
-It includes stable IDs, the prior attempt, raw arguments, and effective typed input. Program
-recovery also supplies the script, completed inner results, and uncertain inner calls. Callbacks
-produce guidance. Use the separate context-aware `ToolRecoveryFunc` for external reconciliation
-that can fail.
+`ToolRecoveryResponse` contains the decision, optional `SteeringMessage`, and optional `Output`:
 
-Recovery first uses saved results, then an optional `ToolRecovery` decision. An unresolved operation
-produces an explicit `unknown` outcome with standard facts and custom guidance. Later unstarted
-calls in that batch receive `not_started` results. The next model request can make a new plan.
-A normal known error remains distinct from an unknown outcome.
+| Result | Output | Action |
+| --- | --- | --- |
+| `ToolRecoveryCompleted` | Required `*gent.ToolCallResult` | Reuse the recovered result. |
+| `ToolRecoveryRetryAllowed` | Must be nil | Retry with the saved effective input. |
+| `ToolRecoveryUnresolved` | Must be nil | Report an unknown outcome without repeating the call. |
 
-An interrupted program never restarts its script or restores a JavaScript stack. Gent returns the
-saved completed and uncertain inner results through the original `run_code` call ID. It saves this
-transition before another model request. If the save acknowledgment is lost, a new worker reuses the
-accepted result without repeating the callback or effects.
+A recovery error stops the run and leaves the checkpoint available for another recovery attempt.
+Invalid decisions and missing completed outputs also fail. Gent supplies the original name, call
+ID, attempt ID, arguments, and effective input on a recovered result. The tool supplies its output,
+formatted text, media, and any instructions. A steering message never authorizes a retry.
+
+Gent saves each decision before it uses it. The decision and message survive a lost save
+acknowledgement. A retry gets a new attempt ID, but keeps its logical call ID and effective input;
+its mutation hook does not run again. Steering accompanies the resulting observation, including
+when a retry fails. Checks must be safe to repeat if the process stops before the decision is saved.
+There is no global recovery handler or separate static recovery message setting.
+
+An unresolved operation produces an `unknown` result with standard facts and any steering. Later
+unstarted calls in that batch receive `not_started` results. The model can make a new plan. A known
+tool error remains distinct from an unknown outcome.
+
+An interrupted program never restarts its script or restores a JavaScript stack. Gent recovers
+inner calls with each tool's handler, including a safe retry when permitted. It returns saved and
+recovered partial results through the original `run_code` call ID. Operations that were not started
+remain unstarted. Accepted results take precedence over handlers and are not repeated.
+
+Set ReAct's `WithRecoveryVersion` for your application behavior and change it when a handler or its
+configuration changes. Function behavior cannot be captured in a configuration hash. Tool schemas,
+strict flags, and descriptions remain part of the automatic compatibility checks.
 
 The application recorder must check its worker lease in each atomic save. A rejected save stops an
 old worker before it can start another call. An already running external effect can still finish.

@@ -46,10 +46,12 @@ go test -race ./... -count=1 -timeout 300s
 
 The root `./...` pattern includes both lesson examples under `docs/quickstart/`.
 
-The browser check uses the installed Playwright dependency from `docs/code`. If its expected
+The browser check uses the installed Playwright dependency from `docs/quickstart`. If its expected
 browser is not installed, set `GENT_LESSON_CHROMIUM` to an installed Chromium executable. Tests
 open the final file with networking disabled and fail on console errors or network requests.
 Screenshots go to `docs/quickstart/screenshots/gent-policy-lessons-*.png`.
+Every displayed interface and source line is compared with the current Go file. This check catches
+an old generated lesson after an API change, even when the page still loads and its controls work.
 
 These are static-file checks, so they use the existing documentation test pattern. They do not
 start application servers or use `.dev`. There is no shared `web/playtest/fixtures.ts` in this
@@ -62,7 +64,7 @@ ONNX libraries and model files. A passing portable suite does not prove native i
 | Lesson | Checked behavior |
 | --- | --- |
 | 1 | Map selection opens the correct contract. |
-| 2 | Search, group filter, empty state, and source declarations work. |
+| 2 | All 21 declarations and source lines match Go; metadata advice and filters are correct. |
 | 3 | Display-only fields stay out of both index inputs; edits and reset work. |
 | 4 | Query, weights, top-K, score values, and ranking changes match expected results. |
 | 5 | All five paths stop, move back, restart, and show the expected counts. |

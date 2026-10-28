@@ -128,8 +128,9 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 	)
 
 	tc := newMockToolChain()
-	tc.RegisterTool(gent.NewToolFunc("test_tool", "Read a result", nil,
-		func(context.Context, map[string]any) (string, error) { return "tool result", nil }))
+	tc.RegisterTool(gent.DefineTool("test_tool",
+		func(context.Context, map[string]any) (string, error) { return "tool result", nil }).
+		Description("Read a result").ParameterSchema(nil).MustBuild())
 
 	agent := NewAgent(model).WithRepetitionConfig(cfg).WithToolChain(tc)
 

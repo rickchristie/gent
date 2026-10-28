@@ -25,24 +25,23 @@ type OrderStatus struct {
 	Status  string `json:"status"`
 }
 
-func newOrderTool() *gent.ToolFunc[OrderInput, OrderStatus] {
-	return gent.NewToolFunc(
-		"lookup_order",
-		"Get the current status of an order by its ID.",
-		schema.Object(map[string]*schema.Property{
-			"order_id": schema.String("The order ID, for example order-1001."),
-		}, "order_id"),
-		func(ctx context.Context, input OrderInput) (OrderStatus, error) {
-			if err := ctx.Err(); err != nil {
-				return OrderStatus{}, err
-			}
-			// Use a fixed record so this example needs no database. Replace it with your API.
-			if input.OrderID != "order-1001" {
-				return OrderStatus{}, fmt.Errorf("order not found: %s", input.OrderID)
-			}
-			return OrderStatus{OrderID: input.OrderID, Status: "shipped"}, nil
-		},
-	)
+func newOrderTool() gent.Tool[OrderInput, OrderStatus] {
+	return gent.DefineTool("lookup_order", lookupOrder).
+		Description("Get the current status of an order by its ID.").
+		Parameters(schema.Field("order_id").
+			Description("The order ID, for example order-1001.").MinLength(1)).
+		MustBuild()
+}
+
+func lookupOrder(ctx context.Context, input OrderInput) (OrderStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return OrderStatus{}, err
+	}
+	// Use a fixed record so this example needs no database. Replace it with your API.
+	if input.OrderID != "order-1001" {
+		return OrderStatus{}, fmt.Errorf("order not found: %s", input.OrderID)
+	}
+	return OrderStatus{OrderID: input.OrderID, Status: "shipped"}, nil
 }
 
 // Build the tool registry once, before you use the runner for questions.

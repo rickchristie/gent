@@ -141,16 +141,13 @@ func clearParallelProgramCalls(ctx *gent.ExecutionContext, batch *parallelProgra
 }
 
 func (w *JsToolChainWrapper) recoverProgram(ctx *gent.ExecutionContext,
-	outer *gent.ToolPlan, program *programState,
+	outer *gent.ToolPlan, program *programState, format gent.TextFormat,
 ) (*gent.ToolCallResult, error) {
 	call := outer.Calls[outer.NextCall]
 	if program.CallId != call.Id {
 		return nil, errors.New("JavaScript recovery call does not match")
 	}
 	results := append([]*gent.ToolCallResult(nil), program.Completed...)
-	info := &gent.RecoveryInfo{RunId: ctx.RunId(), ContextId: ctx.ContextId(),
-		ToolCallId: call.Id, AttemptId: program.AttemptId, Name: call.Name,
-		Args: call.Args, Script: program.Script}
 	value, found, err := ctx.CheckpointState("gent:program_calls")
 	if err != nil {
 		return nil, err
@@ -178,23 +175,13 @@ func (w *JsToolChainWrapper) recoverProgram(ctx *gent.ExecutionContext,
 			return nil, errors.New("invalid JavaScript call plan")
 		}
 		for _, inner := range plans {
-			partial, err := w.recoverProgramCalls(ctx, inner, info)
+			partial, err := w.recoverProgramCalls(ctx, inner, format)
 			if err != nil {
 				return nil, err
 			}
 			results = append(results, partial...)
 		}
 	}
-	for _, result := range results {
-		if result.Outcome == "" {
-			info.Completed = append(info.Completed, result)
-		}
-	}
-	owned, err := ctx.Codecs().Clone(info)
-	if err != nil {
-		return nil, err
-	}
-	guidance := w.RecoveryMessage(owned.(*gent.RecoveryInfo))
 	var text strings.Builder
 	fmt.Fprintf(&text, `JavaScript execution was interrupted. The script will not be restarted.
 Script:
@@ -203,14 +190,11 @@ Script:
 		fmt.Fprintf(&text, "\n\n%s", result.Text)
 	}
 	text.WriteString("\n\nReview these results and make a new plan.")
-	if guidance != "" {
-		text.WriteString("\n\nRecovery guidance:\n" + guidance)
-	}
 	result := &gent.ToolCallResult{Name: call.Name, ToolCallId: call.Id,
 		AttemptId: program.AttemptId, Args: call.Args, Outcome: "unknown",
 		Output: &gent.ToolChainResult{Results: results}, Error: gent.ErrUncertainTool,
 		Media: collectMedia(&gent.ToolChainResult{Results: results}),
-		Text:  text.String(), Instructions: guidance, SummaryCaptured: true}
+		Text:  text.String(), SummaryCaptured: true}
 	if parallel != nil {
 		clearParallelProgramCalls(ctx, parallel)
 	}
@@ -218,27 +202,16 @@ Script:
 	return completePlannedTool(ctx, outer, result)
 }
 
+// A permitted inner retry can run on its own. The outer script is never restarted.
 func (w *JsToolChainWrapper) recoverProgramCalls(ctx *gent.ExecutionContext,
-	plan *gent.ToolPlan, info *gent.RecoveryInfo,
+	plan *gent.ToolPlan, format gent.TextFormat,
 ) ([]*gent.ToolCallResult, error) {
-	results := append([]*gent.ToolCallResult(nil), plan.Results...)
 	if plan.ReadyCall != nil {
-		result, completed, err := ctx.RecoverTool(plan)
-		if err != nil && !errors.Is(err, gent.ErrUncertainTool) {
+		if _, err := w.wrapped.ExecuteNext(ctx, plan, format); err != nil {
 			return nil, err
 		}
-		if !completed {
-			result, err = unknownTool(ctx, plan.ReadyCall, w.wrapped)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if result.Outcome == "unknown" {
-			info.Uncertain = append(info.Uncertain, plan.ReadyCall)
-		}
-		results = append(results, result)
-		plan.NextCall++
 	}
+	results := append([]*gent.ToolCallResult(nil), plan.Results...)
 	for plan.NextCall < len(plan.Calls) {
 		results = append(results, skippedTool(plan))
 		plan.NextCall++

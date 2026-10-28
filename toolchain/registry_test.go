@@ -53,14 +53,10 @@ func TestRegistry_RegisterTool(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := New()
-			tool := gent.NewToolFunc(
-				tt.input.toolName,
-				"A test tool",
-				nil,
+			tool := gent.DefineTool(tt.input.toolName,
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "result", nil
-				},
-			)
+				}).Description("A test tool").ParameterSchema(nil).MustBuild()
 
 			tc.RegisterTool(tool)
 
@@ -108,18 +104,14 @@ func TestRegistry_RegisterTool_PanicsOnInvalidOrDuplicate(t *testing.T) {
 		{
 			name: "duplicate tool name panics",
 			input: input{register: func(tc *Registry) {
-				tool1 := gent.NewToolFunc(
-					"duplicate", "First", nil,
+				tool1 := gent.DefineTool("duplicate",
 					func(ctx context.Context, args map[string]any) (string, error) {
 						return "first", nil
-					},
-				)
-				tool2 := gent.NewToolFunc(
-					"duplicate", "Second", nil,
+					}).Description("First").ParameterSchema(nil).MustBuild()
+				tool2 := gent.DefineTool("duplicate",
 					func(ctx context.Context, args map[string]any) (string, error) {
 						return "second", nil
-					},
-				)
+					}).Description("Second").ParameterSchema(nil).MustBuild()
 				tc.RegisterTool(tool1)
 				tc.RegisterTool(tool2)
 			}},
@@ -261,12 +253,8 @@ func TestRegistry_Execute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := New()
 			for _, mock := range tt.mocks {
-				tool := gent.NewToolFunc(
-					mock.name,
-					mock.description,
-					mock.schema,
-					mock.fn,
-				)
+				tool := gent.DefineTool(mock.name, mock.fn).Description(mock.description).
+					ParameterSchema(mock.schema).MustBuild()
 				tc.RegisterTool(tool)
 			}
 
@@ -486,12 +474,8 @@ func TestRegistry_Execute_SchemaValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := New()
 			for _, mock := range tt.mocks {
-				tool := gent.NewToolFunc(
-					mock.name,
-					mock.description,
-					mock.schema,
-					mock.fn,
-				)
+				tool := gent.DefineTool(mock.name, mock.fn).Description(mock.description).
+					ParameterSchema(mock.schema).MustBuild()
 				tc.RegisterTool(tool)
 			}
 
@@ -560,22 +544,18 @@ func TestRegistry_Execute_TimeConversion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := New()
 
-			tool := gent.NewToolFunc(
-				"time_tool",
-				"Tool with time.Time input",
-				map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"date":      map[string]any{"type": "string"},
-						"timestamp": map[string]any{"type": "string"},
-					},
-					"required": []any{"date", "timestamp"},
-				},
+			tool := gent.DefineTool("time_tool",
 				func(ctx context.Context, input JSONTimeTypedInput) (string, error) {
 					return input.Date.Format("2006-01-02") + "|" +
 						input.Timestamp.Format(time.RFC3339), nil
+				}).Description("Tool with time.Time input").ParameterSchema(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"date":      map[string]any{"type": "string"},
+					"timestamp": map[string]any{"type": "string"},
 				},
-			)
+				"required": []any{"date", "timestamp"},
+			}).MustBuild()
 			tc.RegisterTool(tool)
 
 			result, err := executeTestCalls(tc, nil, tt.input.content, testFormat())
@@ -628,20 +608,16 @@ func TestRegistry_Execute_DurationConversion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := New()
 
-			tool := gent.NewToolFunc(
-				"duration_tool",
-				"Tool with time.Duration input",
-				map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"duration": map[string]any{"type": "string"},
-					},
-					"required": []any{"duration"},
-				},
+			tool := gent.DefineTool("duration_tool",
 				func(ctx context.Context, input JSONDurationTypedInput) (string, error) {
 					return input.Duration.String(), nil
+				}).Description("Tool with time.Duration input").ParameterSchema(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"duration": map[string]any{"type": "string"},
 				},
-			)
+				"required": []any{"duration"},
+			}).MustBuild()
 			tc.RegisterTool(tool)
 
 			content := fmt.Sprintf(
@@ -803,16 +779,11 @@ func TestRegistry_Execute_BeforeToolCallHook_ModifyArgs(t *testing.T) {
 			var receivedArgs map[string]any
 
 			tc := New()
-			tool := gent.NewToolFunc(
-				"test",
-				"A test tool",
-				nil,
-				func(ctx context.Context, args map[string]any) (string, error) {
-					receivedArgs = args
-					val, _ := args["value"].(string)
-					return fmt.Sprintf("received: %s", val), nil
-				},
-			)
+			tool := gent.DefineTool("test", func(ctx context.Context, args map[string]any) (string, error) {
+				receivedArgs = args
+				val, _ := args["value"].(string)
+				return fmt.Sprintf("received: %s", val), nil
+			}).Description("A test tool").ParameterSchema(nil).MustBuild()
 			tc.RegisterTool(tool)
 
 			// Create subscriber
@@ -879,24 +850,16 @@ func TestRegistry_Execute_BeforeToolCallHook_MultipleTools(t *testing.T) {
 			var tool1Received, tool2Received map[string]any
 
 			tc := New()
-			tc.RegisterTool(gent.NewToolFunc(
-				"tool1",
-				"First tool",
-				nil,
+			tc.RegisterTool(gent.DefineTool("tool1",
 				func(ctx context.Context, args map[string]any) (string, error) {
 					tool1Received = args
 					return "ok1", nil
-				},
-			))
-			tc.RegisterTool(gent.NewToolFunc(
-				"tool2",
-				"Second tool",
-				nil,
+				}).Description("First tool").ParameterSchema(nil).MustBuild())
+			tc.RegisterTool(gent.DefineTool("tool2",
 				func(ctx context.Context, args map[string]any) (string, error) {
 					tool2Received = args
 					return "ok2", nil
-				},
-			))
+				}).Description("Second tool").ParameterSchema(nil).MustBuild())
 
 			// Create subscriber that tracks tool name
 			sub := &jsonMultiToolSubscriber{modifyFunc: tt.input.modifyFunc}
@@ -968,9 +931,16 @@ type instructionsTool struct {
 	instructions string
 }
 
-func (t *instructionsTool) Name() string                    { return t.name }
-func (t *instructionsTool) Description() string             { return t.description }
-func (t *instructionsTool) Policy() string                  { return "" }
+func (t *instructionsTool) Name() string                 { return t.name }
+func (t *instructionsTool) Description() string          { return t.description }
+func (t *instructionsTool) Policy() string               { return "" }
+func (t *instructionsTool) Strict() bool                 { return false }
+func (t *instructionsTool) OutputSchema() map[string]any { return nil }
+func (t *instructionsTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+	*gent.ToolRecoveryResponse, error,
+) {
+	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved}, nil
+}
 func (t *instructionsTool) ParameterSchema() map[string]any { return t.schema }
 func (t *instructionsTool) Call(
 	ctx context.Context,
@@ -991,14 +961,10 @@ func (t *instructionsTool) DeduplicateSummary(
 func TestRegistry_Execute_TracesToolCallErrors(t *testing.T) {
 	t.Run("tool error increments all error counters", func(t *testing.T) {
 		tc := New()
-		tool := gent.NewToolFunc(
-			"failing_tool",
-			"A test tool",
-			nil,
+		tool := gent.DefineTool("failing_tool",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				return "", errors.New("tool execution failed")
-			},
-		)
+			}).Description("A test tool").ParameterSchema(nil).MustBuild()
 		tc.RegisterTool(tool)
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -1025,18 +991,14 @@ func TestRegistry_Execute_TracesToolCallErrors(t *testing.T) {
 	t.Run("successful tool after failure resets consecutive gauges", func(t *testing.T) {
 		tc := New()
 		callCount := 0
-		tool := gent.NewToolFunc(
-			"test_tool",
-			"A test tool",
-			nil,
+		tool := gent.DefineTool("test_tool",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				callCount++
 				if callCount == 1 {
 					return "", errors.New("first call fails")
 				}
 				return "success", nil
-			},
-		)
+			}).Description("A test tool").ParameterSchema(nil).MustBuild()
 		tc.RegisterTool(tool)
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -1080,14 +1042,10 @@ func TestRegistry_Execute_TracesToolCallErrors(t *testing.T) {
 
 	t.Run("multiple consecutive failures accumulate", func(t *testing.T) {
 		tc := New()
-		tool := gent.NewToolFunc(
-			"always_fails",
-			"A test tool",
-			nil,
+		tool := gent.DefineTool("always_fails",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				return "", errors.New("always fails")
-			},
-		)
+			}).Description("A test tool").ParameterSchema(nil).MustBuild()
 		tc.RegisterTool(tool)
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
@@ -1205,20 +1163,16 @@ func TestRegistry_Execute_TracesToolCallErrors_SchemaValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := New()
-			tool := gent.NewToolFunc(
-				"validated_tool",
-				"A tool with required schema",
-				map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"required_field": map[string]any{"type": "string"},
-					},
-					"required": []any{"required_field"},
-				},
+			tool := gent.DefineTool("validated_tool",
 				func(ctx context.Context, args map[string]any) (string, error) {
 					return "should not reach", nil
+				}).Description("A tool with required schema").ParameterSchema(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"required_field": map[string]any{"type": "string"},
 				},
-			)
+				"required": []any{"required_field"},
+			}).MustBuild()
 			tc.RegisterTool(tool)
 
 			execCtx := gent.NewExecutionContext(
@@ -1285,23 +1239,18 @@ func TestRegistry_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 			input: input{
 				content: `{"tool": "validated_tool", "args": {}}`,
 				setup: func(tc *Registry) {
-					tc.RegisterTool(gent.NewToolFunc(
-						"validated_tool",
-						"A tool with required schema",
-						map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"required_field": map[string]any{"type": "string"},
-							},
-							"required": []any{"required_field"},
+					tc.RegisterTool(gent.DefineTool("validated_tool", func(
+						ctx context.Context,
+						args map[string]any,
+					) (string, error) {
+						return "should not reach", nil
+					}).Description("A tool with required schema").ParameterSchema(map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"required_field": map[string]any{"type": "string"},
 						},
-						func(
-							ctx context.Context,
-							args map[string]any,
-						) (string, error) {
-							return "should not reach", nil
-						},
-					))
+						"required": []any{"required_field"},
+					}).MustBuild())
 				},
 				limitKey: gent.SCToolCallsFor + "validated_tool",
 			},
@@ -1335,22 +1284,14 @@ func TestRegistry_Execute_InvalidAttemptsCountAgainstLimits(t *testing.T) {
 func TestRegistry_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 	t.Run("multiple tools with mixed success/failure in single execute", func(t *testing.T) {
 		tc := New()
-		tc.RegisterTool(gent.NewToolFunc(
-			"success_tool",
-			"A successful tool",
-			nil,
+		tc.RegisterTool(gent.DefineTool("success_tool",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				return "success", nil
-			},
-		))
-		tc.RegisterTool(gent.NewToolFunc(
-			"failing_tool",
-			"A failing tool",
-			nil,
+			}).Description("A successful tool").ParameterSchema(nil).MustBuild())
+		tc.RegisterTool(gent.DefineTool("failing_tool",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				return "", errors.New("tool failed")
-			},
-		))
+			}).Description("A failing tool").ParameterSchema(nil).MustBuild())
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 		execCtx.IncrementIteration()
@@ -1387,28 +1328,20 @@ func TestRegistry_Execute_TracesToolCallErrors_MultipleTools(t *testing.T) {
 		tc := New()
 		tool1CallCount := 0
 		tool2CallCount := 0
-		tc.RegisterTool(gent.NewToolFunc(
-			"tool1",
-			"First tool",
-			nil,
+		tc.RegisterTool(gent.DefineTool("tool1",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				tool1CallCount++
 				if tool1CallCount == 1 {
 					return "", errors.New("tool1 fails first time")
 				}
 				return "tool1 success", nil
-			},
-		))
-		tc.RegisterTool(gent.NewToolFunc(
-			"tool2",
-			"Second tool",
-			nil,
+			}).Description("First tool").ParameterSchema(nil).MustBuild())
+		tc.RegisterTool(gent.DefineTool("tool2",
 			func(ctx context.Context, args map[string]any) (string, error) {
 				tool2CallCount++
 				// Tool2 always fails
 				return "", errors.New("tool2 always fails")
-			},
-		))
+			}).Description("Second tool").ParameterSchema(nil).MustBuild())
 
 		execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 
@@ -1538,3 +1471,8 @@ func TestRegistry_UnknownToolErrorMessage(t *testing.T) {
 Error: unknown tool "nonexistent". Use a function from the current native tool definitions.
 </nonexistent>`, collectText(result))
 }
+
+func (t *instructionsTool) Domain() string             { return "" }
+func (t *instructionsTool) Categories() []string       { return nil }
+func (t *instructionsTool) Keywords() []string         { return nil }
+func (t *instructionsTool) SyntheticQueries() []string { return nil }

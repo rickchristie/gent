@@ -39,6 +39,7 @@ type PolicySearchInput struct {
 //
 //	tool, err := policy.NewPolicySearchTool(ctx, embedder, policies)
 //	tc.RegisterTool(tool)
+//
 // SearchResultMode controls what PolicySearchTool returns for each match.
 type SearchResultMode int
 
@@ -52,12 +53,12 @@ const (
 )
 
 type PolicySearchTool struct {
-	name       string
+	name        string
 	description string
-	index      search.SearchIndex[*Policy]
-	policies   map[string]*Policy
-	topK       int
-	resultMode SearchResultMode
+	index       search.SearchIndex[*Policy]
+	policies    map[string]*Policy
+	topK        int
+	resultMode  SearchResultMode
 
 	// IndexableTool metadata for SearchChain compatibility.
 	keywords         []string
@@ -194,8 +195,19 @@ func (t *PolicySearchTool) WithIndexableSyntheticQueries(sq []string) *PolicySea
 // --- gent.Tool[PolicySearchInput, string] implementation ---
 
 func (t *PolicySearchTool) Name() string        { return t.name }
-func (t *PolicySearchTool) Description() string  { return t.description }
-func (t *PolicySearchTool) Policy() string       { return "" }
+func (t *PolicySearchTool) Description() string { return t.description }
+func (t *PolicySearchTool) Policy() string      { return "" }
+
+func (t *PolicySearchTool) Strict() bool                 { return false }
+func (t *PolicySearchTool) OutputSchema() map[string]any { return map[string]any{"type": "string"} }
+
+// Recovery can repeat this read because it does not change the policy store.
+func (t *PolicySearchTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+	*gent.ToolRecoveryResponse, error,
+) {
+	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+}
+
 func (t *PolicySearchTool) ParameterSchema() map[string]any {
 	return schema.Object(map[string]*schema.Property{
 		"query": schema.String(
@@ -330,10 +342,10 @@ func (t *PolicySearchTool) DeduplicateSummary(
 
 // --- gent.IndexableTool implementation (for SearchChain compatibility) ---
 
-func (t *PolicySearchTool) Domain() string              { return "Policy & Guidance" }
-func (t *PolicySearchTool) Categories() []string         { return []string{"lookup", "policy"} }
-func (t *PolicySearchTool) Keywords() []string           { return t.keywords }
-func (t *PolicySearchTool) SyntheticQueries() []string   { return t.syntheticQueries }
+func (t *PolicySearchTool) Domain() string             { return "Policy & Guidance" }
+func (t *PolicySearchTool) Categories() []string       { return []string{"lookup", "policy"} }
+func (t *PolicySearchTool) Keywords() []string         { return t.keywords }
+func (t *PolicySearchTool) SyntheticQueries() []string { return t.syntheticQueries }
 
 // --- GetPolicyTool configuration ---
 
@@ -352,8 +364,19 @@ func (t *GetPolicyTool) WithDescription(desc string) *GetPolicyTool {
 // --- gent.Tool[GetPolicyInput, string] implementation ---
 
 func (t *GetPolicyTool) Name() string        { return t.name }
-func (t *GetPolicyTool) Description() string  { return t.description }
-func (t *GetPolicyTool) Policy() string       { return "" }
+func (t *GetPolicyTool) Description() string { return t.description }
+func (t *GetPolicyTool) Policy() string      { return "" }
+
+func (t *GetPolicyTool) Strict() bool                 { return false }
+func (t *GetPolicyTool) OutputSchema() map[string]any { return map[string]any{"type": "string"} }
+
+// Recovery can repeat this read because it does not change the policy store.
+func (t *GetPolicyTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+	*gent.ToolRecoveryResponse, error,
+) {
+	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+}
+
 func (t *GetPolicyTool) ParameterSchema() map[string]any {
 	return schema.Object(map[string]*schema.Property{
 		"policy_id": schema.String(
@@ -389,7 +412,7 @@ func (t *GetPolicyTool) DeduplicateSummary(
 
 // --- gent.IndexableTool implementation ---
 
-func (t *GetPolicyTool) Domain() string            { return "Policy & Guidance" }
+func (t *GetPolicyTool) Domain() string             { return "Policy & Guidance" }
 func (t *GetPolicyTool) Categories() []string       { return []string{"lookup", "policy"} }
 func (t *GetPolicyTool) Keywords() []string         { return t.keywords }
 func (t *GetPolicyTool) SyntheticQueries() []string { return t.syntheticQueries }

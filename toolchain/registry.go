@@ -13,7 +13,6 @@ type Registry struct {
 	tools             []any
 	toolMap           map[string]any
 	schemaMap         map[string]*schema.Schema // compiled schemas
-	recovery          map[string]gent.RecoveryMessageProvider
 	printOutputSchema bool
 }
 
@@ -24,7 +23,6 @@ func New() *Registry {
 		toolMap:           make(map[string]any),
 		schemaMap:         make(map[string]*schema.Schema),
 		printOutputSchema: true,
-		recovery:          make(map[string]gent.RecoveryMessageProvider),
 	}
 }
 
@@ -39,7 +37,7 @@ func (c *Registry) WithOutputSchema(enabled bool) *Registry {
 // RegisterTool adds a tool to the chain. The tool must implement Tool[I, O].
 // The tool's schema is compiled for validation when arguments are provided.
 // Panics when the tool is nil, invalid, or duplicates an existing tool name.
-func (c *Registry) RegisterTool(tool any, options ...gent.ToolOption) gent.ToolChain {
+func (c *Registry) RegisterTool(tool any) gent.ToolChain {
 	meta, err := GetToolMeta(tool)
 	if err != nil {
 		panic(fmt.Sprintf("Registry.RegisterTool: invalid tool type: %v", err))
@@ -47,11 +45,6 @@ func (c *Registry) RegisterTool(tool any, options ...gent.ToolOption) gent.ToolC
 	if _, exists := c.toolMap[meta.Name()]; exists {
 		panic(fmt.Sprintf("Registry.RegisterTool: duplicate tool name %q", meta.Name()))
 	}
-	config := gent.ToolOptions{}
-	for _, option := range options {
-		option(&config)
-	}
-	c.recovery[meta.Name()] = config.RecoveryMessage
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
 

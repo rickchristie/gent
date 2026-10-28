@@ -173,8 +173,8 @@ func (r *Agent) WithCallOptions(options ...gent.CallOption) *Agent {
 }
 
 // RegisterTool adds a tool to the tool chain.
-func (r *Agent) RegisterTool(tool any, options ...gent.ToolOption) *Agent {
-	r.toolChain.RegisterTool(tool, options...)
+func (r *Agent) RegisterTool(tool any) *Agent {
+	r.toolChain.RegisterTool(tool)
 	return r
 }
 

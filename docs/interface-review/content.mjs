@@ -183,12 +183,14 @@ describe(
   'Application business logic need not understand LLM formatting or reflection.',
   [
     'The chain validates the schema and converts arguments before Call receives typed input.',
-    'Policy supplies optional usage guidance. Return an empty string when none is needed.',
+    'The builder supplies schemas, search metadata, policy, strict mode, and output descriptions.',
+    'Recover returns a decision, optional steering, and the recovered output when completed.',
+    'Saved results and saved recovery decisions take precedence over another recovery check.',
     'DeduplicateSummary abbreviates older observations; it does not suppress tool execution.',
     'Use ToolIdentityFromContext for an external service’s idempotency or reconciliation key.',
   ],
-  ['gent.ToolFunc'],
-  ['gent.ToolChain', 'gent.ToolRecovery', 'gent.ToolCallResult', 'gent.IndexableTool'],
+  ['gent.DefineTool'],
+  ['gent.ToolChain', 'gent.ToolRecoveryResponse', 'gent.ToolCallResult', 'gent.IndexableTool'],
   'Which tools have external side effects that need reconciliation?',
 );
 
@@ -204,8 +206,23 @@ describe(
     'RegisterCodecs and RecoveryConfig support fresh-worker continuation.',
   ],
   ['toolchain.Registry', 'toolchain.SearchChain', 'toolchain.JsToolChainWrapper'],
-  ['gent.Tool', 'gent.CheckpointState', 'gent.ToolRecovery', 'gent.ToolCallResult'],
+  ['gent.Tool', 'gent.CheckpointState', 'gent.ToolRecoveryResponse', 'gent.ToolCallResult'],
   'Does the selected chain support the recovery guarantees the application expects?',
+);
+
+describe(
+  'gent.ParallelToolChain',
+  'Tools & answers',
+  'Declare whether independent tool plans can run at the same time.',
+  'Programmatic parallel calls must respect the supplied chain and its shared state.',
+  [
+    'Embeds ToolChain and adds SupportsParallelCalls.',
+    'Each concurrent plan must have its own checkpoint key.',
+    'A chain override that needs sequential execution must return false.',
+  ],
+  ['toolchain.Registry', 'toolchain.SearchChain'],
+  ['gent.ToolChain', 'gent.ToolPlan'],
+  'Can this chain safely run independent plans in one execution context?',
 );
 
 describe(
@@ -305,22 +322,6 @@ describe(
   'What behavior is invisible to the declared configuration fingerprint?',
 );
 
-describe(
-  'gent.ToolRecovery',
-  'History & recovery',
-  'Resolve a tool whose external outcome is uncertain.',
-  'A tool-ready checkpoint cannot prove whether an external write happened before a crash.',
-  [
-    'Recover gets the stable logical call ID, previous attempt, arguments, and effective input.',
-    'Return completed with a full result, retry_allowed, or unresolved.',
-    'A durable result takes precedence. Unresolved work becomes guidance for a new model plan.',
-    'An allowed retry preserves logical identity and input; it uses a new worker attempt.',
-    'Gent does not guarantee exactly-once external effects.',
-  ],
-  ['gent.ToolRecoveryFunc'],
-  ['gent.ToolChain', 'gent.ToolPlan', 'gent.RestoreBindings', 'gent.ToolCallResult'],
-  'What external evidence makes a retry safe for each mutating tool?',
-);
 
 describe(
   'gent.ValueCodec',
@@ -660,6 +661,16 @@ describe(
 );
 
 export const supporting = {
+  'gent.ToolRecoveryResponse': [
+    'History & recovery',
+    'Keep a recovery decision, its steering message, and any recovered output together.',
+    'Gent saves this response before using it. A message alone never permits another attempt.',
+  ],
+  'gent.ToolBuilder': [
+    'Tools & answers',
+    'Build a tool from a typed function and explicit field settings.',
+    'Build checks schemas and copies metadata; a built definition can be shared between runs.',
+  ],
   'gent.ExecutionContext': [
     'Execution',
     'Own execution, history, acceptance, limits, and children.',
@@ -779,7 +790,7 @@ export const phases = [
     'Accept effective tool input',
     'A plan position and its final typed input are saved before an external tool call.',
     'After a crash the outcome may be uncertain. Reconcile it before retrying.',
-    ['gent.ToolChain', 'gent.ToolRecovery', 'gent.ToolPlan'],
+    ['gent.ToolChain', 'gent.ToolRecoveryResponse', 'gent.ToolPlan'],
   ],
   [
     'tool_completed',
@@ -841,8 +852,8 @@ export const boundaries = [
     'Uncertain work stays explicit',
     'Logical call ID ≠ worker attempt ID',
     'Call identity survives takeover; the attempt changes. Tool-ready cannot prove a side effect.',
-    'ToolRecovery returns a completed result, permits a retry, or leaves the operation unresolved.',
-    ['gent.ToolRecovery', 'gent.ToolChain', 'gent.ToolPlan'],
+    'Tool.Recover returns a completed result, permits a retry, or leaves the operation unresolved.',
+    ['gent.ToolRecoveryResponse', 'gent.ToolChain', 'gent.ToolPlan'],
   ],
   [
     'Display is a projection',

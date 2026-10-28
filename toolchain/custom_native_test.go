@@ -65,11 +65,11 @@ func TestCustomNativeSelectionKeepsExecutionHooks(t *testing.T) {
 			"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}},
 			"required": []string{"id"}, "additionalProperties": false,
 		}
-		chain.RegisterTool(gent.NewToolFunc(name, "Read a record", inputSchema,
+		chain.RegisterTool(gent.DefineTool(name,
 			func(_ context.Context, input *selectedInput) (string, error) {
 				inputs = append(inputs, input)
 				return "record", nil
-			}))
+			}).Description("Read a record").ParameterSchema(inputSchema).MustBuild())
 	}
 	model := tt.NewMockModel().AddToolCall("lookup", `{"id":"raw"}`, 1, 1).
 		AddResponse("Done.", 1, 1)

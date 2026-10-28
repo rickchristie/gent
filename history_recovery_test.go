@@ -45,16 +45,21 @@ func (m *recoveryModel) GenerateContentStream(
 	}, nil), nil
 }
 
-func newRecoveryAgent(model *recoveryModel, calls *[]gent.ToolIdentity) *react.Agent {
-	tool := gent.NewToolFunc("policy", "Read the original policy", nil,
-		func(ctx context.Context, input recoveryInput) (string, error) {
-			identity, ok := gent.ToolIdentityFromContext(ctx)
-			if !ok {
-				return "", errors.New("missing logical tool identity")
-			}
-			*calls = append(*calls, identity)
-			return input.Id + ": exact original text", nil
-		})
+func newRecoveryAgent(model *recoveryModel, calls *[]gent.ToolIdentity,
+	recovery ...gent.ToolRecoveryFunc,
+) *react.Agent {
+	var handler gent.ToolRecoveryFunc
+	if len(recovery) != 0 {
+		handler = recovery[0]
+	}
+	tool := gent.DefineTool("policy", func(ctx context.Context, input recoveryInput) (string, error) {
+		identity, ok := gent.ToolIdentityFromContext(ctx)
+		if !ok {
+			return "", errors.New("missing logical tool identity")
+		}
+		*calls = append(*calls, identity)
+		return input.Id + ": exact original text", nil
+	}).Description("Read the original policy").ParameterSchema(nil).Recovery(handler).MustBuild()
 	return react.NewAgent(model).RegisterTool(tool).WithRecoveryVersion("recovery-fixture/v1").
 		WithTimeProvider(gent.NewMockTimeProvider(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 }

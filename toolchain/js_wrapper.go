@@ -21,7 +21,6 @@ type JsToolChainWrapper struct {
 	codeGuidance       string
 	directCallGuidance string
 	directCallDisabled bool
-	recoveryMessage    gent.RecoveryMessageProvider
 }
 
 // NewJsToolChainWrapper creates a wrapper around the
@@ -83,10 +82,8 @@ func (w *JsToolChainWrapper) DeduplicateSummary(
 }
 
 // RegisterTool delegates to the wrapped ToolChain.
-func (w *JsToolChainWrapper) RegisterTool(
-	tool any, options ...gent.ToolOption,
-) gent.ToolChain {
-	w.wrapped.RegisterTool(tool, options...)
+func (w *JsToolChainWrapper) RegisterTool(tool any) gent.ToolChain {
+	w.wrapped.RegisterTool(tool)
 	return w
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type liveIndexable[I, O any] struct{ *gent.ToolFunc[I, O] }
+type liveIndexable[I, O any] struct{ gent.Tool[I, O] }
 
 func (*liveIndexable[I, O]) Domain() string             { return "records" }
 func (*liveIndexable[I, O]) Categories() []string       { return []string{"records"} }
@@ -61,21 +61,20 @@ func liveProgramCalls(ctx *gent.ExecutionContext) ([][]liveProgramCall, error) {
 }
 
 func liveToolChain(calls *[]string, withSearch bool) (*toolchain.JsToolChainWrapper, error) {
-	lookup := &liveIndexable[*responseInput, *responseOutput]{gent.NewToolFunc(
-		"lookup", "Find the next record ID", responseInputSchema(),
+	lookup := &liveIndexable[*responseInput, *responseOutput]{gent.DefineTool("lookup",
 		func(_ context.Context, input *responseInput) (*responseOutput, error) {
 			*calls = append(*calls, "lookup:"+input.ID)
 			return &responseOutput{NextID: "record-9"}, nil
-		})}
-	read := &liveIndexable[*responseInput, string]{gent.NewToolFunc(
-		"read", "Read the record identified by lookup", responseInputSchema(),
+		}).Description("Find the next record ID").ParameterSchema(responseInputSchema()).MustBuild()}
+	read := &liveIndexable[*responseInput, string]{gent.DefineTool("read",
 		func(_ context.Context, input *responseInput) (string, error) {
 			*calls = append(*calls, "read:"+input.ID)
 			if input.ID != "record-9" {
 				return "", fmt.Errorf("use the ID returned by lookup")
 			}
 			return "record-finished", nil
-		})}
+		}).Description("Read the record identified by lookup").ParameterSchema(responseInputSchema()).
+		MustBuild()}
 	if !withSearch {
 		chain := toolchain.New().RegisterTool(lookup).RegisterTool(read)
 		return toolchain.NewJsToolChainWrapper(chain).WithDirectCallDisabled(), nil
@@ -83,9 +82,9 @@ func liveToolChain(calls *[]string, withSearch bool) (*toolchain.JsToolChainWrap
 	search := toolchain.NewSearch(toolchain.SearchHintSimpleList).
 		RegisterEngine(toolchain.NewRegexToolSearcher())
 	search.RegisterTool(lookup).RegisterTool(read)
-	search.RegisterTool(&liveIndexable[*responseInput, string]{gent.NewToolFunc(
-		"ping", "Check service status", responseInputSchema(),
-		func(context.Context, *responseInput) (string, error) { return "ready", nil })})
+	search.RegisterTool(&liveIndexable[*responseInput, string]{gent.DefineTool("ping",
+		func(context.Context, *responseInput) (string, error) { return "ready", nil }).
+		Description("Check service status").ParameterSchema(responseInputSchema()).MustBuild()})
 	search.Pin("ping")
 	if err := search.Initialize(); err != nil {
 		return nil, err

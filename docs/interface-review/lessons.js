@@ -58,7 +58,7 @@ const quiz = {
     choices: ['Yes — rerun it immediately', 'No — reconcile the external effect'],
     correct: 1,
     explain:
-      'A process can fail after sending a refund but before saving its result. ToolRecovery ' +
+      'A process can fail after sending a refund but before saving its result. Tool.Recover ' +
       'can supply a completed result or allow retry. Unresolved calls give the model recovery guidance.',
   },
   search: {
@@ -456,17 +456,17 @@ function renderRestart() {
       'recovery guidance. The model can check the refund service before making a new plan.',
     'saved result reused':
       'The durable result already proves completion. Gent reuses it without ' +
-      'calling ToolRecovery or repeating the external effect.',
+      'calling Tool.Recover or repeating the external effect.',
     'no external receipt to return':
       'This scenario has no completed external refund to reconcile. ' +
       'A completed status must carry the full real result; it cannot invent success.',
     'reconciled with receipt':
-      'ToolRecovery returned completed with the full receipt. The result ' +
+      'Tool.Recover returned completed with the full receipt. The result ' +
       'is accepted and the tool is not executed again.',
     'retry explicitly allowed': options.idempotent
-      ? 'ToolRecovery allowed retry. The external service deduplicates the stable logical ' +
+      ? 'Tool.Recover allowed retry. The external service deduplicates the stable logical ' +
         'call ID. The new execution attempt does not create another refund.'
-      : 'ToolRecovery explicitly allowed retry, but the service does not deduplicate. A previous ' +
+      : 'Tool.Recover explicitly allowed retry, but the service does not deduplicate. A previous ' +
         'refund can be sent twice. Gent does not promise exactly-once external effects.',
   };
   updateExperiment(`
@@ -540,7 +540,7 @@ function renderRestart() {
             .join('')}</div></div>
         <p class="recovery-result" id="recovery-result" role="status">${safe(state.status)}</p>
         <p class="experiment-status" id="recovery-status">${descriptions[state.status]}</p>
-        <div class="under-the-hood">${contractButton('gent.ToolRecovery')}
+        <div class="under-the-hood">${contractButton('gent.Tool')}
           <span>reconciles effects.
             ${contractButton('gent.CheckpointState')} restores local state.</span>
         </div>

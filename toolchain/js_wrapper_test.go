@@ -15,7 +15,7 @@ import (
 // setupJsWrapper creates a JsToolChainWrapper wrapping
 // a SearchChain with test tools.
 func setupJsWrapper() *JsToolChainWrapper {
-	tools := []*indexableToolFunc{
+	tools := []indexableToolFunc{
 		newIndexableToolWithSchema(
 			"lookup_customer",
 			"Look up customer by ID",

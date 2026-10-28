@@ -1291,6 +1291,7 @@ func (ctx *ExecutionContext) PublishAfterToolCall(
 	opts ...ToolCallEventOption,
 ) *AfterToolCallEvent {
 	options := applyToolCallEventOptions(opts)
+	ctx.addRecoverySteering(options.toolCallId, output)
 	event := &AfterToolCallEvent{
 		BaseEvent: BaseEvent{
 			EventName: EventNameToolCallAfter,

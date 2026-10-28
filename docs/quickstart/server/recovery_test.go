@@ -99,8 +99,7 @@ func TestRecoveryFromReopenedDatabase(t *testing.T) {
 			defer seq.Close()
 			result, err := freshRunner.Resume(context.Background(), saved, gent.RestoreBindings{
 				Recorder: replacement, Codecs: freshStore.codecs,
-				Observers:    []gent.RecordedEventObserver{seq},
-				ToolRecovery: gent.ToolRecoveryFunc(recoverTool),
+				Observers: []gent.RecordedEventObserver{seq},
 			})
 			if !assert.NoError(t, err) {
 				return

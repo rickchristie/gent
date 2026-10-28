@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../../../", import.meta.url);
-const require = createRequire(new URL("docs/code/package.json", root));
+const require = createRequire(new URL("docs/quickstart/package.json", root));
 const { chromium, expect } = require("playwright/test");
 const folder = await mkdtemp(join(tmpdir(), "gent-streaming-browser-"));
 const binary = join(folder, "server");

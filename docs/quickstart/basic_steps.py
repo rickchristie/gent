@@ -51,15 +51,15 @@ STEPS = [
         "intro": "Give the agent a function it can call to get a fact. Here, lookup_order "
                  "returns a fixed order record. In your app, this function can call your API.",
         "action": "Add these types and the newOrderTool() function after the imports, "
-                  "outside run(). Keep the JSON field name and schema field name the same.",
+                  "outside run(). Use the JSON field name in each field setting.",
         "location": "main.go · top-level types and newOrderTool()",
         "code": extract("type OrderInput", "// Build the tool registry"),
         "notes": [
             ("OrderInput + order_id",
-             "Define the typed input and describe the same field in JSON Schema. "
-             "The Go struct alone does not advertise arguments to the model."),
-            ("gent.NewToolFunc", "Adapt your callback to gent.Tool[OrderInput, OrderStatus]. "
-             "The registry converts JSON arguments to OrderInput."),
+             "Define the typed input with JSON field names. The builder uses those names "
+             "and Go types to create the parameter schema."),
+            ("gent.DefineTool", "Add descriptions and constraints with Parameters, then build "
+             "gent.Tool[OrderInput, OrderStatus]. MustBuild checks fixed definitions at startup."),
             ("Return a value or an error", "Return OrderStatus on success. The registry formats "
              "structured output as JSON and reports tool errors to the loop."),
         ],

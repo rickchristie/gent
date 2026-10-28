@@ -428,11 +428,10 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			term.SetValidator(&contentValidator{})
 			toolCalls := 0
 			agent := react.NewAgent(model).WithTermination(term).WithRecoveryVersion("content-v1").
-				RegisterTool(gent.NewToolFunc("lookup", "Read the status", nil,
-					func(context.Context, map[string]any) (string, error) {
-						toolCalls++
-						return "done", nil
-					}))
+				RegisterTool(gent.DefineTool("lookup", func(context.Context, map[string]any) (string, error) {
+					toolCalls++
+					return "done", nil
+				}).Description("Read the status").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "root",
 				gent.NewBasicLoopData(&gent.Task{Text: "Read the status."}),
 				gent.WithRunId("content"), gent.WithRecorder(store), gent.WithObserver(seq))

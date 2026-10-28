@@ -77,16 +77,15 @@ type OrderStatus struct {
 func runAgent(ctx context.Context, apiKey, modelName string) error {
     model := models.NewOpenAI(apiKey, modelName)
 
-    lookupOrder := gent.NewToolFunc(
-        "lookup_order",
-        "Look up order status by order ID.",
-        schema.Object(map[string]*schema.Property{
-            "order_id": schema.String("Order ID, for example ORD-123"),
-        }, "order_id"),
+    lookupOrder, err := gent.DefineTool("lookup_order",
         func(ctx context.Context, input *LookupOrderInput) (*OrderStatus, error) {
             return &OrderStatus{ID: input.OrderID, Status: "shipped"}, nil
-        },
-    )
+        }).Description("Look up order status by order ID.").
+        Parameters(schema.Field("order_id").Description("Order ID, for example ORD-123")).
+        Build()
+    if err != nil {
+        return err
+    }
 
     tc := toolchain.New().RegisterTool(lookupOrder)
     term := termination.NewText("answer").
@@ -181,9 +180,9 @@ worker replacement. Uncertain tool outcomes require an explicit recovery decisio
 See [durable history and continuation](docs/history.md) and the runnable
 [Go example](examples/history/main.go). Run it with `go run ./examples/history`.
 
-For an interactive introduction, open the [Gent field guide](docs/dist/gent.html) in your browser.
-The single HTML file works offline and explains the loop, interfaces, history, journal, and recovery
-with diagrams and simulations. See its [source and build instructions](docs/code/README.md).
+For an interactive guide, open the [Gent quick start](docs/quickstart/dist/gent-quick-start.html)
+in your browser. It works offline and covers a simple agent, a saved streaming API, a React client,
+and run recovery. See the [source and build instructions](docs/quickstart/README.md).
 
 ### Model
 
@@ -203,26 +202,30 @@ contract](docs/native-tools.md#frontend-and-storage-contract).
 
 ### Tools
 
-Tools are plain Go business logic with JSON Schema parameters:
+Use `gent.DefineTool` to build a tool from a typed function or a bound service method:
 
 ```go
-tool := gent.NewToolFunc(
-    "search_orders",
-    "Search orders by customer email.",
-    schema.Object(map[string]*schema.Property{
-        "email": schema.String("Customer email address"),
-    }, "email"),
-    func(ctx context.Context, input SearchOrdersInput) (SearchOrdersResult, error) {
-        return searchOrders(ctx, input.Email)
-    },
-)
+tool, err := gent.DefineTool("search_orders", service.SearchOrders).
+    Description("Search orders by customer email.").
+    Parameters(schema.Field("email").Description("Customer email address").Format("email")).
+    Policy("Only search by the exact email supplied by the current user.").
+    Domain("Orders").Categories("lookup").Keywords("email", "orders").
+    Build()
+if err != nil {
+    return err
+}
 ```
 
-Add `WithPolicy` when the model needs dynamic usage rules:
+The builder uses Go types and `json` field names for the parameter schema. Fields are required by
+default; use `schema.Field("name").Optional()` to permit an absent field. `omitempty` does not make
+an input optional. `Build` checks schemas and copies configuration. `MustBuild` is available for
+fixed definitions where a configuration error should stop application startup.
 
-```go
-tool = tool.WithPolicy("Only search by the exact email supplied by the current user.")
-```
+Set `Recovery(handler)`, `DeduplicateSummary(handler)`, `SyntheticQueries(...)`, `Strict(bool)`, or
+`OutputSchema(raw)` before building. `ParameterSchema(raw)` supplies a complete schema when type
+inference does not fit your input. It cannot be combined with `Parameters(...)`. For a tool with
+its own fields, media, or dynamic instructions, implement the full `gent.Tool[I, O]` interface.
+See [tool definitions](docs/native-tools.md#tool-definitions) for the complete contract.
 
 ### ToolChain
 
@@ -234,8 +237,9 @@ tc := toolchain.New().RegisterTool(tool)
 
 Use `toolchain.NewSearch` for a large catalog or wrap a chain with `NewJsToolChainWrapper` for
 programmatic calls. Custom chains can embed `Registry` and override selection. All chains use native
-calls, hooks, typed inputs, and recovery. Tools can add `gent.WithRecoveryMessage` callbacks with
-`*gent.RecoveryInfo` to guide the model after an unknown outcome.
+calls, hooks, typed inputs, and recovery. Each tool's `Recover` method returns a decision, optional
+steering, and the recovered output when complete. The builder's default is unresolved. Gent saves
+that decision before using it; saved results always take precedence.
 
 ### Termination
 
@@ -391,9 +395,9 @@ if err := tc.Initialize(); err != nil {
 agent := react.NewAgent(model).WithToolChain(tc)
 ```
 
-Tools registered with `SearchChain` must implement both `gent.Tool[I, O]` and
-`gent.IndexableTool`. The extra metadata lets Gent index the tool by domain, category, keyword,
-description, and synthetic example queries.
+Search metadata is part of every `gent.Tool[I, O]`. Set the builder's domain, categories, keywords,
+and example queries to help the search engine. `gent.IndexableTool` is the metadata view used by
+search engines; a separate wrapper is not needed.
 
 ## Customization Guide
 

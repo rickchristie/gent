@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
-// Reuse the field guide's installed test dependency without changing its package or lockfile.
-const require = createRequire(new URL('../code/package.json', import.meta.url));
+// Share Quickstart's browser dependency so documentation tests use the same version.
+const require = createRequire(new URL('../quickstart/package.json', import.meta.url));
 const { chromium } = require('playwright');
 const launch = { headless: true };
 if (process.env.GENT_REVIEW_CHROMIUM) launch.executablePath = process.env.GENT_REVIEW_CHROMIUM;
@@ -55,7 +55,7 @@ try {
     assert.equal(await text('#interface-count'), '52named interfaces');
     assert.equal(
       await text('#scope-detail'),
-      '3 new or changed declarations · 18 supporting types · 8 structural capabilities',
+      '2 new or changed declarations · 20 supporting types · 8 structural capabilities',
     );
     assert.equal(await page.locator('.map-group').count(), 7);
     assert.equal(await page.evaluate(() => document.fonts.check('16px GuideSans')), true);
@@ -134,7 +134,7 @@ try {
     );
     await page.click('#clear-filters');
     await page.selectOption('#kind', 'support');
-    assert.equal(await page.locator('.contract-row').count(), 18);
+    assert.equal(await page.locator('.contract-row').count(), 20);
     const supports = await page
       .locator('.contract-row')
       .evaluateAll((nodes) => nodes.map((node) => node.dataset.open));

@@ -16,23 +16,26 @@ type OrderInput struct {
 }
 
 func newAgent(model gent.Model) *react.Agent {
-	tool := gent.NewToolFunc("lookup_order", "Read an order status.",
-		schema.Object(map[string]*schema.Property{
-			"order_id": schema.String("The order ID, such as order-1001."),
-		}, "order_id"), func(ctx context.Context, input OrderInput) (string, error) {
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-			if input.OrderID != "order-1001" {
-				return "", fmt.Errorf("order not found: %s", input.OrderID)
-			}
-			return "Order order-1001 has shipped.", nil
-		})
+	tool := gent.DefineTool("lookup_order", lookupOrder).
+		Description("Read an order status.").
+		Parameters(schema.Field("order_id").
+			Description("The order ID, such as order-1001.").MinLength(1)).
+		Recovery(recoverOrder).MustBuild()
 	return react.NewAgent(model).RegisterTool(tool).
 		WithRecoveryVersion("order-streaming/v1").
 		WithBehaviorAndContext("Help the user check an order.").
 		WithCriticalRules("Use lookup_order for order facts. Do not invent a status.").
 		WithCallOptions(gent.WithMaxTokens(1024))
+}
+
+func lookupOrder(ctx context.Context, input OrderInput) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if input.OrderID != "order-1001" {
+		return "", fmt.Errorf("order not found: %s", input.OrderID)
+	}
+	return "Order order-1001 has shipped.", nil
 }
 
 // The demo provider makes the complete example usable without credentials or API calls.
@@ -90,13 +93,7 @@ func (m *DemoModel) answer(parent context.Context) (gent.Stream, error) {
 	return stream, nil
 }
 
-// Only the named read-only tool can be retried without an external receipt.
-func recoverTool(_ context.Context, request *gent.ToolRecoveryRequest) (
-	*gent.ToolRecoveryResult, error,
-) {
-	status := gent.ToolRecoveryUnresolved
-	if request.Name == "lookup_order" {
-		status = gent.ToolRecoveryRetryAllowed
-	}
-	return &gent.ToolRecoveryResult{Status: status}, nil
+// The order lookup reads current state and has no external side effects.
+func recoverOrder(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
+	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
 }

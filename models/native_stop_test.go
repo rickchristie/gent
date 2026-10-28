@@ -86,11 +86,10 @@ record
 			}
 			calls := 0
 			agent := react.NewAgent(models.NewLCGWrapper(provider)).RegisterTool(
-				gent.NewToolFunc("lookup", "Read", nil,
-					func(context.Context, map[string]any) (string, error) {
-						calls++
-						return "record", nil
-					}))
+				gent.DefineTool("lookup", func(context.Context, map[string]any) (string, error) {
+					calls++
+					return "record", nil
+				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "http", gent.NewBasicLoopData(
 				&gent.Task{Text: "Read two records."}))
 			result, err := agent.Next(ctx)

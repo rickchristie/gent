@@ -81,7 +81,6 @@ type RestoreBindings struct {
 	Codecs             *CodecRegistry
 	Data               LoopData
 	Compatibility      CompatibilityManifest
-	ToolRecovery       ToolRecovery
 	Components         map[string]CheckpointState
 	CompactionStrategy CompactionStrategy
 	CompactionTrigger  CompactionTrigger
@@ -96,14 +95,17 @@ var (
 	ErrUncertainTool          = errors.New("gent: tool outcome is uncertain")
 )
 
-type ToolRecoveryStatus string
+// ToolRecoveryResult is a tool's decision about an interrupted operation.
+type ToolRecoveryResult string
 
 const (
-	ToolRecoveryCompleted    ToolRecoveryStatus = "completed"
-	ToolRecoveryRetryAllowed ToolRecoveryStatus = "retry_allowed"
-	ToolRecoveryUnresolved   ToolRecoveryStatus = "unresolved"
+	ToolRecoveryCompleted    ToolRecoveryResult = "completed"
+	ToolRecoveryRetryAllowed ToolRecoveryResult = "retry_allowed"
+	ToolRecoveryUnresolved   ToolRecoveryResult = "unresolved"
 )
 
+// ToolRecoveryRequest contains the original call identity and saved effective input.
+// AttemptId identifies the interrupted attempt; ToolCallId is stable across attempts.
 type ToolRecoveryRequest struct {
 	RunId      string
 	ContextId  string
@@ -114,22 +116,19 @@ type ToolRecoveryRequest struct {
 	Input      EncodedValue
 }
 
-type ToolRecoveryResult struct {
-	Status ToolRecoveryStatus
-	Result *ToolCallResult
+// ToolRecoveryResponse keeps the decision and its explanation together. Output is required
+// only for Completed and must be nil otherwise. Gent supplies the saved call identity and input.
+// SteeringMessage is saved with the decision and added to the resulting tool observation.
+// For RetryAllowed it accompanies the retry's result. It never authorizes a retry on its own.
+type ToolRecoveryResponse struct {
+	Result          ToolRecoveryResult
+	SteeringMessage string
+	Output          *ToolCallResult
 }
 
-type ToolRecovery interface {
-	Recover(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResult, error)
-}
-
-type ToolRecoveryFunc func(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResult, error)
-
-func (f ToolRecoveryFunc) Recover(ctx context.Context, request *ToolRecoveryRequest) (
-	*ToolRecoveryResult, error,
-) {
-	return f(ctx, request)
-}
+// ToolRecoveryFunc is the handler accepted by ToolBuilder.Recovery.
+// Handlers must be safe to repeat if a process stops before the decision is saved.
+type ToolRecoveryFunc func(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)
 
 type toolIdentityKey struct{}
 

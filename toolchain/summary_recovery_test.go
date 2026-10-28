@@ -41,18 +41,19 @@ func TestToolPlanKeepsCapturedSummary(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			toolCalls, summaryCalls := 0, 0
-			tool := newIndexableTool("lookup", "Read the answer", "Answer", nil, nil,
+			tool := gent.DefineTool("lookup",
 				func(context.Context, map[string]any) (string, error) {
 					toolCalls++
 					return "answer", nil
-				})
-			tool.WithDeduplicateSummary(func(map[string]any, string) string {
-				summaryCalls++
-				if test.input.empty {
-					return ""
-				}
-				return fmt.Sprintf("summary %d", summaryCalls)
-			})
+				}).Description("Read the answer").Domain("Answer").ParameterSchema(nil).
+				DeduplicateSummary(func(map[string]any, string) string {
+					summaryCalls++
+					if test.input.empty {
+						return ""
+					}
+					return fmt.Sprintf("summary %d", summaryCalls)
+				}).MustBuild()
+
 			chain := test.input.chain()
 			chain.RegisterTool(tool)
 			if search, ok := chain.(*SearchChain); ok {

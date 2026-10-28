@@ -38,12 +38,12 @@ func (model *nativeRecoveryModel) GenerateContentStream(_ context.Context,
 }
 
 func newNativeRecoveryAgent(model *nativeRecoveryModel, calls *[]gent.ToolIdentity) *react.Agent {
-	chain := toolchain.New().RegisterTool(gent.NewToolFunc("policy", "Read the policy", nil,
+	chain := toolchain.New().RegisterTool(gent.DefineTool("policy",
 		func(ctx context.Context, input recoveryInput) (string, error) {
 			identity, _ := gent.ToolIdentityFromContext(ctx)
 			*calls = append(*calls, identity)
 			return input.Id + ": exact original text", nil
-		}))
+		}).Description("Read the policy").ParameterSchema(nil).MustBuild())
 	if model.code {
 		chain = toolchain.NewJsToolChainWrapper(chain)
 	}

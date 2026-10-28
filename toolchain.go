@@ -1,6 +1,9 @@
 package gent
 
-import "github.com/rickchristie/gent/schema"
+import (
+	"context"
+	"github.com/rickchristie/gent/schema"
+)
 
 // ToolCallResult represents the complete result of a single tool call,
 // including both raw typed data and formatted output for the LLM.
@@ -69,13 +72,13 @@ type ToolChainResult struct {
 // and override NativeTools to control visibility while retaining validation, hooks, and recovery.
 // RegisterCodecs and RecoveryConfig describe saved state and binding compatibility.
 type ToolChain interface {
-	RegisterTool(any, ...ToolOption) ToolChain
+	RegisterTool(any) ToolChain
 	NativeTools(*ExecutionContext) ([]ToolDefinition, error)
 	PrepareCalls(*ExecutionContext, []ModelToolCall) (*ToolPlan, error)
 	ExecuteNext(*ExecutionContext, *ToolPlan, TextFormat) (*ToolCallResult, error)
 	GetToolSchema(string) *schema.Schema
 	DeduplicateSummary(*ToolCallResult) string
-	RecoveryMessage(*RecoveryInfo) string
+	Recover(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)
 	RegisterCodecs(*CodecRegistry) error
 	RecoveryConfig() any
 }

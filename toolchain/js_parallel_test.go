@@ -24,7 +24,7 @@ func TestNativeJavaScript_ParallelOverlap(t *testing.T) {
 	defer ctx.Release()
 	var active, peak, started atomic.Int32
 	ready := []chan struct{}{make(chan struct{}), make(chan struct{})}
-	chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+	chain := New().RegisterTool(gent.DefineTool("lookup",
 		func(ctx context.Context, args map[string]any) (string, error) {
 			count := active.Add(1)
 			defer active.Add(-1)
@@ -44,7 +44,7 @@ func TestNativeJavaScript_ParallelOverlap(t *testing.T) {
 			case <-ctx.Done():
 				return "", ctx.Err()
 			}
-		}))
+		}).Description("Read data").ParameterSchema(nil).MustBuild())
 	wrapper := NewJsToolChainWrapper(chain)
 	result, err := executeTestCode(wrapper, ctx, `for (let i = 0; i < 2; i++) {
 const results = tool.parallelCall([
@@ -160,7 +160,7 @@ lookup failed,checked-second
 				})
 			var chain gent.ToolChain = New().RegisterTool(tool)
 			if test.input.search {
-				chain = setupSearchChain([]*indexableToolFunc{tool},
+				chain = setupSearchChain([]indexableToolFunc{tool},
 					[]gent.ToolSearcher{NewRegexToolSearcher()})
 			}
 			wrapper := NewJsToolChainWrapper(chain)
@@ -224,14 +224,14 @@ func TestNativeJavaScript_ParallelCancellation(t *testing.T) {
 	defer ctx.Release()
 	started := make(chan struct{}, 2)
 	var active atomic.Int32
-	chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+	chain := New().RegisterTool(gent.DefineTool("lookup",
 		func(ctx context.Context, _ map[string]any) (string, error) {
 			active.Add(1)
 			defer active.Add(-1)
 			started <- struct{}{}
 			<-ctx.Done()
 			return "", ctx.Err()
-		}))
+		}).Description("Read data").ParameterSchema(nil).MustBuild())
 	done := make(chan error, 1)
 	go func() {
 		_, err := executeTestCode(NewJsToolChainWrapper(chain), ctx, `tool.parallelCall([
@@ -295,9 +295,9 @@ func TestNativeJavaScript_ParallelRecovery(t *testing.T) {
 		beforeCalls bool
 	}
 	type expected struct {
-		started, completed, uncertain int
-		outcomes                      []string
-		err                           error
+		started  int
+		outcomes []string
+		err      error
 	}
 	type testCase struct {
 		name     string
@@ -307,10 +307,10 @@ func TestNativeJavaScript_ParallelRecovery(t *testing.T) {
 	saveError := errors.New("parallel save failed")
 	cases := []testCase{
 		{"before tool calls", input{true, true},
-			expected{0, 0, 0, []string{"not_started", "not_started"}, saveError}},
-		{"lost result", input{}, expected{2, 0, 2, []string{"unknown", "unknown"}, saveError}},
+			expected{0, []string{"not_started", "not_started"}, saveError}},
+		{"lost result", input{}, expected{2, []string{"unknown", "unknown"}, saveError}},
 		{"lost acknowledgement", input{afterSave: true},
-			expected{2, 1, 1, []string{"", "unknown"}, saveError}},
+			expected{2, []string{"", "unknown"}, saveError}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -318,9 +318,8 @@ func TestNativeJavaScript_ParallelRecovery(t *testing.T) {
 			defer cancel()
 			var started, active atomic.Int32
 			ready := make(chan struct{})
-			var recovery *gent.RecoveryInfo
 			build := func() *JsToolChainWrapper {
-				chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+				chain := New().RegisterTool(gent.DefineTool("lookup",
 					func(ctx context.Context, args map[string]any) (string, error) {
 						active.Add(1)
 						defer active.Add(-1)
@@ -337,12 +336,8 @@ func TestNativeJavaScript_ParallelRecovery(t *testing.T) {
 						case <-ctx.Done():
 							return "", ctx.Err()
 						}
-					}))
-				return NewJsToolChainWrapper(chain).WithRecoveryMessage(
-					func(info *gent.RecoveryInfo) string {
-						recovery = info
-						return "Check both calls before trying again."
-					})
+					}).Description("Read data").ParameterSchema(nil).MustBuild())
+				return NewJsToolChainWrapper(chain)
 			}
 			store := &parallelSaveFailure{codecs: gent.NewCodecRegistry(),
 				afterSave: test.input.afterSave, beforeCalls: test.input.beforeCalls, err: saveError}
@@ -350,11 +345,12 @@ func TestNativeJavaScript_ParallelRecovery(t *testing.T) {
 				gent.WithRecorder(store), gent.WithCodecs(store.codecs))
 			defer ctx.Release()
 			store.view = gent.RunView{SchemaVersion: gent.RunSchemaVersion, RunId: ctx.RunId()}
-			_, err := executeTestCode(build(), ctx, `tool.parallelCall([
+			const script = `tool.parallelCall([
   {tool: "lookup", args: {id: "first"}},
   {tool: "lookup", args: {id: "second"}}
 ]);
-tool.call({tool: "lookup", args: {id: "later"}});`, format.NewXML())
+tool.call({tool: "lookup", args: {id: "later"}});`
+			_, err := executeTestCode(build(), ctx, script, format.NewXML())
 			assert.ErrorIs(t, err, test.expected.err)
 			assert.Equal(t, int32(test.expected.started), started.Load())
 			assert.Equal(t, int32(0), active.Load())
@@ -385,7 +381,7 @@ tool.call({tool: "lookup", args: {id: "later"}});`, format.NewXML())
 			}
 			assert.ErrorIs(t, result.Error, gent.ErrUncertainTool)
 			assert.Equal(t, "unknown", result.Outcome)
-			assert.Equal(t, "Check both calls before trying again.", result.Instructions)
+			assert.Equal(t, "", result.Instructions)
 			partial := result.Output.(*gent.ToolChainResult)
 			var outcomes, ids []string
 			var wantCalls []*gent.ToolCallResult
@@ -405,7 +401,8 @@ tool.call({tool: "lookup", args: {id: "later"}});`, format.NewXML())
 					want.Input, want.AttemptId = args, ctx.AttemptId()
 					want.Error = gent.ErrUncertainTool
 					want.Text = fmt.Sprintf(`Tool lookup (call %s):
-%s`, want.ToolCallId, gent.DefaultRecoveryMessage)
+%s`, want.ToolCallId, `The operation was interrupted. Its outcome is unknown.
+It may have completed. Check the current state before you decide whether to repeat it.`)
 				default:
 					want.Input, want.AttemptId, want.Output = args, ctx.AttemptId(), "first"
 					want.Hash = ToolCallResultHash("lookup", args)
@@ -421,20 +418,17 @@ first
 			texts := []string{fmt.Sprintf(
 				`JavaScript execution was interrupted. The script will not be restarted.
 Script:
-%s`, recovery.Script)}
+%s`, script)}
 			for _, call := range wantCalls {
 				texts = append(texts, call.Text)
 			}
-			texts = append(texts, "Review these results and make a new plan.", `Recovery guidance:
-Check both calls before trying again.`)
+			texts = append(texts, "Review these results and make a new plan.")
 			assert.Equal(t, &gent.ToolCallResult{Name: "run_code", Args: plan.Calls[0].Args,
 				ToolCallId: plan.Calls[0].Id, AttemptId: ctx.AttemptId(), Outcome: "unknown",
 				Output: &gent.ToolChainResult{Results: wantCalls}, Error: gent.ErrUncertainTool,
-				Text:            strings.Join(texts, "\n\n"),
-				Instructions:    "Check both calls before trying again.",
+				Text: strings.Join(texts, "\n\n"),
+
 				SummaryCaptured: true}, result)
-			assert.Len(t, recovery.Completed, test.expected.completed)
-			assert.Len(t, recovery.Uncertain, test.expected.uncertain)
 			assert.Equal(t, int64(test.expected.started), fresh.Stats().GetCounter(gent.SCToolCalls))
 			assert.Equal(t, int32(test.expected.started), started.Load())
 			assertProgramStateCleared(t, fresh)
@@ -451,7 +445,7 @@ func TestNativeJavaScript_ParallelSearch(t *testing.T) {
 	ready := make(chan struct{})
 	tool := newIndexableTool("lookup", "Read data", "Data", nil, nil,
 		func(context.Context, map[string]any) (string, error) { return "record", nil })
-	chain := setupSearchChain([]*indexableToolFunc{tool}, []gent.ToolSearcher{
+	chain := setupSearchChain([]indexableToolFunc{tool}, []gent.ToolSearcher{
 		&mockToolSearcher{id: "test",
 			searchFn: func(ctx context.Context, _ string) ([]string, error) {
 				if started.Add(1) == 2 {
@@ -523,11 +517,11 @@ func TestNativeJavaScript_ParallelRequiresSupport(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			var calls atomic.Int32
-			chain := New().RegisterTool(gent.NewToolFunc("lookup", "Read data", nil,
+			chain := New().RegisterTool(gent.DefineTool("lookup",
 				func(context.Context, map[string]any) (string, error) {
 					calls.Add(1)
 					return "record", nil
-				}))
+				}).Description("Read data").ParameterSchema(nil).MustBuild())
 			ctx := newExecCtx()
 			defer ctx.Release()
 			result, err := executeTestCode(NewJsToolChainWrapper(test.input.wrap(chain)), ctx,
@@ -663,7 +657,7 @@ func TestNativeJavaScript_ParallelPanicStopsCalls(t *testing.T) {
 			defer ctx.Release()
 			var calls, active atomic.Int32
 			started := make(chan struct{})
-			tools := []*indexableToolFunc{
+			tools := []indexableToolFunc{
 				newIndexableTool("fail", "Fail", "Data", nil, nil,
 					func(callCtx context.Context, _ map[string]any) (string, error) {
 						calls.Add(1)

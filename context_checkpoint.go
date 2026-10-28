@@ -432,8 +432,8 @@ func RestoreExecutionContext(
 		codecs:    registry, id: bundle.RunId,
 		attempt: randomIdentity(), allocation: bundle.Runtime.Allocation, root: ctx,
 		working: bundle.History, compatibility: cloneWire(checkpoint.Compatibility),
-		toolRecovery: bindings.ToolRecovery, extensions: cloneWire(state.Extensions),
-		archived: cloneWire(checkpoint.Contexts[1:])}
+		extensions: cloneWire(state.Extensions),
+		archived:   cloneWire(checkpoint.Contexts[1:])}
 	for _, runtime := range bundle.Runtime.Contexts {
 		if runtime.ContextId != ctx.contextId {
 			ctx.run.archivedRuntime = append(ctx.run.archivedRuntime, cloneWire(runtime))

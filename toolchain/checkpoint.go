@@ -8,9 +8,6 @@ import (
 )
 
 func registerToolCodecs(registry *gent.CodecRegistry, tools []any) error {
-	if err := registry.RegisterValueType(reflect.TypeOf(gent.RecoveryInfo{})); err != nil {
-		return err
-	}
 	for _, tool := range tools {
 		call := reflect.ValueOf(tool).MethodByName("Call").Type()
 		if err := registry.RegisterValueType(call.In(1)); err != nil {
@@ -70,13 +67,7 @@ func executeNextTool(
 	}
 	unbind := ctx.BindToolCall(plan)
 	defer unbind()
-	result, completed, err := ctx.RecoverTool(plan)
-	if errors.Is(err, gent.ErrUncertainTool) {
-		result, err = unknownTool(ctx, plan.ReadyCall, chain)
-		if err == nil {
-			return completePlannedTool(ctx, plan, result)
-		}
-	}
+	result, completed, err := ctx.RecoverTool(plan, chain.Recover)
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +122,7 @@ func completePlannedTool(
 	plan.Results = append(plan.Results, result)
 	plan.NextCall++
 	plan.ReadyCall = nil
+	plan.RecoverySteering = ""
 	if err := ctx.SetToolPlan(plan); err != nil {
 		return nil, err
 	}

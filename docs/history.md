@@ -235,7 +235,6 @@ result, err := freshExecutor.Resume(worker, saved, gent.RestoreBindings{
     Recorder: replacementWriter,
     Observers: []gent.RecordedEventObserver{seq},
     Codecs: codecs,
-    ToolRecovery: recovery,
     // Supply these together if the saved run used compaction.
     CompactionTrigger: trigger,
     CompactionStrategy: strategy,
@@ -272,17 +271,25 @@ work. Application code must not replace a terminal failure with an empty success
 
 Saving tool-ready happens before calling the tool. The process can die after an external write but
 before its result is saved. Gent cannot determine whether that action occurred from a checkpoint.
-The default result has an `unknown` outcome and standard recovery guidance. A per-tool
-`gent.WithRecoveryMessage(func(*gent.RecoveryInfo) string)` callback can add application guidance.
-Later unstarted calls receive `not_started` results. The model can then make a new plan.
+Each tool's `Recover` method receives a context and `*ToolRecoveryRequest`. The request contains
+the stable logical ID, interrupted attempt, original arguments, and saved effective input. It
+returns `*ToolRecoveryResponse` with `Result`, optional `SteeringMessage`, and optional `Output`.
+Use `ToolRecoveryCompleted` with the full `*ToolCallResult`, `ToolRecoveryRetryAllowed` only when
+another attempt is safe, or `ToolRecoveryUnresolved` when the outcome cannot be established.
+Only completed responses can have an output. Invalid responses and handler errors stop recovery.
 
-`ToolRecoveryFunc` receives a context and `*ToolRecoveryRequest` and returns `*ToolRecoveryResult`.
-The request contains the stable logical ID, previous attempt, arguments, and effective input. It
-must return one of `ToolRecoveryCompleted` with the full result, `ToolRecoveryRetryAllowed`, or
-`ToolRecoveryUnresolved`. A durable saved result takes precedence over that adapter. An authorized
-retry uses the same logical ID, a new attempt, and the original effective input without rerunning
-its mutation hook. Tools can read `ToolIdentityFromContext` and pass that ID to an external
-idempotency mechanism. Gent makes no exactly-once guarantee about external side effects.
+The builder's `.Recovery(handler)` sets this method. Its default returns unresolved. Static steering
+can be returned from the handler; no separate message setting or restore-time handler is needed.
+Gent always keeps the basic facts of an unknown outcome. Later unstarted calls get `not_started`
+results, and the model can make a new plan. Message text alone never authorizes a retry.
+
+Accepted result evidence takes precedence over a recovery handler. Gent also saves a recovery
+decision before using it, so a lost acknowledgement does not lose the decision or message. A check
+must be safe to repeat if it stops before that save. An authorized retry uses the same logical ID,
+a new attempt, and the original effective input without rerunning its mutation hook. Steering is
+included in the recovered result or the retry's result. Tools can read `ToolIdentityFromContext`
+and pass the stable call ID to an external idempotency mechanism. Gent makes no exactly-once
+guarantee about external side effects.
 
 Tool summaries are captured once with the completed result. Recovery keeps that value, including
 an empty summary, so it cannot change when the callback or application state changes.
@@ -290,7 +297,7 @@ an empty summary, so it cannot change when the callback or application state cha
 ### Compatibility and custom state
 
 Set ReAct's `WithRecoveryVersion` to identify application behavior: hooks, prompts, clocks, tool
-implementations, validators, custom sections, and private provider defaults. Change it when their
+implementations and recovery handlers, validators, custom sections, and private provider defaults. Change it when their
 meaning changes. Built-in configuration hashes also include prompt/format/tool declarations, model
 identity/options, repetition settings, and compaction configuration.
 `LCGWrapper.WithRecoveryVersion` can identify configuration hidden inside its injected client.

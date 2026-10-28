@@ -86,7 +86,6 @@ type SearchChain struct {
 	pinnedToolNames   []string
 	pageSize          int
 	noResultsMessage  string
-	recovery          map[string]gent.RecoveryMessageProvider
 	printOutputSchema bool
 
 	// Computed by Initialize()
@@ -102,7 +101,6 @@ func NewSearch(
 ) *SearchChain {
 	return &SearchChain{
 		printOutputSchema: true,
-		recovery:          make(map[string]gent.RecoveryMessageProvider),
 		hintType:          hintType,
 		tools:             make([]any, 0),
 		toolMap:           make(map[string]any),
@@ -178,16 +176,12 @@ func (c *SearchChain) Pin(
 	return c
 }
 
-// RegisterTool adds a tool to the chain. The tool must
-// implement both Tool[I, O] and IndexableTool.
+// RegisterTool adds a tool with its search metadata. It must implement the full Tool[I, O].
 //
 // Panics if:
 //   - tool doesn't implement Tool[I, O] (invalid type)
-//   - tool doesn't implement IndexableTool
 //   - a tool with the same name is already registered
-func (c *SearchChain) RegisterTool(
-	tool any, options ...gent.ToolOption,
-) gent.ToolChain {
+func (c *SearchChain) RegisterTool(tool any) gent.ToolChain {
 	meta, err := GetToolMeta(tool)
 	if err != nil {
 		panic(fmt.Sprintf(
@@ -196,15 +190,7 @@ func (c *SearchChain) RegisterTool(
 		))
 	}
 
-	// Must implement IndexableTool
-	indexable, ok := tool.(gent.IndexableTool)
-	if !ok {
-		panic(fmt.Sprintf(
-			"SearchChain.RegisterTool: tool %q "+
-				"must implement IndexableTool",
-			meta.Name(),
-		))
-	}
+	indexable := tool.(gent.IndexableTool)
 
 	// Check duplicate
 	if _, exists := c.toolMap[meta.Name()]; exists {
@@ -215,11 +201,6 @@ func (c *SearchChain) RegisterTool(
 		))
 	}
 
-	config := gent.ToolOptions{}
-	for _, option := range options {
-		option(&config)
-	}
-	c.recovery[meta.Name()] = config.RecoveryMessage
 	c.tools = append(c.tools, tool)
 	c.toolMap[meta.Name()] = tool
 	c.indexableTools = append(c.indexableTools, indexable)

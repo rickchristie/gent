@@ -85,13 +85,13 @@ func TestAgent_NativeLimits(t *testing.T) {
 		for _, stop := range []int{1, 3} {
 			t.Run(fmt.Sprintf("%s/iteration %d", test.name, stop), func(t *testing.T) {
 				model := &limitModel{kind: test.input.kind}
-				chain := toolchain.New().RegisterTool(gent.NewToolFunc("work", "Do work", nil,
+				chain := toolchain.New().RegisterTool(gent.DefineTool("work",
 					func(context.Context, map[string]any) (string, error) {
 						if test.input.kind == "error" {
 							return "", errors.New("failed")
 						}
 						return "done", nil
-					}))
+					}).Description("Do work").ParameterSchema(nil).MustBuild())
 				if test.input.kind == "code" {
 					chain = toolchain.NewJsToolChainWrapper(chain)
 				}
@@ -158,13 +158,12 @@ func TestAgent_NativePrefixLimit(t *testing.T) {
 			model := newMockModel(responses...)
 			agent := NewAgent(model)
 			for _, name := range []string{"alpha", "beta"} {
-				agent.RegisterTool(gent.NewToolFunc(name, "Do work", nil,
-					func(context.Context, map[string]any) (string, error) {
-						if test.input.failures {
-							return "", errors.New("failed")
-						}
-						return "done", nil
-					}))
+				agent.RegisterTool(gent.DefineTool(name, func(context.Context, map[string]any) (string, error) {
+					if test.input.failures {
+						return "", errors.New("failed")
+					}
+					return "done", nil
+				}).Description("Do work").ParameterSchema(nil).MustBuild())
 			}
 			limit := gent.Limit{Type: gent.LimitKeyPrefix, Key: test.input.key, MaxValue: 2}
 			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Use both tools."}))
