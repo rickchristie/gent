@@ -170,7 +170,7 @@ func TestToolRecoveryRejectsInvalidResponses(t *testing.T) {
 			if fresh != nil {
 				defer fresh.Release()
 			}
-			assert.EqualError(t, err, "AgentLoop.Next (iteration 1): "+test.expected.err)
+			assert.EqualError(t, err, "Loop.Next (iteration 1): "+test.expected.err)
 			assert.Empty(t, calls)
 		})
 	}
@@ -192,7 +192,7 @@ func TestToolRecoveryRetryInsideProgram(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			calls := map[string]int{}
 			recoveries := []string{}
-			build := func(model *guidanceModel) *react.Agent {
+			build := func(model *guidanceModel) *react.Agent[string] {
 				var chain gent.ToolChain = toolchain.New()
 				for _, name := range []string{"lookup", "book", "later"} {
 					tool := gent.DefineTool(name,
@@ -218,11 +218,11 @@ func TestToolRecoveryRetryInsideProgram(t *testing.T) {
 			store := &guidanceStore{codecs: gent.NewCodecRegistry(), cancel: cancel,
 				view: gent.RunView{SchemaVersion: gent.RunSchemaVersion, RunId: "retry"}}
 			agent := build(&guidanceModel{program: test.input.program})
-			data := gent.NewBasicLoopData(&gent.Task{Text: "Check the booking."})
+			data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Check the booking."}))
 			ctx := gent.NewExecutionContext(worker, "booking", data,
 				gent.WithRunId("retry"), gent.WithCodecs(store.codecs), gent.WithRecorder(store))
 			defer ctx.Release()
-			_, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+			_, _, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			if !assert.ErrorIs(t, err, context.Canceled) {
 				return
 			}

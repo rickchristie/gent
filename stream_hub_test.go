@@ -15,18 +15,22 @@ func TestStreamHub_SubscribeAll_ReceivesAllChunks(t *testing.T) {
 	defer unsub()
 
 	go func() {
-		hub.emit(StreamChunk{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "hello"}}})
+		hub.emit(StreamChunk{
+			MetaContent: []*MetaContent{
+				{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}}},
+			},
+		})
 		hub.emit(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "world",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "world"}},
 				},
 			}, StreamId: "s1",
 		})
 		hub.emit(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "!",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "!"}},
 				},
 			}, StreamTopicId: "topic1",
 		})
@@ -64,22 +68,26 @@ func TestStreamHub_SubscribeToStream_FiltersCorrectly(t *testing.T) {
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "skip",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "skip"}},
 							},
 						}, StreamId: "other-stream",
 					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "hello",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 							},
 						}, StreamId: "target-stream",
 					},
-					{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "skip again"}}},
+					{
+						MetaContent: []*MetaContent{
+							{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "skip again"}}},
+						},
+					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "world",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "world"}},
 							},
 						}, StreamId: "target-stream",
 					},
@@ -138,22 +146,26 @@ func TestStreamHub_SubscribeToTopic_FiltersCorrectly(t *testing.T) {
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "skip",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "skip"}},
 							},
 						}, StreamTopicId: "other-topic",
 					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "hello",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 							},
 						}, StreamTopicId: "my-topic",
 					},
-					{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "skip again"}}},
+					{
+						MetaContent: []*MetaContent{
+							{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "skip again"}}},
+						},
+					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "world",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "world"}},
 							},
 						}, StreamTopicId: "my-topic",
 					},
@@ -206,7 +218,11 @@ func TestStreamHub_Unsubscribe(t *testing.T) {
 
 	ch, unsub := hub.subscribeAll()
 
-	hub.emit(StreamChunk{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "first"}}})
+	hub.emit(StreamChunk{
+		MetaContent: []*MetaContent{
+			{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "first"}}},
+		},
+	})
 
 	unsub()
 
@@ -227,8 +243,16 @@ func TestStreamHub_DrainingUnsubscribeKeepsQueuedChunks(t *testing.T) {
 	hub := newStreamHub()
 
 	ch, unsub := hub.subscribeAllDraining()
-	hub.emit(StreamChunk{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "first"}}})
-	hub.emit(StreamChunk{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "second"}}})
+	hub.emit(StreamChunk{
+		MetaContent: []*MetaContent{
+			{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "first"}}},
+		},
+	})
+	hub.emit(StreamChunk{
+		MetaContent: []*MetaContent{
+			{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "second"}}},
+		},
+	})
 	unsub()
 
 	var contents []string
@@ -247,7 +271,11 @@ func TestStreamHub_MultipleSubscribers(t *testing.T) {
 	defer unsub2()
 
 	go func() {
-		hub.emit(StreamChunk{MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "hello"}}})
+		hub.emit(StreamChunk{
+			MetaContent: []*MetaContent{
+				{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}}},
+			},
+		})
 		hub.close()
 	}()
 
@@ -275,8 +303,10 @@ func TestStreamHub_ConcurrentEmit(t *testing.T) {
 			defer wg.Done()
 			for j := range chunksPerEmitter {
 				hub.emit(StreamChunk{
-					MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "chunk"}},
-					StreamId:    string(rune(emitterID*1000 + j)),
+					MetaContent: []*MetaContent{
+						{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "chunk"}}},
+					},
+					StreamId: string(rune(emitterID*1000 + j)),
 				})
 			}
 		}(i)
@@ -327,7 +357,7 @@ func TestStreamHub_EmitAfterClose(t *testing.T) {
 	hub.emit(StreamChunk{
 		MetaContent: []*MetaContent{
 			{
-				Type: MetaContentIntermediary, Text: "should be ignored",
+				Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "should be ignored"}},
 			},
 		},
 	}) // Should not panic

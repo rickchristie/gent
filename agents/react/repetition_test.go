@@ -32,12 +32,22 @@ func TestAgent_RepetitionDetection_Recovery(t *testing.T) {
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: loopingResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: validResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: validResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
 
@@ -45,7 +55,7 @@ func TestAgent_RepetitionDetection_Recovery(t *testing.T) {
 		WithRepetitionConfig(cfg).
 		WithToolChain(newMockToolChain())
 
-	data := gent.NewBasicLoopData(&gent.Task{Text: "test task"})
+	data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test task"}))
 	execCtx := gent.NewExecutionContext(context.Background(), "repetition-test", data)
 
 	// First call: model loops -> detected -> truncated -> format error -> LAContinue.
@@ -84,15 +94,20 @@ func TestAgent_RepetitionDetection_TerminateImmediately(t *testing.T) {
 	loopingResponse := strings.Repeat(loopBlock, 5)
 
 	model := newMockModel(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
-		Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: loopingResponse}},
+			},
+		},
+		Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 	})
 
 	agent := NewAgent(model).
 		WithRepetitionConfig(cfg).
 		WithToolChain(newMockToolChain())
 
-	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+	data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test"}))
 	execCtx := gent.NewExecutionContext(context.Background(), "term-test", data)
 
 	_, err := agent.Next(execCtx)
@@ -116,13 +131,21 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: loopingResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{ToolCalls: []gent.ModelToolCall{
-				nativeTestCall("work", "test_tool", "{}"),
-			}}},
+			Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
+				Status: gent.ModelStatusToolCalls,
+			},
+				ToolCalls: []gent.ModelToolCall{
+					nativeTestCall("work", "test_tool", "{}"),
+				}}},
 			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
@@ -134,7 +157,7 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 
 	agent := NewAgent(model).WithRepetitionConfig(cfg).WithToolChain(tc)
 
-	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+	data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test"}))
 	execCtx := gent.NewExecutionContext(context.Background(), "gauge-test", data)
 
 	// Iteration 1: loop -> gauge=1
@@ -178,12 +201,22 @@ func TestAgent_MaxResponseChars_TooLongButNotLooping(t *testing.T) {
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: longResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 3000},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: longResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 3000},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: validResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: validResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
 
@@ -191,7 +224,7 @@ func TestAgent_MaxResponseChars_TooLongButNotLooping(t *testing.T) {
 		WithMaxResponseChars(500). // Very low limit to trigger truncation.
 		WithToolChain(newMockToolChain())
 
-	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+	data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test"}))
 	execCtx := gent.NewExecutionContext(context.Background(), "too-long-test", data)
 
 	// First call: too long but not looping -> conciseness reminder, LAContinue.
@@ -234,12 +267,22 @@ func TestAgent_MaxResponseChars_TooLongAndLooping(t *testing.T) {
 
 	model := newMockModel(
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: loopingResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 200},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: loopingResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 200},
 		},
 		&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: validResponse}},
-			Info:    &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: validResponse}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
 		},
 	)
 
@@ -248,7 +291,7 @@ func TestAgent_MaxResponseChars_TooLongAndLooping(t *testing.T) {
 		WithMaxResponseChars(len(loopingResponse) - 10). // Just under total, forces truncation.
 		WithToolChain(newMockToolChain())
 
-	data := gent.NewBasicLoopData(&gent.Task{Text: "test"})
+	data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test"}))
 	execCtx := gent.NewExecutionContext(context.Background(), "long-loop-test", data)
 
 	// First call: too long + loop detected -> loop recovery path.

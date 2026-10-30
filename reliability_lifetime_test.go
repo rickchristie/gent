@@ -23,7 +23,7 @@ func TestReliabilitySetupFailureReleasesContext(t *testing.T) {
 	defer cancel()
 	for i := 0; i < 32; i++ {
 		ctx := gent.NewExecutionContext(parent, "test", nil)
-		result, err := executor.NewRunner(failedSetupLoop{}, executor.Config{}).Execute(ctx)
+		_, result, err := executor.NewRunner(failedSetupLoop{}, executor.Config{}).Execute(ctx)
 		assert.Nil(t, result)
 		assert.EqualError(t, err, "setup failed")
 		assert.ErrorIs(t, ctx.Context().Err(), context.Canceled)
@@ -83,7 +83,10 @@ func TestReliabilityExportDuringAcceptance(t *testing.T) {
 	if !assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
 		MetaContent: []*gent.MetaContent{
 			{
-				Type: gent.MetaContentIntermediary, Text: "first",
+				Type: gent.MetaContentIntermediary,
+				Content: []gent.ContentPart{
+					gent.TextContent{Text: "first"},
+				},
 			},
 		},
 	})) {
@@ -103,7 +106,10 @@ func TestReliabilityExportDuringAcceptance(t *testing.T) {
 			assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
 				MetaContent: []*gent.MetaContent{
 					{
-						Type: gent.MetaContentIntermediary, Text: "next",
+						Type: gent.MetaContentIntermediary,
+						Content: []gent.ContentPart{
+							gent.TextContent{Text: "next"},
+						},
 					},
 				},
 			}))

@@ -28,33 +28,64 @@ func TestResponsesMetadataAndLastMessage(t *testing.T) {
 	cases := []testCase{
 		{"unknown phase", input{`[{"type":"message","phase":"progress",
 "content":[{"type":"output_text","text":"Working."}]}]`}, expected{metadata: []*gent.MetaContent{
-			{Type: "progress", Text: "Working.", MessageId: "output:0"}}}},
+			{
+				Type:      "progress",
+				Content:   []gent.ContentPart{gent.TextContent{Text: "Working."}},
+				MessageId: "output:0",
+			}}}},
 		{"unknown phase matches a display type", input{`[{"type":"message","phase":"intermediary",
 "content":[{"type":"output_text","text":"Working."}]}]`}, expected{metadata: []*gent.MetaContent{
-			{Type: gent.MetaContentIntermediary, Text: "Working.", MessageId: "output:0"}}}},
+			{
+				Type:      gent.MetaContentIntermediary,
+				Content:   []gent.ContentPart{gent.TextContent{Text: "Working."}},
+				MessageId: "output:0",
+			}}}},
 		{"last message is commentary", input{`[
 {"type":"message","content":[{"type":"output_text","text":"Maybe."}]},
 {"type":"message","phase":"commentary","content":[{"type":"output_text","text":"Checking."}]}]`},
 			expected{metadata: []*gent.MetaContent{
-				{Type: gent.MetaContentIntermediary, Text: "Maybe.", MessageId: "output:0"},
-				{Type: gent.MetaContentCommentary, Text: "Checking.", MessageId: "output:1"}}}},
+				{
+					Type:      gent.MetaContentIntermediary,
+					Content:   []gent.ContentPart{gent.TextContent{Text: "Maybe."}},
+					MessageId: "output:0",
+				},
+				{
+					Type:      gent.MetaContentCommentary,
+					Content:   []gent.ContentPart{gent.TextContent{Text: "Checking."}},
+					MessageId: "output:1",
+				}}}},
 		{"one candidate from multiple messages", input{`[
 {"type":"message","content":[{"type":"output_text","text":"First."}]},
 {"type":"message","phase":"final_answer","content":[{"type":"output_text","text":"Last."}]}]`},
 			expected{candidate: "Last.", source: &gent.ContentSource{MessageIds: []string{"output:1"}},
 				metadata: []*gent.MetaContent{
-					{Type: gent.MetaContentIntermediary, Text: "First.", MessageId: "output:0"},
-					{Type: gent.MetaContentIntermediary, Text: "Last.", MessageId: "output:1"}}}},
+					{
+						Type:      gent.MetaContentIntermediary,
+						Content:   []gent.ContentPart{gent.TextContent{Text: "First."}},
+						MessageId: "output:0",
+					},
+					{
+						Type:      gent.MetaContentIntermediary,
+						Content:   []gent.ContentPart{gent.TextContent{Text: "Last."}},
+						MessageId: "output:1",
+					}}}},
 		{"visible reasoning with opaque state", input{`[{"type":"reasoning",
 "encrypted_content":"opaque","content":[{"type":"reasoning_text","text":"Checked."}]}]`},
 			expected{metadata: []*gent.MetaContent{
-				{Type: gent.MetaContentReasoning, Text: "Checked.", MessageId: "output:0"}}}},
+				{
+					Type:      gent.MetaContentReasoning,
+					Content:   []gent.ContentPart{gent.TextContent{Text: "Checked."}},
+					MessageId: "output:0",
+				}}}},
 		{"text is never parsed as reasoning", input{`[{"type":"message",
 "content":[{"type":"output_text","text":"<think>Example</think>"}]}]`},
 			expected{candidate: "<think>Example</think>",
 				source: &gent.ContentSource{MessageIds: []string{"output:0"}},
 				metadata: []*gent.MetaContent{{Type: gent.MetaContentIntermediary,
-					Text: "<think>Example</think>", MessageId: "output:0"}}}},
+					Content: []gent.ContentPart{
+						gent.TextContent{Text: "<think>Example</think>"},
+					},
+					MessageId: "output:0"}}}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -77,7 +108,7 @@ func TestResponsesMetadataAndLastMessage(t *testing.T) {
 			}
 			var metadata []*gent.MetaContent
 			for chunk := range stream.Chunks() {
-				assert.Equal(t, "", chunk.Content)
+				assert.Equal(t, []gent.ContentPart(nil), chunk.Content)
 				metadata = append(metadata, chunk.MetaContent...)
 			}
 			result, err := stream.Response()
@@ -86,7 +117,7 @@ func TestResponsesMetadataAndLastMessage(t *testing.T) {
 			}
 			assert.Equal(t, test.expected.metadata, metadata)
 			choice := result.Choices[0]
-			assert.Equal(t, test.expected, expected{choice.CandidateContent,
+			assert.Equal(t, test.expected, expected{gent.ContentText(choice.CandidateContent),
 				choice.CandidateSource, choice.MetaContent, err})
 			assert.Equal(t, &gent.ProviderContinuation{Provider: "openai", Items: output},
 				choice.Continuation)

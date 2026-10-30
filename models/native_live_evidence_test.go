@@ -83,7 +83,9 @@ if (second.error) throw new Error(second.error);
 				if !assert.NoError(t, err) {
 					t.FailNow()
 				}
-				model.choices = append(model.choices, &gent.ContentChoice{
+				model.choices = append(model.choices, &gent.ContentChoice{Completion: gent.ModelCompletion{
+					Status: gent.ModelStatusToolCalls,
+				},
 					ToolCalls: []gent.ModelToolCall{{ID: fmt.Sprintf("call-%d", len(model.choices)),
 						Type: "function", FunctionCall: &gent.FunctionCall{Name: name, Arguments: string(data)}}},
 				})
@@ -96,7 +98,10 @@ if (second.error) throw new Error(second.error);
 				addCall("lookup", map[string]any{"id": "start"})
 				addCall("read", map[string]any{"id": "record-9"})
 			}
-			model.choices = append(model.choices, &gent.ContentChoice{CandidateContent: "record-finished"})
+			model.choices = append(model.choices, &gent.ContentChoice{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "record-finished"}},
+			})
 			actual := expected{}
 			chain, err := liveToolChain(&actual.calls, true)
 			if !assert.NoError(t, err) {
@@ -104,9 +109,11 @@ if (second.error) throw new Error(second.error);
 			}
 			loop := react.NewAgent(model).WithToolChain(chain).WithRecoveryVersion("live-evidence/v1")
 			ctx := gent.NewExecutionContext(context.Background(), "live evidence",
-				gent.NewBasicLoopData(&gent.Task{Text: "Search, then use code to read the record."}))
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{
+					Text: "Search, then use code to read the record.",
+				})))
 			ctx.SetLimits([]gent.Limit{{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 6}})
-			result, err := executor.New[gent.LoopData](loop, executor.DefaultConfig()).Execute(ctx)
+			_, result, err := executor.NewRunner(loop, executor.DefaultConfig()).Execute(ctx)
 			if !assert.NoError(t, err) {
 				return
 			}

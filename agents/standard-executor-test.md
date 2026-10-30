@@ -36,7 +36,7 @@ Use the strongest assertion that matches the behavior under test.
 Example exact error assertion:
 
 ```go
-assert.Equal(t, "AgentLoop.Next (iteration 2): boom", err.Error())
+assert.Equal(t, "Loop.Next (iteration 2): boom", err.Error())
 ```
 
 Example timestamp assertion:
@@ -51,8 +51,10 @@ Example complete event assertion:
 expectedEvents := []gent.Event{
 	tt.BeforeExec(0, 0),
 	tt.BeforeIter(0, 1),
-	tt.AfterIter(0, 1, tt.ContinueWithPrompt(expectedPrompt)),
-	tt.AfterExec(0, 1, gent.TerminationSuccess),
+	tt.AfterIter(0, 1, tt.Continue()),
+	tt.BeforeIter(0, 2),
+	tt.AfterIter(0, 2, tt.Terminate("Done.")),
+	tt.AfterExec(0, 2, gent.TerminationSuccess),
 }
 tt.AssertEventsEqual(t, expectedEvents, tt.CollectLifecycleEvents(execCtx))
 ```
@@ -65,8 +67,8 @@ These tests belong in `executor/` unless the behavior is specific to one agent.
 
 Cover the public executor API directly and keep these tests focused.
 
-- `New()` creates an executor with nil config values and default event registry behavior.
-- `New()` respects a custom event registry supplied in config.
+- `NewRunner()` creates a typed runner with default event registry behavior.
+- `NewRunner()` respects a custom event registry supplied in config.
 - `WithEvents()` replaces the registry, returns the same executor, and routes events there.
 - `Subscribe()` adds subscribers to the current registry, returns the same executor, and chains.
 - Multiple subscribers that implement the same subscriber interface all receive the event.
@@ -76,8 +78,8 @@ Cover the public executor API directly and keep these tests focused.
 Every executor lifecycle test that runs `Execute()` must assert the complete lifecycle sequence.
 
 - `BeforeExecutionEvent` is published before the first iteration.
-- Each iteration publishes `BeforeIterationEvent` before `AgentLoop.Next()`.
-- Each completed iteration publishes `AfterIterationEvent` after `AgentLoop.Next()`.
+- Each iteration publishes `BeforeIterationEvent` before `Loop.Next()`.
+- Each completed iteration publishes `AfterIterationEvent` after `Loop.Next()`.
 - `AfterExecutionEvent` is published exactly once after success, error, cancellation, or limit.
 - `AfterExecutionEvent` contains the final `TerminationReason` and final error.
 - Event order is `BeforeExecution`, repeated iteration events, then `AfterExecution`.
@@ -86,20 +88,22 @@ Every executor lifecycle test that runs `Execute()` must assert the complete lif
 
 Cover the normal `LATerminate` path with exact result assertions.
 
-- Execution stops when `AgentLoop.Next()` returns `LATerminate`.
+- Execution stops when `Loop.Next()` returns `LATerminate`.
 - `ExecutionContext.Result()` stores the exact `AgentLoopResult.Result` value.
+- `Execute()` and `Resume()` return the exact typed value, outcome, and operation error.
+- Terminal restore reads the saved value without another model call or validation callback.
 - `TerminationReason()` is `TerminationSuccess`.
 - `Error()` is nil.
 - The result iteration count matches the number of completed iterations.
 
 ### Loop Errors
 
-Cover errors returned by `AgentLoop.Next()`.
+Cover errors returned by `Loop.Next()`.
 
 - `AfterIterationEvent` is published before termination is set.
 - The termination reason is `TerminationError`.
 - The error wraps the loop error with the exact iteration number.
-- The error message format is `AgentLoop.Next (iteration N): <cause>`.
+- The error message format is `Loop.Next (iteration N): <cause>`.
 - If a limit is already exceeded, limit termination takes precedence over loop-error termination.
 
 ### Context Cancellation
@@ -110,7 +114,7 @@ Cover user cancellation separately from limit cancellation.
 - The stored error is the context cancellation cause or `context.Canceled`.
 - Cancellation before the first iteration stops before `BeforeIterationEvent`.
 - Cancellation after an iteration stops before the next iteration starts.
-- Cancellation during `AgentLoop.Next()` is only observed after the loop returns.
+- Cancellation during `Loop.Next()` is only observed after the loop returns.
 
 ### Stream Lifecycle
 
@@ -227,9 +231,11 @@ lower-level stat helper.
 - Include the exact `LimitExceededEvent` with limit, current value, and matched key.
 - Include `AfterModelCallEvent`, `BeforeToolCallEvent`, or parse-error events when they create the
   stat that triggers the limit.
-- Verify `AfterIterationEvent.Result.NextPrompt` with exact expected content.
+- Compare the complete `AfterIterationEvent.Result` and its action.
+- Verify the exact candidate and steering messages in the next model request after rejection.
 
-Use `tt.ContinueWithPrompt()` instead of any empty continue helper when the prompt is known.
+Use `tt.Continue()` for a continued iteration. The next request comes from structured history;
+there is no separate text-only prompt field on the loop result.
 
 ## Code Organization
 
@@ -270,16 +276,11 @@ tt.LimitExceeded(depth, iteration, limit, currentValue, matchedKey)
 tt.ParseError(depth, iteration, errorType, rawContent)
 ```
 
-Common result and observation builders:
+Common result builders:
 
 ```go
-tt.ContinueWithPrompt(nextPrompt)
+tt.Continue()
 tt.Terminate(text)
-tt.ToolObservation(format, toolChain, toolName, output)
-tt.FormatParseErrorObservation(format, err, rawResponse)
-tt.ToolchainErrorObservation(format, err)
-tt.TerminationParseErrorObservation(format, err, content)
-tt.ValidatorFeedbackObservation(format, feedbackSections...)
 ```
 
 Common limit builders:
@@ -314,5 +315,5 @@ When implementing executor limit tests for a new agent:
 - Cover every counter, gauge, and prefix stat the agent can produce.
 - Cover child context propagation for agent behavior that can spawn child contexts.
 - Use exact expected stats, limits, termination reasons, errors, and lifecycle events.
-- Verify `NextPrompt` content for every continued iteration.
+- Verify exact task and history messages for continued model requests.
 - Run the full native, CGO-disabled, and race suites over `./...`.

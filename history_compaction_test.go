@@ -24,11 +24,11 @@ func (m *historySequenceModel) GenerateContentStream(
 ) (
 	gent.Stream, error,
 ) {
-	choice := &gent.ContentChoice{}
+	choice := &gent.ContentChoice{Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer}}
 	if len(m.choices) > 0 {
 		choice = m.choices[len(m.requests)]
 	} else {
-		choice.CandidateContent = m.texts[len(m.requests)]
+		choice.CandidateContent = []gent.ContentPart{gent.TextContent{Text: m.texts[len(m.requests)]}}
 	}
 	m.requests = append(m.requests, request)
 	return gent.NewCompletedStream(&gent.ContentResponse{
@@ -51,7 +51,7 @@ func TestHistoryCompaction_PreservesBothSummariesAndResumes(t *testing.T) {
 	summaries := &historySequenceModel{texts: []string{
 		"Policy P10 permits refunds within 30 days.", "Two policy lookups were completed.",
 	}}
-	newAgent := func(model gent.Model) *react.Agent {
+	newAgent := func(model gent.Model) *react.Agent[string] {
 		return react.NewAgent(model).WithRecoveryVersion("summaries/v1").RegisterTool(
 			gent.DefineTool("policy", func(context.Context, recoveryInput) (string, error) {
 				return "Policy P10 permits refunds within 30 days.", nil
@@ -66,10 +66,10 @@ func TestHistoryCompaction_PreservesBothSummariesAndResumes(t *testing.T) {
 	}
 	agent := newAgent(model)
 	ctx := gent.NewExecutionContext(worker, "root", gent.NewBasicLoopData(
-		&gent.Task{Text: "Check the policy twice."}), gent.WithRunId("summaries"),
+		gent.NewTask(gent.TextContent{Text: "Check the policy twice."})), gent.WithRunId("summaries"),
 		gent.WithRecorder(store), gent.WithCodecs(store.codecs))
 	configure(ctx, summaries)
-	_, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Execute(ctx)
+	_, _, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 	assert.ErrorIs(t, err, context.Canceled)
 	bundle, err := ctx.Export()
 	assert.NoError(t, err)

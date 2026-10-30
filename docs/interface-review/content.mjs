@@ -34,24 +34,10 @@ describe(
     'A custom resumable loop also needs CheckpointState and an executor RecoveryVersion.',
   ],
   ['agents/react.Agent'],
-  ['gent.LoopData', 'gent.ExecutionContext', 'executor.Runner', 'gent.CheckpointState'],
+  ['gent.LoopData', 'gent.ExecutionContext', 'executor.Runner', 'gent.CheckpointState', 'gent.Output'],
   'Which continuation state does a custom loop need to save?',
 );
 
-describe(
-  'gent.AgentLoop',
-  'Execution',
-  'Keep source compatibility with loops that use a data type argument.',
-  'The old type argument did not restrict context data. Loop needs no type argument.',
-  [
-    'Embeds Loop and keeps the same Next method.',
-    'Existing AgentLoop[Data] and executor.New[Data] callers still work.',
-    'Use Loop and executor.NewRunner for new code.',
-  ],
-  ['agents/react.Agent'],
-  ['gent.Loop', 'gent.LoopData', 'executor.Runner'],
-  'Can this caller remove a type argument without changing its custom data?',
-);
 
 describe(
   'gent.LoopData',
@@ -71,12 +57,11 @@ describe(
 describe(
   'gent.TimeProvider',
   'Execution',
-  'Provide time values to prompt templates.',
-  'An injectable clock makes prompt time formatting and tests predictable.',
+  'Provide time values for caller-authored prompts.',
+  'An application clock makes time formatting and tests predictable.',
   [
-    'Now, Today, Date, Time, Format, Weekday, and RelativeDate form the template-facing API.',
-    'WithClock accepts one function and keeps all standard prompt time formats.',
-    'WithTimeProvider still supports custom formats.',
+    'Now, Today, Date, Time, Format, Weekday, and RelativeDate supply formatted time values.',
+    'TimeProviderFunc wraps a clock function. The caller includes its values in Task messages.',
     'This is a prompt clock; execution deadlines and runtime accounting have separate ownership.',
   ],
   ['gent.DefaultTimeProvider', 'gent.TimeProviderFunc', 'gent.MockTimeProvider'],
@@ -94,7 +79,7 @@ describe(
     'Call through ExecutionContext.GenerateContentStream for managed capture and recovery.',
     'Honor cancellation and finish the producer before Response completes; avoid duplicate events.',
   ],
-  ['models.LCGWrapper'],
+  ['Gent native provider adapters'],
   ['gent.Stream', 'gent.ModelCallRequest', 'gent.ModelNamer', 'gent.ExecutionContext'],
   'Is every agent model call using the managed context boundary?',
 );
@@ -105,7 +90,7 @@ describe(
   'Deliver streaming chunks and the final provider result.',
   'Cancellation and producer completion are different events; final evidence must not arrive late.',
   [
-    'Chunks carries MetaContent; Response returns candidate text, stop state, tools, and usage.',
+    'Chunks carries MetaContent; Response returns candidate content, completion state, tools, and usage.',
     'The executor publishes one full Content event after validation and terminal save.',
     'SourceMessageIds link the final answer to previews; saved replay keeps message IDs.',
     'Close requests cancellation and is safe to repeat.',
@@ -126,7 +111,7 @@ describe(
     'DefaultSamplingParams checks this optional capability.',
     'Without a name, Gent uses generic defaults. Callers can supply explicit options.',
   ],
-  ['models.LCGWrapper'],
+  ['Gent native provider adapters'],
   ['gent.Model', 'gent.RecoveryConfig'],
   'Is the model identity sufficient to distinguish hidden provider configuration?',
 );
@@ -149,32 +134,14 @@ describe(
 describe(
   'gent.TextFormat',
   'Model & content',
-  'Parse and render the outer section envelope.',
-  'The outer XML or Markdown structure is independent of JSON, YAML, or text inside a section.',
-  [
-    'Register sections before generating DescribeStructure guidance.',
-    'Parse returns all occurrences of each recognized section as map[string][]string.',
-    'Parse implementations must tolerate a nil execution context before publishing statistics.',
-  ],
+  'Render named text sections for tool results.',
+  'A display format can organize tool observations without defining the answer protocol.',
+  ['FormatSections renders the supplied sections. It does not parse model responses.'],
   ['format.XML', 'format.Markdown'],
-  ['gent.TextSection', 'gent.ToolChain', 'gent.Termination'],
-  'Does a custom format preserve multiple occurrences and report parse failures consistently?',
+  ['gent.ToolChain'],
+  'Which rendering makes the tool result clear to the model?',
 );
 
-describe(
-  'gent.TextSection',
-  'Model & content',
-  'Name, describe, and parse one section’s content.',
-  'Section syntax stays reusable across outer formats and agent patterns.',
-  [
-    'Name and Guidance define the prompt-facing contract; ParseSection produces a typed value.',
-    'ToolChain and Termination embed this interface.',
-    'Parsers must check a nil context before publishing events or updating statistics.',
-  ],
-  ['section.Text', 'section.JSON', 'section.YAML'],
-  ['gent.TextFormat', 'gent.ToolChain', 'gent.Termination'],
-  'Are custom parsed values registered if they enter saved state?',
-);
 
 describe(
   'gent.Tool',
@@ -226,34 +193,22 @@ describe(
 );
 
 describe(
-  'gent.Termination',
+  'gent.Output',
   'Tools & answers',
-  'Decide whether an answer can finish the run.',
-  'An answer-shaped response still needs explicit parsing and acceptance.',
+  'Define and process the typed answer contract.',
+  'Provider completion identifies the candidate; local processing decides acceptance.',
   [
-    'Embeds TextSection and optionally delegates acceptance to an AnswerValidator.',
-    'ShouldTerminate returns continue, rejected with feedback, or accepted; it requires a context.',
-    'SetValidator(nil) removes the validator. A terminal outcome is saved by execution.',
+    'Instructions is caller-controlled prompt text. Configure sets native output controls.',
+    'Process receives ordered content parts and returns OutputResult[T] with explicit Steering.',
+    'Built-ins always run local checks, then an optional OutputCustomValidator callback.',
+    'An error stops execution. Rejection retains the candidate and steering for correction.',
+    'The runner saves the typed value and delivery content before returning success.',
   ],
-  ['termination.Text', 'termination.JSON'],
-  ['gent.TextSection', 'gent.AnswerValidator', 'gent.Checkpoint'],
-  'What is the application’s acceptance rule beyond syntactic validity?',
+  ['output.TextOutput', 'output.ImageOutput', 'output.JsonOutput[T]', 'output.SchemaOutput[T]'],
+  ['gent.OutputResult', 'gent.OutputValidationSubscriber', 'gent.Checkpoint', 'gent.Loop'],
+  'Which domain rules must run after schema validation?',
 );
 
-describe(
-  'gent.AnswerValidator',
-  'Tools & answers',
-  'Accept a parsed answer or return corrective feedback.',
-  'Domain acceptance policy stays separate from the answer’s text or JSON representation.',
-  [
-    'Name identifies validator-specific rejection accounting.',
-    'Validate receives the parsed answer and returns ValidationResult, not a separate error.',
-    'Validation runs with the task and execution state available through ExecutionContext.',
-  ],
-  ['Application validators'],
-  ['gent.Termination', 'gent.ValidatorCalledSubscriber', 'gent.ValidatorResultSubscriber'],
-  'Will a validator change require a new recovery version?',
-);
 
 describe(
   'gent.Recorder',
@@ -405,11 +360,6 @@ const hooks = [
   ['BeforeIteration', 'Before Loop.Next for an iteration.', 'Inspect or prepare loop policy.'],
   ['AfterIteration', 'After an iteration returns.', 'Inspect the iteration result.'],
   [
-    'BeforeSystemPrompt',
-    'Before system prompt sections are rendered.',
-    'May modify or replace Sections to change the effective prompt.',
-  ],
-  [
     'BeforeModelCall',
     'Before the effective provider request is frozen and accepted.',
     'May modify Messages and resolved Options on ModelCallRequest.',
@@ -431,18 +381,13 @@ const hooks = [
   ],
   [
     'ParseError',
-    'When a format, section, toolchain, or termination parser reports failure.',
+    'When native tool argument parsing reports failure.',
     'Inspect parse error details; error counters and consecutive gauges are updated by publishing.',
   ],
   [
-    'ValidatorCalled',
-    'When answer validation begins.',
-    'Inspect the validator and candidate answer.',
-  ],
-  [
-    'ValidatorResult',
-    'When answer validation returns.',
-    'Inspect acceptance or rejection; a rejection increments validator accounting.',
+    'OutputValidation',
+    'When output processing or a custom validation stage completes.',
+    'Inspect acceptance, steering, and errors; rejected stages update output rejection accounting.',
   ],
   [
     'Error',
@@ -661,6 +606,22 @@ describe(
 );
 
 export const supporting = {
+  'gent.Task': [
+    'Execution', 'Hold the caller-authored message sequence.',
+    'System instructions and user text or media remain outside the compacted working history.',
+  ],
+  'gent.ModelMessage': [
+    'Model & content', 'Carry one role, ordered parts, and native continuation data.',
+    'Task and request messages use pointers. Accepted snapshots own their mutable data.',
+  ],
+  'gent.OutputResult': [
+    'Tools & answers', 'Return explicit acceptance, typed value, delivery content, or steering.',
+    'Expected rejection is data. Unexpected processing failure uses error and stops the run.',
+  ],
+  'gent.OutputValidationResult': [
+    'Tools & answers', 'Return the optional custom validator decision.',
+    'Domain validation can reject with steering after all built-in local checks pass.',
+  ],
   'gent.ToolRecoveryResponse': [
     'History & recovery',
     'Keep a recovery decision, its steering message, and any recovered output together.',
@@ -679,7 +640,7 @@ export const supporting = {
   'executor.Runner': [
     'Execution',
     'Run the lifecycle and cross safe continuation boundaries.',
-    'NewRunner needs no type argument. Resume restores a run. Executor[Data] is an alias.',
+    'NewRunner infers T from Loop[T]. Execute and Resume return T, execution metadata, and error.',
   ],
   'gent.HistoryEntry': [
     'History & recovery',
@@ -783,7 +744,7 @@ export const phases = [
     'Keep the model decision',
     'ReAct has saved the parsed decision and can continue without generating it again.',
     'A completed response beyond the checkpoint can be reused. Partial attempts stay visible.',
-    ['gent.TextFormat', 'gent.TextSection', 'gent.Termination'],
+    ['gent.Model', 'gent.Output', 'gent.ModelCallRequest'],
   ],
   [
     'tool_ready',
@@ -804,7 +765,7 @@ export const phases = [
     'Accept the iteration',
     'Iteration evidence and working-context changes reach a continuation boundary.',
     'Rejected answers supply feedback for another iteration. Accepted answers lead to terminal.',
-    ['gent.HistoryUpdate', 'gent.AnswerValidator', 'gent.Loop'],
+    ['gent.HistoryUpdate', 'gent.Output', 'gent.Loop'],
   ],
   [
     'compaction_completed',

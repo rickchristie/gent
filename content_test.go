@@ -8,40 +8,65 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestContentChoiceState(t *testing.T) {
-	type input struct {
-		reason string
-		tools  bool
-	}
-	type expected struct{ state string }
+func TestContentChoiceCompletion(t *testing.T) {
+	type input struct{ choice *ContentChoice }
+	type expected struct{ err string }
 	type testCase struct {
 		name     string
 		input    input
 		expected expected
 	}
+	tool := []ModelToolCall{{ID: "lookup", Type: "function",
+		FunctionCall: &FunctionCall{Name: "lookup", Arguments: "{}"}}}
 	cases := []testCase{
-		{"custom adapter", input{}, expected{ModelAnswer}},
-		{"ordinary answer", input{reason: "stop"}, expected{ModelAnswer}},
-		{"Anthropic answer", input{reason: "end_turn"}, expected{ModelAnswer}},
-		{"refusal", input{reason: "refusal"}, expected{ModelAnswer}},
-		{"tool request", input{"tool_calls", true}, expected{ModelTools}},
-		{"Anthropic tools", input{"tool_use", true}, expected{ModelTools}},
-		{"empty tool request", input{reason: "tool_calls"}, expected{ModelFailed}},
-		{"token limit with tools", input{"length", true}, expected{ModelIncomplete}},
-		{"output limit", input{reason: "max_output_tokens"}, expected{ModelIncomplete}},
-		{"context limit", input{reason: "model_context_window_exceeded"}, expected{ModelIncomplete}},
-		{"continuation", input{reason: "pause_turn"}, expected{ModelContinue}},
-		{"filtered", input{reason: "content_filter"}, expected{ModelFailed}},
-		{"unknown", input{reason: "new_reason"}, expected{ModelFailed}},
+		{
+			"answer",
+			input{&ContentChoice{Completion: ModelCompletion{Status: ModelStatusAnswer}}},
+			expected{},
+		},
+		{"unknown", input{&ContentChoice{}}, expected{`gent: unknown model completion ""`}},
+		{"missing calls",
+			input{
+				&ContentChoice{Completion: ModelCompletion{Status: ModelStatusToolCalls}},
+			},
+			expected{"gent: tool completion has no calls"}},
+		{"answer with calls", input{&ContentChoice{ToolCalls: tool,
+			Completion: ModelCompletion{Status: ModelStatusAnswer}}},
+			expected{"gent: answer completion contains tool calls"}},
+		{"tools", input{&ContentChoice{ToolCalls: tool,
+			Completion: ModelCompletion{Status: ModelStatusToolCalls}}}, expected{}},
+		{"incomplete calls", input{&ContentChoice{ToolCalls: tool,
+			Completion: ModelCompletion{Status: ModelStatusIncomplete}}}, expected{}},
+		{"refused calls retained", input{&ContentChoice{ToolCalls: tool,
+			Completion: ModelCompletion{Status: ModelStatusRefused, Refusal: &ModelRefusal{}}}}, expected{}},
+		{"refusal missing",
+			input{
+				&ContentChoice{Completion: ModelCompletion{Status: ModelStatusRefused}},
+			},
+			expected{`gent: completion "refused" has inconsistent refusal data`}},
+		{"refusal on answer", input{&ContentChoice{Completion: ModelCompletion{
+			Status: ModelStatusAnswer, Refusal: &ModelRefusal{}}}},
+			expected{`gent: completion "answer" has inconsistent refusal data`}},
+		{"missing continuation",
+			input{
+				&ContentChoice{Completion: ModelCompletion{Status: ModelStatusContinue}},
+			},
+			expected{"gent: continuation has no provider data"}},
+		{"continuation", input{&ContentChoice{Completion: ModelCompletion{Status: ModelStatusContinue},
+			Continuation: &ProviderContinuation{Provider: "fixture"}}}, expected{}},
+		{
+			"failed",
+			input{&ContentChoice{Completion: ModelCompletion{Status: ModelStatusFailed}}},
+			expected{},
+		},
 	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			choice := &ContentChoice{StopReason: test.input.reason}
-			if test.input.tools {
-				choice.ToolCalls = []ModelToolCall{{ID: "lookup", Type: "function",
-					FunctionCall: &FunctionCall{Name: "lookup", Arguments: "{}"}}}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := expected{}
+			if err := tt.input.choice.ValidateCompletion(); err != nil {
+				actual.err = err.Error()
 			}
-			assert.Equal(t, test.expected, expected{choice.State()})
+			assert.Equal(t, tt.expected, actual)
 		})
 	}
 }
@@ -53,13 +78,19 @@ func TestMetadataSubscribersOwnTheirChunks(t *testing.T) {
 	defer stopFirst()
 	second, stopSecond := ctx.SubscribeAll()
 	defer stopSecond()
-	meta := &MetaContent{Type: "progress", Text: "Checking.", MessageId: "message"}
+	meta := &MetaContent{
+		Type:      "progress",
+		Content:   []ContentPart{TextContent{Text: "Checking."}},
+		MessageId: "message",
+	}
 	assert.NoError(t, ctx.EmitChunk(StreamChunk{MetaContent: []*MetaContent{meta}}))
-	meta.Text = "producer changed entry"
+	meta.Content = []ContentPart{TextContent{Text: "producer changed entry"}}
 	one := <-first
-	one.MetaContent[0].Text = "subscriber changed entry"
+	one.MetaContent[0].Content = []ContentPart{TextContent{Text: "subscriber changed entry"}}
 	two := <-second
-	want := []*MetaContent{{Type: "progress", Text: "Checking.", MessageId: "message"}}
+	want := []*MetaContent{
+		{Type: "progress", Content: []ContentPart{TextContent{Text: "Checking."}}, MessageId: "message"},
+	}
 	assert.Equal(t, want, two.MetaContent)
 	view, err := ctx.Export()
 	assert.NoError(t, err)
@@ -70,11 +101,28 @@ func TestMetadataSubscribersOwnTheirChunks(t *testing.T) {
 
 func TestStreamOwnsMetadataAndResponse(t *testing.T) {
 	meta := []*MetaContent{
-		{Type: MetaContentReasoning, Text: "Check.", MessageId: "reason"},
-		{Type: "progress", Text: "Half done.", MessageId: "progress"},
-		{Type: MetaContentIntermediary, Text: "Answer.", MessageId: "answer"},
+		{
+			Type:      MetaContentReasoning,
+			Content:   []ContentPart{TextContent{Text: "Check."}},
+			MessageId: "reason",
+		},
+		{
+			Type:      "progress",
+			Content:   []ContentPart{TextContent{Text: "Half done."}},
+			MessageId: "progress",
+		},
+		{
+			Type:      MetaContentIntermediary,
+			Content:   []ContentPart{TextContent{Text: "Answer."}},
+			MessageId: "answer",
+		},
 	}
-	response := &ContentResponse{Choices: []*ContentChoice{{CandidateContent: "Answer.",
+	response := &ContentResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
+		Status: ModelStatusAnswer,
+	},
+		CandidateContent: []ContentPart{
+			TextContent{Text: "Answer."},
+		},
 		MetaContent: CloneMetaContent(meta), CandidateSource: &ContentSource{
 			MessageIds: []string{
 				"answer",
@@ -88,8 +136,10 @@ func TestStreamOwnsMetadataAndResponse(t *testing.T) {
 	stream := NewStreamWithDuration()
 	stream.Send(StreamChunk{MetaContent: meta})
 	stream.Complete(response, nil)
-	meta[0].Text = "producer changed delta"
-	response.Choices[0].MetaContent[0].Text = "producer changed response"
+	meta[0].Content = []ContentPart{TextContent{Text: "producer changed delta"}}
+	response.Choices[0].MetaContent[0].Content = []ContentPart{
+		TextContent{Text: "producer changed response"},
+	}
 	response.Choices[0].CandidateSource.MessageIds[0] = "changed"
 	response.Info.RawGenerationInfo["usage"].(map[string]any)["tokens"] = 999
 	response.Choices[0].Continuation.Items[0][0] = '!'
@@ -98,12 +148,14 @@ func TestStreamOwnsMetadataAndResponse(t *testing.T) {
 		chunks = append(chunks, chunk)
 	}
 	assert.Equal(t, []StreamChunk{{MetaContent: want.Choices[0].MetaContent}}, chunks)
-	chunks[0].MetaContent[0].Text = "subscriber changed delta"
+	chunks[0].MetaContent[0].Content = []ContentPart{TextContent{Text: "subscriber changed delta"}}
 	assert.Equal(t, want.Choices[0].MetaContent, stream.AccumulatedMetaContent())
 	first, err := stream.Response()
 	assert.NoError(t, err)
 	assert.Equal(t, want, first)
-	first.Choices[0].MetaContent[0].Text = "reader changed response"
+	first.Choices[0].MetaContent[0].Content = []ContentPart{
+		TextContent{Text: "reader changed response"},
+	}
 	first.Choices[0].CandidateSource.MessageIds[0] = "changed"
 	first.Info.RawGenerationInfo["usage"].(map[string]any)["tokens"] = 999
 	first.Choices[0].Continuation.Items[0][0] = '!'

@@ -12,7 +12,7 @@ func (s *SlidingWindowStrategy) RecoveryConfig() any {
 
 func (s *SummarizationStrategy) RecoveryConfig() any {
 	configuration := map[string]any{"type": "summarization/v1", "recent": s.keepRecent,
-		"system": s.systemPrompt, "user": s.userPrompt, "format": s.textFormat.DescribeStructure(),
+		"system": s.systemPrompt, "user": s.userPrompt, "format": fmt.Sprintf("%T", s.textFormat),
 		"modelType": fmt.Sprintf("%T", s.model)}
 	if named, ok := s.model.(interface{ ModelName() string }); ok {
 		configuration["model"] = named.ModelName()

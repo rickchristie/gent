@@ -19,20 +19,18 @@ func registerFrameworkCodecs(registry *CodecRegistry) {
 		AfterExecutionEvent{},
 		BeforeIterationEvent{},
 		AfterIterationEvent{},
-		BeforeSystemPromptEvent{},
 		BeforeModelCallEvent{},
 		AfterModelCallEvent{},
 		BeforeToolCallEvent{},
 		AfterToolCallEvent{},
 		ParseErrorEvent{},
-		ValidatorCalledEvent{},
-		ValidatorResultEvent{},
+		OutputValidationEvent{},
+		OutputValidationStage(""),
 		ErrorEvent{},
 		LimitExceededEvent{},
 		CompactionEvent{},
 		CommonEvent{},
 		ModelCallRequest{},
-		StreamChunk{},
 		AgentLoopResult{},
 		ExecutionResult{},
 		Limit{},
@@ -41,9 +39,6 @@ func registerFrameworkCodecs(registry *CodecRegistry) {
 		ParseErrorType(""),
 		TerminationReason(""),
 		LoopAction(""),
-		TerminationStatus(0),
-		TerminationResult{},
-		ValidationResult{},
 	}
 	values = append(values, PlannedToolCall{}, SavedToolCall{}, ToolPlan{}, EncodedValue{})
 	values = append(values, HistoryRevision(0), EntryId(""))
@@ -51,6 +46,9 @@ func registerFrameworkCodecs(registry *CodecRegistry) {
 		typ := reflect.TypeOf(value)
 		registry.add(registeredValue{id: typ.PkgPath() + "/" + typ.Name(), version: 1, typ: typ})
 	}
+	chunkCodec := streamChunkCodec{registry: registry}
+	registry.add(registeredValue{id: chunkCodec.Type(), version: chunkCodec.Version(),
+		typ: reflect.TypeFor[StreamChunk](), codec: chunkCodec})
 }
 
 func recordedEventType(event Event) string {
@@ -63,8 +61,6 @@ func recordedEventType(event Event) string {
 		return "iteration_started"
 	case *AfterIterationEvent:
 		return "iteration_finished"
-	case *BeforeSystemPromptEvent:
-		return "system_prompt"
 	case *BeforeModelCallEvent:
 		return "model_call_started"
 	case *AfterModelCallEvent:
@@ -75,10 +71,8 @@ func recordedEventType(event Event) string {
 		return "tool_call_finished"
 	case *ParseErrorEvent:
 		return "parse_error"
-	case *ValidatorCalledEvent:
-		return "validator_called"
-	case *ValidatorResultEvent:
-		return "validator_result"
+	case *OutputValidationEvent:
+		return "output_validation"
 	case *ErrorEvent:
 		return "error"
 	case *LimitExceededEvent:

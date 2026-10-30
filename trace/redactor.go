@@ -13,7 +13,6 @@ type Redactor interface {
 	RedactModelResponse(resp any) any
 	RedactToolArgs(args any) any
 	RedactToolOutput(output any) any
-	RedactSystemPrompt(sections []gent.FormattedSection) any
 	RedactCommonPayload(eventName string, payload any) any
 	RedactStateChange(eventName string, change gent.HistoryChange) any
 	RedactRunOutput(output []gent.ContentPart) any
@@ -28,7 +27,6 @@ type RedactorFuncs struct {
 	ModelResponse func(any) any
 	ToolArgs      func(any) any
 	ToolOutput    func(any) any
-	SystemPrompt  func([]gent.FormattedSection) any
 	CommonPayload func(string, any) any
 	StateChange   func(string, gent.HistoryChange) any
 	RunOutput     func([]gent.ContentPart) any
@@ -62,13 +60,6 @@ func (r RedactorFuncs) RedactToolOutput(output any) any {
 		return output
 	}
 	return r.ToolOutput(output)
-}
-
-func (r RedactorFuncs) RedactSystemPrompt(sections []gent.FormattedSection) any {
-	if r.SystemPrompt == nil {
-		return sections
-	}
-	return r.SystemPrompt(sections)
 }
 
 func (r RedactorFuncs) RedactCommonPayload(eventName string, payload any) any {

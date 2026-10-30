@@ -99,7 +99,7 @@ try {
   await page.screenshot({ path: join(shots, "gent-streaming-preview.png") });
   await page.reload();
   const answer = page.getByRole("region", { name: "Accepted answer" });
-  await expect(answer.locator("p")).toHaveText("Order order-1001 has shipped.", { timeout: 15000 });
+  await expect(answer.locator(".answer-content")).toHaveText("Order order-1001 has shipped.", { timeout: 15000 });
   await expect(answer).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Model preview" })).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveText("Complete");
@@ -135,7 +135,7 @@ try {
   await page.goto(resumeURL);
   await expect(page.getByRole("region", { name: "Model preview" })).toBeVisible();
   await page.getByRole("button", { name: "Resume saved run", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Accepted answer" }).locator("p")).toHaveText(
+  await expect(page.getByRole("region", { name: "Accepted answer" }).locator(".answer-content")).toHaveText(
     "Order order-1001 has shipped.",
     { timeout: 15000 },
   );
@@ -162,6 +162,27 @@ try {
     fullPage: true,
   });
   console.log("PASS database reopen, fresh worker recovery, higher cursors, and terminal reuse");
+  // Reuse the completed run's event cursor and exercise the binary display contract offline.
+  const mediaState = structuredClone(resumed);
+  const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf1s" +
+    "AAAAASUVORK5CYII=";
+  mediaState.answers[0].content = [
+    { Text: "Image and report." },
+    { MIMEType: "image/png", Data: pixel },
+    { MIMEType: "application/pdf", Data: "JVBERi0xLjcK" },
+  ];
+  await page.route(`**/api/runs/${interruptedID}/state`, (route) => route.fulfill({
+    json: mediaState,
+  }));
+  await page.reload();
+  const image = page.getByRole("img", { name: "Generated image 2" });
+  await expect(image).toHaveJSProperty("naturalWidth", 1);
+  await expect(page.getByRole("link", { name: "Download PDF" }))
+    .toHaveAttribute("href", "data:application/pdf;base64,JVBERi0xLjcK");
+  await expect(page.getByRole("region", { name: "Accepted answer" }).locator(".answer-content"))
+    .toHaveText("Image and report.Download PDF");
+  await page.screenshot({ path: join(shots, "gent-streaming-media-mobile.png"), fullPage: true });
+  console.log("PASS ordered binary image and PDF display from a saved snapshot");
   assert.deepEqual(errors, []);
   console.log("PASS no browser errors and no mobile page overflow");
 } finally {

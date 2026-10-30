@@ -132,8 +132,9 @@ func TestSearchChain_Config(t *testing.T) {
 				return NewSearch(SearchHintDomainCategories).WithPageSize(5)
 			},
 			expected: expected{
-				pageSize:         5,
-				noResultsMessage: "No tools found matching your query. Try different keywords or a broader search.",
+				pageSize: 5,
+				noResultsMessage: "No tools found matching your query. " +
+					"Try different keywords or a broader search.",
 			},
 		},
 		{
@@ -530,7 +531,7 @@ func TestSearchChain_Pin_ToolStillSearchable(
 }
 
 // -------------------------------------------------------
-// ParseSection Tests
+// Native tool call argument tests
 // -------------------------------------------------------
 
 // -------------------------------------------------------

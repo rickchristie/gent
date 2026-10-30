@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rickchristie/gent/agents/react"
+	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestAgentClockKeepsTimeFormats(t *testing.T) {
+func TestTimeProviderFuncKeepsTimeFormats(t *testing.T) {
 	type input struct {
 		now    time.Time
 		target time.Time
@@ -37,8 +37,7 @@ func TestAgentClockKeepsTimeFormats(t *testing.T) {
 			"00:00 WIB", "2026-10-09T00:00:00+07:00", "Friday", "yesterday"}},
 	}
 	var now time.Time
-	provider := react.NewAgent(&savedReplyModel{}).
-		WithClock(func() time.Time { return now }).TimeProvider()
+	provider := gent.TimeProviderFunc(func() time.Time { return now })
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			now = test.input.now

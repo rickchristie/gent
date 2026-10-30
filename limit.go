@@ -124,10 +124,10 @@ func DefaultLimits() []Limit {
 			MaxValue: 100,
 		},
 
-		// Stop after 3 consecutive format parse errors (gauge)
+		// Stop after 3 consecutive output rejections (gauge)
 		{
 			Type:     LimitExactKey,
-			Key:      SGFormatParseErrorConsecutive,
+			Key:      SGOutputRejectedConsecutive,
 			MaxValue: 3,
 		},
 
@@ -135,13 +135,6 @@ func DefaultLimits() []Limit {
 		{
 			Type:     LimitExactKey,
 			Key:      SGToolchainParseErrorConsecutive,
-			MaxValue: 3,
-		},
-
-		// Stop after 3 consecutive section parse errors (gauge)
-		{
-			Type:     LimitExactKey,
-			Key:      SGSectionParseErrorConsecutive,
 			MaxValue: 3,
 		},
 
@@ -159,10 +152,10 @@ func DefaultLimits() []Limit {
 			MaxValue: 3,
 		},
 
-		// Stop after 10 total answer rejections (by validators)
+		// Stop after 10 total output rejections
 		{
 			Type:     LimitExactKey,
-			Key:      SCAnswerRejectedTotal,
+			Key:      SCOutputRejectedTotal,
 			MaxValue: 10,
 		},
 	}

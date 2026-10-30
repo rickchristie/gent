@@ -29,6 +29,11 @@ func cloneRunResult(result *RunResult) *RunResult {
 	}
 	clone := *result
 	clone.Output = cloneAny(result.Output)
+	if result.Refusal != nil {
+		copy := *result.Refusal
+		copy.Content = gent.CloneContentParts(result.Refusal.Content)
+		clone.Refusal = &copy
+	}
 	clone.Error = cloneError(result.Error)
 	return &clone
 }
@@ -48,6 +53,7 @@ func cloneContext(ctx *Context) *Context {
 		return nil
 	}
 	clone := *ctx
+	clone.Content = gent.CloneContentParts(ctx.Content)
 	clone.SourceMessageIds = append([]string(nil), ctx.SourceMessageIds...)
 	if ctx.CompletedTs != nil {
 		completed := *ctx.CompletedTs

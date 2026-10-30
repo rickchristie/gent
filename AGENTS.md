@@ -49,29 +49,38 @@ goal is to make it easy to write and experiment with custom agent loops.
 
 ## High-Level Features & Responsibilities
 
-### Executor + AgentLoop
-- Interface: `agent.go` (AgentLoop, LoopData)
-- Implementation: `executor/executor.go`
-- Executor runs the loop: BeforeExecution → [BeforeIteration → AgentLoop.Next() → AfterIteration]* → AfterExecution
-- AgentLoop.Next() returns `LAContinue` (keep looping) or `LATerminate` (stop with result)
-- ReAct agent: `agents/react/agent.go` - reads native calls → executes tools OR validates final content
+### Runner + Loop[T]
+- Interface: `agent.go` (`Loop[T]`, `LoopData`)
+- Implementation: `executor/executor.go` (`Runner[T]`)
+- Runner manages lifecycle, limits, checkpoints, and resource release
+- `Loop[T].Next` returns `LAContinue` or `LATerminate`; `Output()` defines the accepted type
+- `Execute` and `Resume` return `(T, *ExecutionResult, error)`
+- ReAct: `agents/react/` reads native completion, runs tools, or processes a final candidate
+- Accepted output is saved before publication; terminal restore does not run processing again
 
-### LoopData
-- Defined in: `agent.go`
-- Supplies Task (user input); ExecutionContext owns history and working context
-- BasicLoopData is the default; embed it in custom struct for additional fields
+### LoopData and Task
+- `Task.Messages` contains `[]*ModelMessage`; each message carries ordered `[]ContentPart`
+- Default examples use a caller-authored system message followed by a user message
+- `NewTask(parts...)` supplies a convenient single user message
+- ExecutionContext freezes the Task and owns history and working context
+- The Task stays outside compaction; a request hook cannot change its saved content
+- BasicLoopData is the default; embed it for additional application fields
 - Scratchpad: ordered HistoryEntry IDs used in the next model call
 - History: append-only originals, summaries, compaction decisions, and context transitions
-- SIDE EFFECT: UpdateHistory queues structured StateChangeEvent; checkpoints accept it atomically
-- History, storage, and continuation contract: docs/history.md
+- UpdateHistory queues StateChangeEvent; checkpoints accept evidence atomically
+- See `docs/history.md` for storage and continuation contracts
 
 ### Model
-- Interface: `model.go`
-- Implementation: `models/` (e.g., `models/lcg.go` for LangChainGo wrapper)
-- Gent owns message/tool types and opaque provider continuation items
-- OpenAI/Grok use direct Responses adapters; LangChainGo is used for lossless conversions
-- Managed ExecutionContext calls record requests, chunks, responses, and usage before delivery
-- Adapters return a Stream; they must Complete after their producer stops, including cancellation
+- Interface: `model.go`; native implementations: `models/`
+- Supported: OpenAI, Anthropic, Gemini, xAI, DeepSeek, vLLM, Ollama, OpenRouter, llama.cpp, SGLang
+- OpenAI uses Responses. Each adapter owns its native request and response mapping
+- Use native API controls when the endpoint can enforce the declared contract
+- Unsupported input types return an error; adapters do not convert input files
+- Preserve native completion, refusal, tool IDs, and opaque continuation items
+- Managed calls record requests, chunks, responses, and usage before delivery
+- Adapters return a Stream and Complete only after producer cleanup, including cancellation
+- Content and MetaContent retain ordered text and binary parts; only accepted output is Content
+- See `docs/models.md` for endpoint-specific support and limitations
 
 ### ToolChain
 - Interface: `toolchain.go` (native calls only)
@@ -85,20 +94,21 @@ goal is to make it easy to write and experiment with custom agent loops.
 - SIDE EFFECT: BeforeToolCallEvent increments tool-call counters; AfterToolCallEvent tracks errors
 - SIDE EFFECT: Success resets consecutive error gauges
 
-### Termination + Validator
-- Interface: `termination.go`
-- Implementations: `termination/text.go`, `termination/json.go`
-- Parses answer section, runs optional AnswerValidator
-- Returns: Continue (no answer), AnswerRejected (with feedback), AnswerAccepted
-- SIDE EFFECT: ValidatorResultEvent with rejection increments answer_rejected counter
+### Output[T]
+- Interface: `output.go`; implementations: `output/`
+- Built-ins: TextOutput, ImageOutput, JsonOutput[T], SchemaOutput[T]
+- Instructions() supplies optional prompt text; only the caller decides to include it
+- Configure requests native controls; Process validates and processes ordered content parts
+- Always run local validation, then the optional OutputCustomValidator callback
+- OutputResult exposes Accepted, Value, Content, and Steering; error means operation failure
+- Retain a rejected candidate and its steering together through the next main model call
+- Corrections use ordinary run limits; they have no separate retry counter
+- OutputValidationEvent distinguishes local, custom, and overall processing decisions
+- See `docs/output.md` for typed values, images, validation, and saved restoration
 
-### TextFormat + TextSection
-- Interfaces: `format.go` (TextFormat), `section/` (TextSection)
-- Implementations: `format/xml.go`, `format/markdown.go`, `section/yaml.go`, `section/json.go`
-- TextFormat: envelope parsing (<tags> or # headers), section extraction
-- TextSection: content parsing within a section (text passthrough, JSON, YAML)
-- DescribeStructure(): generates output format instructions for system prompt
-- SIDE EFFECT: ParseErrorEvent increments parse error counters/gauges by type
+### TextFormat
+- Interface: `format.go`; implementations: `format/xml.go`, `format/markdown.go`
+- FormatSections renders tool-result text; it does not parse answers or build agent prompts
 
 ### Stats + Limits
 - Defined in: `stats.go`, `stats_keys.go`, `limit.go`
@@ -119,15 +129,13 @@ goal is to make it easy to write and experiment with custom agent loops.
 - FlushProgress/CommitCheckpoint accept evidence before StateChange and trace observers see it
 
 ## Data Flow (ReAct Agent)
-1. Executor.Run() → creates ExecutionContext with LoopData, Stats, Limits
-2. BeforeExecution hook → agent prepares prompt and execution settings
-3. Loop iteration:
-   - Model.Call() → LLM response (streams chunks, increments token stats)
-   - ToolChain.NativeTools() supplies definitions for each model request
-   - If native calls: PrepareCalls → ExecuteNext → append structured call/result history
-   - If final content: Termination → validate, run AnswerValidator → accept/reject
-4. On limit exceeded: context canceled, TerminationLimitExceeded returned
-5. On accepted answer: TerminationSuccess with result
+1. Runner.Execute configures a typed output contract on the caller's ExecutionContext
+2. Each iteration builds a request from the frozen Task and active history
+3. Native completion selects tool execution, continuation, refusal, failure, or output processing
+4. Tool calls use PrepareCalls and ExecuteNext; results remain in structured history
+5. Rejected output and steering stay provisional; accepted output saves Value and Content together
+6. Limits cancel execution with their own termination reason
+7. A successful terminal save permits typed return and accepted Content publication
 
 ## Stats Keys (gent: prefix)
 ### Counters (SC*, propagated, $self: counterpart)
@@ -137,17 +145,13 @@ goal is to make it easy to write and experiment with custom agent loops.
 - SCTotalTokens, SCTotalTokensFor (+ model)
 - SCToolCalls, SCToolCallsFor (+ tool)
 - SCToolCallsErrorTotal, SCToolCallsErrorFor (+ tool)
-- SCFormatParseErrorTotal
 - SCToolchainParseErrorTotal
-- SCTerminationParseErrorTotal
-- SCSectionParseErrorTotal
-- SCAnswerRejectedTotal, SCAnswerRejectedBy (+ validator)
+- SCOutputRejectedTotal, SCOutputLocalRejectedTotal, SCOutputCustomRejectedTotal
+- SCOutputCustomRejectedBy (+ named custom validator)
 
 ### Gauges (SG*, local-only, never propagated)
-- SGFormatParseErrorConsecutive
+- SGOutputRejectedConsecutive, SGOutputLocalRejectedConsecutive, SGOutputCustomRejectedConsecutive
 - SGToolchainParseErrorConsecutive
-- SGSectionParseErrorConsecutive
-- SGTerminationParseErrorConsecutive
 - SGToolCallsErrorConsecutive
 - SGToolCallsErrorConsecutiveFor (+ tool)
 - SGScratchpadLength
@@ -160,7 +164,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 - LimitKeyPrefix - match any key with prefix
 - Use Key.Self() for per-context limits (excludes children)
 - DefaultLimits uses SCIterations.Self() for per-context iteration limit
-- Executor has default limits
+- Runner has default limits
 </codebase_architecture>
 
 <testing_standards>

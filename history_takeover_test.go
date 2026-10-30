@@ -77,7 +77,7 @@ func TestNativeTakeoverStopsOldWorker(t *testing.T) {
 			unblock := func() { releaseOnce.Do(func() { close(release) }) }
 			defer unblock()
 			var effects atomic.Int64
-			build := func(finish bool) *react.Agent {
+			build := func(finish bool) *react.Agent[string] {
 				chain := toolchain.New()
 				for _, name := range []string{"lookup", "book", "later"} {
 					chain.RegisterTool(gent.DefineTool(name,
@@ -106,12 +106,12 @@ func TestNativeTakeoverStopsOldWorker(t *testing.T) {
 			worker, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			ctx := gent.NewExecutionContext(worker, "takeover",
-				gent.NewBasicLoopData(&gent.Task{Text: "Run the operations."}),
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Run the operations."})),
 				gent.WithRunId("takeover"), gent.WithCodecs(store.codecs),
 				gent.WithRecorder(&takeoverRecorder{store: store, lease: 1}))
 			oldDone := make(chan error, 1)
 			go func() {
-				_, err := executor.New[gent.LoopData](build(false), executor.DefaultConfig()).Execute(ctx)
+				_, _, err := executor.NewRunner(build(false), executor.DefaultConfig()).Execute(ctx)
 				oldDone <- err
 			}()
 			select {

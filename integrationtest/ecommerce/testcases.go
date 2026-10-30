@@ -36,7 +36,6 @@ I just noticed that I was charged twice for a ` +
 			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllTools,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:    tp,
 			SystemPrompt: fmt.Sprintf(
 				`## Task Description
 
@@ -105,7 +104,6 @@ I just noticed that I was charged twice for a ` +
 			MaxIterations:   25,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:    tp,
 			SystemPrompt: fmt.Sprintf(
 				`## Task Description
 
@@ -205,7 +203,6 @@ Important: Our internal payment records may be `+
 			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllTools,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:    tp,
 		},
 	)
 }
@@ -264,7 +261,6 @@ Important: Our internal payment records may be `+
 			MaxIterations:   25,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
-			TimeProvider:    tp,
 		},
 	)
 }

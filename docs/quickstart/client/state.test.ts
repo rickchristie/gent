@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { applyEvent, catchUp, Gap, type Frame, type State } from "./src/state";
+import { applyEvent, catchUp, Gap, terminal, type ContentPart, type Frame, type State } from "./src/state";
 
 const initial: State = {
   runId: "run",
@@ -76,7 +76,7 @@ test("an accepted empty answer replaces the preview instead of appending text", 
         contextId: "ctx",
         messageId: "old",
         sourceMessageIds: [],
-        text: "old answer",
+        content: [{ Text: "old answer" }],
       },
     ],
   };
@@ -87,7 +87,7 @@ test("an accepted empty answer replaces the preview instead of appending text", 
       runId: "run",
       contextId: "ctx",
       payload: {
-        content: "",
+        content: [],
         messageId: "final",
         sourceMessageIds: ["preview"],
       },
@@ -101,8 +101,48 @@ test("an accepted empty answer replaces the preview instead of appending text", 
         contextId: "ctx",
         messageId: "final",
         sourceMessageIds: ["preview"],
-        text: "",
+        content: [],
       },
     ],
   });
+});
+
+
+test("binary parts keep their order through previews, acceptance, and snapshot catch-up", () => {
+  const image = { MIMEType: "image/png", Data: "AQID" };
+  const start: State = { ...initial, previews: [{
+    id: "call", attemptId: "attempt", contextId: "ctx", status: "running", parts: [],
+  }] };
+  const chunk = (number: string, content: ContentPart[]): Frame => ({
+    ...event(number), event: {
+      type: "model_stream_chunk", runId: "run", modelCallId: "call", attemptId: "attempt",
+      payload: { metaContent: [{ type: "intermediary", messageId: "preview", content }] },
+    },
+  });
+  const frames = [chunk("1", [{ Text: "Before " }]), chunk("2", [{ Text: "image" }]),
+    chunk("3", [image]), chunk("4", [{ Text: "After" }])];
+  const state = catchUp(start, frames);
+  assert.deepEqual(state, { ...start, lastEventNumber: "4", previews: [{
+    ...start.previews[0], parts: [
+      { type: "intermediary", messageId: "preview", content: [
+        { Text: "Before " }, { Text: "image" }, image, { Text: "After" },
+      ] },
+    ],
+  }] });
+  assert.deepEqual(catchUp(catchUp(start, frames.slice(0, 2)), frames.slice(1)), state);
+  const accepted = { ...event("5"), event: { type: "execution_content", runId: "run",
+    contextId: "ctx", payload: { content: [image], messageId: "final",
+      sourceMessageIds: ["preview"] } } };
+  const final = applyEvent(state, accepted);
+  image.Data = "changed";
+  assert.deepEqual(final.answers, [{ contextId: "ctx", messageId: "final",
+    sourceMessageIds: ["preview"], content: [{ MIMEType: "image/png", Data: "AQID" }] }]);
+});
+
+test("refusal ends the connection without an accepted answer", () => {
+  const final = applyEvent(initial, { ...event("1"), event: {
+    type: "execution_finished", runId: "run", payload: { status: "refused" },
+  } });
+  assert.deepEqual(final, { ...initial, status: "refused", lastEventNumber: "1" });
+  assert.equal(terminal(final), true);
 });

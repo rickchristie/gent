@@ -69,7 +69,12 @@ record 8
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			model := tt.NewMockModel().AddRawResponse(&gent.ContentResponse{
-				Choices: []*gent.ContentChoice{{CandidateContent: test.input.content,
+				Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
+					Status: gent.ModelStatusToolCalls,
+				},
+					CandidateContent: []gent.ContentPart{
+						gent.TextContent{Text: test.input.content},
+					},
 					ToolCalls: []gent.ModelToolCall{
 						{ID: "call-a", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "lookup", Arguments: `{"id":7}`}},
@@ -82,17 +87,12 @@ record 8
 					return fmt.Sprintf("record %v", args["id"]), nil
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "summary", gent.NewBasicLoopData(
-				&gent.Task{Text: "Read both records."}))
+				gent.NewTask(gent.TextContent{Text: "Read both records."})))
 			result, err := agent.Next(ctx)
 			if !assert.NoError(t, err) {
 				return
 			}
-			assert.Equal(t, &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: `<lookup>
-record 7
-</lookup>
-<lookup>
-record 8
-</lookup>`}, result)
+			assert.Equal(t, &gent.AgentLoopResult{Action: gent.LAContinue}, result)
 			original, err := ctx.Scratchpad()
 			if !assert.NoError(t, err) {
 				return
@@ -108,7 +108,7 @@ record 8
 			if !assert.Equal(t, test.expected.err, err) {
 				return
 			}
-			assert.Equal(t, [][]gent.ModelMessage{{gent.TextParts(gent.ChatMessageTypeHuman,
+			assert.Equal(t, [][]*gent.ModelMessage{{gent.TextParts(gent.ChatMessageTypeHuman,
 				test.expected.prompt)}}, summary.CapturedMessages)
 			assert.NoError(t, ctx.UpdateHistory(update))
 			active, err := ctx.Scratchpad()
@@ -149,7 +149,7 @@ func TestSummarization_TextAndMedia(t *testing.T) {
 	}
 	_, err = strategy.Compact(ctx, selection)
 	assert.NoError(t, err)
-	assert.Equal(t, [][]gent.ModelMessage{{gent.TextParts(gent.ChatMessageTypeHuman,
+	assert.Equal(t, [][]*gent.ModelMessage{{gent.TextParts(gent.ChatMessageTypeHuman,
 		`## Existing Summary
 
 None (first compaction).

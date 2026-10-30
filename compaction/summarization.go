@@ -686,7 +686,7 @@ func (s *SummarizationStrategy) Compact(
 		s.userPrompt, existingText, newMessages,
 	)
 
-	// Call model directly without TextFormat/TextSection.
+	// Use a managed model call with the summarization prompt.
 	// This is a one-shot call where the entire output is
 	// the summary — no multi-section parsing needed.
 	//
@@ -695,9 +695,9 @@ func (s *SummarizationStrategy) Compact(
 	// system message is static across calls. When empty
 	// (e.g., after WithPrompt), we send a single user
 	// message containing everything.
-	var messages []gent.ModelMessage
+	var messages []*gent.ModelMessage
 	if s.systemPrompt != "" {
-		messages = []gent.ModelMessage{
+		messages = []*gent.ModelMessage{
 			{
 				Role: gent.ChatMessageTypeSystem,
 				Parts: []gent.ContentPart{
@@ -716,7 +716,7 @@ func (s *SummarizationStrategy) Compact(
 			},
 		}
 	} else {
-		messages = []gent.ModelMessage{
+		messages = []*gent.ModelMessage{
 			{
 				Role: gent.ChatMessageTypeHuman,
 				Parts: []gent.ContentPart{
@@ -765,11 +765,16 @@ func (s *SummarizationStrategy) Compact(
 	}
 	// A metadata-only or partial reply cannot replace the selected working context.
 	choice := response.Choices[0]
-	if state := choice.State(); state != gent.ModelAnswer {
+	// Custom models need the same boundary check as bundled adapters. Inconsistent content
+	// cannot become trusted history even when its status claims to be a complete answer.
+	if err := choice.ValidateCompletion(); err != nil {
+		return gent.HistoryUpdate{}, fmt.Errorf("summarization model completion: %w", err)
+	}
+	if state := choice.Completion.Status; state != gent.ModelStatusAnswer {
 		return gent.HistoryUpdate{}, fmt.Errorf(
 			"summarization model returned %s instead of a completed summary", state)
 	}
-	if strings.TrimSpace(choice.CandidateContent) == "" {
+	if strings.TrimSpace(gent.ContentText(choice.CandidateContent)) == "" {
 		return gent.HistoryUpdate{}, fmt.Errorf("summarization model returned no summary text")
 	}
 
@@ -777,7 +782,7 @@ func (s *SummarizationStrategy) Compact(
 		[]gent.FormattedSection{
 			{
 				Name:    "prior_work_summary",
-				Content: choice.CandidateContent,
+				Content: gent.ContentText(choice.CandidateContent),
 			},
 		},
 	)
@@ -831,7 +836,13 @@ func extractText(entry *gent.HistoryEntry) string {
 		for _, part := range msg.Parts {
 			switch value := part.(type) {
 			case gent.TextContent:
-				parts = append(parts, value.Text)
+				if value.Text != "" {
+					parts = append(parts, value.Text)
+				}
+			case *gent.TextContent:
+				if value.Text != "" {
+					parts = append(parts, value.Text)
+				}
 			case gent.ModelToolCall:
 				text := fmt.Sprintf("Tool call %q (%s)", value.ID, value.Type)
 				if value.FunctionCall != nil {

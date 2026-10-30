@@ -58,7 +58,7 @@ SERVER = {
              "WithRecorder, WithObserver, and WithCodecs when you create the execution context.",
              "server/runtime.go", "\t\t\tdata := gent.NewBasicLoopData", "\t\tif runErr != nil", [
                  ("trace.NewSequencer(runID, displayConfig(codecs))", "Create seq before this "
-                  "block. displayConfig enables preview chunks and accepted answer text."),
+                  "block. displayConfig enables preview chunks and accepted answer content."),
                  ("Worker context", "The worker belongs to the service, not to the WebSocket "
                   "request. Refreshing the browser must not cancel the agent."),
                  ("PersistenceError", "A failed or uncertain save stops new external work. "

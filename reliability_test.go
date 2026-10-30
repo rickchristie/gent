@@ -1,9 +1,12 @@
 package gent_test
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rickchristie/gent/output"
 	"runtime"
 	"strings"
 	"sync"
@@ -32,7 +35,12 @@ func (m reviewModel) GenerateContentStream(
 	context.Context, gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{CandidateContent: m.text}},
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: m.text}},
+			},
+		},
 	}, m.err), nil
 }
 
@@ -58,12 +66,14 @@ func TestReliabilitySharedAgent(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			agent := react.NewAgent(reviewModel{text: tc.input.response}).WithFormat(tc.input.format)
+			agent := react.NewAgent(reviewModel{
+				text: tc.input.response,
+			}).WithToolResultFormat(tc.input.format)
 			runner := executor.NewRunner(agent, executor.Config{})
 			var contexts []*gent.ExecutionContext
 			for i := 0; i < 8; i++ {
 				contexts = append(contexts, gent.NewExecutionContext(context.Background(), "review",
-					gent.NewBasicLoopData(&gent.Task{Text: "test"})))
+					gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test"}))))
 			}
 			var wg sync.WaitGroup
 			start := make(chan struct{})
@@ -72,7 +82,7 @@ func TestReliabilitySharedAgent(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					<-start
-					result, err := runner.Execute(ctx)
+					_, result, err := runner.Execute(ctx)
 					assert.Equal(t, tc.expected.err, err)
 					assert.Equal(t, &tc.expected.result, result)
 				}()
@@ -100,12 +110,12 @@ func TestReliabilityModelErrorWaitsForCompletion(t *testing.T) {
 	agent := react.NewAgent(reviewModel{err: errors.New("provider failed")})
 	runner := executor.NewRunner(agent, executor.Config{}).Subscribe(hook)
 	ctx := gent.NewExecutionContext(context.Background(), "review",
-		gent.NewBasicLoopData(&gent.Task{Text: "test"}))
+		gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "test"})))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, err := runner.Execute(ctx)
-		assert.EqualError(t, err, "AgentLoop.Next (iteration 1): model call failed: provider failed")
+		_, _, err := runner.Execute(ctx)
+		assert.EqualError(t, err, "Loop.Next (iteration 1): model call failed: provider failed")
 	}()
 	<-hook.entered
 	select {
@@ -133,7 +143,11 @@ func TestReliabilityModelErrorWaitsForCompletion(t *testing.T) {
 }
 
 func (l reviewLoop) Next(*gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-	return &gent.AgentLoopResult{Action: gent.LATerminate}, l.err
+	return &gent.AgentLoopResult{
+		TerminationReason: gent.TerminationSuccess,
+		Action:            gent.LATerminate,
+		Value:             genttest.Value(""),
+	}, l.err
 }
 
 func TestReliabilityExecutionReleasesContext(t *testing.T) {
@@ -149,7 +163,7 @@ func TestReliabilityExecutionReleasesContext(t *testing.T) {
 		expected expected
 	}
 	loopErr := errors.New("loop failed")
-	runErr := fmt.Errorf("AgentLoop.Next (iteration 1): %w", loopErr)
+	runErr := fmt.Errorf("Loop.Next (iteration 1): %w", loopErr)
 	tests := []testCase{
 		{"success", input{}, expected{
 			result:   gent.ExecutionResult{TerminationReason: gent.TerminationSuccess},
@@ -165,7 +179,7 @@ func TestReliabilityExecutionReleasesContext(t *testing.T) {
 			worker, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			ctx := gent.NewExecutionContext(worker, "review", nil)
-			result, err := executor.NewRunner(reviewLoop{tc.input.loopErr}, executor.Config{}).
+			_, result, err := executor.NewRunner(reviewLoop{tc.input.loopErr}, executor.Config{}).
 				Execute(ctx)
 			assert.Equal(t, tc.expected.err, err)
 			assert.Equal(t, &tc.expected.result, result)
@@ -210,20 +224,14 @@ func reviewBufferWorkers() int {
 	stack := make([]byte, 1<<20)
 	n := runtime.Stack(stack, true)
 	count := 0
-	for _, entry := range strings.Split(string(stack[:n]), "\n\n") {
+	for _, entry := range strings.Split(string(stack[:n]), `
+
+`) {
 		if strings.Contains(entry, "internal/buffer.(*Unbounded") {
 			count++
 		}
 	}
 	return count
-}
-
-func TestReliabilityXMLWithoutRegisteredSections(t *testing.T) {
-	assert.NotPanics(t, func() {
-		result, err := format.NewXML().Parse(nil, "<answer>done</answer>")
-		assert.NoError(t, err)
-		assert.Equal(t, map[string][]string{"answer": {"done"}}, result)
-	})
 }
 
 func TestReliabilityBleveSearchChecksCancellation(t *testing.T) {
@@ -455,7 +463,10 @@ func BenchmarkReliabilityEmitChunk(b *testing.B) {
 					if err := ctx.EmitChunk(gent.StreamChunk{
 						MetaContent: []*gent.MetaContent{
 							{
-								Type: gent.MetaContentIntermediary, Text: "x",
+								Type: gent.MetaContentIntermediary,
+								Content: []gent.ContentPart{
+									gent.TextContent{Text: "x"},
+								},
 							},
 						},
 					}); err != nil {
@@ -467,3 +478,5 @@ func BenchmarkReliabilityEmitChunk(b *testing.B) {
 		})
 	}
 }
+
+func (reviewLoop) Output() gent.Output[string] { return output.NewTextOutput() }

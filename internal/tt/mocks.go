@@ -20,7 +20,7 @@ type MockModel struct {
 
 	// CapturedRequests and CapturedMessages contain each submitted request.
 	CapturedRequests []gent.ModelCallRequest
-	CapturedMessages [][]gent.ModelMessage
+	CapturedMessages [][]*gent.ModelMessage
 }
 
 // NewMockModel creates a new MockModel with the default name "test-model".
@@ -39,7 +39,12 @@ func (m *MockModel) ModelName() string { return m.name }
 // AddResponse queues a response with the specified content and token counts.
 func (m *MockModel) AddResponse(content string, inputTokens, outputTokens int) *MockModel {
 	m.responses = append(m.responses, &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{CandidateContent: content}},
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: content}},
+			},
+		},
 		Info: &gent.GenerationInfo{
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
@@ -88,8 +93,13 @@ func (m *MockModel) GenerateContentStream(
 		return gent.NewCompletedStream(m.responses[idx], nil), nil
 	}
 	response := &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{CandidateContent: "done"}},
-		Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "done"}},
+			},
+		},
+		Info: &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
 	}
 	return gent.NewCompletedStream(response, nil), nil
 }
@@ -98,72 +108,9 @@ func (m *MockModel) GenerateContentStream(
 // MockFormat - implements gent.TextFormat with proper event publishing
 // -----------------------------------------------------------------------------
 
-// MockFormatCall represents a single parse call configuration.
-type MockFormatCall struct {
-	Result map[string][]string
-	Err    error
-}
+type MockFormat struct{}
 
-// MockFormat is a configurable mock that implements gent.TextFormat.
-// It publishes ParseError events as required.
-type MockFormat struct {
-	calls   []MockFormatCall
-	callIdx int
-}
-
-// NewMockFormat creates a new MockFormat.
-func NewMockFormat() *MockFormat {
-	return &MockFormat{}
-}
-
-// AddParseResult queues a successful parse result.
-func (f *MockFormat) AddParseResult(result map[string][]string) *MockFormat {
-	f.calls = append(f.calls, MockFormatCall{Result: result})
-	return f
-}
-
-// AddParseError queues a parse error.
-func (f *MockFormat) AddParseError(err error) *MockFormat {
-	f.calls = append(f.calls, MockFormatCall{Err: err})
-	return f
-}
-
-// RegisterSection implements gent.TextFormat.
-func (f *MockFormat) RegisterSection(_ gent.TextSection) gent.TextFormat { return f }
-
-// DescribeStructure implements gent.TextFormat.
-func (f *MockFormat) DescribeStructure() string { return "XML format" }
-
-// Parse implements gent.TextFormat with proper event publishing.
-func (f *MockFormat) Parse(
-	execCtx *gent.ExecutionContext,
-	output string,
-) (map[string][]string, error) {
-	idx := f.callIdx
-	f.callIdx++
-
-	if idx < len(f.calls) {
-		call := f.calls[idx]
-		if call.Err != nil {
-			if execCtx != nil {
-				execCtx.PublishParseError(gent.ParseErrorTypeFormat, output, call.Err)
-			}
-			return nil, call.Err
-		}
-
-		// Success resets consecutive counter
-		if execCtx != nil {
-			execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
-		}
-		return call.Result, nil
-	}
-
-	// Default: terminate
-	if execCtx != nil {
-		execCtx.Stats().ResetGauge(gent.SGFormatParseErrorConsecutive)
-	}
-	return map[string][]string{"answer": {"done"}}, nil
-}
+func NewMockFormat() *MockFormat { return &MockFormat{} }
 
 // FormatSections implements gent.TextFormat.
 func (f *MockFormat) FormatSections(sections []gent.FormattedSection) string {
@@ -290,9 +237,12 @@ var _ gent.CompactionStrategy = (*MockCompactionStrategy)(nil)
 // AddToolCall queues a native function call with explicit arguments.
 func (m *MockModel) AddToolCall(name, arguments string, inputTokens, outputTokens int) *MockModel {
 	m.responses = append(m.responses, &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{ToolCalls: []gent.ModelToolCall{{
-			ID: "test-call", Type: "function",
-			FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments}}}}},
+		Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
+			Status: gent.ModelStatusToolCalls,
+		},
+			ToolCalls: []gent.ModelToolCall{{
+				ID: "test-call", Type: "function",
+				FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments}}}}},
 		Info: &gent.GenerationInfo{InputTokens: inputTokens, OutputTokens: outputTokens}})
 	return m
 }

@@ -53,10 +53,13 @@ func (m *lessonModel) GenerateContentStream(
 }
 
 func modelCall(id, name, arguments string) *gent.ContentChoice {
-	return &gent.ContentChoice{ToolCalls: []gent.ModelToolCall{{
-		ID: id, Type: "function",
-		FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments},
-	}}}
+	return &gent.ContentChoice{Completion: gent.ModelCompletion{
+		Status: gent.ModelStatusToolCalls,
+	},
+		ToolCalls: []gent.ModelToolCall{{
+			ID: id, Type: "function",
+			FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments},
+		}}}
 }
 
 func TestLessonPolicyRun(t *testing.T) {
@@ -106,7 +109,10 @@ Report damage within 7 days of delivery. Supply the order ID and a photo of the 
 After the report is checked, the customer can request a replacement or a refund.`
 	searchCall := modelCall("search-1", "search_policy", `{"query":"return refund unused"}`)
 	getCall := modelCall("get-1", "get_policy", `{"policy_id":"return-window"}`)
-	final := &gent.ContentChoice{CandidateContent: answer}
+	final := &gent.ContentChoice{
+		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+		CandidateContent: []gent.ContentPart{gent.TextContent{Text: answer}},
+	}
 	formatted := func(name, content string) string {
 		return format.NewXML().FormatSections([]gent.FormattedSection{{Name: name, Content: content}})
 	}

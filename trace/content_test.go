@@ -54,7 +54,7 @@ func TestFinalContentTraceRetention(t *testing.T) {
 			ctx.PublishAfterExecution(gent.TerminationSuccess, nil)
 			err := ctx.CommitCheckpoint(gent.PhaseTerminal)
 			snapshot := seq.Snapshot()
-			assert.Equal(t, test.expected, expected{snapshot.Contexts[0].Content,
+			assert.Equal(t, test.expected, expected{gent.ContentText(snapshot.Contexts[0].Content),
 				snapshot.Contexts[0].ContentTruncated, err})
 			assert.Equal(t, ctx.ContextId()+":answer", snapshot.Contexts[0].MessageId)
 			assert.Equal(t, []string{"preview"}, snapshot.Contexts[0].SourceMessageIds)
@@ -77,20 +77,42 @@ func TestTraceMetadataOrderAndSharedLimit(t *testing.T) {
 	defer ctx.Release()
 	before := ctx.PublishBeforeModelCall("fixture", gent.NewModelCallRequest(nil))
 	for _, meta := range []*gent.MetaContent{
-		{Type: gent.MetaContentReasoning, Text: "abc", MessageId: "reason"},
-		{Type: gent.MetaContentCommentary, Text: "def", MessageId: "comment"},
-		{Type: "progress", Text: "ghi", MessageId: "progress"},
+		{
+			Type:      gent.MetaContentReasoning,
+			Content:   []gent.ContentPart{gent.TextContent{Text: "abc"}},
+			MessageId: "reason",
+		},
+		{
+			Type:      gent.MetaContentCommentary,
+			Content:   []gent.ContentPart{gent.TextContent{Text: "def"}},
+			MessageId: "comment",
+		},
+		{
+			Type:      "progress",
+			Content:   []gent.ContentPart{gent.TextContent{Text: "ghi"}},
+			MessageId: "progress",
+		},
 	} {
 		assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{ModelCallId: before.ModelCallId,
 			MetaContent: []*gent.MetaContent{meta}}))
 	}
 	want := []*gent.MetaContent{
-		{Type: gent.MetaContentReasoning, Text: "abc", MessageId: "reason"},
-		{Type: gent.MetaContentCommentary, Text: "de", MessageId: "comment"},
+		{
+			Type:      gent.MetaContentReasoning,
+			Content:   []gent.ContentPart{gent.TextContent{Text: "abc"}},
+			MessageId: "reason",
+		},
+		{
+			Type:      gent.MetaContentCommentary,
+			Content:   []gent.ContentPart{gent.TextContent{Text: "de"}},
+			MessageId: "comment",
+		},
 	}
 	snapshot := seq.Snapshot()
 	assert.Equal(t, want, snapshot.ModelCalls[0].Stream.MetaContent)
 	assert.True(t, snapshot.ModelCalls[0].Stream.MetaContentTruncated)
-	snapshot.ModelCalls[0].Stream.MetaContent[0].Text = "changed"
+	snapshot.ModelCalls[0].Stream.MetaContent[0].Content = []gent.ContentPart{
+		gent.TextContent{Text: "changed"},
+	}
 	assert.Equal(t, want, seq.Snapshot().ModelCalls[0].Stream.MetaContent)
 }

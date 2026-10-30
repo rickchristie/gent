@@ -51,7 +51,10 @@ func TestExecutionContext_ObserversDoNotBlockRecording(t *testing.T) {
 						StreamChunk{
 							MetaContent: []*MetaContent{
 								{
-									Type: MetaContentIntermediary, Text: "policy evidence",
+									Type: MetaContentIntermediary,
+									Content: []ContentPart{
+										TextContent{Text: "policy evidence"},
+									},
 								},
 							},
 						},
@@ -105,13 +108,16 @@ func TestBoundedProviderStream_CancellationReleasesBackpressure(t *testing.T) {
 	defer cancel()
 	stream, err := NewBoundedStreamWithDuration(ctx, 1, nil)
 	assert.NoError(t, err)
-	assert.True(t, stream.SendMeta(&MetaContent{Type: MetaContentIntermediary, Text: "first"}))
+	assert.True(t, stream.SendMeta(&MetaContent{
+		Type:    MetaContentIntermediary,
+		Content: []ContentPart{TextContent{Text: "first"}},
+	}))
 	started := make(chan struct{})
 	done := make(chan bool, 1)
 	go func() {
 		close(started)
 		done <- stream.SendMeta(&MetaContent{
-			Type: MetaContentIntermediary, Text: "second",
+			Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "second"}},
 		})
 	}()
 	<-started

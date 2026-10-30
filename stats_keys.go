@@ -148,21 +148,6 @@ const (
 	SGToolCallsErrorConsecutiveFor StatKey = "gent:tool_calls_error_consecutive:" // + tool
 )
 
-// Format parse error tracking keys.
-//
-// Auto-updated when ParseErrorEvent with ErrorType="format" is
-// published. These track errors when the TextFormat fails to parse
-// LLM output structure.
-//
-// Default limit: 3 consecutive errors (see DefaultLimits).
-const (
-	// Counters
-	SCFormatParseErrorTotal StatKey = "gent:format_parse_error_total"
-
-	// Gauges
-	SGFormatParseErrorConsecutive StatKey = "gent:format_parse_error_consecutive"
-)
-
 // Toolchain parse error tracking keys.
 //
 // Auto-updated when ParseErrorEvent with ErrorType="toolchain" is
@@ -176,36 +161,6 @@ const (
 
 	// Gauges
 	SGToolchainParseErrorConsecutive StatKey = "gent:toolchain_parse_error_consecutive"
-)
-
-// Termination parse error tracking keys.
-//
-// Auto-updated when ParseErrorEvent with ErrorType="termination" is
-// published. These track errors when the Termination fails to parse
-// answer content.
-//
-// Default limit: 3 consecutive errors (see DefaultLimits).
-const (
-	// Counters
-	SCTerminationParseErrorTotal StatKey = "gent:termination_parse_error_total"
-
-	// Gauges
-	SGTerminationParseErrorConsecutive StatKey = "gent:termination_parse_error_consecutive"
-)
-
-// Section parse error tracking keys.
-//
-// Auto-updated when ParseErrorEvent with ErrorType="section" is
-// published. These track errors when generic TextSections fail to
-// parse content.
-//
-// Default limit: 3 consecutive errors (see DefaultLimits).
-const (
-	// Counters
-	SCSectionParseErrorTotal StatKey = "gent:section_parse_error_total"
-
-	// Gauges
-	SGSectionParseErrorConsecutive StatKey = "gent:section_parse_error_consecutive"
 )
 
 // Scratchpad length tracking key (Gauge).
@@ -269,33 +224,6 @@ const (
 	SGTotalTokensLastIterationFor  StatKey = "gent:total_tokens_last_iteration:"  // + model
 )
 
-// Answer rejection tracking keys (Counter).
-//
-// Updated by Termination implementations when a validator rejects an
-// answer. Use SCAnswerRejectedBy + validator name for per-validator
-// tracking.
-//
-// Example limits:
-//
-//	// Stop after 10 total rejections
-//	{Type: LimitExactKey, Key: SCAnswerRejectedTotal, MaxValue: 10}
-//
-//	// Stop if specific validator rejects 5 times
-//	{
-//	    Type: LimitExactKey,
-//	    Key: SCAnswerRejectedBy + "schema_validator",
-//	    MaxValue: 5,
-//	}
-//
-//	// Stop if ANY validator rejects 3 times
-//	{Type: LimitKeyPrefix, Key: SCAnswerRejectedBy, MaxValue: 3}
-//
-// Default limit: 10 total rejections (see DefaultLimits).
-const (
-	SCAnswerRejectedTotal StatKey = "gent:answer_rejected_total"
-	SCAnswerRejectedBy    StatKey = "gent:answer_rejected_by:" // + validator name
-)
-
 // Code execution tracking keys (Programmatic Tool Calling).
 //
 // Auto-updated by JsToolChainWrapper when code blocks
@@ -326,7 +254,7 @@ const SCCompactions StatKey = "gent:compactions"
 
 // Repetition loop detection tracking keys.
 //
-// Updated by the AgentLoop when streaming repetition detection triggers.
+// Updated by the Loop when streaming repetition detection triggers.
 // These are separate from format parse errors — a loop is a distinct failure
 // mode where the model repeats the same reasoning/action.
 //

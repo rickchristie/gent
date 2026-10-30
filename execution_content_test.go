@@ -1,9 +1,12 @@
 package gent_test
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/rickchristie/gent/output"
 	"regexp"
 	"sync"
 	"testing"
@@ -12,7 +15,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
 	"github.com/rickchristie/gent/executor"
-	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/trace"
 	"github.com/stretchr/testify/assert"
 )
@@ -40,7 +42,10 @@ func (model *contentModel) GenerateContentStream(_ context.Context, request gent
 	reply := model.replies[index]
 	stream := gent.NewStreamWithDuration()
 	for _, delta := range reply.deltas {
-		stream.SendMeta(&gent.MetaContent{Type: gent.MetaContentIntermediary, Text: delta})
+		stream.SendMeta(&gent.MetaContent{
+			Type:    gent.MetaContentIntermediary,
+			Content: []gent.ContentPart{gent.TextContent{Text: delta}},
+		})
 	}
 	if model.complete != nil {
 		model.complete()
@@ -69,7 +74,7 @@ func TestExecutionContent_FailuresKeepOnlyPreviews(t *testing.T) {
 	}
 	cases := []testCase{
 		{"provider failure", input{provider: true}, expected{gent.TerminationError,
-			"AgentLoop.Next (iteration 1): model call failed: provider failed"}},
+			"Loop.Next (iteration 1): model call failed: provider failed"}},
 		{"cancel", input{cancel: true}, expected{gent.TerminationContextCanceled, "context canceled"}},
 		{"truncated", input{stopReason: "length"}, expected{gent.TerminationLimitExceeded,
 			"limit exceeded: $self:gent:iterations >= 1"}},
@@ -78,15 +83,29 @@ func TestExecutionContent_FailuresKeepOnlyPreviews(t *testing.T) {
 		{"token limit", input{tokenLimit: true}, expected{gent.TerminationLimitExceeded,
 			"limit exceeded: gent:output_tokens > 3"}},
 		{"unknown completion", input{stopReason: "new_stop"}, expected{gent.TerminationError,
-			`AgentLoop.Next (iteration 1): model stopped without a usable response: "new_stop"`}},
+			`Loop.Next (iteration 1): model stopped without a usable response: "new_stop"`}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := gent.NewExecutionContext(context.Background(), "root",
-				gent.NewBasicLoopData(&gent.Task{Text: "Get the status."}))
-			choice := &gent.ContentChoice{CandidateContent: `{"status":"pending"}`,
-				StopReason: test.input.stopReason}
-			reply := contentReply{choice: choice, deltas: []string{choice.CandidateContent}}
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Get the status."})))
+			choice := &gent.ContentChoice{CandidateContent: []gent.ContentPart{
+				gent.TextContent{Text: `{"status":"pending"}`},
+			},
+				Completion: gent.ModelCompletion{
+					Status:         gent.ModelStatusAnswer,
+					ProviderReason: test.input.stopReason,
+				}}
+			switch test.input.stopReason {
+			case "length":
+				choice.Completion.Status = gent.ModelStatusIncomplete
+			case "new_stop":
+				choice.Completion.Status = gent.ModelStatusFailed
+			}
+			reply := contentReply{
+				choice: choice,
+				deltas: []string{gent.ContentText(choice.CandidateContent)},
+			}
 			if test.input.provider {
 				reply.err = errors.New("provider failed")
 			}
@@ -94,12 +113,14 @@ func TestExecutionContent_FailuresKeepOnlyPreviews(t *testing.T) {
 			if test.input.cancel {
 				model.complete = func() { ctx.CancelRun(context.Canceled) }
 			}
-			agent := react.NewAgent(model)
-			if test.input.reject {
-				term := termination.NewJSON[contentAnswer]("answer")
-				term.SetValidator(&contentValidator{})
-				agent.WithTermination(term)
+			out, err := output.NewJsonOutput[contentAnswer]()
+			if !assert.NoError(t, err) {
+				return
 			}
+			if test.input.reject {
+				out.SetCustomValidator("status", validateContentAnswer)
+			}
+			agent := react.NewWithOutput(model, out)
 			if test.input.reject || test.input.stopReason == "length" {
 				ctx.SetLimits([]gent.Limit{{Type: gent.LimitExactKey,
 					Key: gent.SCIterations.Self(), MaxValue: 1}})
@@ -110,14 +131,14 @@ func TestExecutionContent_FailuresKeepOnlyPreviews(t *testing.T) {
 			}
 			chunks, unsubscribe := ctx.SubscribeAll()
 			defer unsubscribe()
-			result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+			_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			if !assert.Error(t, err) || !assert.NotNil(t, result) {
 				return
 			}
 			assert.Equal(t, test.expected, expected{result.TerminationReason, err.Error()})
 			var live []gent.StreamChunk
 			for chunk := range chunks {
-				assert.Equal(t, "", chunk.Content)
+				assert.Equal(t, []gent.ContentPart(nil), chunk.Content)
 				assert.Equal(t, "", chunk.MessageId)
 				live = append(live, chunk)
 			}
@@ -144,15 +165,20 @@ func TestExecutionContent_ChildRunsHaveSeparateAnswers(t *testing.T) {
 		var pending sync.WaitGroup
 		failures := make(chan error, 2)
 		for range 2 {
-			child := ctx.SpawnChild("child", gent.NewBasicLoopData(&gent.Task{Text: "Answer."}))
+			child := ctx.SpawnChild("child", gent.NewBasicLoopData(gent.NewTask(gent.TextContent{
+				Text: "Answer.",
+			})))
 			children = append(children, child)
 			pending.Add(1)
 			go func() {
 				defer pending.Done()
 				model := &contentModel{replies: []contentReply{{
-					choice: &gent.ContentChoice{CandidateContent: "Child answer."},
+					choice: &gent.ContentChoice{
+						Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+						CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Child answer."}},
+					},
 					deltas: []string{"Child answer."}}}}
-				_, err := executor.NewRunner(react.NewAgent(model), executor.DefaultConfig()).Execute(child)
+				_, _, err := executor.NewRunner(react.NewAgent(model), executor.DefaultConfig()).Execute(child)
 				failures <- errors.Join(err, ctx.CompleteChild(child))
 			}()
 		}
@@ -163,10 +189,15 @@ func TestExecutionContent_ChildRunsHaveSeparateAnswers(t *testing.T) {
 				return nil, err
 			}
 		}
-		return &gent.AgentLoopResult{Action: gent.LATerminate,
-			Result: []gent.ContentPart{gent.TextContent{Text: "Parent answer."}}}, nil
+		return &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess, Action: gent.LATerminate,
+			Result: []gent.ContentPart{
+				gent.TextContent{Text: "Parent answer."},
+			},
+			Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+				gent.TextContent{Text: "Parent answer."},
+			}))}, nil
 	})
-	_, err := executor.NewRunner(loop, executor.DefaultConfig()).Execute(ctx)
+	_, _, err := executor.NewRunner(loop, executor.DefaultConfig()).Execute(ctx)
 	assert.NoError(t, err)
 	finals := map[string]gent.StreamChunk{}
 	previews := map[string]string{}
@@ -181,13 +212,15 @@ func TestExecutionContent_ChildRunsHaveSeparateAnswers(t *testing.T) {
 		}
 	}
 	assert.Len(t, finals, 3)
-	assert.Equal(t, "Parent answer.", finals[ctx.ContextId()].Content)
+	assert.Equal(t, []gent.ContentPart{
+		gent.TextContent{Text: "Parent answer."},
+	}, finals[ctx.ContextId()].Content)
 	assert.Nil(t, finals[ctx.ContextId()].SourceMessageIds)
 	assert.NotEqual(t, previews[children[0].ContextId()], previews[children[1].ContextId()])
 	for _, child := range children {
 		final := finals[child.ContextId()]
 		assert.Equal(t, ctx.ContextId(), final.ParentContextId)
-		assert.Equal(t, "Child answer.", final.Content)
+		assert.Equal(t, []gent.ContentPart{gent.TextContent{Text: "Child answer."}}, final.Content)
 		assert.Equal(t, child.ContextId()+":answer", final.MessageId)
 		assert.Equal(t, []string{previews[child.ContextId()]}, final.SourceMessageIds)
 	}
@@ -202,10 +235,25 @@ func TestContentIdentity_NewRequestsDoNotReusePreviewIDs(t *testing.T) {
 	child := ctx.SpawnChild("child", nil)
 	defer child.Release()
 	model := &contentModel{replies: []contentReply{
-		{choice: &gent.ContentChoice{CandidateContent: "Partial."},
+		{choice: &gent.ContentChoice{
+			Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+			CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Partial."}},
+		},
 			deltas: []string{"Partial."}, err: context.Canceled},
-		{choice: &gent.ContentChoice{CandidateContent: "Retry."}, deltas: []string{"Retry."}},
-		{choice: &gent.ContentChoice{CandidateContent: "Child."}, deltas: []string{"Child."}},
+		{
+			choice: &gent.ContentChoice{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Retry."}},
+			},
+			deltas: []string{"Retry."},
+		},
+		{
+			choice: &gent.ContentChoice{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Child."}},
+			},
+			deltas: []string{"Child."},
+		},
 	}}
 	seen := map[string]bool{}
 	for index, owner := range []*gent.ExecutionContext{ctx, ctx, child} {
@@ -242,26 +290,41 @@ func TestExecutionContent_ProviderContinuationIsNotFinal(t *testing.T) {
 	continuation := &gent.ProviderContinuation{Provider: "fixture", Items: []json.RawMessage{
 		json.RawMessage(`{"type":"server_tool_use","id":"work"}`)}}
 	model := &contentModel{replies: []contentReply{
-		{choice: &gent.ContentChoice{CandidateContent: "Still working.",
-			StopReason: "pause_turn", Continuation: continuation}, deltas: []string{"Still working."}},
-		{choice: &gent.ContentChoice{CandidateContent: "Done."}, deltas: []string{"Done."}},
+		{choice: &gent.ContentChoice{CandidateContent: []gent.ContentPart{
+			gent.TextContent{Text: "Still working."},
+		},
+			Completion: gent.ModelCompletion{
+				Status:         gent.ModelStatusContinue,
+				ProviderReason: "pause_turn",
+			},
+			Continuation: continuation},
+			deltas: []string{
+				"Still working.",
+			}},
+		{
+			choice: &gent.ContentChoice{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Done."}},
+			},
+			deltas: []string{"Done."},
+		},
 	}}
 	ctx := gent.NewExecutionContext(context.Background(), "root",
-		gent.NewBasicLoopData(&gent.Task{Text: "Finish the work."}))
+		gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Finish the work."})))
 	chunks, unsubscribe := ctx.SubscribeAll()
 	defer unsubscribe()
-	result, err := executor.NewRunner(react.NewAgent(model), executor.DefaultConfig()).Execute(ctx)
+	_, result, err := executor.NewRunner(react.NewAgent(model), executor.DefaultConfig()).Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, &gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
 		Output: []gent.ContentPart{gent.TextContent{Text: "Done."}}}, result)
 	if !assert.Len(t, model.requests, 2) {
 		return
 	}
-	assert.Equal(t, continuation, model.requests[1].Messages[2].Continuation)
+	assert.Equal(t, continuation, model.requests[1].Messages[1].Continuation)
 	var contents []string
 	for chunk := range chunks {
 		if chunk.MessageId != "" {
-			contents = append(contents, chunk.Content)
+			contents = append(contents, gent.ContentText(chunk.Content))
 		}
 	}
 	assert.Equal(t, []string{"Done."}, contents)
@@ -294,16 +357,21 @@ func TestExecutionContent_ObserverDelayDoesNotLoseFinalChunk(t *testing.T) {
 	go func() { flushed <- ctx.FlushProgress() }()
 	<-observer.started
 	loop := contentLoop(func(*gent.ExecutionContext) (*gent.AgentLoopResult, error) {
-		return &gent.AgentLoopResult{Action: gent.LATerminate,
-			Result: []gent.ContentPart{gent.TextContent{Text: "Done."}}}, nil
+		return &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess, Action: gent.LATerminate,
+			Result: []gent.ContentPart{
+				gent.TextContent{Text: "Done."},
+			},
+			Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+				gent.TextContent{Text: "Done."},
+			}))}, nil
 	})
-	_, err := executor.NewRunner(loop, executor.DefaultConfig()).Execute(ctx)
+	_, _, err := executor.NewRunner(loop, executor.DefaultConfig()).Execute(ctx)
 	close(observer.release)
 	assert.NoError(t, err)
 	assert.NoError(t, <-flushed)
 	var contents []string
 	for chunk := range chunks {
-		contents = append(contents, chunk.Content)
+		contents = append(contents, gent.ContentText(chunk.Content))
 	}
 	assert.Equal(t, []string{"Done."}, contents)
 }
@@ -312,12 +380,14 @@ type contentAnswer struct {
 	Status string `json:"status"`
 }
 
-type contentValidator struct{}
-
-func (*contentValidator) Name() string { return "status" }
-func (*contentValidator) Validate(_ *gent.ExecutionContext, answer any) *gent.ValidationResult {
-	return &gent.ValidationResult{Accepted: answer.(contentAnswer).Status == "done",
-		Feedback: []gent.FormattedSection{{Name: "error", Content: "Check the status."}}}
+func validateContentAnswer(_ *gent.ExecutionContext, answer contentAnswer) (
+	*gent.OutputValidationResult, error,
+) {
+	if answer.Status == "done" {
+		return &gent.OutputValidationResult{Accepted: true}, nil
+	}
+	return &gent.OutputValidationResult{Steering: []gent.ContentPart{
+		gent.TextContent{Text: "Check the status."}}}, nil
 }
 
 // The terminal save can pause, fail before acceptance, or lose its acknowledgment. This exercises
@@ -415,25 +485,42 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			}
 			defer seq.Close()
 			model := &contentModel{replies: []contentReply{
-				{choice: &gent.ContentChoice{CandidateContent: "Looking up.",
+				{choice: &gent.ContentChoice{Completion: gent.ModelCompletion{
+					Status: gent.ModelStatusToolCalls,
+				},
+					CandidateContent: []gent.ContentPart{
+						gent.TextContent{Text: "Looking up."},
+					},
 					ToolCalls: []gent.ModelToolCall{{ID: "lookup", Type: "function",
 						FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: "{}"}}}},
 					deltas: []string{"Looking up."}},
-				{choice: &gent.ContentChoice{CandidateContent: `{"status":"pending"}`},
+				{choice: &gent.ContentChoice{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: `{"status":"pending"}`}},
+				},
 					deltas: []string{`{"status":"pending"}`}},
-				{choice: &gent.ContentChoice{CandidateContent: ` { "status" : "done" } `},
+				{choice: &gent.ContentChoice{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: ` { "status" : "done" } `}},
+				},
 					deltas: []string{` { "status" : `, `"done" } `}},
 			}}
-			term := termination.NewJSON[contentAnswer]("answer")
-			term.SetValidator(&contentValidator{})
+			out, err := output.NewJsonOutput[contentAnswer]()
+			if !assert.NoError(t, err) {
+				return
+			}
+			out.SetCustomValidator("status", validateContentAnswer)
 			toolCalls := 0
-			agent := react.NewAgent(model).WithTermination(term).WithRecoveryVersion("content-v1").
-				RegisterTool(gent.DefineTool("lookup", func(context.Context, map[string]any) (string, error) {
-					toolCalls++
-					return "done", nil
-				}).Description("Read the status").ParameterSchema(nil).MustBuild())
+			buildAgent := func(model gent.Model) *react.Agent[contentAnswer] {
+				return react.NewWithOutput(model, out).WithRecoveryVersion("content-v1").
+					RegisterTool(gent.DefineTool("lookup", func(context.Context, map[string]any) (string, error) {
+						toolCalls++
+						return "done", nil
+					}).Description("Read the status").ParameterSchema(nil).MustBuild())
+			}
+			agent := buildAgent(model)
 			ctx := gent.NewExecutionContext(context.Background(), "root",
-				gent.NewBasicLoopData(&gent.Task{Text: "Read the status."}),
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read the status."})),
 				gent.WithRunId("content"), gent.WithRecorder(store), gent.WithObserver(seq))
 			chunks, unsubscribe := ctx.SubscribeAll()
 			defer unsubscribe()
@@ -444,7 +531,7 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			done := make(chan outcome, 1)
 			started := time.Now()
 			go func() {
-				result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+				_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 				done <- outcome{result, err}
 			}()
 			var live []gent.StreamChunk
@@ -463,13 +550,13 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			}
 			var texts []string
 			for _, chunk := range live {
-				assert.Equal(t, "", chunk.Content)
+				assert.Equal(t, []gent.ContentPart(nil), chunk.Content)
 				texts = append(texts, gent.MetaText(chunk.MetaContent, gent.MetaContentIntermediary))
 				assert.GreaterOrEqual(t, chunk.Timestamp.UnixNano(), started.UnixNano())
 			}
 			assert.Equal(t, []string{"Looking up.", `{"status":"pending"}`,
 				` { "status" : `, `"done" } `}, texts)
-			assert.Equal(t, "", seq.Snapshot().Contexts[0].Content)
+			assert.Equal(t, []gent.ContentPart(nil), seq.Snapshot().Contexts[0].Content)
 			select {
 			case chunk := <-chunks:
 				t.Errorf("chunk arrived before terminal acceptance: %#v", chunk)
@@ -489,13 +576,15 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			assert.Equal(t, 3, len(model.requests))
 			assert.Equal(t, 1, toolCalls)
 			assert.Equal(t, int64(18), ctx.Stats().GetCounter(gent.SCTotalTokens))
-			assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCAnswerRejectedTotal))
+			assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCOutputRejectedTotal))
 			terminal := contentChunks(t, store.terminal.Events, ctx.Codecs())
 			if !assert.Len(t, terminal, 1) {
 				return
 			}
 			final := terminal[0]
-			assert.Equal(t, gent.StreamChunk{Content: `{"status":"done"}`,
+			assert.Equal(t, gent.StreamChunk{Content: []gent.ContentPart{
+				gent.TextContent{Text: `{"status":"done"}`},
+			},
 				MessageId:        ctx.ContextId() + ":answer",
 				SourceMessageIds: []string{live[3].MetaContent[0].MessageId},
 				RunId:            ctx.RunId(), EventNumber: final.EventNumber, Timestamp: final.Timestamp,
@@ -539,7 +628,7 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			assert.NoError(t, ctx.Codecs().Unmarshal(encoded, &saved))
 			assert.NoError(t, gent.ValidateBundle(saved, ctx.Codecs()))
 			fresh := &contentModel{}
-			result, err := executor.NewRunner(react.NewAgent(fresh), executor.DefaultConfig()).Resume(
+			_, result, err := executor.NewRunner(buildAgent(fresh), executor.DefaultConfig()).Resume(
 				context.Background(), saved, gent.RestoreBindings{Codecs: ctx.Codecs()})
 			assert.NoError(t, err)
 			assert.Equal(t, &gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
@@ -549,3 +638,5 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 		})
 	}
 }
+
+func (contentLoop) Output() gent.Output[string] { return output.NewTextOutput() }

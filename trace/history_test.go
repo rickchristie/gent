@@ -79,7 +79,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 		assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
 			StreamId: "partial", MetaContent: []*gent.MetaContent{
 				{
-					Type: gent.MetaContentIntermediary, Text: "x",
+					Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "x"}},
 				},
 			},
 		}))
@@ -113,7 +113,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 	assert.NoError(t, restored.EmitChunk(gent.StreamChunk{
 		StreamId: "partial", MetaContent: []*gent.MetaContent{
 			{
-				Type: gent.MetaContentIntermediary, Text: "y",
+				Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "y"}},
 			},
 		},
 	}))
@@ -127,7 +127,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 	assert.NoError(t, restored.EmitChunk(gent.StreamChunk{
 		StreamId: "partial", MetaContent: []*gent.MetaContent{
 			{
-				Type: gent.MetaContentIntermediary, Text: "z",
+				Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "z"}},
 			},
 		},
 	}))
@@ -161,13 +161,21 @@ func (m *interruptedProvider) GenerateContentStream(ctx context.Context, _ gent.
 	stream := gent.NewStreamWithDuration()
 	go func() {
 		stream.SendMeta(&gent.MetaContent{
-			Type: gent.MetaContentIntermediary, Text: "partial policy evidence",
+			Type: gent.MetaContentIntermediary,
+			Content: []gent.ContentPart{
+				gent.TextContent{Text: "partial policy evidence"},
+			},
 		})
 		close(m.started)
 		<-ctx.Done()
 		stream.Complete(&gent.ContentResponse{
-			Choices: []*gent.ContentChoice{{CandidateContent: "partial policy evidence"}},
-			Info:    &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
+			Choices: []*gent.ContentChoice{
+				{
+					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+					CandidateContent: []gent.ContentPart{gent.TextContent{Text: "partial policy evidence"}},
+				},
+			},
+			Info: &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
 		}, ctx.Err())
 	}()
 	return stream, nil
@@ -180,8 +188,13 @@ func (m *completedProvider) GenerateContentStream(context.Context, gent.ModelCal
 ) {
 	m.calls++
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{CandidateContent: "complete answer"}},
-		Info:    &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "complete answer"}},
+			},
+		},
+		Info: &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
 	}, nil), nil
 }
 
@@ -201,7 +214,7 @@ func TestHistoryReplay_ModelAttemptsAndKnownUsage(t *testing.T) {
 	ctx.IncrementIteration()
 	ctx.PublishBeforeIteration()
 	assert.NoError(t, ctx.CommitCheckpoint(gent.PhaseIterationReady))
-	request := gent.NewModelCallRequest([]gent.ModelMessage{
+	request := gent.NewModelCallRequest([]*gent.ModelMessage{
 		gent.TextParts(gent.ChatMessageTypeHuman, "policy question"),
 	})
 	model := &interruptedProvider{started: make(chan struct{})}

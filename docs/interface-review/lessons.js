@@ -34,7 +34,7 @@ const quiz = {
     choices: ['The executor stops successfully', 'Feedback goes into another iteration'],
     correct: 1,
     explain:
-      'Parsing is not acceptance. Termination can reject an answer and return feedback; ' +
+      'Parsing is not acceptance. Output can reject an answer and return feedback; ' +
       'the loop continues within its limits.',
   },
   memory: {
@@ -222,8 +222,8 @@ function renderLoop() {
         <label for="loop-format">Prompt format</label>
         <select id="loop-format">${option('xml', 'XML sections', state.format)}
           ${option('markdown', 'Markdown sections', state.format)}</select>
-        <div class="control-note">Prompt sections change. Native calls and answer rules stay the same.
-          ${contractButton('gent.TextFormat')}${contractButton('gent.TextSection')}</div>
+        <div class="control-note">The caller writes the prompt. Gent preserves its text and native message roles.
+          ${contractButton('gent.Task')}${contractButton('gent.Output')}</div>
       </aside>
       <div class="experiment-stage loop-stage">
         <div class="stage-topline"><span class="live-dot"></span> ORDER 42

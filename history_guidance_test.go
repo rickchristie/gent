@@ -32,10 +32,16 @@ func (m *guidanceModel) GenerateContentStream(
 	_ context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	m.requests = append(m.requests, request)
-	choice := &gent.ContentChoice{CandidateContent: "Check the booking before another attempt."}
+	choice := &gent.ContentChoice{
+		Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+		CandidateContent: []gent.ContentPart{
+			gent.TextContent{Text: "Check the booking before another attempt."},
+		},
+	}
 	if !m.finish {
-		choice.CandidateContent = ""
+		choice.CandidateContent = nil
 		for _, name := range []string{"lookup", "book", "later"} {
+			choice.Completion.Status = gent.ModelStatusToolCalls
 			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: "provider-" + name,
 				Type: "function", FunctionCall: &gent.FunctionCall{
 					Name: name, Arguments: `{"request_id":"request-7"}`}})
@@ -49,6 +55,7 @@ func (m *guidanceModel) GenerateContentStream(
 			if err != nil {
 				return nil, err
 			}
+			choice.Completion.Status = gent.ModelStatusToolCalls
 			choice.ToolCalls = []gent.ModelToolCall{{ID: "provider-program", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "run_code", Arguments: string(args)}}}
 		}
@@ -148,7 +155,7 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			effects := map[string]int{}
-			build := func(model *guidanceModel) *react.Agent {
+			build := func(model *guidanceModel) *react.Agent[string] {
 				var chain gent.ToolChain = toolchain.New()
 				if test.input.search {
 					chain = toolchain.NewSearch(toolchain.SearchHintSimpleList).
@@ -190,11 +197,11 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 				afterEffect: test.input.afterEffect,
 				view:        gent.RunView{SchemaVersion: gent.RunSchemaVersion, RunId: "guidance"}}
 			model := &guidanceModel{program: test.input.program}
-			data := gent.NewBasicLoopData(&gent.Task{Text: "Book once."})
+			data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Book once."}))
 			ctx := gent.NewExecutionContext(worker, "booking", data,
 				gent.WithRunId("guidance"), gent.WithRecorder(store), gent.WithCodecs(store.codecs))
 			defer ctx.Release()
-			_, err := executor.New[gent.LoopData](build(model), executor.DefaultConfig()).Execute(ctx)
+			_, _, err := executor.NewRunner(build(model), executor.DefaultConfig()).Execute(ctx)
 			assert.Error(t, err)
 			assert.Equal(t, test.expected.effects, effects)
 			freshModel := &guidanceModel{program: test.input.program, finish: true}
@@ -312,7 +319,7 @@ func (*recoverySearchTool) SyntheticQueries() []string { return []string{"book a
 
 func TestInterruptedProgramKeepsSearchDiscovery(t *testing.T) {
 	effects := 0
-	build := func(model *guidanceModel) *react.Agent {
+	build := func(model *guidanceModel) *react.Agent[string] {
 		chain := toolchain.NewSearch(toolchain.SearchHintSimpleList).
 			RegisterEngine(toolchain.NewRegexToolSearcher())
 		chain.RegisterTool(&recoverySearchTool{gent.DefineTool("book",
@@ -332,9 +339,11 @@ func TestInterruptedProgramKeepsSearchDiscovery(t *testing.T) {
 args:{query_type:"regex",query:"book"}});
 tool.call({tool:"book",args:{request_id:"request-7"}});`}
 	ctx := gent.NewExecutionContext(worker, "search program",
-		gent.NewBasicLoopData(&gent.Task{Text: "Book a flight."}), gent.WithRunId("search-program"),
+		gent.NewBasicLoopData(gent.NewTask(gent.TextContent{
+			Text: "Book a flight.",
+		})), gent.WithRunId("search-program"),
 		gent.WithRecorder(store), gent.WithCodecs(store.codecs))
-	_, err := executor.New[gent.LoopData](build(model), executor.DefaultConfig()).Execute(ctx)
+	_, _, err := executor.NewRunner(build(model), executor.DefaultConfig()).Execute(ctx)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 0, effects)
 	freshModel := &guidanceModel{finish: true}

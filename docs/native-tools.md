@@ -83,7 +83,7 @@ schemas remain chain settings.
 
 ```go
 model := models.NewOpenAI(apiKey, modelName)
-// Or: model := models.NewGrok(apiKey, modelName)
+// Or: model := models.NewXAI(apiKey, modelName)
 agent := react.NewAgent(model).WithRecoveryVersion("support/v1")
 ```
 
@@ -108,11 +108,10 @@ same field from `thinking_config`. The final choice exposes provider-visible sum
 `MetaContent` entries with type `reasoning`. Opaque and encrypted items remain unchanged in
 `ProviderContinuation`.
 
-`models.NewLCGWrapper` remains available for lossless LangChainGo conversions. It rejects opaque
-continuation items and reasoning-plus-tool responses that it cannot replay. The existing Anthropic
-adapter repairs still preserve text and ordinary tool blocks. This does not certify signed thinking
-replay for Anthropic, DeepSeek reasoning replay, or every Qwen server. Use a provider adapter that
-preserves the required fields before enabling those features.
+Gent owns the Anthropic, Gemini, DeepSeek, local runtime, and OpenRouter adapters as well.
+Each preserves its native continuation fields, including signed thinking or reasoning fields.
+See [provider protocols and supported features](models.md). Unsupported inputs and native controls
+return errors. A schema that cannot use native enforcement still receives complete local validation.
 
 ## Reasoning, commentary, and answers
 
@@ -120,15 +119,15 @@ Gent separates provider candidates from accepted execution output:
 
 | Value | Meaning |
 | --- | --- |
-| `ContentChoice.CandidateContent` | Provider text that the agent must check. |
+| `ContentChoice.CandidateContent` | Ordered content parts that the agent must check. |
 | `MetaContent{Type: "intermediary"}` | Ordinary text whose role is not yet certain. |
 | `MetaContent{Type: "reasoning"}` | Visible reasoning or a visible reasoning summary. |
 | `MetaContent{Type: "commentary"}` | An assistant update with an explicit provider label. |
 | `StreamChunk.Content` | The complete accepted answer, published once at terminal acceptance. |
 
 `MetaContent` is an ordered slice of pointers. Its `Type` is a string. Constants cover the three
-known types; unknown provider labels remain metadata. `Text` is display text. `MessageId` identifies
-its message. Encrypted or signed continuation data must not be used as display text.
+known types; unknown provider labels remain metadata. `Content` contains ordered text or media.
+`MessageId` identifies its message. Encrypted or signed continuation data must not be used as display text.
 
 The Responses adapter uses the assistant message `phase` from `response.output_item.added` for text
 deltas. Both unlabelled text and `final_answer` stream as `intermediary`: a provider cannot know
@@ -140,16 +139,14 @@ See [OpenAI's phase contract][openai-phase].
 [openai-phase]: https://developers.openai.com/api/docs/guides/reasoning#phase-parameter
 
 A provider completion ends one request. ReAct checks the stop reason, executes native calls, and
-passes a candidate with no tool calls to the termination handler and validator. Truncated responses
+passes a complete candidate with no tool calls to `Output[T].Process`. Truncated responses
 retry. A provider continuation such as `pause_turn` requires lossless continuation data and another
 request. Unknown or failed completion states return an error. Commentary alone continues the loop.
 
-Anthropic's wire-level `content` is an array of typed blocks. The LangChainGo adapter maps visible
-thinking to reasoning metadata and ordinary text to intermediary metadata. Literal `<thinking>`
-tags remain ordinary text. Signed thinking replay still has the adapter limits stated above.
-The final LangChainGo response keeps callback order and adds text that appears only in final SDK
-fields. A matching streamed prefix is not repeated. The position of final-only text is unknown,
-so it follows the streamed entries. If a final field differs, both versions remain as evidence.
+Anthropic's wire-level `content` is an array of typed blocks. Its adapter maps visible thinking to
+reasoning metadata and ordinary text to intermediary metadata. Literal tags remain ordinary text.
+Signed thinking blocks are saved and replayed in their original order. Gemini retains thought
+signatures with their parts; Chat endpoints retain the assistant's reasoning and native call fields.
 
 ### Frontend and storage contract
 
@@ -159,7 +156,7 @@ accepted events. The same stream carries provisional metadata and the accepted a
 
 1. Append each metadata delta to the preview identified by its `MessageId` and type. Keep entry
 order.
-2. On `execution_content`, replace the final answer with `Content`. This is a full text snapshot.
+2. On `execution_content`, replace the final answer with `Content`. This is a complete ordered content snapshot.
    Hide or replace previews whose IDs occur in `SourceMessageIds`. Other updates can remain visible.
 3. Identify an answer by its `ContextId` and final `MessageId`. Child contexts have separate
 answers.
@@ -167,9 +164,9 @@ answers.
    `CodecRegistry.DecodeEvent`, which fills these cursor fields from the accepted envelope.
 
 For example, a model can stream ` { "status" : "done" } ` as intermediary text. If the JSON
-termination handler accepts it, the final event contains `{"status":"done"}`. The final snapshot
-uses the actual termination result, so it can differ from the preview. A frontend must replace it,
-not append it. This sends the final text twice over the display transport, with no extra model call,
+output processor accepts it, the final event contains `{"status":"done"}`. The final snapshot
+uses the actual output result, so it can differ from the preview. A frontend must replace it,
+not append it. This can send text twice over the display transport, with no extra model call,
 model tokens, or history message.
 
 Each managed provider request scopes local message IDs to a new physical call. A retry gets new
@@ -191,11 +188,12 @@ Failed, canceled, limited, truncated, or rejected attempts do not publish final 
 successful result with no text still has a final event and `MessageId`, with empty `Content`.
 Opaque state, tools, and media retain their structured representations.
 
-Trace snapshots retain provisional entries in `ModelStream.MetaContent` and the accepted text in
+Trace snapshots retain provisional entries in `ModelStream.MetaContent` and the accepted content in
 `Context.Content`. `MaxMetaContentBytes` bounds total retained metadata per model call;
-`MaxContentBytes` bounds accepted text per context. `IncludeChunkText` controls metadata, and
-`IncludeRunOutput` controls final text. The chunk redactor applies to both; the run-output redactor
-also applies to final text. A non-text replacement from that redactor hides the final text.
+`MaxContentBytes` bounds retained content per context. `IncludeChunkText` controls metadata, and
+`IncludeRunOutput` controls final content. The chunk redactor applies to both; the run-output redactor
+also applies to final content. An oversized media part is omitted from a bounded preview as a whole;
+saved history retains the complete bytes.
 
 `StreamAccumulator` keeps metadata separate from `Content`; use one accumulator per context.
 Stream helpers copy responses and metadata. Provider metadata uses built-in wire types such as

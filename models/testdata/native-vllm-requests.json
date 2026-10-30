@@ -1,0 +1,100 @@
+[
+  {
+    "model": "wire-test",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Read records."
+      },
+      {
+        "role": "user",
+        "content": "Read two records."
+      }
+    ],
+    "temperature": 0.5,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      }
+    ],
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "max_tokens": 100,
+    "top_p": 1
+  },
+  {
+    "model": "wire-test",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Read records."
+      },
+      {
+        "role": "user",
+        "content": "Read two records."
+      },
+      {
+        "role": "assistant",
+        "content": "Checking.",
+        "tool_calls": [
+          {
+            "id": "call-a",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{\"id\":1}"
+            }
+          },
+          {
+            "id": "call-b",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{\"id\":2}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call-a",
+        "content": "<lookup>\nrecord\n</lookup>"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call-b",
+        "content": "<lookup>\nrecord\n</lookup>"
+      }
+    ],
+    "temperature": 0.5,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      }
+    ],
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "max_tokens": 100,
+    "top_p": 1
+  }
+]

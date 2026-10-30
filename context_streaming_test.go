@@ -24,14 +24,14 @@ func TestExecutionContext_SubscribeAll(t *testing.T) {
 		ctx.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "hello",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 				},
 			},
 		})
 		ctx.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "world",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "world"}},
 				},
 			},
 		})
@@ -69,21 +69,21 @@ func TestExecutionContext_SubscribeToStream(t *testing.T) {
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "skip",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "skip"}},
 							},
 						}, StreamId: "other",
 					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "hello",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 							},
 						}, StreamId: "my-stream",
 					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "world",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "world"}},
 							},
 						}, StreamId: "my-stream",
 					},
@@ -140,21 +140,21 @@ func TestExecutionContext_SubscribeToTopic(t *testing.T) {
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "skip",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "skip"}},
 							},
 						}, StreamTopicId: "other",
 					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "hello",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 							},
 						}, StreamTopicId: "llm-response",
 					},
 					{
 						MetaContent: []*MetaContent{
 							{
-								Type: MetaContentIntermediary, Text: "world",
+								Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "world"}},
 							},
 						}, StreamTopicId: "llm-response",
 					},
@@ -270,7 +270,7 @@ func TestExecutionContext_EmitChunk_AutoPopulatesSource(t *testing.T) {
 		ctx.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "hello",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 				},
 			},
 		})
@@ -292,7 +292,7 @@ func TestExecutionContext_EmitChunk_PreservesExistingSource(t *testing.T) {
 		ctx.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "hello",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 				},
 			}, Source: "custom/path",
 		})
@@ -317,7 +317,7 @@ func TestExecutionContext_ParentPropagation(t *testing.T) {
 		child.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "from child",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "from child"}},
 				},
 			},
 		})
@@ -347,7 +347,7 @@ func TestExecutionContext_ParentPropagation_MultipleLevels(t *testing.T) {
 		grandchild.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "from grandchild",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "from grandchild"}},
 				},
 			},
 		})
@@ -385,8 +385,10 @@ func TestExecutionContext_ConcurrentChildEmit(t *testing.T) {
 			defer wg.Done()
 			for j := range chunksPerChild {
 				c.EmitChunk(StreamChunk{
-					MetaContent: []*MetaContent{{Type: MetaContentIntermediary, Text: "chunk"}},
-					StreamId:    string(rune(childID*100 + j)),
+					MetaContent: []*MetaContent{
+						{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "chunk"}}},
+					},
+					StreamId: string(rune(childID*100 + j)),
 				})
 			}
 		}(i, child)
@@ -419,7 +421,10 @@ func TestExecutionContext_EarlyUnsubscribe(t *testing.T) {
 			ctx.EmitChunk(StreamChunk{
 				MetaContent: []*MetaContent{
 					{
-						Type: MetaContentIntermediary, Text: string(rune('A' + i%26)),
+						Type: MetaContentIntermediary,
+						Content: []ContentPart{
+							TextContent{Text: string(rune('A' + i%26))},
+						},
 					},
 				},
 			})
@@ -465,7 +470,7 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 		ctx.EmitChunk(StreamChunk{
 			MetaContent: []*MetaContent{
 				{
-					Type: MetaContentIntermediary, Text: "hello",
+					Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 				},
 			}, StreamTopicId: "topic",
 		})
@@ -482,12 +487,25 @@ func TestExecutionContext_MultipleSubscribers_SameTopic(t *testing.T) {
 func TestExecutionContext_EmitChunkRecordsWithoutListeners(t *testing.T) {
 	ctx := NewExecutionContext(context.Background(), "test", &testLoopData{})
 	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	t.Cleanup(func() {
+		ctx.Release()
+		<-stopped
+	})
 	go func() {
+		defer close(stopped)
 		for i := range 1000 {
+			if err := ctx.Context().Err(); err != nil {
+				done <- err
+				return
+			}
 			if err := ctx.EmitChunk(StreamChunk{
 				MetaContent: []*MetaContent{
 					{
-						Type: MetaContentIntermediary, Text: string(rune('A' + i%26)),
+						Type: MetaContentIntermediary,
+						Content: []ContentPart{
+							TextContent{Text: string(rune('A' + i%26))},
+						},
 					},
 				},
 			}); err != nil {

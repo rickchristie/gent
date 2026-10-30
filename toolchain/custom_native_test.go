@@ -76,12 +76,12 @@ func TestCustomNativeSelectionKeepsExecutionHooks(t *testing.T) {
 	agent := react.NewAgent(model).WithToolChain(chain).WithRecoveryVersion("selection/v1")
 	hook := &selectedHook{}
 	ctx := gent.NewExecutionContext(context.Background(), "selected",
-		gent.NewBasicLoopData(&gent.Task{Text: "Read the record."}))
+		gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read the record."})))
 	definitions, err := chain.Registry.NativeTools(ctx)
 	if !assert.NoError(t, err) {
 		return
 	}
-	result, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).
+	_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).
 		WithEvents(events.NewRegistry().Subscribe(hook)).Execute(ctx)
 	if !assert.NoError(t, err) {
 		return

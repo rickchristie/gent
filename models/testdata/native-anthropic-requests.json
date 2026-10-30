@@ -1,7 +1,12 @@
 [
   {
     "model": "wire-test",
-    "system": "<instructions>\nRead records.\n</instructions>",
+    "system": [
+      {
+        "type": "text",
+        "text": "Read records."
+      }
+    ],
     "messages": [
       {
         "role": "user",
@@ -30,7 +35,12 @@
   },
   {
     "model": "wire-test",
-    "system": "<instructions>\nRead records.\n</instructions>",
+    "system": [
+      {
+        "type": "text",
+        "text": "Read records."
+      }
+    ],
     "messages": [
       {
         "role": "user",
@@ -47,12 +57,7 @@
           {
             "type": "text",
             "text": "Checking."
-          }
-        ]
-      },
-      {
-        "role": "assistant",
-        "content": [
+          },
           {
             "type": "tool_use",
             "id": "call-a",
@@ -60,12 +65,7 @@
             "input": {
               "id": 1
             }
-          }
-        ]
-      },
-      {
-        "role": "assistant",
-        "content": [
+          },
           {
             "type": "tool_use",
             "id": "call-b",

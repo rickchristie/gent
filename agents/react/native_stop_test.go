@@ -1,5 +1,7 @@
 package react
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"testing"
@@ -8,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNativeAgent_ProviderStopReasons(t *testing.T) {
+func TestNativeAgent_CompletionStates(t *testing.T) {
 	type input struct {
-		reason string
+		status gent.ModelStatus
 		tools  bool
 	}
 	type expected struct {
@@ -23,36 +25,34 @@ func TestNativeAgent_ProviderStopReasons(t *testing.T) {
 		input    input
 		expected expected
 	}
-	retry := &gent.AgentLoopResult{Action: gent.LAContinue,
-		NextPrompt: "The response was incomplete. Use a shorter answer or fewer tool calls."}
-	answer := &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{gent.TextContent{Text: "Done."}}}
-	toolResult := &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: `<lookup>
-record
-</lookup>`}
+	retry := &gent.AgentLoopResult{Action: gent.LAContinue}
+	answer := &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess,
+		Action: gent.LATerminate,
+		Result: []gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		},
+		Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		}))}
+	toolResult := &gent.AgentLoopResult{Action: gent.LAContinue}
 	cases := []testCase{
-		{"OpenAI tool limit", input{"length", true}, expected{retry, 0, nil}},
-		{"OpenAI answer limit", input{"length", false}, expected{retry, 0, nil}},
-		{"Anthropic tool limit", input{"max_tokens", true}, expected{retry, 0, nil}},
-		{"Anthropic answer limit", input{"max_tokens", false}, expected{retry, 0, nil}},
-		{"Anthropic tool context limit", input{"model_context_window_exceeded", true},
-			expected{retry, 0, nil}},
-		{"Anthropic answer context limit", input{"model_context_window_exceeded", false},
-			expected{retry, 0, nil}},
-		{"Google API tool limit", input{"MAX_TOKENS", true}, expected{retry, 0, nil}},
-		{"Google API answer limit", input{"MAX_TOKENS", false}, expected{retry, 0, nil}},
-		{"Google SDK tool limit", input{"FinishReasonMaxTokens", true}, expected{retry, 0, nil}},
-		{"Google SDK answer limit", input{"FinishReasonMaxTokens", false}, expected{retry, 0, nil}},
-		{"OpenAI complete answer", input{"stop", false}, expected{answer, 0, nil}},
-		{"Anthropic complete answer", input{"end_turn", false}, expected{answer, 0, nil}},
-		{"Anthropic complete tools", input{"tool_use", true}, expected{toolResult, 1, nil}},
-		{"Google SDK complete tools", input{"FinishReasonStop", true},
-			expected{toolResult, 1, nil}},
-		{"Google SDK complete answer", input{"FinishReasonStop", false}, expected{answer, 0, nil}},
+		{"incomplete tools", input{gent.ModelStatusIncomplete, true}, expected{retry, 0, nil}},
+		{"incomplete answer", input{gent.ModelStatusIncomplete, false}, expected{retry, 0, nil}},
+		{"completed tools", input{gent.ModelStatusToolCalls, true}, expected{toolResult, 1, nil}},
+		{"completed answer", input{gent.ModelStatusAnswer, false}, expected{answer, 0, nil}},
+		{"refused with calls", input{gent.ModelStatusRefused, true}, expected{
+			&gent.AgentLoopResult{Action: gent.LATerminate, TerminationReason: gent.TerminationRefused,
+				Refusal: &gent.ModelRefusal{Code: "blocked"}}, 0, nil}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			choice := &gent.ContentChoice{CandidateContent: "Done.", StopReason: test.input.reason}
+			choice := &gent.ContentChoice{
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Done."}},
+				Completion:       gent.ModelCompletion{Status: test.input.status},
+			}
+			if test.input.status == gent.ModelStatusRefused {
+				choice.Completion.Refusal = &gent.ModelRefusal{Code: "blocked"}
+			}
 			if test.input.tools {
 				choice.ToolCalls = []gent.ModelToolCall{nativeTestCall("call-a", "lookup", "{}")}
 			}
@@ -63,10 +63,10 @@ record
 					calls++
 					return "record", nil
 				}).Description("Read").ParameterSchema(nil).MustBuild())
-			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Read."}))
+			ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read."})))
 			result, err := agent.Next(ctx)
 			want := test.expected
-			if want.result.Action == gent.LATerminate {
+			if want.result.TerminationReason == gent.TerminationSuccess {
 				copy := *want.result
 				copy.ContentSource = nativeTestSource(ctx, 1)
 				want.result = &copy

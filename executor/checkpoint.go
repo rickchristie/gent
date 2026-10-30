@@ -7,7 +7,7 @@ import (
 	"github.com/rickchristie/gent"
 )
 
-func (e *Runner) configureRecovery(ctx *gent.ExecutionContext) error {
+func (e *Runner[T]) configureRecovery(ctx *gent.ExecutionContext) error {
 	if ctx.Parent() != nil {
 		return nil
 	}
@@ -65,7 +65,10 @@ func (e *Runner) configureRecovery(ctx *gent.ExecutionContext) error {
 	return ctx.SetCompatibility(manifest)
 }
 
-func (e *Runner) configureExecution(ctx *gent.ExecutionContext) error {
+func (e *Runner[T]) configureExecution(ctx *gent.ExecutionContext) error {
+	if err := gent.PrepareOutput(ctx, e.loop.Output()); err != nil {
+		return err
+	}
 	if configured, ok := any(e.loop).(interface {
 		ConfigureExecution(*gent.ExecutionContext) error
 	}); ok {
@@ -79,9 +82,9 @@ func (e *Runner) configureExecution(ctx *gent.ExecutionContext) error {
 // Resume prepares the actual restored context with this executor's normal configuration, then
 // continues from its accepted checkpoint. Applications supply new clients/recorders and any
 // custom state; they never need a temporary execution context to calculate recovery bindings.
-func (e *Runner) Resume(
+func (e *Runner[T]) Resume(
 	worker context.Context, saved gent.RunView, bindings gent.RestoreBindings,
-) (*gent.ExecutionResult, error) {
+) (T, *gent.ExecutionResult, error) {
 	configure := bindings.Configure
 	bindings.Configure = func(ctx *gent.ExecutionContext) error {
 		if configure != nil {
@@ -93,7 +96,8 @@ func (e *Runner) Resume(
 	}
 	ctx, err := gent.RestoreExecutionContext(worker, saved, bindings)
 	if err != nil {
-		return nil, err
+		var zero T
+		return zero, nil, err
 	}
 	// Configuration must precede restoration exactly once. Running it again could reset a
 	// custom component's restored state or register the same application codec twice.

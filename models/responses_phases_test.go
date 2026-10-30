@@ -1,5 +1,7 @@
 package models
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"io"
@@ -31,14 +33,18 @@ func TestResponsesAgentMessagePhases(t *testing.T) {
 	const ordinary = `{"type":"message","role":"assistant",
 "content":[{"type":"output_text","text":"Done."}]}`
 	const call = `{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{}"}`
-	accepted := &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{gent.TextContent{Text: "Done."}}}
-	tools := &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: `<lookup>
-record
-</lookup>`}
+	accepted := &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess,
+		Action: gent.LATerminate,
+		Result: []gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		},
+		Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		}))}
+	tools := &gent.AgentLoopResult{Action: gent.LAContinue}
 	cases := []testCase{
 		{"commentary alone", input{commentary}, expected{result: &gent.AgentLoopResult{
-			Action: gent.LAContinue, NextPrompt: "Use a tool or give a final answer."}}},
+			Action: gent.LAContinue}}},
 		{"commentary and answer", input{commentary + "," + answer}, expected{result: accepted}},
 		{"answer alone", input{answer}, expected{result: accepted}},
 		{"unlabelled answer", input{ordinary}, expected{result: accepted}},
@@ -66,7 +72,7 @@ record
 					return "record", nil
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "phases",
-				gent.NewBasicLoopData(&gent.Task{Text: "Read the record."}))
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read the record."})))
 			result, err := agent.Next(ctx)
 			want := test.expected
 			if want.result.Action == gent.LATerminate {

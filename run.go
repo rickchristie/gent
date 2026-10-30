@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-const RunSchemaVersion = 5
+const RunSchemaVersion = 6
 
 // RecordedEvent is the lossless numbered event. Payload uses the registry, while Change is a
 // structured history transition. Display projections may redact data without altering this record.
@@ -230,7 +231,31 @@ func BatchDigest(batch *SaveBatch, registries ...*CodecRegistry) (string, error)
 	}
 	copy := *batch
 	copy.BatchId = ""
-	data, err := registryOrDefault(registries).Marshal(&copy)
+	// Batch envelopes, runtime, and checkpoints already contain only wire values. Re-encoding
+	// every field through reflection adds work for each stream chunk. Only history changes
+	// contain application values that still need the registry's type and version information.
+	copy.Events = make([]*RecordedEvent, len(batch.Events))
+	changes := make([]*EncodedValue, len(batch.Events))
+	for i, event := range batch.Events {
+		if event == nil {
+			continue // ApplyBatch reports invalid events after checking the digest.
+		}
+		owned := *event
+		if event.Change != nil {
+			value, err := registryOrDefault(registries).Encode(event.Change)
+			if err != nil {
+				return "", err
+			}
+			changes[i] = &value
+			owned.Change = nil
+		}
+		copy.Events[i] = &owned
+	}
+	type digestValue struct {
+		Batch   SaveBatch       `json:"batch"`
+		Changes []*EncodedValue `json:"changes"`
+	}
+	data, err := json.Marshal(digestValue{Batch: copy, Changes: changes})
 	if err != nil {
 		return "", err
 	}

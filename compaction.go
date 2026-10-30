@@ -85,6 +85,9 @@ type CompactionStrategy interface {
 type CompactionInput struct {
 	Revision uint64
 	Entries  []*HistoryEntry
+	// Required groups must remain selected until the next main model call consumes them.
+	// UpdateHistory preserves them even when a custom strategy omits them from its proposal.
+	Required []EntryId
 }
 
 // EntryIds returns the exact ordered input selection for this revision.

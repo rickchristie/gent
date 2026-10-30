@@ -9,7 +9,6 @@ export const lessons = [
     takeaway: 'The loop decides. The executor repeats. The context records what actually happened.',
     contracts: [
       'gent.Loop',
-      'gent.AgentLoop',
       'gent.LoopData',
       'gent.TimeProvider',
       'gent.Model',
@@ -17,12 +16,10 @@ export const lessons = [
       'gent.ModelNamer',
       'gent.ContentPart',
       'gent.TextFormat',
-      'gent.TextSection',
       'gent.Tool',
       'gent.ToolChain',
       'gent.ParallelToolChain',
-      'gent.Termination',
-      'gent.AnswerValidator',
+      'gent.Output',
     ],
   },
   {
@@ -49,14 +46,12 @@ export const lessons = [
       'gent.AfterExecutionSubscriber',
       'gent.BeforeIterationSubscriber',
       'gent.AfterIterationSubscriber',
-      'gent.BeforeSystemPromptSubscriber',
       'gent.BeforeModelCallSubscriber',
       'gent.AfterModelCallSubscriber',
       'gent.BeforeToolCallSubscriber',
       'gent.AfterToolCallSubscriber',
       'gent.ParseErrorSubscriber',
-      'gent.ValidatorCalledSubscriber',
-      'gent.ValidatorResultSubscriber',
+      'gent.OutputValidationSubscriber',
       'gent.ErrorSubscriber',
       'gent.CommonEventSubscriber',
       'gent.CompactionSubscriber',
@@ -122,7 +117,7 @@ export function loopFrames(route, format) {
       'Task',
       'gent.LoopData',
       'The application supplies the task.',
-      'ExecutionContext owns its copy. LoopData is no longer the scratchpad owner.',
+      'ExecutionContext freezes the task. Compaction changes history, not the original task.',
       'Where is order 42?',
       'Start the iteration →',
     ],
@@ -144,9 +139,9 @@ export function loopFrames(route, format) {
     ],
     [
       'Read',
-      route === 'tool' || route === 'malformed' ? 'gent.ToolChain' : 'gent.Termination',
+      route === 'tool' || route === 'malformed' ? 'gent.ToolChain' : 'gent.Output',
       'Read native calls or candidate assistant text.',
-      'ToolChain prepares structured calls. Termination checks candidate text when there are no calls.',
+      'ToolChain prepares structured calls. Output checks a candidate after native completion.',
       response,
       route === 'tool' ? 'Execute the tool →' : 'Check the response →',
     ],
@@ -180,16 +175,16 @@ Next working context: [H1]`,
     ]);
     frames.push([
       'Answer',
-      'gent.Termination',
+      'gent.Output',
       'The new answer is checked before ending.',
-      'Termination parses the answer. AnswerValidator applies any domain acceptance rule.',
+      'Output processes the answer and runs local checks plus the optional custom validator.',
       'Order 42 ships on Friday. → accepted → LATerminate',
       'Iteration complete',
     ]);
   } else {
     frames.push([
       'Validate',
-      'gent.AnswerValidator',
+      'gent.Output',
       route === 'rejected'
         ? 'The answer parses, but the validator rejects it.'
         : 'The answer passes validation.',

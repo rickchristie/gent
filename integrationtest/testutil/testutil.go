@@ -8,9 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
-
 	"path/filepath"
+	"strings"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
@@ -22,9 +21,6 @@ import (
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/search"
 	"github.com/rickchristie/gent/toolchain"
-
-	"github.com/tmc/langchaingo/llms/anthropic"
-	"github.com/tmc/langchaingo/llms/openai"
 )
 
 // ToolChainType specifies which toolchain to use.
@@ -171,7 +167,7 @@ type ModelOption struct {
 // API base URLs for model providers.
 const (
 	baseURLXAI    = "https://api.x.ai/v1"
-	baseURLGemini = "https://generativelanguage.googleapis.com/v1beta/openai/"
+	baseURLGemini = "https://generativelanguage.googleapis.com/v1beta"
 )
 
 // Environment variable keys for API authentication.
@@ -236,9 +232,7 @@ func CreateModel(
 		)
 	}
 
-	httpClient := &http.Client{
-		Transport: &models.ErrorCaptureTransport{},
-	}
+	httpClient := &http.Client{}
 
 	if opt.EnvKey == envKeyOpenAI || opt.EnvKey == envKeyXAI {
 		provider, baseURL := "openai", "https://api.openai.com/v1"
@@ -249,50 +243,15 @@ func CreateModel(
 			APIKey: apiKey, Model: modelName, HTTPClient: httpClient}), nil
 	}
 
-	// Anthropic models use a different client.
-	if strings.HasPrefix(modelName, "claude-") {
-		return createAnthropicModel(
-			modelName, apiKey, httpClient,
-		)
+	config := &models.Config{APIKey: apiKey, Model: modelName, HTTPClient: httpClient}
+	switch opt.EnvKey {
+	case envKeyAnthropic:
+		return models.NewAnthropic(config), nil
+	case envKeyGemini:
+		return models.NewGemini(config), nil
+	default:
+		return nil, fmt.Errorf("unsupported provider for model %q", modelName)
 	}
-
-	opts := []openai.Option{
-		openai.WithToken(apiKey),
-		openai.WithModel(modelName),
-		openai.WithHTTPClient(httpClient),
-	}
-	if opt.BaseURL != "" {
-		opts = append(opts, openai.WithBaseURL(opt.BaseURL))
-	}
-
-	llm, err := openai.New(opts...)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to create LLM: %w", err,
-		)
-	}
-
-	return models.NewLCGWrapper(llm).
-		WithModelName(modelName), nil
-}
-
-// createAnthropicModel creates an Anthropic Claude model.
-func createAnthropicModel(
-	modelName, apiKey string, httpClient *http.Client,
-) (gent.Model, error) {
-	llm, err := anthropic.New(
-		anthropic.WithToken(apiKey),
-		anthropic.WithModel(modelName),
-		anthropic.WithHTTPClient(httpClient),
-	)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to create Anthropic LLM: %w", err,
-		)
-	}
-
-	return models.NewLCGWrapper(llm).
-		WithModelName(modelName), nil
 }
 
 // CreateToolChain creates the appropriate toolchain based on config. For
@@ -431,7 +390,7 @@ func (h *PolicySuggestionHook) OnBeforeIteration(
 		return
 	}
 
-	// Format as XML TextSection.
+	// Render the examples as named XML sections.
 	xmlFormat := format.NewXML()
 	content := xmlFormat.FormatSections(
 		[]gent.FormattedSection{
@@ -501,7 +460,6 @@ type ScenarioConfig struct {
 	HeaderTitle     string
 	CustomerRequest string
 	MaxIterations   float64
-	TimeProvider    gent.TimeProvider
 	RegisterTools   func(tc gent.ToolChain)
 	SystemPrompt    string
 	CriticalRules   string
@@ -535,13 +493,13 @@ func RunScenario(
 
 	loop := react.NewAgent(model).
 		WithToolChain(tc).
-		WithRecoveryVersion("integration/v1").
-		WithTimeProvider(scenario.TimeProvider).
-		WithBehaviorAndContext(scenario.SystemPrompt).
-		WithCriticalRules(scenario.CriticalRules)
+		WithRecoveryVersion("integration/v1")
 
 	data := gent.NewBasicLoopData(
-		&gent.Task{Text: scenario.CustomerRequest},
+		&gent.Task{Messages: []*gent.ModelMessage{
+			gent.TextParts(gent.ChatMessageTypeSystem, scenario.SystemPrompt+"\n\n"+scenario.CriticalRules),
+			gent.TextParts(gent.ChatMessageTypeHuman, scenario.CustomerRequest),
+		}},
 	)
 
 	seq, err := NewIntegrationTrace(scenario.Name)
@@ -578,7 +536,7 @@ func RunScenario(
 		})
 	}
 
-	exec := executor.New[*gent.BasicLoopData](
+	exec := executor.NewRunner(
 		loop, executor.Config{},
 	).WithEvents(registry)
 
@@ -610,7 +568,7 @@ func RunScenario(
 	PrintSection(w, "Agent Execution")
 	fmt.Fprintln(w)
 
-	_, executionErr := exec.Execute(execCtx)
+	_, _, executionErr := exec.Execute(execCtx)
 	seq.Close()
 	streamWait()
 	if logWait != nil {
@@ -702,7 +660,6 @@ type ChatConfig struct {
 	CriticalRules string
 	MaxIterations float64
 	RegisterTools func(tc gent.ToolChain)
-	TimeProvider  gent.TimeProvider
 	// PolicySuggester generates a policy suggestion section based
 	// on conversation history. Called on each SendMessage with
 	// the last 10 messages formatted as text. Returns empty string
@@ -739,27 +696,23 @@ func NewInteractiveChat(
 	}, nil
 }
 
-// formatMessageHistory formats the conversation history for the
-// task template.
-func (s *InteractiveChat) formatMessageHistory() string {
-	if len(s.History) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString("<message_history>\n")
-	for i, msg := range s.History {
-		if msg.Role == "user" && i == len(s.History)-1 {
-			sb.WriteString("user(most_recent):\n")
-		} else {
-			sb.WriteString(msg.Role + ":\n")
+// startingTask keeps conversation roles separate from the application's system instructions.
+// Prior chat turns are fixed for this example's one-response execution, not rendered as role tags.
+func (s *InteractiveChat) startingTask() (*gent.Task, error) {
+	messages := []*gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeSystem,
+		s.ChatCfg.SystemPrompt+"\n\n"+s.ChatCfg.CriticalRules)}
+	for _, message := range s.History {
+		role := gent.ChatMessageTypeHuman
+		switch message.Role {
+		case "user":
+		case "agent":
+			role = gent.ChatMessageTypeAI
+		default:
+			return nil, fmt.Errorf("unsupported chat role %q", message.Role)
 		}
-		sb.WriteString(msg.Content)
-		sb.WriteString("\n")
+		messages = append(messages, gent.TextParts(role, message.Content))
 	}
-	sb.WriteString("</message_history>\n")
-	sb.WriteString("\nAssist and reply to the customer!")
-	return sb.String()
+	return &gent.Task{Messages: messages}, nil
 }
 
 // recentHistoryText formats the last N messages as text for policy suggestion.
@@ -797,15 +750,13 @@ func (s *InteractiveChat) SendMessage(
 
 	loop := react.NewAgent(s.Model).
 		WithToolChain(tc).
-		WithRecoveryVersion("integration/v1").
-		WithTimeProvider(s.ChatCfg.TimeProvider).
-		WithBehaviorAndContext(s.ChatCfg.SystemPrompt).
-		WithCriticalRules(s.ChatCfg.CriticalRules)
+		WithRecoveryVersion("integration/v1")
 
-	taskContent := s.formatMessageHistory()
-	data := gent.NewBasicLoopData(
-		&gent.Task{Text: taskContent},
-	)
+	task, err := s.startingTask()
+	if err != nil {
+		return err
+	}
+	data := gent.NewBasicLoopData(task)
 
 	seq, err := NewIntegrationTrace(fmt.Sprintf("%s-chat-%d", s.ChatCfg.Name, len(s.History)))
 	if err != nil {
@@ -841,7 +792,7 @@ func (s *InteractiveChat) SendMessage(
 		})
 	}
 
-	exec := executor.New[*gent.BasicLoopData](
+	exec := executor.NewRunner(
 		loop, executor.Config{},
 	).WithEvents(registry)
 
@@ -853,7 +804,7 @@ func (s *InteractiveChat) SendMessage(
 	PrintSection(s.Writer, "Agent Processing")
 	fmt.Fprintln(s.Writer)
 
-	_, executionErr := exec.Execute(execCtx)
+	_, _, executionErr := exec.Execute(execCtx)
 	seq.Close()
 	streamWait()
 	if logWait != nil {

@@ -140,12 +140,17 @@ func (ctx *ExecutionContext) Task() (*Task, error) {
 }
 
 func (ctx *ExecutionContext) History() HistorySnapshot {
-	bundle, err := ctx.Export()
+	// Accepted history is immutable. Copy only the requested history, not the full stream,
+	// checkpoint, and batch index that Export supplies to a persistence caller.
+	ctx.run.mu.RLock()
+	history := ctx.run.view.History
+	ctx.run.mu.RUnlock()
+	owned, err := cloneOwned(ctx.run.codecs, history)
 	if err != nil {
 		ctx.stopRecording(err)
 		return HistorySnapshot{}
 	}
-	return bundle.History
+	return owned
 }
 
 func (ctx *ExecutionContext) ContextDraft() ContextDraft {
@@ -173,9 +178,13 @@ func (ctx *ExecutionContext) CompactionInput() (CompactionInput, error) {
 		}
 	}
 	revision := ctx.draftRevision
+	required, err := ctx.requiredHistoryLocked()
 	ctx.run.mu.RUnlock()
+	if err != nil {
+		return CompactionInput{}, err
+	}
 	owned, err := cloneOwned(ctx.run.codecs, entries)
-	return CompactionInput{Revision: revision, Entries: owned}, err
+	return CompactionInput{Revision: revision, Entries: owned, Required: required}, err
 }
 
 // NewHistoryEntry freezes content now. Later caller mutations cannot change the proposed entry.
@@ -234,6 +243,20 @@ func (ctx *ExecutionContext) UpdateHistory(update HistoryUpdate) error {
 		ctx.run.mu.Unlock()
 		return ErrHistoryConflict
 	}
+	required, err := ctx.requiredHistoryLocked()
+	if err != nil {
+		ctx.run.mu.Unlock()
+		return err
+	}
+	update.Active = keepRequiredRecords(update.Active, required)
+	if update.Compaction != nil {
+		update.Compaction.Active = append([]EntryId(nil), update.Active...)
+	}
+	for _, entry := range update.AppendedEntries {
+		if entry.Compaction != nil {
+			entry.Compaction.Active = append([]EntryId(nil), update.Active...)
+		}
+	}
 	change := HistoryChange{PreviousRevision: ctx.run.working.Revision,
 		Revision: ctx.run.working.Revision + 1, AppendedEntries: update.AppendedEntries,
 		Selections:  []ContextSelection{{ctx.contextId, append([]EntryId(nil), update.Active...)}},
@@ -279,22 +302,29 @@ func (ctx *ExecutionContext) AppendRecord(record *HistoryEntry, active bool) err
 }
 
 func (ctx *ExecutionContext) ExpireRecords(nextIteration int) error {
-	// IDs and records must come from one revision, including during concurrent appends.
-	input, err := ctx.CompactionInput()
-	if err != nil {
-		return err
-	}
-	active := make([]EntryId, 0, len(input.Entries))
-	for _, record := range input.Entries {
+	// Expiry needs only immutable entry metadata. Copying all selected media and tool payloads
+	// here adds work on every iteration. Capture IDs and revision together, then let UpdateHistory
+	// reject a stale selection if a concurrent append wins after the read lock is released.
+	ctx.run.mu.RLock()
+	revision := ctx.draftRevision
+	active := make([]EntryId, 0, len(ctx.active))
+	for _, id := range ctx.active {
+		record, ok := ctx.run.working.Entry(id)
+		if !ok {
+			ctx.run.mu.RUnlock()
+			return fmt.Errorf("gent: missing active history entry %s", id)
+		}
 		if record.ExpireAfterIteration > 0 && nextIteration >= record.ExpireAfterIteration {
 			continue
 		}
 		active = append(active, record.Id)
 	}
-	if len(active) == len(input.Entries) {
+	unchanged := len(active) == len(ctx.active)
+	ctx.run.mu.RUnlock()
+	if unchanged {
 		return nil
 	}
-	return ctx.UpdateHistory(HistoryUpdate{ExpectedDraftRevision: input.Revision,
+	return ctx.UpdateHistory(HistoryUpdate{ExpectedDraftRevision: revision,
 		Active: active, Reason: ContextExpire})
 }
 

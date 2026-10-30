@@ -57,3 +57,5 @@ code {
 [role="alert"] {
   color: #a52b26;
 }
+
+section img { display: block; max-width: 100%; height: auto; }

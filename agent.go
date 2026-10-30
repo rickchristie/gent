@@ -5,55 +5,15 @@ import (
 	"time"
 )
 
-// Loop runs one iteration of the agent's think-act-observe cycle.
-//
-// # Responsibilities
-//
-//  1. Construct the prompt to be sent to the LLM model
-//  2. Call the LLM model with the constructed prompt
-//  3. Parse LLM output (tool calls, termination, other sections)
-//  4. Execute any tool calls and collect observations
-//  5. Decide whether to continue iterating or terminate
-//
-// # Available Implementations
-//
-//   - agents/react: ReAct-style agent with thinking, action, and answer sections
-//
-// # Implementing Custom Loops
-//
-// Custom loops can use provided building blocks ([ToolChain], [Termination], [TextFormat])
-// or implement everything from scratch. Use ExecutionContext.GenerateContentStream for managed
-// model calls, AppendRecord/UpdateHistory for context edits, and explicit checkpoint barriers.
-// Custom continuation state implements CheckpointState; see docs/history.md and examples/history.
-//
-// The executor calls Next() repeatedly until it returns [LATerminate] or a limit is exceeded.
-type Loop interface {
-	// Next performs one iteration of the agent loop.
-	//
-	// The ExecutionContext provides:
-	//   - Access to LoopData via execCtx.Data()
-	//   - Automatic tracing for all framework components
-	//   - Context for cancellation via execCtx.Context()
-	//   - Stats for limit checking via execCtx.Stats()
-	//
-	// Use execCtx.Context() when calling external APIs that require context.Context.
-	// The context is cancelled when limits are exceeded or the parent context is cancelled.
-	//
-	// Return values:
-	//   - LAContinue: Continue to next iteration with NextPrompt as observation
-	//   - LATerminate: Stop execution with Result as final output
-	//   - error: Iteration failed, execution terminates with error
-	Next(execCtx *ExecutionContext) (*AgentLoopResult, error)
+// Loop performs one iteration and defines the typed output contract. Use native model completion
+// to select tools, continuation, or Output processing. AcceptOutput prepares a validated success;
+// the runner commits that value and its delivery content before returning it to the caller.
+type Loop[T any] interface {
+	Next(ctx *ExecutionContext) (*AgentLoopResult, error)
+	Output() Output[T]
 }
 
-// AgentLoop keeps the existing generic API. Data does not restrict the execution context.
-//
-// Deprecated: Use Loop. It has the same Next method and needs no type argument.
-type AgentLoop[Data LoopData] interface {
-	Loop
-}
-
-// LoopData supplies the initial task and can carry application-specific state for an AgentLoop.
+// LoopData supplies the initial task and can carry application-specific state for an Loop.
 // ExecutionContext freezes that task and owns history and the active context selection. History
 // changes go through its APIs so evidence, selection changes, and checkpoints can commit together.
 // Custom data implements CheckpointState when its mutable fields must survive worker replacement.
@@ -105,7 +65,14 @@ func copyTask(task *Task) *Task {
 		return nil
 	}
 	result := *task
-	result.Media = append([]ContentPart(nil), task.Media...)
+	if task.Messages != nil {
+		result.Messages = make([]*ModelMessage, len(task.Messages))
+	}
+	for i, message := range task.Messages {
+		copy := *message
+		copy.Parts = append([]ContentPart(nil), message.Parts...)
+		result.Messages[i] = &copy
+	}
 	return &result
 }
 
@@ -122,7 +89,7 @@ type RecordOrigin string
 
 const (
 	// RecordOriginal is the zero value. The record was
-	// created normally by the AgentLoop during execution.
+	// created normally by the Loop during execution.
 	RecordOriginal RecordOrigin = ""
 
 	// RecordCompactedSynthetic means this record summarizes earlier records, which may span
@@ -207,7 +174,7 @@ type HistoryEntry struct {
 
 	// Origin indicates how this record was created.
 	// Zero value (RecordOriginal) means it was created
-	// normally by the AgentLoop.
+	// normally by the Loop.
 	Origin RecordOrigin
 
 	// ExpireAfterIteration is the executor iteration number
@@ -297,7 +264,7 @@ type MessageContentMetadataKey string
 const MMKToolChainResult MessageContentMetadataKey = "gent:tool_chain_result"
 
 // MessageContent is wrapper around [ModelMessage] used
-// in AgentLoop.
+// in Loop.
 type MessageContent struct {
 	Continuation *ProviderContinuation
 	Role         ChatMessageType
@@ -339,25 +306,16 @@ func (m *MessageContent) GetMetadata(
 	return val, ok
 }
 
-// Task represents the input to an agent loop.
-// The client is responsible for formatting the Text field (including chat history if applicable).
+// Task contains the caller's complete starting prompt. Messages retain their roles and ordered
+// content. ExecutionContext freezes an owned snapshot, separate from compactable run history.
 type Task struct {
-	// Text is the formatted task description/instructions.
-	// For chat tasks, this should include the formatted message history.
-	Text string
-
-	// Media contains images, audio, or other non-text content.
-	Media []ContentPart
+	Messages []*ModelMessage
 }
 
-// AsContentParts returns the task as a slice of ContentParts for building LLM messages.
-// The text is returned first (if non-empty), followed by any media.
-func (t *Task) AsContentParts() []ContentPart {
-	var parts []ContentPart
-	if t.Text != "" {
-		parts = append(parts, TextContent{Text: t.Text})
-	}
-	return append(parts, t.Media...)
+// NewTask creates one user message. Use Task.Messages to supply a system message, earlier turns,
+// or several user messages. Output instructions are included only when the caller supplies them.
+func NewTask(parts ...ContentPart) *Task {
+	return &Task{Messages: []*ModelMessage{{Role: ChatMessageTypeHuman, Parts: parts}}}
 }
 
 type LoopAction string
@@ -368,12 +326,14 @@ const (
 )
 
 type AgentLoopResult struct {
+	// Value is the encoded typed result produced by AcceptOutput. It remains separate from
+	// delivery content so restoration does not repeat parsing or domain validation.
+	Value             *EncodedValue
+	TerminationReason TerminationReason
+	Refusal           *ModelRefusal
 	// Action indicates whether to continue or terminate the loop.
-	// The [AgentLoop] is completely free to determine whether to continue or terminate.
+	// The [Loop] is completely free to determine whether to continue or terminate.
 	Action LoopAction
-
-	// NextPrompt is only set when Action is [LAContinue].
-	NextPrompt string
 
 	// Result is only set when Action is [LATerminate].
 	// This is a slice of ContentPart to support multimodal outputs.

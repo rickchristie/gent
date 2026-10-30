@@ -247,7 +247,17 @@ func (ctx *ExecutionContext) prepareCheckpoint(
 			ctx.mu.RUnlock()
 			return nil, err
 		}
+		var refusal *EncodedValue
+		if ctx.refusal != nil {
+			value, err := ctx.run.codecs.Encode(ctx.refusal)
+			if err != nil {
+				ctx.mu.RUnlock()
+				return nil, err
+			}
+			refusal = &value
+		}
 		checkpoint.Outcome = &SavedOutcome{Reason: ctx.terminationReason, Result: result,
+			Refusal: refusal, Value: cloneWire(ctx.acceptedValue),
 			Error: SaveError(ctx.err), CompletedAt: ctx.endTime}
 		ctx.mu.RUnlock()
 	}
@@ -312,13 +322,9 @@ func RestoreExecutionContext(
 	state := checkpoint.Contexts[0]
 	data := bindings.Data
 	if data == nil {
-		var task *Task
-		if checkpoint.Phase != PhaseTerminal {
-			var err error
-			task, err = decodeAs[*Task](registry, state.Task)
-			if err != nil {
-				return nil, err
-			}
+		task, err := decodeAs[*Task](registry, state.Task)
+		if err != nil {
+			return nil, err
 		}
 		data = NewBasicLoopData(task)
 	}
@@ -350,7 +356,7 @@ func RestoreExecutionContext(
 		ctx.SetCompaction(bindings.CompactionTrigger, bindings.CompactionStrategy)
 	}
 	ctx.savedTask = cloneWire(state.Task)
-	if checkpoint.Phase != PhaseTerminal && bindings.Configure != nil {
+	if bindings.Configure != nil {
 		if err := bindings.Configure(ctx); err != nil {
 			return nil, err
 		}
@@ -375,10 +381,14 @@ func RestoreExecutionContext(
 	if checkpoint.Contexts[0].ParentContextId != "" {
 		return nil, errors.New("gent: first checkpoint context is not the root")
 	}
-	if checkpoint.Phase != PhaseTerminal {
+	// A runner binds its output type and contract even for a completed run. A caller that only
+	// reads saved metadata can omit executable bindings and supply its own codecs instead.
+	if checkpoint.Phase != PhaseTerminal || bindings.Configure != nil {
 		if !reflect.DeepEqual(checkpoint.Compatibility, bindings.Compatibility) {
 			return nil, ErrIncompatibleCheckpoint
 		}
+	}
+	if checkpoint.Phase != PhaseTerminal {
 		for _, state := range checkpoint.Contexts[1:] {
 			if !state.Completed {
 				return nil, fmt.Errorf(
@@ -481,7 +491,15 @@ func RestoreExecutionContext(
 		if checkpoint.Outcome.Error != nil {
 			savedErr = cloneWire(checkpoint.Outcome.Error)
 		}
-		ctx.SetTermination(checkpoint.Outcome.Reason, result, savedErr)
+		var refusal *ModelRefusal
+		if checkpoint.Outcome.Refusal != nil {
+			refusal, err = decodeAs[*ModelRefusal](registry, *checkpoint.Outcome.Refusal)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx.setTermination(checkpoint.Outcome.Reason, result, refusal, savedErr)
+		ctx.acceptedValue = cloneWire(checkpoint.Outcome.Value)
 		ctx.endTime = checkpoint.Outcome.CompletedAt
 		ctx.Release()
 		return ctx, nil

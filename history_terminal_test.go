@@ -9,6 +9,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/executor"
+	"github.com/rickchristie/gent/output"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,7 +45,7 @@ func TestHistoryRecovery_TerminalFailuresAndCancellation(t *testing.T) {
 	cases := []testCase{
 		{"failure", input{loopErr: lookupErr}, expected{
 			calls: 1, reason: gent.TerminationError,
-			err: fmt.Errorf("AgentLoop.Next (iteration 1): %w", lookupErr),
+			err: fmt.Errorf("Loop.Next (iteration 1): %w", lookupErr),
 			is:  gent.ErrHistoryConflict,
 		}},
 		{"intentional cancellation", input{cancel: true}, expected{
@@ -63,8 +64,8 @@ func TestHistoryRecovery_TerminalFailuresAndCancellation(t *testing.T) {
 			if tt.input.cancel {
 				ctx.CancelRun(tt.input.cause)
 			}
-			exec := executor.New[gent.LoopData](loop, executor.DefaultConfig())
-			result, err := exec.Execute(ctx)
+			exec := executor.NewRunner(loop, executor.DefaultConfig())
+			_, result, err := exec.Execute(ctx)
 			assert.EqualError(t, err, tt.expected.err.Error())
 			assert.ErrorIs(t, err, tt.expected.is)
 			assert.Equal(t, tt.expected.calls, loop.calls)
@@ -77,9 +78,8 @@ func TestHistoryRecovery_TerminalFailuresAndCancellation(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			// No loop, provider, or compatibility manifest is needed to return a terminal outcome.
-			freshExec := executor.New[gent.LoopData](nil, executor.DefaultConfig())
-			restored, err := freshExec.Continue(fresh)
+			// Metadata reads do not require a loop. Typed Runner.Resume also checks its output contract.
+			restored, err := fresh.Result(), fresh.Error()
 			assert.EqualError(t, err, tt.expected.err.Error())
 			assert.ErrorIs(t, err, tt.expected.is)
 			assert.Equal(t, &gent.ExecutionResult{
@@ -92,3 +92,5 @@ func TestHistoryRecovery_TerminalFailuresAndCancellation(t *testing.T) {
 		})
 	}
 }
+
+func (*terminalTestLoop) Output() gent.Output[string] { return output.NewTextOutput() }

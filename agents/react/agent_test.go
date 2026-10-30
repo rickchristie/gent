@@ -4,13 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/format"
-	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/toolchain"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +21,7 @@ type mockModel struct {
 	errors           []error
 	callCount        int
 	capturedOptions  [][]gent.CallOption
-	capturedMessages [][]gent.ModelMessage
+	capturedMessages [][]*gent.ModelMessage
 }
 
 func newMockModel(responses ...*gent.ContentResponse) *mockModel {
@@ -51,7 +48,14 @@ func (m *mockModel) response(request *gent.ModelCallRequest) (*gent.ContentRespo
 		return m.responses[idx], nil
 	}
 
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{{CandidateContent: ""}}}, nil
+	return &gent.ContentResponse{
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: ""}},
+			},
+		},
+	}, nil
 }
 
 func (m *mockModel) GenerateContentStream(
@@ -86,30 +90,17 @@ func TestAgent_Next_ModelError(t *testing.T) {
 	model := newMockModel().WithErrors(errors.New("model failed"))
 	format := format.NewXML()
 	tc := newMockToolChain()
-	term := termination.NewText("answer")
 
 	loop := NewAgent(model).
-		WithFormat(format).
-		WithToolChain(tc).
-		WithTermination(term)
+		WithToolResultFormat(format).
+		WithToolChain(tc)
 
-	data := gent.NewBasicLoopData(&gent.Task{Text: "Hello"})
+	data := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Hello"}))
 	execCtx := newTestExecCtx(data)
 	_, err := loop.Next(execCtx)
 
 	require.Error(t, err)
 	assert.EqualError(t, err, "model call failed: model failed")
-}
-
-func TestAgent_WithTimeProvider(t *testing.T) {
-	model := newMockModel()
-	mockTime := gent.NewMockTimeProvider(time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC))
-
-	loop := NewAgent(model).WithTimeProvider(mockTime)
-
-	assert.Equal(t, mockTime, loop.TimeProvider())
-	assert.Equal(t, "2025-06-15", loop.TimeProvider().Today())
-	assert.Equal(t, "Sunday", loop.TimeProvider().Weekday())
 }
 
 // mockNamerModel implements Model with ModelNamer for
@@ -203,18 +194,19 @@ func TestAgent_WithCallOptions(t *testing.T) {
 			model := newMockModel(
 				&gent.ContentResponse{
 					Choices: []*gent.ContentChoice{
-						{CandidateContent: "done"},
+						{
+							Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+							CandidateContent: []gent.ContentPart{gent.TextContent{Text: "done"}},
+						},
 					},
 				},
 			)
 
 			format := format.NewXML()
-			term := termination.NewText("answer")
 
 			agent := NewAgent(model).
-				WithFormat(format).
-				WithToolChain(newMockToolChain()).
-				WithTermination(term)
+				WithToolResultFormat(format).
+				WithToolChain(newMockToolChain())
 
 			if tc.input.callOptions != nil {
 				agent.WithCallOptions(
@@ -223,7 +215,7 @@ func TestAgent_WithCallOptions(t *testing.T) {
 			}
 
 			data := gent.NewBasicLoopData(
-				&gent.Task{Text: "test"},
+				gent.NewTask(gent.TextContent{Text: "test"}),
 			)
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,
@@ -311,7 +303,10 @@ func TestAgent_SamplingParams_ForbiddenModel(
 			inner := newMockModel(
 				&gent.ContentResponse{
 					Choices: []*gent.ContentChoice{
-						{CandidateContent: "done"},
+						{
+							Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+							CandidateContent: []gent.ContentPart{gent.TextContent{Text: "done"}},
+						},
 					},
 				},
 			)
@@ -323,9 +318,8 @@ func TestAgent_SamplingParams_ForbiddenModel(
 			format := format.NewXML()
 
 			agent := NewAgent(model).
-				WithFormat(format).
-				WithToolChain(newMockToolChain()).
-				WithTermination(termination.NewText("answer"))
+				WithToolResultFormat(format).
+				WithToolChain(newMockToolChain())
 
 			if tc.input.callOptions != nil {
 				agent.WithCallOptions(
@@ -334,7 +328,7 @@ func TestAgent_SamplingParams_ForbiddenModel(
 			}
 
 			data := gent.NewBasicLoopData(
-				&gent.Task{Text: "test"},
+				gent.NewTask(gent.TextContent{Text: "test"}),
 			)
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,
@@ -475,7 +469,10 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 				inner := newMockModel(
 					&gent.ContentResponse{
 						Choices: []*gent.ContentChoice{
-							{CandidateContent: "ok"},
+							{
+								Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+								CandidateContent: []gent.ContentPart{gent.TextContent{Text: "ok"}},
+							},
 						},
 					},
 				)
@@ -487,7 +484,10 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 				model = newMockModel(
 					&gent.ContentResponse{
 						Choices: []*gent.ContentChoice{
-							{CandidateContent: "ok"},
+							{
+								Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+								CandidateContent: []gent.ContentPart{gent.TextContent{Text: "ok"}},
+							},
 						},
 					},
 				)
@@ -496,9 +496,8 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 			format := format.NewXML()
 
 			agent := NewAgent(model).
-				WithFormat(format).
-				WithToolChain(newMockToolChain()).
-				WithTermination(termination.NewText("answer"))
+				WithToolResultFormat(format).
+				WithToolChain(newMockToolChain())
 
 			if tc.input.callOptions != nil {
 				agent.WithCallOptions(
@@ -507,7 +506,7 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 			}
 
 			data := gent.NewBasicLoopData(
-				&gent.Task{Text: "test"},
+				gent.NewTask(gent.TextContent{Text: "test"}),
 			)
 			execCtx := gent.NewExecutionContext(
 				context.Background(), "test", data,

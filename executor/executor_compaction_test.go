@@ -8,6 +8,7 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/internal/tt"
+	"github.com/rickchristie/gent/output"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -61,9 +62,7 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					tt.BeforeIter(0, 2),
 					tt.AfterIter(0, 2,
 						tt.Terminate("done")),
@@ -92,9 +91,7 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					tt.BeforeIter(0, 2),
 					tt.AfterIter(0, 2,
 						tt.Terminate("done")),
@@ -138,16 +135,12 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					// Compaction fires before iter 2
 					tt.Compaction(0, 1, 1, 1),
 					tt.BeforeIter(0, 2),
 					tt.AfterIter(0, 2,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					tt.BeforeIter(0, 3),
 					tt.AfterIter(0, 3,
 						tt.Terminate("done")),
@@ -192,23 +185,17 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					// Compaction before iter 2
 					tt.Compaction(0, 1, 1, 1),
 					tt.BeforeIter(0, 2),
 					tt.AfterIter(0, 2,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					// Compaction before iter 3
 					tt.Compaction(0, 2, 2, 1),
 					tt.BeforeIter(0, 3),
 					tt.AfterIter(0, 3,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					tt.BeforeIter(0, 4),
 					tt.AfterIter(0, 4,
 						tt.Terminate("done")),
@@ -240,9 +227,7 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					// No CompactionEvent (strategy failed)
 					tt.AfterExec(0, 1,
 						gent.TerminationCompactionFailed),
@@ -286,16 +271,12 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 					tt.BeforeExec(0, 0),
 					tt.BeforeIter(0, 1),
 					tt.AfterIter(0, 1,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					// First compaction succeeds
 					tt.Compaction(0, 1, 1, 1),
 					tt.BeforeIter(0, 2),
 					tt.AfterIter(0, 2,
-						tt.ContinueWithPrompt(
-							mockObservation,
-						)),
+						tt.Continue()),
 					// Second compaction fails
 					tt.AfterExec(0, 2,
 						gent.TerminationCompactionFailed),
@@ -307,14 +288,14 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			data := gent.NewBasicLoopData(
-				&gent.Task{Text: "test"},
+				gent.NewTask(gent.TextContent{Text: "test"}),
 			)
 
 			loop := &scratchpadTrackingLoop{
 				terminateAt: tc.input.terminateAt,
 			}
 
-			exec := executor.New[*gent.BasicLoopData](
+			exec := executor.NewRunner(
 				loop,
 				executor.DefaultConfig(),
 			)
@@ -382,7 +363,7 @@ func TestCompaction_ExecutorIntegration(t *testing.T) {
 	}
 }
 
-// scratchpadTrackingLoop implements AgentLoop that adds an
+// scratchpadTrackingLoop implements Loop that adds an
 // iteration to the scratchpad on each call. This simulates
 // real agent behavior where each iteration grows the
 // scratchpad.
@@ -407,7 +388,7 @@ func (l *scratchpadTrackingLoop) Next(
 	if l.terminateAt > 0 && l.calls >= l.terminateAt {
 		return tt.Terminate("done"), nil
 	}
-	return tt.ContinueWithPrompt(mockObservation), nil
+	return tt.Continue(), nil
 }
 
 // collectLifecycleAndCompaction collects lifecycle events
@@ -486,7 +467,7 @@ func TestCompaction_PerIterationGaugesAvailable(
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			data := gent.NewBasicLoopData(
-				&gent.Task{Text: "test"},
+				gent.NewTask(gent.TextContent{Text: "test"}),
 			)
 
 			loop := &modelCallingLoop{
@@ -501,7 +482,7 @@ func TestCompaction_PerIterationGaugesAvailable(
 
 			strategy := tt.NewMockCompactionStrategy()
 
-			exec := executor.New[*gent.BasicLoopData](
+			exec := executor.NewRunner(
 				loop,
 				executor.DefaultConfig(),
 			)
@@ -547,7 +528,7 @@ func TestCompaction_PerIterationGaugesAvailable(
 	}
 }
 
-// modelCallingLoop is an AgentLoop that publishes
+// modelCallingLoop is an Loop that publishes
 // AfterModelCallEvent on each iteration to set per-iteration
 // token gauges.
 type modelCallingLoop struct {
@@ -565,7 +546,10 @@ func (l *modelCallingLoop) Next(
 	// Publish model call event to set per-iteration gauges
 	resp := &gent.ContentResponse{
 		Choices: []*gent.ContentChoice{
-			{CandidateContent: "response"},
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "response"}},
+			},
 		},
 		Info: &gent.GenerationInfo{
 			InputTokens:  l.inputTokens,
@@ -587,7 +571,7 @@ func (l *modelCallingLoop) Next(
 	if l.terminateAt > 0 && l.calls >= l.terminateAt {
 		return tt.Terminate("done"), nil
 	}
-	return tt.ContinueWithPrompt(mockObservation), nil
+	return tt.Continue(), nil
 }
 
 // gaugeCapturingTrigger captures per-iteration gauge values
@@ -617,3 +601,7 @@ func (t *gaugeCapturingTrigger) ShouldCompact(
 }
 
 func (t *gaugeCapturingTrigger) NotifyCompacted(_ *gent.ExecutionContext) error { return nil }
+
+func (*scratchpadTrackingLoop) Output() gent.Output[string] { return output.NewTextOutput() }
+
+func (*modelCallingLoop) Output() gent.Output[string] { return output.NewTextOutput() }

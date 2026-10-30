@@ -106,7 +106,7 @@ const mapItems = {
   loop: [
     "ReAct connects model decisions to tools",
     "It builds messages, sends native definitions, " +
-      "executes calls, and checks final content through Termination.",
+      "executes calls, and checks final content through Output.",
     "Loop",
   ],
   model: [
@@ -346,11 +346,12 @@ const startStep = step(
   0,
   0,
   "APPLICATION",
-  `data := gent.NewBasicLoopData(&gent.Task{
-    Text: "Can I return an unused item after 10 days?",
-})
+  `data := gent.NewBasicLoopData(&gent.Task{Messages: []*gent.ModelMessage{
+    gent.TextParts(gent.ChatMessageTypeSystem, "Use policy evidence. Give a short answer."),
+    gent.TextParts(gent.ChatMessageTypeHuman, "Can I return an unused item after 10 days?"),
+}})
 execCtx := gent.NewExecutionContext(ctx, "policy-help", data)
-result, err := runner.Execute(execCtx)`,
+answer, result, err := runner.Execute(execCtx)`,
 );
 const requestStep = step(
   "REACT → MODEL",
@@ -424,11 +425,11 @@ const answerText =
   "delivery. At 10 days, it is within that window. Please supply the order ID.";
 function answerStep(iteration, tools) {
   return step(
-    "MODEL → TERMINATION",
+    "MODEL → OUTPUT",
     "Check final assistant content",
     "The next response has no " +
-      "tool calls. ReAct uses ParseSection and ShouldTerminate. Text termination " +
-      "accepts non-empty content unless a validator rejects it.",
+      "tool calls and native completion marks an answer. TextOutput " +
+      "checks all parts and runs the optional custom validator before acceptance.",
     iteration,
     tools,
     "PLAIN FINAL CONTENT",
@@ -441,7 +442,7 @@ function finishStep(iteration, tools) {
     "Return the accepted answer",
     "ReAct returns LATerminate. " +
       "The runner saves the terminal result and releases resources. The caller checks " +
-      "the error and TerminationReason before using Output.",
+      "the error and TerminationReason before using the typed answer.",
     iteration,
     tools,
     "EXECUTION RESULT",
@@ -701,7 +702,7 @@ const questions = [
     question: "Which piece must you write to add standard hybrid policy search?",
     correct: 1,
     options: [
-      "A new AgentLoop implementation",
+      "A new Loop implementation",
       "Your policy documents and dependency setup",
       "A SearchChain that discovers every policy as a tool",
     ],

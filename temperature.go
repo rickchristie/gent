@@ -5,7 +5,7 @@ import "strings"
 // ModelNamer is an optional interface that models can implement to expose their name.
 // This is used by [DefaultSamplingParams] to select model-appropriate defaults.
 //
-// [LCGWrapper] in the models package implements this interface.
+// Provider adapters in the models package implement this interface.
 type ModelNamer interface {
 	ModelName() string
 }
@@ -89,7 +89,7 @@ type SamplingParams struct {
 // If the model does not implement [ModelNamer] or the name is empty, the generic defaults
 // are returned (temperature 0.2, top-p 1.0).
 //
-// This function is designed to be called by AgentLoop implementations to set sensible
+// This function is designed to be called by Loop implementations to set sensible
 // defaults. User-provided options (via WithCallOptions or similar) should always override
 // the values returned here.
 func DefaultSamplingParams(model Model) SamplingParams {

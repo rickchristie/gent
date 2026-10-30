@@ -27,13 +27,13 @@ func (m *requestOwnershipModel) GenerateContentStream(_ context.Context, request
 
 func TestManagedRequestHooksOwnNestedValues(t *testing.T) {
 	type expected struct {
-		messages []ModelMessage
+		messages []*ModelMessage
 		options  CallOptions
 		response *ContentResponse
 		err      error
 	}
 	makeRequest := func(text, tool, mode string) ModelCallRequest {
-		return NewModelCallRequest([]ModelMessage{TextParts(ChatMessageTypeHuman, text)},
+		return NewModelCallRequest([]*ModelMessage{TextParts(ChatMessageTypeHuman, text)},
 			WithOptions(&CallOptions{
 				StopWords: []string{text},
 				Tools: []ToolDefinition{{Type: "function", Function: &FunctionDefinition{
@@ -71,4 +71,54 @@ func TestManagedRequestHooksOwnNestedValues(t *testing.T) {
 	response, err := stream.Response()
 	assert.Equal(t, want, expected{model.request.Messages, model.request.Options, response, err})
 	assert.Equal(t, makeRequest("original", "lookup", "high"), request)
+}
+
+func TestRequestHooksRetainOutputControls(t *testing.T) {
+	type input struct{ change func(*ModelCallRequest) }
+	type expected struct {
+		err    string
+		called bool
+	}
+	type testCase struct {
+		name     string
+		input    input
+		expected expected
+	}
+	failure := "gent: model request hook changed required output controls"
+	cases := []testCase{
+		{"sampling", input{func(r *ModelCallRequest) { r.Options.MaxTokens = 100 }},
+			expected{called: true}},
+		{"schema removed", input{func(r *ModelCallRequest) { r.Options.ResponseSchema = nil }},
+			expected{err: failure}},
+		{"nested schema weakened", input{func(r *ModelCallRequest) {
+			r.Options.ResponseSchema["properties"].(map[string]any)["name"] = map[string]any{}
+		}}, expected{err: failure}},
+		{"modality changed", input{func(r *ModelCallRequest) {
+			r.Options.ResponseModalities[0] = "image"
+		}}, expected{err: failure}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := NewExecutionContext(context.Background(), "root", nil)
+			defer ctx.Release()
+			ctx.SetEventPublisher(&requestOwnershipHook{change: tt.input.change})
+			request := NewModelCallRequest([]*ModelMessage{TextParts(ChatMessageTypeHuman, "Name.")})
+			request.Options.ResponseSchema = map[string]any{"type": "object",
+				"properties": map[string]any{"name": map[string]any{"type": "string"}}}
+			request.Options.ResponseMIMEType = "application/json"
+			request.Options.ResponseModalities = []string{"text"}
+			model := &requestOwnershipModel{}
+			stream, err := ctx.GenerateContentStream(model, ModelCall{}, request)
+			actual := expected{called: model.request.Messages != nil}
+			if err != nil {
+				actual.err = err.Error()
+			}
+			assert.Equal(t, tt.expected, actual)
+			if stream != nil {
+				_, err := stream.Response()
+				assert.NoError(t, err)
+				stream.Close()
+			}
+		})
+	}
 }

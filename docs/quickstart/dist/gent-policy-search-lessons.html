@@ -1398,10 +1398,9 @@ input[type="radio"] {
             </div>
           </div>
           <p class="callout">
-            <strong>Current API:</strong> <code>gent.Loop</code> and
-            <code>executor.NewRunner</code> are the current names in this working copy.
-            <code>AgentLoop[Data]</code> and <code>executor.New[Data]</code> remain compatibility
-            APIs.
+            <strong>Current API:</strong> <code>gent.Loop[T]</code> and
+            <code>executor.NewRunner</code> carry the output type through execution and restore.
+            The caller supplies the system and user messages in <code>Task.Messages</code>.
           </p>
         </section>
 
@@ -1417,7 +1416,7 @@ input[type="radio"] {
               >Find an interface<input
                 id="contract-search"
                 type="search"
-                placeholder="Try Embedder, Tool, or Termination"
+                placeholder="Try Embedder, Tool, or Output"
                 autocomplete="off"
             /></label>
             <label
@@ -1638,7 +1637,7 @@ I changed my mind about an item I bought</textarea
               >Run path<select id="run-path" aria-label="Run path">
                 <option value="full">Full policy → answer</option>
                 <option value="snippet">Snippet → get_policy → answer</option>
-                <option value="reject">Validator rejects → corrected answer</option>
+                <option value="reject">Output rejects → corrected answer</option>
                 <option value="error">Empty query → tool error → retry</option>
                 <option value="limit">Iteration limit stops an unfinished run</option>
               </select></label
@@ -1678,9 +1677,9 @@ I changed my mind about an item I bought</textarea
             checks. A truncated response is handled before either route.
           </p>
           <p class="source-note">
-            The native path passes plain final content to Termination. The default XML format shapes
-            prompt sections and tool output; it does not require the model to write XML tool calls
-            or an <code>&lt;answer&gt;</code> envelope.
+            The native path passes complete candidate content to <code>Output.Process</code>.
+            The caller owns the starting prompt. The tool formatter only renders tool results;
+            native fields identify calls, completion, and candidate content.
           </p>
         </section>
 
@@ -1722,11 +1721,15 @@ import (
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/policy"
 	"github.com/rickchristie/gent/search"
-	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/toolchain"
 )
 
 // SamplePolicies contains invented rules for this lesson. Replace them with your own rules.
+const agentPrompt = `Help a customer understand the store's return rules.
+Search the policies before you answer a policy question.
+If search returns a title or a snippet, use get_policy to read the full policy first.
+Use only the policy text you read. Do not approve a refund or invent missing facts.`
+
 func SamplePolicies() []*policy.Policy {
 	return []*policy.Policy{
 		{
@@ -1756,7 +1759,7 @@ After the report is checked, the customer can request a replacement or a refund.
 // BuildRunner indexes the policies at startup. Keep the embedder open while the runner is in use.
 func BuildRunner(
 	ctx context.Context, model gent.Model, embedder search.Embedder, mode policy.SearchResultMode,
-) (*executor.Runner, error) {
+) (*executor.Runner[string], error) {
 	policies := SamplePolicies()
 	lookup, err := policy.NewPolicySearchTool(ctx, embedder, policies)
 	if err != nil {
@@ -1768,22 +1771,17 @@ func BuildRunner(
 	if mode != policy.SearchResultFull {
 		chain.RegisterTool(policy.NewGetPolicyTool(policies))
 	}
-	term := termination.NewText("answer").WithGuidance(
-		"State the policy ID and the conditions that apply. Ask for any missing facts.",
-	)
 	loop := react.NewAgent(model).
-		WithToolChain(chain).
-		WithTermination(term).
-		WithBehaviorAndContext("Help a customer understand the store's return rules.").
-		WithCriticalRules(`Search the policies before you answer a policy question.
-If search returns a title or a snippet, use get_policy to read the full policy first.
-Use only the policy text you read. Do not approve a refund or invent missing facts.`)
+		WithToolChain(chain)
 	return executor.NewRunner(loop, executor.DefaultConfig()), nil
 }
 
 // Answer uses a new execution context so history and limits belong to this question.
-func Answer(ctx context.Context, runner *executor.Runner, question string) (string, error) {
-	data := gent.NewBasicLoopData(&amp;gent.Task{Text: question})
+func Answer(ctx context.Context, runner *executor.Runner[string], question string) (string, error) {
+	data := gent.NewBasicLoopData(&amp;gent.Task{Messages: []*gent.ModelMessage{
+		gent.TextParts(gent.ChatMessageTypeSystem, agentPrompt),
+		gent.TextParts(gent.ChatMessageTypeHuman, question),
+	}})
 	execCtx := gent.NewExecutionContext(ctx, "policy-help", data)
 	limits := gent.DefaultLimits()
 	for i := range limits {
@@ -1792,21 +1790,14 @@ func Answer(ctx context.Context, runner *executor.Runner, question string) (stri
 		}
 	}
 	execCtx.SetLimits(limits)
-	result, err := runner.Execute(execCtx)
+	answer, result, err := runner.Execute(execCtx)
 	if err != nil {
 		return "", err
 	}
 	if result.TerminationReason != gent.TerminationSuccess {
 		return "", fmt.Errorf("run ended with %s: %v", result.TerminationReason, result.Error)
 	}
-	if len(result.Output) != 1 {
-		return "", fmt.Errorf("expected one text answer, got %d parts", len(result.Output))
-	}
-	text, ok := result.Output[0].(gent.TextContent)
-	if !ok {
-		return "", fmt.Errorf("expected text answer, got %T", result.Output[0])
-	}
-	return text.Text, nil
+	return answer, nil
 }
 
 func NewEmbedder() (search.Embedder, error) {
@@ -2001,9 +1992,10 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
           <details>
             <summary>When you need policy compliance or recovery across workers</summary>
             <p>
-              Use <code>AnswerValidator</code> for answer checks and application code for
-              authorization or mutations. A prompt is guidance; the default text termination accepts
-              any non-empty answer. Policy search does not approve refunds.
+              Use an output's <code>SetCustomValidator</code> callback for answer checks and
+              application code for authorization or mutations. The default <code>TextOutput</code>
+              checks the content type; it does not enforce business rules. Policy search does not
+              approve refunds.
             </p>
             <p>
               ExecutionContext owns append-only history and the active message selection. Durable
@@ -2068,19 +2060,9 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
         "ops.",
       "advice": "Use react.NewAgent(model). You do not need to write a loop for policy retr" +
         "ieval.",
-      "signature": "type Loop interface {\n\tNext(execCtx *ExecutionContext) (*AgentLoopResult" +
-        ", error)\n}",
-      "line": 30
-    },
-    {
-      "name": "AgentLoop",
-      "path": "agent.go",
-      "group": "Run",
-      "use": "Compatibility API",
-      "summary": "The older generic interface embeds Loop and adds no methods.",
-      "advice": "Use gent.Loop and executor.NewRunner in new code in this working copy.",
-      "signature": "type AgentLoop[Data LoopData] interface {\n\tLoop\n}",
-      "line": 52
+      "signature": "type Loop[T any] interface {\n\tNext(ctx *ExecutionContext) (*AgentLoopRes" +
+        "ult, error)\n\tOutput() Output[T]\n}",
+      "line": 11
     },
     {
       "name": "LoopData",
@@ -2092,7 +2074,7 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "advice": "Use gent.NewBasicLoopData. Add custom data only if the application needs i" +
         "t.",
       "signature": "type LoopData interface {\n\tGetTask() *Task\n}",
-      "line": 60
+      "line": 20
     },
     {
       "name": "Model",
@@ -2243,56 +2225,30 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "line": 14
     },
     {
-      "name": "Termination",
-      "path": "termination.go",
+      "name": "Output",
+      "path": "output.go",
       "group": "Answer",
-      "use": "Use termination.Text",
-      "summary": "Parses and checks final content, then accepts it, rejects it, or asks the " +
-        "loop to continue.",
-      "advice": "The current native ReAct path passes assistant content directly. No answer" +
-        " XML is required.",
-      "signature": "type Termination interface {\n\tTextSection\n\tShouldTerminate(execCtx *Ex" +
-        "ecutionContext, content string) *TerminationResult\n\tSetValidator(validat" +
-        "or AnswerValidator)\n}",
-      "line": 189
-    },
-    {
-      "name": "AnswerValidator",
-      "path": "termination.go",
-      "group": "Answer",
-      "use": "Optional check",
-      "summary": "Checks a parsed answer and returns acceptance or feedback.",
-      "advice": "Add a validator for checks you can test. Search alone does not prove polic" +
-        "y compliance.",
-      "signature": "type AnswerValidator interface {\n\tName() string\n\tValidate(execCtx *Exe" +
-        "cutionContext, answer any) *ValidationResult\n}",
-      "line": 80
+      "use": "Use output.TextOutput",
+      "summary": "Processes ordered content and returns acceptance, a typed value, or correc" +
+        "tion steering.",
+      "advice": "Native completion identifies the candidate. Local checks and custom valida" +
+        "tion decide acceptance.",
+      "signature": "type Output[T any] interface {\n\tInstructions() string\n\tConfigure(reque" +
+        "st *ModelCallRequest) error\n\tProcess(ctx *ExecutionContext, content []Co" +
+        "ntentPart) (*OutputResult[T], error)\n}",
+      "line": 6
     },
     {
       "name": "TextFormat",
       "path": "format.go",
-      "group": "Answer",
-      "use": "Default XML formatter",
-      "summary": "Formats structured prompt sections and tool output. It also has a section " +
-        "parser.",
-      "advice": "The current ReAct path does not call this parser on native model responses" +
-        ".",
-      "signature": "type TextFormat interface {\n\tRegisterSection(section TextSection) TextFo" +
-        "rmat\n\tDescribeStructure() string\n\tParse(execCtx *ExecutionContext, out" +
-        "put string) (map[string][]string, error)\n\tFormatSections(sections []Form" +
-        "attedSection) string\n}",
-      "line": 103
-    },
-    {
-      "name": "TextSection",
-      "path": "section.go",
-      "group": "Answer",
-      "use": "Embedded by Termination",
-      "summary": "Gives a section a name, guidance, and a content parser.",
-      "advice": "Text termination parses a string. JSON termination parses a typed answer.",
-      "signature": "type TextSection interface {\n\tName() string\n\tGuidance() string\n\tPars" +
-        "eSection(execCtx *ExecutionContext, content string) (any, error)\n}",
-      "line": 78
+      "group": "Tools",
+      "use": "Tool result renderer",
+      "summary": "Renders named sections in tool observations. It does not parse model answe" +
+        "rs.",
+      "advice": "The caller supplies system instructions and user content in Task messages.",
+      "signature": "type TextFormat interface {\n\tFormatSections([]FormattedSection) string\n" +
+        "}",
+      "line": 13
     },
     {
       "name": "IndexableTool",
@@ -2330,11 +2286,11 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "advice": "Use the history storage contract for worker recovery. The demo uses the de" +
         "fault store.",
       "signature": "type Recorder interface {\n\tSave(context.Context, *SaveBatch) error\n}",
-      "line": 62
+      "line": 63
     }
   ],
-  "revision": "6695f3c",
-  "digest": "45d56c88c8a4f68b",
+  "revision": "d72d816",
+  "digest": "7d4d0f327cfca399",
   "sources": [
     "agent.go",
     "agents/react/agent.go",
@@ -2343,6 +2299,8 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
     "format.go",
     "limit.go",
     "model.go",
+    "output.go",
+    "output/text.go",
     "policy/policy.go",
     "policy/search.go",
     "run.go",
@@ -2356,9 +2314,6 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
     "search/fuser.go",
     "search/normalize.go",
     "search/search.go",
-    "section.go",
-    "termination.go",
-    "termination/text.go",
     "tool.go",
     "tool_search.go",
     "toolchain.go",
@@ -2373,74 +2328,69 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
         "\"github.com/rickchristie/gent/common\"\n\t\"github.com/rickchristie/gent/" +
         "executor\"\n\t\"github.com/rickchristie/gent/models\"\n\t\"github.com/rick" +
         "christie/gent/policy\"\n\t\"github.com/rickchristie/gent/search\"\n\t\"git" +
-        "hub.com/rickchristie/gent/termination\"\n\t\"github.com/rickchristie/gent/" +
-        "toolchain\"\n)\n\n// SamplePolicies contains invented rules for this lesso" +
-        "n. Replace them with your own rules.\nfunc SamplePolicies() []*policy.Poli" +
-        "cy {\n\treturn []*policy.Policy{\n\t\t{\n\t\t\tId:          \"return-windo" +
-        "w\",\n\t\t\tDescription: \"Return unused items within 30 days of delivery." +
-        "\",\n\t\t\tFullContent: `## Returns\n\nAn unused item can be returned with" +
-        "in 30 days of delivery.\nThe customer must supply the order ID. Check the " +
-        "delivery date and item condition.\nThe refund uses the original payment me" +
-        "thod after the return is checked.`,\n\t\t\tKeywords:         []string{\"re" +
-        "turn\", \"refund\", \"unused\", \"30 days\"},\n\t\t\tSyntheticQueries: []s" +
-        "tring{\"I changed my mind about an item I bought\"},\n\t\t},\n\t\t{\n\t\t" +
-        "\tId:          \"damaged-delivery\",\n\t\t\tDescription: \"Report an item " +
-        "that arrived damaged.\",\n\t\t\tFullContent: `## Damage on delivery\n\nRep" +
-        "ort damage within 7 days of delivery. Supply the order ID and a photo of t" +
-        "he damage.\nAfter the report is checked, the customer can request a replac" +
-        "ement or a refund.`,\n\t\t\tKeywords:         []string{\"damaged\", \"brok" +
-        "en\", \"replacement\"},\n\t\t\tSyntheticQueries: []string{\"my parcel arri" +
-        "ved with a broken item\"},\n\t\t},\n\t}\n}\n\n// BuildRunner indexes the p" +
-        "olicies at startup. Keep the embedder open while the runner is in use.\nfu" +
-        "nc BuildRunner(\n\tctx context.Context, model gent.Model, embedder search." +
-        "Embedder, mode policy.SearchResultMode,\n) (*executor.Runner, error) {\n\t" +
-        "policies := SamplePolicies()\n\tlookup, err := policy.NewPolicySearchTool(" +
-        "ctx, embedder, policies)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tl" +
-        "ookup.WithTopK(3).WithResultMode(mode)\n\tchain := toolchain.New()\n\tchai" +
-        "n.RegisterTool(lookup)\n\tif mode != policy.SearchResultFull {\n\t\tchain." +
-        "RegisterTool(policy.NewGetPolicyTool(policies))\n\t}\n\tterm := terminatio" +
-        "n.NewText(\"answer\").WithGuidance(\n\t\t\"State the policy ID and the con" +
-        "ditions that apply. Ask for any missing facts.\",\n\t)\n\tloop := react.Ne" +
-        "wAgent(model).\n\t\tWithToolChain(chain).\n\t\tWithTermination(term).\n\t" +
-        "\tWithBehaviorAndContext(\"Help a customer understand the store's return r" +
-        "ules.\").\n\t\tWithCriticalRules(`Search the policies before you answer a " +
-        "policy question.\nIf search returns a title or a snippet, use get_policy t" +
-        "o read the full policy first.\nUse only the policy text you read. Do not a" +
-        "pprove a refund or invent missing facts.`)\n\treturn executor.NewRunner(lo" +
-        "op, executor.DefaultConfig()), nil\n}\n\n// Answer uses a new execution co" +
-        "ntext so history and limits belong to this question.\nfunc Answer(ctx cont" +
-        "ext.Context, runner *executor.Runner, question string) (string, error) {\n" +
-        "\tdata := gent.NewBasicLoopData(&gent.Task{Text: question})\n\texecCtx := " +
-        "gent.NewExecutionContext(ctx, \"policy-help\", data)\n\tlimits := gent.Def" +
-        "aultLimits()\n\tfor i := range limits {\n\t\tif limits[i].Key == gent.SCIt" +
-        "erations.Self() {\n\t\t\tlimits[i].MaxValue = 6\n\t\t}\n\t}\n\texecCtx.Set" +
-        "Limits(limits)\n\tresult, err := runner.Execute(execCtx)\n\tif err != nil " +
-        "{\n\t\treturn \"\", err\n\t}\n\tif result.TerminationReason != gent.Termin" +
-        "ationSuccess {\n\t\treturn \"\", fmt.Errorf(\"run ended with %s: %v\", res" +
-        "ult.TerminationReason, result.Error)\n\t}\n\tif len(result.Output) != 1 {" +
-        "\n\t\treturn \"\", fmt.Errorf(\"expected one text answer, got %d parts\", " +
-        "len(result.Output))\n\t}\n\ttext, ok := result.Output[0].(gent.TextContent" +
-        ")\n\tif !ok {\n\t\treturn \"\", fmt.Errorf(\"expected text answer, got %T" +
-        "\", result.Output[0])\n\t}\n\treturn text.Text, nil\n}\n\nfunc NewEmbedder" +
-        "() (search.Embedder, error) {\n\tcfg := common.FindConfig(\"multilingual-e" +
-        "5-small\")\n\tif cfg == nil {\n\t\treturn nil, fmt.Errorf(\"embedding conf" +
-        "iguration not found\")\n\t}\n\tdir, err := common.ModelDir(cfg.Model.Name)" +
-        "\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn search.NewOnnxEmbe" +
-        "dder(*cfg, search.OnnxOptions{\n\t\tModelPath:     filepath.Join(dir, cfg." +
-        "Model.ModelFile),\n\t\tTokenizerPath: filepath.Join(dir, \"tokenizer.json" +
-        "\"), NumThreads: 2, MaxConcurrency: 2,\n\t})\n}\n\nfunc run() (runErr erro" +
-        "r) {\n\tkey, modelName := os.Getenv(\"OPENAI_API_KEY\"), os.Getenv(\"GENT_" +
-        "MODEL\")\n\tif key == \"\" || modelName == \"\" {\n\t\treturn fmt.Errorf(" +
-        "\"set OPENAI_API_KEY and GENT_MODEL to use this example\")\n\t}\n\tembedde" +
-        "r, err := NewEmbedder()\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer f" +
-        "unc() { runErr = errors.Join(runErr, embedder.Close()) }()\n\tctx, cancel " +
-        ":= context.WithTimeout(context.Background(), 90*time.Second)\n\tdefer canc" +
-        "el()\n\tmodel := models.NewOpenAI(key, modelName)\n\trunner, err := BuildR" +
-        "unner(ctx, model, embedder, policy.SearchResultFull)\n\tif err != nil {\n" +
-        "\t\treturn err\n\t}\n\tanswer, err := Answer(ctx, runner, \"An unused item" +
-        " arrived 10 days ago. Can I return it?\")\n\tif err != nil {\n\t\treturn e" +
-        "rr\n\t}\n\tfmt.Println(answer)\n\treturn nil\n}\n\nfunc main() {\n\tif err" +
-        " := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n"
+        "hub.com/rickchristie/gent/toolchain\"\n)\n\n// SamplePolicies contains inv" +
+        "ented rules for this lesson. Replace them with your own rules.\nconst agen" +
+        "tPrompt = `Help a customer understand the store's return rules.\nSearch th" +
+        "e policies before you answer a policy question.\nIf search returns a title" +
+        " or a snippet, use get_policy to read the full policy first.\nUse only the" +
+        " policy text you read. Do not approve a refund or invent missing facts.`\n" +
+        "\nfunc SamplePolicies() []*policy.Policy {\n\treturn []*policy.Policy{\n\t" +
+        "\t{\n\t\t\tId:          \"return-window\",\n\t\t\tDescription: \"Return un" +
+        "used items within 30 days of delivery.\",\n\t\t\tFullContent: `## Returns" +
+        "\n\nAn unused item can be returned within 30 days of delivery.\nThe custom" +
+        "er must supply the order ID. Check the delivery date and item condition.\n" +
+        "The refund uses the original payment method after the return is checked.`," +
+        "\n\t\t\tKeywords:         []string{\"return\", \"refund\", \"unused\", \"3" +
+        "0 days\"},\n\t\t\tSyntheticQueries: []string{\"I changed my mind about an " +
+        "item I bought\"},\n\t\t},\n\t\t{\n\t\t\tId:          \"damaged-delivery\"," +
+        "\n\t\t\tDescription: \"Report an item that arrived damaged.\",\n\t\t\tFull" +
+        "Content: `## Damage on delivery\n\nReport damage within 7 days of delivery" +
+        ". Supply the order ID and a photo of the damage.\nAfter the report is chec" +
+        "ked, the customer can request a replacement or a refund.`,\n\t\t\tKeywords" +
+        ":         []string{\"damaged\", \"broken\", \"replacement\"},\n\t\t\tSynth" +
+        "eticQueries: []string{\"my parcel arrived with a broken item\"},\n\t\t},\n" +
+        "\t}\n}\n\n// BuildRunner indexes the policies at startup. Keep the embedde" +
+        "r open while the runner is in use.\nfunc BuildRunner(\n\tctx context.Conte" +
+        "xt, model gent.Model, embedder search.Embedder, mode policy.SearchResultMo" +
+        "de,\n) (*executor.Runner[string], error) {\n\tpolicies := SamplePolicies()" +
+        "\n\tlookup, err := policy.NewPolicySearchTool(ctx, embedder, policies)\n\t" +
+        "if err != nil {\n\t\treturn nil, err\n\t}\n\tlookup.WithTopK(3).WithResult" +
+        "Mode(mode)\n\tchain := toolchain.New()\n\tchain.RegisterTool(lookup)\n\tif" +
+        " mode != policy.SearchResultFull {\n\t\tchain.RegisterTool(policy.NewGetPo" +
+        "licyTool(policies))\n\t}\n\tloop := react.NewAgent(model).\n\t\tWithToolCh" +
+        "ain(chain)\n\treturn executor.NewRunner(loop, executor.DefaultConfig()), n" +
+        "il\n}\n\n// Answer uses a new execution context so history and limits belo" +
+        "ng to this question.\nfunc Answer(ctx context.Context, runner *executor.Ru" +
+        "nner[string], question string) (string, error) {\n\tdata := gent.NewBasicL" +
+        "oopData(&gent.Task{Messages: []*gent.ModelMessage{\n\t\tgent.TextParts(gen" +
+        "t.ChatMessageTypeSystem, agentPrompt),\n\t\tgent.TextParts(gent.ChatMessag" +
+        "eTypeHuman, question),\n\t}})\n\texecCtx := gent.NewExecutionContext(ctx, " +
+        "\"policy-help\", data)\n\tlimits := gent.DefaultLimits()\n\tfor i := range" +
+        " limits {\n\t\tif limits[i].Key == gent.SCIterations.Self() {\n\t\t\tlimit" +
+        "s[i].MaxValue = 6\n\t\t}\n\t}\n\texecCtx.SetLimits(limits)\n\tanswer, resu" +
+        "lt, err := runner.Execute(execCtx)\n\tif err != nil {\n\t\treturn \"\", er" +
+        "r\n\t}\n\tif result.TerminationReason != gent.TerminationSuccess {\n\t\tre" +
+        "turn \"\", fmt.Errorf(\"run ended with %s: %v\", result.TerminationReason," +
+        " result.Error)\n\t}\n\treturn answer, nil\n}\n\nfunc NewEmbedder() (search" +
+        ".Embedder, error) {\n\tcfg := common.FindConfig(\"multilingual-e5-small\")" +
+        "\n\tif cfg == nil {\n\t\treturn nil, fmt.Errorf(\"embedding configuration " +
+        "not found\")\n\t}\n\tdir, err := common.ModelDir(cfg.Model.Name)\n\tif err" +
+        " != nil {\n\t\treturn nil, err\n\t}\n\treturn search.NewOnnxEmbedder(*cfg," +
+        " search.OnnxOptions{\n\t\tModelPath:     filepath.Join(dir, cfg.Model.Mode" +
+        "lFile),\n\t\tTokenizerPath: filepath.Join(dir, \"tokenizer.json\"), NumThr" +
+        "eads: 2, MaxConcurrency: 2,\n\t})\n}\n\nfunc run() (runErr error) {\n\tkey" +
+        ", modelName := os.Getenv(\"OPENAI_API_KEY\"), os.Getenv(\"GENT_MODEL\")\n" +
+        "\tif key == \"\" || modelName == \"\" {\n\t\treturn fmt.Errorf(\"set OPENA" +
+        "I_API_KEY and GENT_MODEL to use this example\")\n\t}\n\tembedder, err := N" +
+        "ewEmbedder()\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer func() { run" +
+        "Err = errors.Join(runErr, embedder.Close()) }()\n\tctx, cancel := context." +
+        "WithTimeout(context.Background(), 90*time.Second)\n\tdefer cancel()\n\tmod" +
+        "el := models.NewOpenAI(key, modelName)\n\trunner, err := BuildRunner(ctx, " +
+        "model, embedder, policy.SearchResultFull)\n\tif err != nil {\n\t\treturn e" +
+        "rr\n\t}\n\tanswer, err := Answer(ctx, runner, \"An unused item arrived 10 " +
+        "days ago. Can I return it?\")\n\tif err != nil {\n\t\treturn err\n\t}\n\tf" +
+        "mt.Println(answer)\n\treturn nil\n}\n\nfunc main() {\n\tif err := run(); e" +
+        "rr != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n"
 };
     </script>
     <script>
@@ -2552,7 +2502,7 @@ const mapItems = {
   loop: [
     "ReAct connects model decisions to tools",
     "It builds messages, sends native definitions, " +
-      "executes calls, and checks final content through Termination.",
+      "executes calls, and checks final content through Output.",
     "Loop",
   ],
   model: [
@@ -2792,11 +2742,12 @@ const startStep = step(
   0,
   0,
   "APPLICATION",
-  `data := gent.NewBasicLoopData(&gent.Task{
-    Text: "Can I return an unused item after 10 days?",
-})
+  `data := gent.NewBasicLoopData(&gent.Task{Messages: []*gent.ModelMessage{
+    gent.TextParts(gent.ChatMessageTypeSystem, "Use policy evidence. Give a short answer."),
+    gent.TextParts(gent.ChatMessageTypeHuman, "Can I return an unused item after 10 days?"),
+}})
 execCtx := gent.NewExecutionContext(ctx, "policy-help", data)
-result, err := runner.Execute(execCtx)`,
+answer, result, err := runner.Execute(execCtx)`,
 );
 const requestStep = step(
   "REACT → MODEL",
@@ -2870,11 +2821,11 @@ const answerText =
   "delivery. At 10 days, it is within that window. Please supply the order ID.";
 function answerStep(iteration, tools) {
   return step(
-    "MODEL → TERMINATION",
+    "MODEL → OUTPUT",
     "Check final assistant content",
     "The next response has no " +
-      "tool calls. ReAct uses ParseSection and ShouldTerminate. Text termination " +
-      "accepts non-empty content unless a validator rejects it.",
+      "tool calls and native completion marks an answer. TextOutput " +
+      "checks all parts and runs the optional custom validator before acceptance.",
     iteration,
     tools,
     "PLAIN FINAL CONTENT",
@@ -2887,7 +2838,7 @@ function finishStep(iteration, tools) {
     "Return the accepted answer",
     "ReAct returns LATerminate. " +
       "The runner saves the terminal result and releases resources. The caller checks " +
-      "the error and TerminationReason before using Output.",
+      "the error and TerminationReason before using the typed answer.",
     iteration,
     tools,
     "EXECUTION RESULT",
@@ -3147,7 +3098,7 @@ const questions = [
     question: "Which piece must you write to add standard hybrid policy search?",
     correct: 1,
     options: [
-      "A new AgentLoop implementation",
+      "A new Loop implementation",
       "Your policy documents and dependency setup",
       "A SearchChain that discovers every policy as a tool",
     ],

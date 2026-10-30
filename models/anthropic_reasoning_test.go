@@ -12,7 +12,6 @@ import (
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/tmc/langchaingo/llms/anthropic"
 )
 
 func TestAnthropicNativeThinkingChannels(t *testing.T) {
@@ -32,38 +31,61 @@ func TestAnthropicNativeThinkingChannels(t *testing.T) {
 	}
 	cases := []testCase{
 		{"native thinking block", input{"Checked the record.", "Done."}, expected{
-			choices: []*gent.ContentChoice{{CandidateContent: "Done.",
+			choices: []*gent.ContentChoice{{CandidateContent: []gent.ContentPart{
+				gent.TextContent{Text: "Done."},
+			},
 				MetaContent: []*gent.MetaContent{{
-					Type: gent.MetaContentReasoning, Text: "Checked the record.", MessageId: "reasoning",
+					Type: gent.MetaContentReasoning,
+					Content: []gent.ContentPart{
+						gent.TextContent{Text: "Checked the record."},
+					},
+					MessageId: "reasoning",
 				},
-					{Type: gent.MetaContentIntermediary, Text: "Done."}},
-				StopReason: "end_turn"}},
+					{
+						Type:    gent.MetaContentIntermediary,
+						Content: []gent.ContentPart{gent.TextContent{Text: "Done."}},
+					}},
+				Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer, ProviderReason: "end_turn"}}},
 			chunks: []gent.StreamChunk{
 				{
 					MetaContent: []*gent.MetaContent{
 						{
-							Type: gent.MetaContentReasoning, Text: "Checked the record.", MessageId: "reasoning",
+							Type: gent.MetaContentReasoning,
+							Content: []gent.ContentPart{
+								gent.TextContent{Text: "Checked the record."},
+							},
+							MessageId: "reasoning",
 						},
 					},
 				}, {
 					MetaContent: []*gent.MetaContent{
 						{
-							Type: gent.MetaContentIntermediary, Text: "Done.",
+							Type: gent.MetaContentIntermediary,
+							Content: []gent.ContentPart{
+								gent.TextContent{Text: "Done."},
+							},
 						},
 					},
 				}},
 		}},
 		{"ordinary text with tags", input{text: "Example: <thinking>quoted text</thinking>"},
 			expected{
-				choices: []*gent.ContentChoice{{CandidateContent: "Example: <thinking>quoted text</thinking>",
+				choices: []*gent.ContentChoice{{CandidateContent: []gent.ContentPart{
+					gent.TextContent{Text: "Example: <thinking>quoted text</thinking>"},
+				},
 					MetaContent: []*gent.MetaContent{{Type: gent.MetaContentIntermediary,
-						Text: "Example: <thinking>quoted text</thinking>"}},
-					StopReason: "end_turn"}},
+						Content: []gent.ContentPart{
+							gent.TextContent{Text: "Example: <thinking>quoted text</thinking>"},
+						}}},
+					Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer, ProviderReason: "end_turn"}}},
 				chunks: []gent.StreamChunk{
 					{
 						MetaContent: []*gent.MetaContent{
 							{
-								Type: gent.MetaContentIntermediary, Text: "Example: <thinking>quoted text</thinking>",
+								Type: gent.MetaContentIntermediary,
+								Content: []gent.ContentPart{
+									gent.TextContent{Text: "Example: <thinking>quoted text</thinking>"},
+								},
 							},
 						},
 					},
@@ -115,14 +137,11 @@ data: %s
 					Header: http.Header{"Content-Type": {"text/event-stream"}},
 					Body:   io.NopCloser(strings.NewReader(body.String()))}, nil
 			})}
-			provider, err := anthropic.New(anthropic.WithToken("fixture"),
-				anthropic.WithModel("fixture"), anthropic.WithHTTPClient(client))
-			if !assert.NoError(t, err) {
-				return
-			}
-			request := gent.NewModelCallRequest([]gent.ModelMessage{
+			provider := models.NewAnthropic(&models.Config{APIKey: "fixture",
+				Model: "fixture", HTTPClient: client})
+			request := gent.NewModelCallRequest([]*gent.ModelMessage{
 				gent.TextParts(gent.ChatMessageTypeHuman, "Read the record.")})
-			stream, err := models.NewLCGWrapper(provider).GenerateContentStream(
+			stream, err := provider.GenerateContentStream(
 				context.Background(), request)
 			if !assert.NoError(t, err) {
 				return
@@ -136,6 +155,24 @@ data: %s
 			if !assert.NoError(t, err) {
 				return
 			}
+			var blocks []map[string]any
+			if test.input.thinking != "" {
+				blocks = append(blocks, map[string]any{"type": "thinking",
+					"thinking": test.input.thinking, "signature": "opaque"})
+			}
+			blocks = append(blocks, map[string]any{"type": "text", "text": test.input.text})
+			continuation := &gent.ProviderContinuation{Provider: "anthropic"}
+			for index, block := range blocks {
+				raw, err := json.Marshal(block)
+				assert.NoError(t, err)
+				continuation.Items = append(continuation.Items, raw)
+				id := fmt.Sprintf("block:%d", index)
+				test.expected.choices[0].MetaContent[index].MessageId = id
+				test.expected.chunks[index].MetaContent[0].MessageId = id
+			}
+			test.expected.choices[0].Continuation = continuation
+			test.expected.choices[0].CandidateSource = &gent.ContentSource{
+				MessageIds: []string{fmt.Sprintf("block:%d", len(blocks)-1)}}
 			actual.choices, actual.err = response.Choices, err
 			assert.Equal(t, test.expected, actual)
 		})

@@ -32,8 +32,7 @@ import (
 // Required when toolChain is non-nil.
 //
 // Returns the number of non-expired entries that were
-// included, which callers can use to decide between
-// "BEGIN!" vs "CONTINUE!" prompts.
+// included, for callers that track working-context size.
 func ScratchpadToMessages(
 	scratchpad []*gent.HistoryEntry,
 	currentIteration int,
@@ -41,7 +40,7 @@ func ScratchpadToMessages(
 		DeduplicateSummary(*gent.ToolCallResult) string
 	},
 	format gent.TextFormat,
-) ([]gent.ModelMessage, int) {
+) ([]*gent.ModelMessage, int) {
 	// First pass: collect the last occurrence index of each
 	// tool call hash. Only stateless tools (non-empty dedup
 	// summary) participate.
@@ -51,7 +50,7 @@ func ScratchpadToMessages(
 
 	// Second pass: build messages, replacing earlier
 	// duplicate observations with summaries.
-	var messages []gent.ModelMessage
+	var messages []*gent.ModelMessage
 	included := 0
 	globalIdx := 0
 
@@ -142,10 +141,10 @@ func convertMessage(
 	iterIndex int,
 	lastOccurrence map[string]*lastOccurrenceEntry,
 	format gent.TextFormat,
-) gent.ModelMessage {
+) *gent.ModelMessage {
 	tcr := getToolChainResult(msg)
 	if tcr == nil || lastOccurrence == nil {
-		return gent.ModelMessage{
+		return &gent.ModelMessage{
 			Role:         msg.Role,
 			Continuation: msg.Continuation,
 			Parts:        slices.Clone(msg.Parts),
@@ -167,7 +166,7 @@ func convertMessage(
 	}
 
 	if !needsRebuild {
-		return gent.ModelMessage{
+		return &gent.ModelMessage{
 			Role:         msg.Role,
 			Continuation: msg.Continuation,
 			Parts:        slices.Clone(msg.Parts),
@@ -188,7 +187,7 @@ func rebuildObservation(
 	iterIndex int,
 	lastOccurrence map[string]*lastOccurrenceEntry,
 	format gent.TextFormat,
-) gent.ModelMessage {
+) *gent.ModelMessage {
 	tcr := getToolChainResult(msg)
 	var sections []string
 	var allMedia []gent.ContentPart
@@ -240,7 +239,7 @@ func rebuildObservation(
 			response.Content = strings.Join(sections, "\n")
 			parts = append(parts, response)
 			parts = append(parts, allMedia...)
-			return gent.ModelMessage{
+			return &gent.ModelMessage{
 				Role: msg.Role, Continuation: msg.Continuation, Parts: slices.Clone(parts)}
 		}
 	}
@@ -252,7 +251,7 @@ func rebuildObservation(
 	}
 	parts = append(parts, allMedia...)
 
-	return gent.ModelMessage{
+	return &gent.ModelMessage{
 		Role:         msg.Role,
 		Continuation: msg.Continuation,
 		Parts:        slices.Clone(parts),

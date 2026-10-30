@@ -6,7 +6,7 @@ import "sync"
 // Provider completion data and tool calls come from Stream.Response, not from display chunks.
 type StreamAccumulator struct {
 	mu        sync.Mutex
-	content   string
+	content   []ContentPart
 	metadata  metaAccumulator
 	lastError error
 }
@@ -16,8 +16,8 @@ func NewStreamAccumulator() *StreamAccumulator { return &StreamAccumulator{} }
 func (a *StreamAccumulator) Add(chunk StreamChunk) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if chunk.Content != "" {
-		a.content = chunk.Content
+	if len(chunk.Content) > 0 {
+		a.content = CloneContentParts(chunk.Content)
 	}
 	a.metadata.add(chunk.MetaContent)
 	if chunk.Err != nil {
@@ -26,10 +26,10 @@ func (a *StreamAccumulator) Add(chunk StreamChunk) {
 }
 
 // Content returns the accepted answer snapshot, not the provisional text.
-func (a *StreamAccumulator) Content() string {
+func (a *StreamAccumulator) Content() []ContentPart {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.content
+	return CloneContentParts(a.content)
 }
 
 func (a *StreamAccumulator) MetaContent() []*MetaContent {
@@ -47,8 +47,10 @@ func (a *StreamAccumulator) Error() error {
 // Response builds a provisional provider response. It cannot establish execution success.
 func (a *StreamAccumulator) Response() *ContentResponse {
 	metadata := a.MetaContent()
-	return &ContentResponse{Choices: []*ContentChoice{{
-		CandidateContent: MetaText(metadata, MetaContentIntermediary), MetaContent: metadata,
+	return &ContentResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
+		Status: ModelStatusAnswer,
+	},
+		CandidateContent: MetaParts(metadata, MetaContentIntermediary), MetaContent: metadata,
 	}}}
 }
 
@@ -64,7 +66,7 @@ func (a *StreamAccumulator) ResponseWithInfo(response *ContentResponse) *Content
 func (a *StreamAccumulator) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.content = ""
+	a.content = nil
 	a.metadata.reset()
 	a.lastError = nil
 }

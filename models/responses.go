@@ -1,14 +1,12 @@
 package models
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/rickchristie/gent"
@@ -39,7 +37,7 @@ func NewOpenAI(apiKey, model string) *Responses {
 		APIKey: apiKey, Model: model})
 }
 
-func NewGrok(apiKey, model string) *Responses {
+func NewXAI(apiKey, model string) *Responses {
 	return NewResponses(&ResponsesConfig{Provider: "xai", BaseURL: "https://api.x.ai/v1",
 		APIKey: apiKey, Model: model})
 }
@@ -58,40 +56,21 @@ func (m *Responses) GenerateContentStream(base context.Context,
 	if err != nil {
 		return nil, err
 	}
-	data, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithCancel(base)
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(m.config.BaseURL, "/")+"/responses", bytes.NewReader(data))
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	httpRequest.Header.Set("Authorization", "Bearer "+m.config.APIKey)
-	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Accept", "text/event-stream")
-	stream, err := gent.NewBoundedStreamWithDuration(ctx, 64, cancel)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	go func() {
-		defer cancel()
-		response, err := m.config.HTTPClient.Do(httpRequest)
-		if err != nil {
-			stream.Complete(nil, err)
-			return
-		}
-		result, readErr := m.readResponse(ctx, response, stream, &request.Options)
-		closeErr := response.Body.Close()
-		if result != nil {
-			result.Info.Duration = stream.Duration()
-		}
-		stream.Complete(result, errors.Join(readErr, closeErr))
-	}()
-	return stream, nil
+	decision := nativeSchema(m.config.Provider, request.Options.ResponseSchema)
+	hasSchema := request.Options.ResponseSchema != nil
+	headers := http.Header{"Authorization": {"Bearer " + m.config.APIKey},
+		"Accept": {"text/event-stream"}}
+	return startProviderStream(base, m.config.HTTPClient,
+		strings.TrimRight(m.config.BaseURL, "/")+"/responses", headers, body,
+		func(ctx context.Context, response *http.Response, stream *gent.StreamWithDuration) (
+			*gent.ContentResponse, error,
+		) {
+			result, err := m.readResponse(ctx, response, stream, &request.Options)
+			if hasSchema {
+				recordSchema(result, decision)
+			}
+			return result, err
+		})
 }
 
 func (m *Responses) requestBody(request *gent.ModelCallRequest) (map[string]any, error) {
@@ -122,9 +101,8 @@ func (m *Responses) requestBody(request *gent.ModelCallRequest) (map[string]any,
 	if o.TopP != nil {
 		body["top_p"] = *o.TopP
 	}
-	if o.JSONMode || o.ResponseMIMEType == "application/json" {
-		body["text"] = map[string]any{"format": map[string]any{"type": "json_object"}}
-	} else if o.ResponseMIMEType != "" && o.ResponseMIMEType != "text/plain" {
+	if o.ResponseMIMEType != "" && o.ResponseMIMEType != "text/plain" &&
+		o.ResponseMIMEType != "application/json" {
 		return nil, fmt.Errorf("unsupported Responses output type %q", o.ResponseMIMEType)
 	}
 	tools := make([]any, 0, len(o.Tools))
@@ -137,16 +115,24 @@ func (m *Responses) requestBody(request *gent.ModelCallRequest) (map[string]any,
 			"description": f.Description, "parameters": f.Parameters, "strict": f.Strict})
 	}
 	body["tools"] = tools
-	switch choice := o.ToolChoice.(type) {
+	value := o.ToolChoice
+	if pointer, ok := value.(*gent.ToolChoice); ok {
+		value = *pointer
+	}
+	switch choice := value.(type) {
 	case gent.ToolChoice:
-		body["tool_choice"] = map[string]any{"type": choice.Type, "name": choice.Function.Name}
-	case *gent.ToolChoice:
+		if choice.Type != "function" || choice.Function == nil {
+			return nil, errors.New("Responses named tool choice requires a function")
+		}
 		body["tool_choice"] = map[string]any{"type": choice.Type, "name": choice.Function.Name}
 	case nil:
 	default:
 		body["tool_choice"] = choice
 	}
 	if err := applyResponsesMetadata(body, o.Metadata); err != nil {
+		return nil, err
+	}
+	if err := m.outputControls(body, o); err != nil {
 		return nil, err
 	}
 	return body, nil
@@ -195,7 +181,20 @@ func applyResponsesMetadata(body, metadata map[string]any) error {
 				reasoning[field] = value
 			}
 			body[name] = reasoning
-		case "parallel_tool_calls", "text", "service_tier", "max_tool_calls":
+		case "text":
+			fields, ok := option.(map[string]any)
+			if !ok {
+				return errors.New("Responses text option must be an object")
+			}
+			copy := make(map[string]any, len(fields))
+			for field, value := range fields {
+				if field != "verbosity" {
+					return fmt.Errorf("unsupported Responses text option %q", field)
+				}
+				copy[field] = value
+			}
+			body[name] = copy
+		case "parallel_tool_calls", "service_tier", "max_tool_calls":
 			body[name] = option
 		default:
 			return fmt.Errorf("unsupported Responses option %q", name)
@@ -204,7 +203,7 @@ func applyResponsesMetadata(body, metadata map[string]any) error {
 	return nil
 }
 
-func (m *Responses) inputItems(messages []gent.ModelMessage) ([]any, error) {
+func (m *Responses) inputItems(messages []*gent.ModelMessage) ([]any, error) {
 	items := make([]any, 0, len(messages))
 	for _, message := range messages {
 		if saved := message.Continuation; saved != nil {
@@ -219,12 +218,9 @@ func (m *Responses) inputItems(messages []gent.ModelMessage) ([]any, error) {
 			}
 			continue
 		}
-		role := string(message.Role)
-		if message.Role == gent.ChatMessageTypeHuman {
-			role = "user"
-		}
-		if message.Role == gent.ChatMessageTypeAI {
-			role = "assistant"
+		role, err := messageRole(message.Role)
+		if err != nil {
+			return nil, err
 		}
 		var content []any
 		flush := func() {
@@ -234,7 +230,7 @@ func (m *Responses) inputItems(messages []gent.ModelMessage) ([]any, error) {
 			}
 		}
 		for _, part := range message.Parts {
-			switch p := part.(type) {
+			switch p := partValue(part).(type) {
 			case gent.TextContent:
 				content = append(content, map[string]any{"type": "input_text", "text": p.Text})
 			case gent.ImageURLContent:
@@ -244,6 +240,11 @@ func (m *Responses) inputItems(messages []gent.ModelMessage) ([]any, error) {
 				}
 				content = append(content, image)
 			case gent.BinaryContent:
+				if p.MIMEType == "application/pdf" && m.config.Provider == "openai" {
+					content = append(content, map[string]any{"type": "input_file",
+						"filename": "document.pdf", "file_data": p.String()})
+					continue
+				}
 				if !strings.HasPrefix(p.MIMEType, "image/") {
 					return nil, fmt.Errorf("unsupported Responses media %q", p.MIMEType)
 				}
@@ -266,7 +267,10 @@ func (m *Responses) inputItems(messages []gent.ModelMessage) ([]any, error) {
 }
 
 type responseEnvelope struct {
-	Status string            `json:"status"`
+	Status            string `json:"status"`
+	IncompleteDetails struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
 	Output []json.RawMessage `json:"output"`
 	Error  *responseError    `json:"error"`
 	Usage  struct {
@@ -291,45 +295,28 @@ func (e *responseError) Error() string { return fmt.Sprintf("Responses %s: %s", 
 func (m *Responses) readResponse(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions,
 ) (*gent.ContentResponse, error) {
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		data, err := io.ReadAll(io.LimitReader(response.Body, 64*1024))
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("Responses HTTP %d: %s",
-			response.StatusCode, strings.TrimSpace(string(data)))
-	}
 	if !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		var envelope responseEnvelope
-		decoder := json.NewDecoder(io.LimitReader(response.Body, 32*1024*1024))
-		if err := decoder.Decode(&envelope); err != nil {
+		if err := decodeProviderJSON(response.Body, &envelope); err != nil {
 			return nil, err
 		}
 		result, err := m.convertResponse(&envelope)
 		if err != nil {
 			return nil, err
 		}
-		for _, item := range result.Choices[0].MetaContent {
-			if !stream.SendMeta(item) {
-				return nil, ctx.Err()
-			}
-		}
-		return result, nil
+		return previewProviderResponse(ctx, stream, options, result)
 	}
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
-	var data strings.Builder
 	var result *gent.ContentResponse
 	// An output item's phase applies to all its text deltas, including interleaved items.
 	itemTypes := make(map[int]string)
-	consume := func() error {
-		if data.Len() == 0 {
-			return nil
+	size := 0
+	err := readSSE(response.Body, func(data []byte) (bool, error) {
+		size += len(data)
+		if size > maxProviderBytes {
+			return false, errors.New("Responses response exceeds 64 MiB")
 		}
-		payload := data.String()
-		data.Reset()
-		if payload == "[DONE]" {
-			return nil
+		if string(data) == "[DONE]" {
+			return false, errors.New("Responses stream ended without a final response")
 		}
 		var event struct {
 			Type        string           `json:"type"`
@@ -343,11 +330,14 @@ func (m *Responses) readResponse(ctx context.Context, response *http.Response,
 				Phase string `json:"phase"`
 			} `json:"item"`
 		}
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			return err
+		if err := json.Unmarshal(data, &event); err != nil {
+			return false, err
 		}
 		switch event.Type {
 		case "response.output_item.added":
+			if event.OutputIndex < 0 || event.OutputIndex > 4096 {
+				return false, errors.New("invalid Responses output index")
+			}
 			if event.Item.Type == "message" {
 				itemTypes[event.OutputIndex] = responseMetaType(event.Item.Phase)
 			}
@@ -356,63 +346,22 @@ func (m *Responses) readResponse(ctx context.Context, response *http.Response,
 			if kind == "" {
 				kind = gent.MetaContentIntermediary
 			}
-			if kind == gent.MetaContentIntermediary && options.StreamingFunc != nil {
-				if err := options.StreamingFunc(ctx, []byte(event.Delta)); err != nil {
-					return err
-				}
-			}
-			if !stream.SendMeta(&gent.MetaContent{Type: kind, Text: event.Delta,
-				MessageId: fmt.Sprintf("output:%d", event.OutputIndex)}) {
-				return ctx.Err()
-			}
+			return false, sendProviderText(ctx, stream, options, kind,
+				fmt.Sprintf("output:%d", event.OutputIndex), event.Delta)
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-			if options.StreamingReasoningFunc != nil {
-				if err := options.StreamingReasoningFunc(ctx, []byte(event.Delta), nil); err != nil {
-					return err
-				}
-			}
-			if !stream.SendMeta(&gent.MetaContent{Type: gent.MetaContentReasoning, Text: event.Delta,
-				MessageId: fmt.Sprintf("output:%d", event.OutputIndex)}) {
-				return ctx.Err()
-			}
+			return false, sendProviderText(ctx, stream, options, gent.MetaContentReasoning,
+				fmt.Sprintf("output:%d", event.OutputIndex), event.Delta)
 		case "response.completed", "response.incomplete", "response.failed":
 			var err error
 			result, err = m.convertResponse(&event.Response)
-			return err
+			return true, err
 		case "error":
-			return &responseError{Code: event.Code, Message: event.Message}
+			return false, &responseError{Code: event.Code, Message: event.Message}
 		}
-		return nil
-	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if err := consume(); err != nil {
-				return nil, err
-			}
-			if result != nil {
-				return result, nil
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "data:") {
-			if data.Len()+len(line) > 32*1024*1024 {
-				return nil, errors.New("Responses event exceeds 32 MiB")
-			}
-			if data.Len() > 0 {
-				data.WriteByte('\n')
-			}
-			data.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
-		}
-	}
-	if err := scanner.Err(); err != nil {
+		return false, nil
+	})
+	if err != nil {
 		return nil, err
-	}
-	if err := consume(); err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, errors.New("Responses stream ended without a final response")
 	}
 	return result, nil
 }
@@ -424,14 +373,22 @@ func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ContentRe
 	if response.Status != "completed" && response.Status != "incomplete" {
 		return nil, fmt.Errorf("Responses ended with status %q", response.Status)
 	}
-	choice := &gent.ContentChoice{StopReason: "stop", Continuation: &gent.ProviderContinuation{
-		Provider: m.config.Provider, Items: response.Output}}
+	choice := &gent.ContentChoice{Completion: gent.ModelCompletion{
+		Status:         gent.ModelStatusAnswer,
+		ProviderReason: response.Status,
+	},
+		Continuation: &gent.ProviderContinuation{
+			Provider: m.config.Provider, Items: response.Output}}
 	if response.Status == "incomplete" {
-		choice.StopReason = "length"
+		choice.Completion.Status = gent.ModelStatusIncomplete
+		choice.Completion.ProviderReason = response.IncompleteDetails.Reason
 	}
 	for index, raw := range response.Output {
 		var item struct {
 			Type      string `json:"type"`
+			Status    string `json:"status"`
+			Result    string `json:"result"`
+			Format    string `json:"output_format"`
 			Phase     string `json:"phase"`
 			CallID    string `json:"call_id"`
 			Name      string `json:"name"`
@@ -450,51 +407,127 @@ func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ContentRe
 			return nil, err
 		}
 		switch item.Type {
+		case "image_generation_call":
+			if item.Status != "completed" {
+				if response.Status == "incomplete" {
+					continue
+				}
+				return nil, fmt.Errorf("image generation ended with status %q", item.Status)
+			}
+			format := item.Format
+			if format == "" {
+				format = "png"
+				if m.config.Provider == "xai" {
+					format = "jpeg"
+				}
+			}
+			part, err := decodeOutputImage("image/"+format, item.Result)
+			if err != nil {
+				return nil, err
+			}
+			id := fmt.Sprintf("output:%d", index)
+			choice.CandidateContent = append(choice.CandidateContent, part)
+			if choice.CandidateSource == nil {
+				choice.CandidateSource = &gent.ContentSource{}
+			}
+			choice.CandidateSource.MessageIds = append(choice.CandidateSource.MessageIds, id)
+			choice.MetaContent = append(choice.MetaContent, &gent.MetaContent{
+				Type: gent.MetaContentIntermediary, MessageId: id, Content: []gent.ContentPart{part}})
 		case "function_call":
 			// The raw item is replayed without changes. A generated ID would disagree with it.
 			if item.CallID == "" || item.Name == "" {
+				if response.Status == "incomplete" {
+					continue
+				}
 				return nil, errors.New("Responses function call requires call_id and name")
 			}
 			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: item.CallID, Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: item.Name, Arguments: item.Arguments}})
 		case "message":
 			kind := responseMetaType(item.Phase)
-			choice.CandidateContent, choice.CandidateSource = "", nil
+			// A new message supersedes earlier text candidates. Generated images remain ordered
+			// answer parts even when the provider also emits an assistant message.
+			var images []gent.ContentPart
+			var imageIDs []string
+			for i, part := range choice.CandidateContent {
+				if _, ok := part.(gent.BinaryContent); ok {
+					images = append(images, part)
+					imageIDs = append(imageIDs, choice.CandidateSource.MessageIds[i])
+				}
+			}
+			choice.CandidateContent, choice.CandidateSource = images, nil
+			if len(imageIDs) > 0 {
+				choice.CandidateSource = &gent.ContentSource{MessageIds: imageIDs}
+			}
 			var text strings.Builder
 			for _, part := range item.Content {
 				if part.Type != "output_text" && part.Type != "refusal" {
 					return nil, fmt.Errorf("unsupported Responses output content %q", part.Type)
 				}
-				text.WriteString(part.Text + part.Refusal)
+				if part.Type == "refusal" {
+					if choice.Completion.Refusal == nil {
+						choice.Completion.Refusal = &gent.ModelRefusal{}
+					}
+					if part.Refusal != "" {
+						choice.Completion.Refusal.Content = append(choice.Completion.Refusal.Content,
+							gent.TextContent{Text: part.Refusal})
+					}
+					continue
+				}
+				text.WriteString(part.Text)
 			}
 			id := fmt.Sprintf("output:%d", index)
 			choice.MetaContent = append(choice.MetaContent,
-				&gent.MetaContent{Type: kind, Text: text.String(), MessageId: id})
+				&gent.MetaContent{
+					Type:      kind,
+					Content:   []gent.ContentPart{gent.TextContent{Text: text.String()}},
+					MessageId: id,
+				})
 			if item.Phase == "" || item.Phase == "final_answer" {
 				// A Responses output can contain multiple assistant messages. Only the last
 				// message can be the answer candidate; earlier messages remain previews.
-				choice.CandidateContent = text.String()
-				choice.CandidateSource = &gent.ContentSource{MessageIds: []string{id}}
+				choice.CandidateContent = append(choice.CandidateContent,
+					gent.TextContent{Text: text.String()})
+				if choice.CandidateSource == nil {
+					choice.CandidateSource = &gent.ContentSource{}
+				}
+				choice.CandidateSource.MessageIds = append(choice.CandidateSource.MessageIds, id)
 			}
 		case "reasoning":
 			// Opaque data stays in the raw continuation. Display only explicit visible text.
 			for _, part := range item.Summary {
 				if part.Type == "summary_text" {
 					choice.MetaContent = append(choice.MetaContent, &gent.MetaContent{
-						Type: gent.MetaContentReasoning, Text: part.Text,
+						Type: gent.MetaContentReasoning,
+						Content: []gent.ContentPart{
+							gent.TextContent{Text: part.Text},
+						},
 						MessageId: fmt.Sprintf("output:%d", index)})
 				}
 			}
 			for _, part := range item.Content {
 				if part.Type == "reasoning_text" {
 					choice.MetaContent = append(choice.MetaContent, &gent.MetaContent{
-						Type: gent.MetaContentReasoning, Text: part.Text,
+						Type: gent.MetaContentReasoning,
+						Content: []gent.ContentPart{
+							gent.TextContent{Text: part.Text},
+						},
 						MessageId: fmt.Sprintf("output:%d", index)})
 				}
 			}
 		default:
 			return nil, fmt.Errorf("unsupported Responses output item %q", item.Type)
 		}
+	}
+	if choice.Completion.Refusal != nil {
+		choice.Completion.Status = gent.ModelStatusRefused
+	} else if choice.Completion.Status == gent.ModelStatusAnswer && len(choice.ToolCalls) > 0 {
+		choice.Completion.Status = gent.ModelStatusToolCalls
+	} else if choice.Completion.Status == gent.ModelStatusAnswer && len(choice.CandidateContent) == 0 {
+		choice.Completion.Status = gent.ModelStatusContinue
+	}
+	if err := choice.ValidateCompletion(); err != nil {
+		return nil, err
 	}
 	usage := response.Usage
 	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
@@ -509,4 +542,60 @@ func responseMetaType(phase string) string {
 		return gent.MetaContentIntermediary
 	}
 	return phase
+}
+
+func (m *Responses) outputControls(body map[string]any, options *gent.CallOptions) error {
+	decision := nativeSchema(m.config.Provider, options.ResponseSchema)
+	text, _ := body["text"].(map[string]any)
+	if text == nil {
+		text = make(map[string]any)
+	}
+	if decision.Native {
+		text["format"] = map[string]any{"type": "json_schema", "name": "gent_output",
+			"schema": options.ResponseSchema, "strict": true}
+	} else if wantsJSONObject(options) {
+		text["format"] = map[string]any{"type": "json_object"}
+	}
+	if len(text) > 0 {
+		body["text"] = text
+	}
+	for _, modality := range options.ResponseModalities {
+		if modality != "text" && modality != "image" {
+			return fmt.Errorf("unsupported Responses output modality %q", modality)
+		}
+	}
+	if !slices.Contains(options.ResponseModalities, "image") {
+		return nil
+	}
+	if m.config.Provider != "openai" && m.config.Provider != "xai" {
+		return errors.New("this Responses endpoint has no image generation adapter")
+	}
+	image := map[string]any{"type": "image_generation"}
+	if m.config.Provider == "xai" && len(options.ImageMIMETypes) > 0 &&
+		!slices.Contains(options.ImageMIMETypes, "image/jpeg") {
+		return errors.New("xAI image generation requires JPEG output")
+	}
+	if m.config.Provider == "openai" && len(options.ImageMIMETypes) > 0 {
+		for _, mime := range options.ImageMIMETypes {
+			if mime == "image/png" || mime == "image/jpeg" || mime == "image/webp" {
+				image["output_format"] = strings.TrimPrefix(mime, "image/")
+				break
+			}
+		}
+		if image["output_format"] == nil {
+			return errors.New("OpenAI cannot generate the required image type")
+		}
+	}
+	body["tools"] = append(body["tools"].([]any), image)
+	// Let the model run application tools first when present. With no application tools, forcing
+	// the native image tool avoids a text-only response to an image request.
+	if len(options.Tools) == 0 && options.ToolChoice == nil {
+		body["tool_choice"] = map[string]any{"type": "image_generation"}
+		if m.config.Provider == "xai" {
+			// xAI rejects OpenAI's image-specific choice object. With only the native image
+			// tool available, "required" selects that tool without changing the output contract.
+			body["tool_choice"] = "required"
+		}
+	}
+	return nil
 }

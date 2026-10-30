@@ -82,10 +82,13 @@ func (a *API) start(runID, question string, resume bool) error {
 		defer cancel()
 		var runErr error
 		if resume {
-			_, runErr = resumeSaved(worker, saved, agent, writer, seq, a.store.codecs)
+			_, _, runErr = resumeSaved(worker, saved, agent, writer, seq, a.store.codecs)
 		} else {
 			runner := executor.NewRunner(agent, executor.DefaultConfig())
-			data := gent.NewBasicLoopData(&gent.Task{Text: question})
+			data := gent.NewBasicLoopData(&gent.Task{Messages: []*gent.ModelMessage{
+				gent.TextParts(gent.ChatMessageTypeSystem, agentPrompt),
+				gent.TextParts(gent.ChatMessageTypeHuman, question),
+			}})
 			ctx := gent.NewExecutionContext(worker, "order-helper", data,
 				gent.WithRunId(runID), gent.WithCodecs(a.store.codecs),
 				gent.WithRecorder(writer), gent.WithObserver(seq))
@@ -96,7 +99,7 @@ func (a *API) start(runID, question string, resume bool) error {
 				}
 			}
 			ctx.SetLimits(limits)
-			_, runErr = runner.Execute(ctx)
+			_, _, runErr = runner.Execute(ctx)
 		}
 		if runErr != nil {
 			log.Printf("run %s stopped: %v", runID, runErr)

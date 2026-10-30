@@ -120,10 +120,9 @@
             </div>
           </div>
           <p class="callout">
-            <strong>Current API:</strong> <code>gent.Loop</code> and
-            <code>executor.NewRunner</code> are the current names in this working copy.
-            <code>AgentLoop[Data]</code> and <code>executor.New[Data]</code> remain compatibility
-            APIs.
+            <strong>Current API:</strong> <code>gent.Loop[T]</code> and
+            <code>executor.NewRunner</code> carry the output type through execution and restore.
+            The caller supplies the system and user messages in <code>Task.Messages</code>.
           </p>
         </section>
 
@@ -139,7 +138,7 @@
               >Find an interface<input
                 id="contract-search"
                 type="search"
-                placeholder="Try Embedder, Tool, or Termination"
+                placeholder="Try Embedder, Tool, or Output"
                 autocomplete="off"
             /></label>
             <label
@@ -360,7 +359,7 @@ I changed my mind about an item I bought</textarea
               >Run path<select id="run-path" aria-label="Run path">
                 <option value="full">Full policy → answer</option>
                 <option value="snippet">Snippet → get_policy → answer</option>
-                <option value="reject">Validator rejects → corrected answer</option>
+                <option value="reject">Output rejects → corrected answer</option>
                 <option value="error">Empty query → tool error → retry</option>
                 <option value="limit">Iteration limit stops an unfinished run</option>
               </select></label
@@ -400,9 +399,9 @@ I changed my mind about an item I bought</textarea
             checks. A truncated response is handled before either route.
           </p>
           <p class="source-note">
-            The native path passes plain final content to Termination. The default XML format shapes
-            prompt sections and tool output; it does not require the model to write XML tool calls
-            or an <code>&lt;answer&gt;</code> envelope.
+            The native path passes complete candidate content to <code>Output.Process</code>.
+            The caller owns the starting prompt. The tool formatter only renders tool results;
+            native fields identify calls, completion, and candidate content.
           </p>
         </section>
 
@@ -572,9 +571,10 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
           <details>
             <summary>When you need policy compliance or recovery across workers</summary>
             <p>
-              Use <code>AnswerValidator</code> for answer checks and application code for
-              authorization or mutations. A prompt is guidance; the default text termination accepts
-              any non-empty answer. Policy search does not approve refunds.
+              Use an output's <code>SetCustomValidator</code> callback for answer checks and
+              application code for authorization or mutations. The default <code>TextOutput</code>
+              checks the content type; it does not enforce business rules. Policy search does not
+              approve refunds.
             </p>
             <p>
               ExecutionContext owns append-only history and the active message selection. Durable

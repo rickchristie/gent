@@ -22,13 +22,19 @@ func (m *scriptedModel) GenerateContentStream(
 	}
 	index := len(m.requests)
 	m.requests = append(m.requests, request)
-	choice := &gent.ContentChoice{CandidateContent: m.answer}
+	choice := &gent.ContentChoice{
+		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+		CandidateContent: []gent.ContentPart{gent.TextContent{Text: m.answer}},
+	}
 	if index%2 == 0 {
-		choice = &gent.ContentChoice{ToolCalls: []gent.ModelToolCall{{
-			ID: "lookup-1", Type: "function", FunctionCall: &gent.FunctionCall{
-				Name: "lookup_order", Arguments: `{"order_id":"` + m.orderID + `"}`,
-			},
-		}}}
+		choice = &gent.ContentChoice{Completion: gent.ModelCompletion{
+			Status: gent.ModelStatusToolCalls,
+		},
+			ToolCalls: []gent.ModelToolCall{{
+				ID: "lookup-1", Type: "function", FunctionCall: &gent.FunctionCall{
+					Name: "lookup_order", Arguments: `{"order_id":"` + m.orderID + `"}`,
+				},
+			}}}
 	}
 	return gent.NewCompletedStream(&gent.ContentResponse{
 		Choices: []*gent.ContentChoice{choice},
@@ -104,7 +110,7 @@ Error: order not found: missing-order
 					assert.Equal(t, "lookup_order", requests[0].Options.Tools[0].Function.Name)
 				}
 				last := requests[1].Messages[len(requests[1].Messages)-1]
-				assert.Equal(t, gent.ModelMessage{Role: gent.ChatMessageTypeTool,
+				assert.Equal(t, &gent.ModelMessage{Role: gent.ChatMessageTypeTool,
 					Parts: []gent.ContentPart{test.expected.result}}, last)
 			}
 		})

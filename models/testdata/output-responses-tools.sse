@@ -1,0 +1,12 @@
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"Read "}
+
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"the record."}
+
+data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call-7","name":"lookup","arguments":""}}
+
+data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"id\":"}
+
+data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"7}"}
+
+data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","id":"reason-7","encrypted_content":"sealed","summary":[{"type":"summary_text","text":"Read the record."}]},{"type":"function_call","call_id":"call-7","name":"lookup","arguments":"{\"id\":7}"}],"usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21,"input_tokens_details":{"cached_tokens":2},"output_tokens_details":{"reasoning_tokens":3}}}}
+

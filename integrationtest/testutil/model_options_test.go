@@ -25,7 +25,7 @@ func TestAvailableModels(t *testing.T) {
 		{
 			Label: "Google gemini-4-argon", Name: "gemini-4-argon",
 			EnvKey:  "GENT_TEST_GEMINI_KEY",
-			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+			BaseURL: "https://generativelanguage.googleapis.com/v1beta",
 		},
 		{
 			Label: "Anthropic claude-fable-5-1", Name: "claude-fable-5-1",

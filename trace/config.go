@@ -20,7 +20,6 @@ type Config struct {
 	IncludeModelResponses bool
 	IncludeToolArgs       bool
 	IncludeToolOutput     bool
-	IncludeSystemPrompt   bool
 	IncludeCommonPayload  bool
 	IncludeStateChanges   bool
 	IncludeChunkText      bool

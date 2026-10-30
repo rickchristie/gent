@@ -173,7 +173,8 @@ go get github.com/rickchristie/gent`,
     );
   assert.ok(colors.length >= 5, JSON.stringify(colors));
   await expect(study.locator(".token.keyword").first()).toHaveCSS("color", "rgb(203, 188, 245)");
-  await expect(study.locator(".token.string").first()).toHaveCSS("color", "rgb(212, 229, 160)");
+  await expect(page.locator('#code-basic-task .token.string').first())
+    .toHaveCSS("color", "rgb(212, 229, 160)");
   const background = await study
     .locator("pre")
     .evaluate((pre) => getComputedStyle(pre).backgroundColor);

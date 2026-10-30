@@ -9,19 +9,21 @@ import (
 // AgentLoopResult Helpers
 // -----------------------------------------------------------------------------
 
-// ContinueWithPrompt creates an AgentLoopResult with LAContinue action and specified NextPrompt.
-func ContinueWithPrompt(nextPrompt string) *gent.AgentLoopResult {
-	return &gent.AgentLoopResult{
-		Action:     gent.LAContinue,
-		NextPrompt: nextPrompt,
-	}
+// Continue creates an AgentLoopResult with the LAContinue action.
+func Continue() *gent.AgentLoopResult {
+	return &gent.AgentLoopResult{Action: gent.LAContinue}
 }
 
 // Terminate creates an AgentLoopResult with LATerminate action and text result.
 func Terminate(text string) *gent.AgentLoopResult {
-	return &gent.AgentLoopResult{
+	return &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess,
 		Action: gent.LATerminate,
-		Result: []gent.ContentPart{gent.TextContent{Text: text}},
+		Result: []gent.ContentPart{
+			gent.TextContent{Text: text},
+		},
+		Value: Value(gent.ContentText([]gent.ContentPart{
+			gent.TextContent{Text: text},
+		})),
 	}
 }
 
@@ -125,9 +127,11 @@ func AfterModelCall(
 			Iteration: iteration,
 			Depth:     depth,
 		},
-		Model:        model,
-		Request:      gent.ModelCallRequest{},
-		Response:     &gent.ContentResponse{Info: &gent.GenerationInfo{InputTokens: inputTokens, OutputTokens: outputTokens}},
+		Model:   model,
+		Request: gent.ModelCallRequest{},
+		Response: &gent.ContentResponse{
+			Info: &gent.GenerationInfo{InputTokens: inputTokens, OutputTokens: outputTokens},
+		},
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		Error:        nil,

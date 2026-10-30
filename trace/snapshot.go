@@ -197,15 +197,9 @@ func (s *Sequencer) applyModelChunk(event *Event) {
 	call.LastUpdatedTs = event.Ts
 	call.LastEventNumber = event.EventNumber
 	payload, _ := event.Payload.(map[string]any)
-	if items, ok := payload["metaContent"].([]any); ok {
-		for _, value := range items {
-			item, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			s.appendStreamMeta(call.Stream, &gent.MetaContent{
-				Type: stringFromPayload(item, "type"), Text: stringFromPayload(item, "text"),
-				MessageId: stringFromPayload(item, "messageId")})
+	if items, ok := payload["metaContent"].([]*gent.MetaContent); ok {
+		for _, item := range items {
+			s.appendStreamMeta(call.Stream, item)
 		}
 	}
 	if event.Error != nil {
@@ -333,6 +327,8 @@ func stepStatusFromRunStatus(status RunStatus, err *Error) StepStatus {
 		return StepStatusSucceeded
 	case RunStatusCanceled:
 		return StepStatusCanceled
+	case RunStatusRefused:
+		return StepStatusRefused
 	case RunStatusFailed, RunStatusLimitExceeded:
 		return StepStatusFailed
 	default:
@@ -344,6 +340,8 @@ func stepStatusFromTerminationReason(reason gent.TerminationReason, err *Error) 
 	switch reason {
 	case gent.TerminationSuccess:
 		return StepStatusSucceeded
+	case gent.TerminationRefused:
+		return StepStatusRefused
 	case gent.TerminationContextCanceled:
 		return StepStatusCanceled
 	case gent.TerminationError, gent.TerminationCompactionFailed, gent.TerminationLimitExceeded:
@@ -401,6 +399,8 @@ func runStatus(reason gent.TerminationReason, err *Error) RunStatus {
 	switch reason {
 	case gent.TerminationSuccess:
 		return RunStatusSucceeded
+	case gent.TerminationRefused:
+		return RunStatusRefused
 	case gent.TerminationContextCanceled:
 		return RunStatusCanceled
 	case gent.TerminationLimitExceeded:
@@ -419,27 +419,23 @@ func (s *Sequencer) appendStreamMeta(stream *ModelStream, item *gent.MetaContent
 	remaining := s.cfg.maxMetaContentBytes
 	if remaining >= 0 {
 		for _, saved := range stream.MetaContent {
-			remaining -= len(saved.Text)
-		}
-		if remaining <= 0 {
-			stream.MetaContentTruncated = stream.MetaContentTruncated || item.Text != ""
-			return
+			remaining -= contentSize(saved.Content)
 		}
 	}
-	text, truncated := appendLimitedUTF8("", item.Text, remaining)
+	parts, truncated := limitContent(item.Content, remaining)
 	stream.MetaContentTruncated = stream.MetaContentTruncated || truncated
-	if text == "" {
+	if len(parts) == 0 {
 		return
 	}
 	if n := len(stream.MetaContent); n > 0 {
 		last := stream.MetaContent[n-1]
 		if last.Type == item.Type && last.MessageId == item.MessageId {
-			last.Text += text
+			last.Content = append(last.Content, parts...)
 			return
 		}
 	}
 	stream.MetaContent = append(stream.MetaContent, &gent.MetaContent{
-		Type: item.Type, Text: text, MessageId: item.MessageId})
+		Type: item.Type, Content: parts, MessageId: item.MessageId})
 }
 
 func (s *Sequencer) applyExecutionContent(event *Event) {
@@ -454,6 +450,6 @@ func (s *Sequencer) applyExecutionContent(event *Event) {
 	if ids, ok := payload["sourceMessageIds"].([]string); ok {
 		ctx.SourceMessageIds = append([]string(nil), ids...)
 	}
-	ctx.Content, ctx.ContentTruncated = appendLimitedUTF8(
-		"", stringFromPayload(payload, "content"), s.cfg.maxContentBytes)
+	parts, _ := payload["content"].([]gent.ContentPart)
+	ctx.Content, ctx.ContentTruncated = limitContent(parts, s.cfg.maxContentBytes)
 }

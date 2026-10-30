@@ -12,9 +12,9 @@ const (
 // MessageId groups deltas. The managed boundary scopes adapter-local IDs to one physical call.
 // IDs are opaque. Saved replay keeps them; a new provider request uses new IDs.
 type MetaContent struct {
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	MessageId string `json:"messageId,omitempty"`
+	Type      string        `json:"type"`
+	Content   []ContentPart `json:"content"`
+	MessageId string        `json:"messageId,omitempty"`
 }
 
 // ContentSource links an accepted answer to the previews it replaces. It is optional for a custom
@@ -31,7 +31,7 @@ func MetaText(items []*MetaContent, kind string) string {
 	var text strings.Builder
 	for _, item := range items {
 		if item.Type == kind {
-			text.WriteString(item.Text)
+			text.WriteString(ContentText(item.Content))
 		}
 	}
 	return text.String()
@@ -45,6 +45,7 @@ func CloneMetaContent(items []*MetaContent) []*MetaContent {
 	result := make([]*MetaContent, len(items))
 	for i, item := range items {
 		copy := *item
+		copy.Content = CloneContentParts(item.Content)
 		result[i] = &copy
 	}
 	return result
@@ -60,76 +61,87 @@ func cloneContentSource(source *ContentSource) *ContentSource {
 }
 
 func cloneStreamChunk(chunk StreamChunk) StreamChunk {
+	chunk.Content = CloneContentParts(chunk.Content)
 	chunk.MetaContent = CloneMetaContent(chunk.MetaContent)
 	chunk.SourceMessageIds = append([]string(nil), chunk.SourceMessageIds...)
 	return chunk
 }
 
-// metaAccumulator keeps each contiguous text segment in order. Builders avoid copying all previous
-// text for each token. Snapshots copy the entries so callers cannot change retained evidence.
+// metaAccumulator joins adjacent pure text deltas without copying all prior text for each token.
+// Media keeps its original order. Snapshots own all mutable content.
 type metaAccumulator struct {
-	entries []*MetaContent
-	text    strings.Builder
+	entries    []*MetaContent
+	text       strings.Builder
+	textActive bool
+}
+
+func (a *metaAccumulator) finishText() {
+	if a.textActive {
+		a.entries[len(a.entries)-1].Content = []ContentPart{TextContent{Text: a.text.String()}}
+		a.text.Reset()
+		a.textActive = false
+	}
 }
 
 func (a *metaAccumulator) add(items []*MetaContent) {
 	for _, item := range items {
-		if item.Text == "" {
+		text, pure := metaTextDelta(item.Content)
+		if pure && text == "" {
 			continue
 		}
-		if n := len(a.entries); n > 0 {
-			last := a.entries[n-1]
+		if pure && a.textActive {
+			last := a.entries[len(a.entries)-1]
 			if last.Type == item.Type && last.MessageId == item.MessageId {
-				a.text.WriteString(item.Text)
+				a.text.WriteString(text)
 				continue
 			}
-			last.Text = a.text.String()
 		}
-		a.text.Reset()
+		a.finishText()
 		copy := *item
-		copy.Text = ""
+		copy.Content = CloneContentParts(item.Content)
 		a.entries = append(a.entries, &copy)
-		a.text.WriteString(item.Text)
+		if pure {
+			a.text.WriteString(text)
+			a.textActive = true
+		}
+	}
+}
+
+func metaTextDelta(parts []ContentPart) (string, bool) {
+	if len(parts) != 1 {
+		return "", false
+	}
+	switch part := parts[0].(type) {
+	case TextContent:
+		return part.Text, true
+	case *TextContent:
+		return part.Text, true
+	default:
+		return "", false
 	}
 }
 
 func (a *metaAccumulator) snapshot() []*MetaContent {
 	result := CloneMetaContent(a.entries)
-	if len(result) > 0 {
-		result[len(result)-1].Text = a.text.String()
+	if a.textActive {
+		result[len(result)-1].Content = []ContentPart{TextContent{Text: a.text.String()}}
 	}
 	return result
 }
 
-func (a *metaAccumulator) reset() { a.entries = nil; a.text.Reset() }
+func (a *metaAccumulator) reset() {
+	a.entries = nil
+	a.text.Reset()
+	a.textActive = false
+}
 
-const (
-	ModelAnswer     = "answer"
-	ModelTools      = "tools"
-	ModelContinue   = "continue"
-	ModelIncomplete = "incomplete"
-	ModelFailed     = "failed"
-)
-
-// State normalizes request completion without treating a completed tool request as an answer.
-// Unknown stop reasons fail closed. A custom adapter may leave StopReason empty after Complete.
-func (choice *ContentChoice) State() string {
-	switch choice.StopReason {
-	case "length", "max_tokens", "model_context_window_exceeded", "MAX_TOKENS",
-		"FinishReasonMaxTokens", "max_output_tokens":
-		return ModelIncomplete
-	case "pause_turn":
-		return ModelContinue
-	case "", "stop", "end_turn", "stop_sequence", "STOP", "FinishReasonStop", "refusal":
-	case "tool_calls", "tool_use":
-		if len(choice.ToolCalls) == 0 {
-			return ModelFailed
+// MetaParts returns the ordered content from one metadata channel, with owned media bytes.
+func MetaParts(items []*MetaContent, kind string) []ContentPart {
+	var parts []ContentPart
+	for _, item := range items {
+		if item.Type == kind {
+			parts = append(parts, CloneContentParts(item.Content)...)
 		}
-	default:
-		return ModelFailed
 	}
-	if len(choice.ToolCalls) > 0 {
-		return ModelTools
-	}
-	return ModelAnswer
+	return parts
 }

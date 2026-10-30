@@ -51,11 +51,12 @@ try {
   await page.evaluate(() => document.fonts.ready);
   await check('offline guide initializes with complete source inventory', async () => {
     assert.equal(await page.title(), 'Gent — An interactive explainer');
-    assert.equal(expectedInterfaces.length, 52);
-    assert.equal(await text('#interface-count'), '52named interfaces');
+    assert.equal(expectedInterfaces.length, 47);
+    assert.equal(await text('#interface-count'), '47named interfaces');
     assert.equal(
       await text('#scope-detail'),
-      '2 new or changed declarations · 20 supporting types · 8 structural capabilities',
+      `${expectedInterfaces.filter((item) => item.change !== 'same').length} new or changed ` +
+        'declarations · 24 supporting types · 7 structural capabilities',
     );
     assert.equal(await page.locator('.map-group').count(), 7);
     assert.equal(await page.evaluate(() => document.fonts.check('16px GuideSans')), true);
@@ -99,7 +100,7 @@ try {
     await page.fill('#search', 'NoSuchGentContract');
     assert.equal(await text('#result-count'), '0 matching contracts');
     await page.click('#clear-filters');
-    assert.equal(await page.locator('.contract-row').count(), 52);
+    assert.equal(await page.locator('.contract-row').count(), 47);
     await page.selectOption('#group', 'Search');
     assert.deepEqual(
       (
@@ -134,7 +135,7 @@ try {
     );
     await page.click('#clear-filters');
     await page.selectOption('#kind', 'support');
-    assert.equal(await page.locator('.contract-row').count(), 20);
+    assert.equal(await page.locator('.contract-row').count(), 24);
     const supports = await page
       .locator('.contract-row')
       .evaluateAll((nodes) => nodes.map((node) => node.dataset.open));
@@ -151,13 +152,13 @@ try {
   await check(
     'embedded contracts, method comments, and previous signatures are inspectable',
     async () => {
-      await open('gent.Termination');
-      await page.locator('.detail-section .related [data-open="gent.TextSection"]').first().click();
-      assert.equal(await text('#selected-contract'), 'gent.TextSection');
+      await open('gent.Loop');
+      await page.locator('.detail-section .related [data-open="gent.Output"]').first().click();
+      assert.equal(await text('#selected-contract'), 'gent.Output');
       await page.getByText('Declared methods (3)', { exact: true }).click();
       await page.locator('.method-row summary').first().click();
       assert.equal(await page.locator('.method-row[open]').count(), 1);
-      await open('gent.ToolChain');
+      await open('gent.Loop');
       await page
         .getByText(`Previous declaration at ${catalog.head.slice(0, 8)}`, {
           exact: true,
@@ -165,7 +166,7 @@ try {
         .click();
       assert.equal(
         await text('.previous-code code'),
-        catalog.declarations.find((item) => item.id === 'gent.ToolChain').previous,
+        catalog.declarations.find((item) => item.id === 'gent.Loop').previous,
       );
       await page.screenshot({
         path: '/tmp/gent-interface-toolchain-desktop.png',
@@ -260,7 +261,6 @@ ${reviewText}
       'EventBase',
       'ModelName',
       'Provider',
-      'RegisterCodecs',
       'Unwrap',
     ]);
     await page.selectOption('#save-outcome', 'lost');

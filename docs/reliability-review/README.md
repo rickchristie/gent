@@ -2,9 +2,12 @@
 
 Review date: 12 October 2026. Source revision: `f3b798a`.
 
-All 12 confirmed findings are fixed in the working tree. The fixes preserve the intended model,
+All 12 confirmed findings were fixed after this review. The fixes preserve the intended model,
 search, parsing, history, and recovery contracts. Failed and completed operations now release their
-resources, and concurrent operations have defined ordering. No feature was removed.
+resources, and concurrent operations have defined ordering. The later output migration removed the answer parser and section registration APIs.
+R2 and R8 below preserve their historical findings; current answer handling uses native completion
+and Output. The obsolete XML parsing fuzz command is historical evidence, not a current test.
+See [Output](../output.md) and [Models](../models.md) for the current contracts.
 
 The required constraints are in [AGENTS.md](../../AGENTS.md), in priority order: reliability,
 CPU and memory use, then performance. Normal regression tests now cover the failures. The tagged
@@ -46,7 +49,8 @@ runtime can skip the applicable checks; model, tokenizer, and inference errors n
 prerequisites are present. Download setup has a 30-minute deadline per file and publishes a complete
 temporary file atomically. Partial downloads cannot remove another caller's complete file.
 [Download tests](../../common/download_test.go) exercise incomplete responses and canceled reads.
-JSON and YAML prompt tests now compare complete strings. XML has a bounded fuzz target.
+The review added exact prompt assertions and a bounded XML fuzz target. Those parser APIs were
+removed in the output migration; tool-result rendering still has exact-string tests.
 
 ### Follow-up: cancel fused-index lock waits
 

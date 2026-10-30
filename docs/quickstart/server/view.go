@@ -21,10 +21,10 @@ type Preview struct {
 }
 
 type Answer struct {
-	ContextID        string   `json:"contextId"`
-	MessageID        string   `json:"messageId"`
-	SourceMessageIDs []string `json:"sourceMessageIds"`
-	Text             string   `json:"text"`
+	ContextID        string             `json:"contextId"`
+	MessageID        string             `json:"messageId"`
+	SourceMessageIDs []string           `json:"sourceMessageIds"`
+	Content          []gent.ContentPart `json:"content"`
 }
 
 // This is an application display view, not the lossless RunView used for recovery.
@@ -52,7 +52,7 @@ func browserState(snapshot *trace.Snapshot) BrowserState {
 		if context.MessageId != "" {
 			state.Answers = append(state.Answers, Answer{ContextID: context.Id,
 				MessageID: context.MessageId, SourceMessageIDs: context.SourceMessageIds,
-				Text: context.Content})
+				Content: gent.CloneContentParts(context.Content)})
 		}
 	}
 	return state

@@ -1,5 +1,7 @@
 package models_test
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"io"
@@ -13,8 +15,6 @@ import (
 	"github.com/rickchristie/gent/agents/react"
 	"github.com/rickchristie/gent/models"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/tmc/langchaingo/llms/anthropic"
 )
 
 type nativeStopTransport func(*http.Request) (*http.Response, error)
@@ -36,16 +36,16 @@ func TestNativeHTTP_AnthropicStopReasons(t *testing.T) {
 		input    input
 		expected expected
 	}
-	retry := &gent.AgentLoopResult{Action: gent.LAContinue,
-		NextPrompt: "The response was incomplete. Use a shorter answer or fewer tool calls."}
-	answer := &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{gent.TextContent{Text: "Done."}}}
-	toolResult := &gent.AgentLoopResult{Action: gent.LAContinue, NextPrompt: `<lookup>
-record
-</lookup>
-<lookup>
-record
-</lookup>`}
+	retry := &gent.AgentLoopResult{Action: gent.LAContinue}
+	answer := &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess,
+		Action: gent.LATerminate,
+		Result: []gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		},
+		Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		}))}
+	toolResult := &gent.AgentLoopResult{Action: gent.LAContinue}
 	cases := []testCase{
 		{"tool token limit", input{"native-anthropic-1.sse", "tool_use", "max_tokens"},
 			expected{retry, 0, nil}},
@@ -79,19 +79,16 @@ record
 					Header: http.Header{"Content-Type": {"text/event-stream"}},
 					Body:   io.NopCloser(strings.NewReader(body))}, nil
 			})}
-			provider, err := anthropic.New(anthropic.WithToken("test-key"),
-				anthropic.WithModel("wire-test"), anthropic.WithHTTPClient(client))
-			if !assert.NoError(t, err) {
-				return
-			}
+			provider := models.NewAnthropic(&models.Config{APIKey: "test-key",
+				Model: "wire-test", HTTPClient: client})
 			calls := 0
-			agent := react.NewAgent(models.NewLCGWrapper(provider)).RegisterTool(
+			agent := react.NewAgent(provider).RegisterTool(
 				gent.DefineTool("lookup", func(context.Context, map[string]any) (string, error) {
 					calls++
 					return "record", nil
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "http", gent.NewBasicLoopData(
-				&gent.Task{Text: "Read two records."}))
+				gent.NewTask(gent.TextContent{Text: "Read two records."})))
 			result, err := agent.Next(ctx)
 			want := test.expected
 			if want.result.Action == gent.LATerminate {

@@ -74,10 +74,10 @@ func TestRecoveryFromReopenedDatabase(t *testing.T) {
 			worker, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			ctx := gent.NewExecutionContext(worker, "order-helper",
-				gent.NewBasicLoopData(&gent.Task{Text: "Check order-1001"}),
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Check order-1001"})),
 				gent.WithRunId("recover"), gent.WithCodecs(codecs),
 				gent.WithRecorder(&stopWriter{writer, test.input.stop, cancel}))
-			_, err = executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+			_, _, err = executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			assert.ErrorIs(t, err, context.Canceled)
 			before, err := store.load("recover")
 			assert.NoError(t, err)
@@ -97,7 +97,7 @@ func TestRecoveryFromReopenedDatabase(t *testing.T) {
 			seq, err := trace.RestoreSequencer(saved, displayConfig(freshStore.codecs))
 			assert.NoError(t, err)
 			defer seq.Close()
-			result, err := freshRunner.Resume(context.Background(), saved, gent.RestoreBindings{
+			_, result, err := freshRunner.Resume(context.Background(), saved, gent.RestoreBindings{
 				Recorder: replacement, Codecs: freshStore.codecs,
 				Observers: []gent.RecordedEventObserver{seq},
 			})
@@ -113,7 +113,7 @@ func TestRecoveryFromReopenedDatabase(t *testing.T) {
 			assert.NoError(t, gent.ValidateBundle(terminal, freshStore.codecs))
 			lastModel := &countedModel{}
 			lastRunner := executor.NewRunner(newAgent(lastModel), executor.DefaultConfig())
-			result, err = lastRunner.Resume(context.Background(), terminal,
+			_, result, err = lastRunner.Resume(context.Background(), terminal,
 				gent.RestoreBindings{Codecs: freshStore.codecs})
 			assert.NoError(t, err)
 			assert.Equal(t, test.expected.answer, result.Output)

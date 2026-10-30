@@ -12,8 +12,11 @@ import (
 type TerminationReason string
 
 const (
-	// TerminationSuccess means the AgentLoop returned LATerminate.
+	// TerminationSuccess means the Loop returned LATerminate.
 	TerminationSuccess TerminationReason = "success"
+
+	// TerminationRefused means the provider explicitly refused the request.
+	TerminationRefused TerminationReason = "refused"
 
 	// TerminationError means an error occurred.
 	TerminationError TerminationReason = "error"
@@ -42,10 +45,12 @@ type ExecutionResult struct {
 	// TerminationReason indicates how execution ended.
 	TerminationReason TerminationReason
 
-	// Output is the final output from the AgentLoop (set when terminated successfully).
+	// Output is the final output from the Loop (set when terminated successfully).
 	// This is a slice of ContentPart to support multimodal outputs.
 	// Nil if terminated due to error, limit, or cancellation.
 	Output []ContentPart
+
+	Refusal *ModelRefusal
 
 	// Error is the error that caused termination, if any.
 	// Nil for successful termination.
@@ -157,6 +162,7 @@ type BeforeExecutionEvent struct {
 type AfterExecutionEvent struct {
 	BaseEvent
 	Output   []ContentPart
+	Refusal  *ModelRefusal
 	Duration time.Duration
 
 	// TerminationReason indicates how execution ended.
@@ -187,25 +193,6 @@ type AfterIterationEvent struct {
 
 	// Duration is how long this iteration took.
 	Duration time.Duration
-}
-
-// -----------------------------------------------------------------------------
-// System Prompt Events
-// -----------------------------------------------------------------------------
-
-// BeforeSystemPromptEvent is published before the system prompt is built.
-// Subscribers can modify or replace the Sections slice to dynamically alter
-// the system prompt on each iteration.
-//
-// The Sections field is mutable — subscribers can append, remove, or replace
-// entries. The AgentLoop reads back the (potentially modified) Sections after
-// publishing and uses them to build the final system prompt.
-type BeforeSystemPromptEvent struct {
-	BaseEvent
-
-	// Sections contains the system prompt sections that will be formatted.
-	// Subscribers can modify this slice for dynamic prompt injection.
-	Sections []FormattedSection
 }
 
 // -----------------------------------------------------------------------------
@@ -340,40 +327,6 @@ type ParseErrorEvent struct {
 
 	// Error is the parse error that occurred.
 	Error error
-}
-
-// -----------------------------------------------------------------------------
-// Validator Events
-// -----------------------------------------------------------------------------
-
-// ValidatorCalledEvent is published when an answer validator is invoked.
-type ValidatorCalledEvent struct {
-	BaseEvent
-
-	// ValidatorName is the name of the validator being called.
-	ValidatorName string
-
-	// Answer is the parsed answer being validated.
-	Answer any
-}
-
-// ValidatorResultEvent is published after a validator completes.
-// Stats updated: AnswerRejectedTotal, AnswerRejectedBy (when rejected).
-type ValidatorResultEvent struct {
-	BaseEvent
-
-	// ValidatorName is the name of the validator.
-	ValidatorName string
-
-	// Answer is the parsed answer that was validated.
-	Answer any
-
-	// Accepted is true if the validator accepted the answer.
-	Accepted bool
-
-	// Feedback contains the rejection feedback sections.
-	// Only set when Accepted is false.
-	Feedback []FormattedSection
 }
 
 // -----------------------------------------------------------------------------

@@ -68,30 +68,26 @@ func TestCreateModel_HTTPRequest(t *testing.T) {
 }`,
 		}},
 		{"Google", input{"gemini-4-argon"}, expected{
-			url:     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-			authKey: "Authorization", auth: "Bearer gemini-key",
-			err: "network error: failed to reach API server",
+			url: "https://generativelanguage.googleapis.com/v1beta/models/" +
+				"gemini-4-argon:streamGenerateContent?alt=sse",
+			authKey: "X-Goog-Api-Key", auth: "gemini-key",
+			err: `Post "https://generativelanguage.googleapis.com/v1beta/models/` +
+				`gemini-4-argon:streamGenerateContent?alt=sse": request captured`,
 			body: `{
-  "model": "gemini-4-argon",
-  "messages": [{"role": "user", "content": "Hello"}],
-  "stream": true,
-  "stream_options": {"include_usage": true},
-  "temperature": 1
+  "contents": [{"role": "user", "parts": [{"text": "Hello"}]}],
+  "generationConfig": {"temperature": 1, "thinkingConfig": {"includeThoughts": true}}
 }`,
 		}},
 		{"Anthropic", input{"claude-fable-5-1"}, expected{
 			url:     "https://api.anthropic.com/v1/messages",
 			authKey: "X-Api-Key", auth: "anthropic-key", version: "2023-06-01",
-			err: `anthropic: failed to create message: send request: ` +
-				`Post "https://api.anthropic.com/v1/messages": request captured`,
-			// This SDK sends temperature even when it is omitted. The pinned API version
-			// accepts the provider default of 1; the SDK adapter already supplies it.
+			err: `Post "https://api.anthropic.com/v1/messages": request captured`,
+			// An omitted sampling setting stays omitted so the provider uses its default.
 			body: `{
   "model": "claude-fable-5-1",
   "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
-  "max_tokens": 2048,
-  "stream": true,
-  "temperature": 1
+  "max_tokens": 4096,
+  "stream": true
 }`,
 		}},
 	}
@@ -102,7 +98,7 @@ func TestCreateModel_HTTPRequest(t *testing.T) {
 	t.Setenv(envKeyAnthropic, "anthropic-key")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Each client uses ErrorCaptureTransport, which reads this public default.
+			// Each client reads the public default HTTP transport.
 			// Keep these cases sequential and restore it after the stream producer stops.
 			previous := http.DefaultTransport
 			t.Cleanup(func() { http.DefaultTransport = previous })
@@ -128,7 +124,7 @@ func TestCreateModel_HTTPRequest(t *testing.T) {
 				return
 			}
 			params := gent.DefaultSamplingParams(model)
-			request := gent.NewModelCallRequest([]gent.ModelMessage{
+			request := gent.NewModelCallRequest([]*gent.ModelMessage{
 				gent.TextParts(gent.ChatMessageTypeHuman, "Hello"),
 			})
 			if value, send := params.Temperature.EffectiveValue(); send {

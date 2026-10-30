@@ -65,9 +65,9 @@ full program log`, true, 2}},
 			if test.expected.firstMedia {
 				firstParts = append(firstParts, image)
 			}
-			want := []gent.ModelMessage{{Role: gent.ChatMessageTypeTool, Parts: firstParts}}
+			want := []*gent.ModelMessage{{Role: gent.ChatMessageTypeTool, Parts: firstParts}}
 			if test.expected.count == 2 {
-				want = append(want, gent.ModelMessage{Role: gent.ChatMessageTypeTool,
+				want = append(want, &gent.ModelMessage{Role: gent.ChatMessageTypeTool,
 					Parts: slices.Clone(entries[1].Messages[0].Parts)})
 			}
 			assert.Equal(t, want, messages)

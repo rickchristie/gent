@@ -48,7 +48,7 @@ func TestCodecRegistryRoundTrip(t *testing.T) {
 		},
 		ImageURLContent{URL: "https://example.test/original.png"},
 		customValue{Id: 1<<63 + 19, Values: map[string]any{"nested": []any{true, "text"}}},
-		&Task{Text: "original task", Media: []ContentPart{TextContent{Text: "media"}}},
+		NewTask(TextContent{Text: "original task"}, TextContent{Text: "media"}),
 		&HistoryEntry{Origin: RecordOriginal, ExpireAfterIteration: 5,
 			Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
 				Parts: []ContentPart{TextContent{Text: "policy P-10: exact original text"}},
@@ -87,6 +87,9 @@ func TestCodecRegistryRoundTrip(t *testing.T) {
 			actual, err := registry.Decode(wire)
 			assert.Equal(t, tt.expected.value, actual)
 			assert.NoError(t, err)
+			cloned, err := registry.Clone(tt.input.value)
+			assert.NoError(t, err)
+			assert.Equal(t, actual, cloned)
 		})
 	}
 }
@@ -115,6 +118,8 @@ func TestCodecRegistryRejectsUnsupportedValues(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewCodecRegistry().Encode(tt.input.value)
+			assert.EqualError(t, err, tt.expected.errorText)
+			_, err = NewCodecRegistry().Clone(tt.input.value)
 			assert.EqualError(t, err, tt.expected.errorText)
 		})
 	}
@@ -151,8 +156,6 @@ func TestSavedFrameworkErrorClassifications(t *testing.T) {
 		{input{ErrHistoryConflict}, expected{"history_conflict"}},
 		{input{ErrPersistenceStopped}, expected{"persistence_stopped"}},
 		{input{ErrToolPlanComplete}, expected{"tool_plan_complete"}},
-		{input{ErrAmbiguousTags}, expected{"ambiguous_tags"}},
-		{input{ErrUnclosedTag}, expected{"unclosed_tag"}},
 		{input{ErrReplayUnavailable}, expected{"replay_unavailable"}},
 	}
 	for _, tt := range cases {

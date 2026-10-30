@@ -67,8 +67,6 @@ const capabilities = Object.values(
 const capabilityDescriptions = {
   DeduplicateSummary: 'A summary function used by history rendering without owning tool execution.',
   Destroy: 'Native resource cleanup that reports errors through the caller.',
-  RegisterCodecs:
-    'Optional type registration used by ReAct and tool plans before saving typed values.',
   ModelName: 'Structural check equivalent to ModelNamer, used in call identity and configuration.',
   Provider: 'Optional provider identity used in managed model calls and recovery configuration.',
   Unwrap: 'Standard joined-error capability used to preserve multiple saved causes.',

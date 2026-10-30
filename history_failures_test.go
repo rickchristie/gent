@@ -125,9 +125,9 @@ func TestHistoryRecorderFailure_PreventsSideEffects(t *testing.T) {
 			agent := newRecoveryAgent(model, &calls)
 			ctx := gent.NewExecutionContext(context.Background(), "root",
 				gent.NewBasicLoopData(
-					&gent.Task{Text: "policy question"},
+					gent.NewTask(gent.TextContent{Text: "policy question"}),
 				), gent.WithRunId("fenced"), gent.WithRecorder(recorder))
-			_, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Execute(ctx)
+			_, _, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			assert.ErrorIs(t, err, saveErr)
 			var failure *gent.PersistenceError
 			if assert.ErrorAs(t, err, &failure) {

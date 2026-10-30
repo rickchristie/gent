@@ -12,7 +12,6 @@ import (
 	"github.com/rickchristie/gent/executor"
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/schema"
-	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/toolchain"
 )
 
@@ -24,6 +23,9 @@ type OrderStatus struct {
 	OrderID string `json:"order_id"`
 	Status  string `json:"status"`
 }
+
+const agentPrompt = `Help the user check an order.
+Use lookup_order for order facts. Do not invent a status.`
 
 func newOrderTool() gent.Tool[OrderInput, OrderStatus] {
 	return gent.DefineTool("lookup_order", lookupOrder).
@@ -45,25 +47,21 @@ func lookupOrder(ctx context.Context, input OrderInput) (OrderStatus, error) {
 }
 
 // Build the tool registry once, before you use the runner for questions.
-func newRunner(model gent.Model) *executor.Runner {
+func newRunner(model gent.Model) *executor.Runner[string] {
 	chain := toolchain.New()
 	chain.RegisterTool(newOrderTool())
 
-	term := termination.NewText("answer").WithGuidance(
-		"Give a short answer with the order ID and its status.",
-	)
 	loop := react.NewAgent(model).
-		WithToolChain(chain).
-		WithTermination(term).
-		WithBehaviorAndContext("Help the user check an order.").
-		WithCriticalRules("Use lookup_order for order facts. Do not invent a status.")
-
+		WithToolChain(chain)
 	return executor.NewRunner(loop, executor.DefaultConfig())
 }
 
-func ask(ctx context.Context, runner *executor.Runner, question string) (string, error) {
+func ask(ctx context.Context, runner *executor.Runner[string], question string) (string, error) {
 	// Each question gets its own history, counters, and cancellation state.
-	data := gent.NewBasicLoopData(&gent.Task{Text: question})
+	data := gent.NewBasicLoopData(&gent.Task{Messages: []*gent.ModelMessage{
+		gent.TextParts(gent.ChatMessageTypeSystem, agentPrompt),
+		gent.TextParts(gent.ChatMessageTypeHuman, question),
+	}})
 	execCtx := gent.NewExecutionContext(ctx, "order-helper", data)
 	limits := gent.DefaultLimits()
 	for i := range limits {
@@ -73,21 +71,14 @@ func ask(ctx context.Context, runner *executor.Runner, question string) (string,
 	}
 	execCtx.SetLimits(limits)
 
-	result, err := runner.Execute(execCtx)
+	answer, result, err := runner.Execute(execCtx)
 	if err != nil {
 		return "", err
 	}
 	if result.TerminationReason != gent.TerminationSuccess {
 		return "", fmt.Errorf("run ended with %s", result.TerminationReason)
 	}
-	if len(result.Output) != 1 {
-		return "", fmt.Errorf("expected one text answer, got %d parts", len(result.Output))
-	}
-	answer, ok := result.Output[0].(gent.TextContent)
-	if !ok {
-		return "", fmt.Errorf("expected text, got %T", result.Output[0])
-	}
-	return answer.Text, nil
+	return answer, nil
 }
 
 func run() error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -29,38 +30,26 @@ func DefaultConfig() Config {
 // event publishing, and trace collection via ExecutionContext.
 //
 // The Runner is responsible for:
-//   - Running the AgentLoop repeatedly until it returns [gent.LATerminate]
+//   - Running the Loop repeatedly until it returns [gent.LATerminate]
 //   - Publishing lifecycle events at appropriate points
 //   - Handling context cancellation and limit exceeded signals
 //
-// Limits are configured on the ExecutionContext, not the Executor. This allows
+// Limits are configured on the ExecutionContext, not the Runner. This allows
 // limits to be shared across nested agent loops and enforced in real-time as
 // stats are updated.
-type Runner struct {
-	loop   gent.Loop
+type Runner[T any] struct {
+	loop   gent.Loop[T]
 	config Config
 	events *events.Registry
 }
 
-// Executor keeps the existing generic API. All execution uses Runner.
-//
-// Deprecated: Use Runner with NewRunner. The loop needs no type argument.
-type Executor[Data gent.LoopData] = Runner
-
-// New keeps the existing constructor for callers that supply a data type.
-//
-// Deprecated: Use NewRunner.
-func New[Data gent.LoopData](loop gent.AgentLoop[Data], config Config) *Executor[Data] {
-	return NewRunner(loop, config)
-}
-
 // NewRunner creates a runner for any Loop. The context supplies its task and custom data.
-func NewRunner(loop gent.Loop, config Config) *Runner {
+func NewRunner[T any](loop gent.Loop[T], config Config) *Runner[T] {
 	registry := config.Events
 	if registry == nil {
 		registry = events.NewRegistry()
 	}
-	return &Runner{
+	return &Runner[T]{
 		loop:   loop,
 		config: config,
 		events: registry,
@@ -79,7 +68,7 @@ func NewRunner(loop gent.Loop, config Config) *Runner {
 //
 //	exec1 := executor.NewRunner(loop1, config).WithEvents(sharedRegistry)
 //	exec2 := executor.NewRunner(loop2, config).WithEvents(sharedRegistry)
-func (e *Runner) WithEvents(registry *events.Registry) *Runner {
+func (e *Runner[T]) WithEvents(registry *events.Registry) *Runner[T] {
 	e.events = registry
 	return e
 }
@@ -97,16 +86,16 @@ func (e *Runner) WithEvents(registry *events.Registry) *Runner {
 //	exec := executor.NewRunner(loop, config).
 //	    Subscribe(&LoggerSubscriber{}).
 //	    Subscribe(&MetricsSubscriber{})
-func (e *Runner) Subscribe(subscriber any) *Runner {
+func (e *Runner[T]) Subscribe(subscriber any) *Runner[T] {
 	e.events.Subscribe(subscriber)
 	return e
 }
 
-// Execute runs the AgentLoop until termination.
+// Execute runs the Loop until termination.
 //
 // The execution flow:
 //  1. Publish BeforeExecutionEvent
-//  2. Repeatedly call AgentLoop.Next until:
+//  2. Repeatedly call Loop.Next until:
 //     - It returns LATerminate
 //     - A limit is exceeded (context cancelled)
 //     - Context is canceled
@@ -120,26 +109,53 @@ func (e *Runner) Subscribe(subscriber any) *Runner {
 //
 //	execCtx := gent.NewExecutionContext(ctx, "main", data)
 //	execCtx.SetLimits(customLimits) // optional
-//	result, err := executor.Execute(execCtx)
+//	value, result, err := exec.Execute(execCtx)
 //	if err != nil {
 //	    // handle error
 //	}
-func (e *Runner) Execute(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
-	return e.execute(execCtx, false)
+func (e *Runner[T]) Execute(execCtx *gent.ExecutionContext) (T, *gent.ExecutionResult, error) {
+	return e.executeTyped(execCtx, false)
 }
 
 // Continue runs an already restored context. Prepare its loop and bindings through
 // RestoreExecutionContext before calling; Continue validates configuration without reinitializing
 // restored state. Terminal runs return the saved outcome. Resume handles this setup automatically.
-func (e *Runner) Continue(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
-	return e.execute(execCtx, true)
+func (e *Runner[T]) Continue(execCtx *gent.ExecutionContext) (T, *gent.ExecutionResult, error) {
+	return e.executeTyped(execCtx, true)
 }
 
-func (e *Runner) execute(
+func Run[T any](ctx *gent.ExecutionContext, loop gent.Loop[T], config Config) (
+	T, *gent.ExecutionResult, error,
+) {
+	return NewRunner(loop, config).Execute(ctx)
+}
+
+func (e *Runner[T]) executeTyped(ctx *gent.ExecutionContext, continuing bool) (
+	T, *gent.ExecutionResult, error,
+) {
+	var zero T
+	result, err := e.execute(ctx, continuing)
+	if err != nil || result == nil || result.TerminationReason != gent.TerminationSuccess {
+		return zero, result, err
+	}
+	value, err := gent.OutputValue[T](ctx)
+	if err != nil {
+		return zero, nil, err
+	}
+	return value, result, nil
+}
+
+func (e *Runner[T]) execute(
 	execCtx *gent.ExecutionContext, continuing bool,
 ) (*gent.ExecutionResult, error) {
 	defer execCtx.Release()
 	if execCtx.Phase() == gent.PhaseTerminal {
+		if err := gent.PrepareOutput(execCtx, e.loop.Output()); err != nil {
+			return nil, err
+		}
+		if err := e.configureRecovery(execCtx); err != nil {
+			return nil, err
+		}
 		return execCtx.Result(), execCtx.Error()
 	}
 	if err := execCtx.RecordingError(); err != nil {
@@ -149,6 +165,9 @@ func (e *Runner) execute(
 		execCtx.SetEventPublisher(e.events)
 	}
 	if continuing {
+		if err := gent.PrepareOutput(execCtx, e.loop.Output()); err != nil {
+			return nil, err
+		}
 		if err := e.configureRecovery(execCtx); err != nil {
 			return nil, err
 		}
@@ -218,7 +237,7 @@ func (e *Runner) execute(
 			return nil, loopErr
 		}
 		if result == nil && loopErr == nil {
-			loopErr = errors.New("AgentLoop.Next returned a nil result")
+			loopErr = errors.New("Loop.Next returned a nil result")
 		}
 		execCtx.PublishAfterIteration(result, time.Since(started), loopErr)
 		execCtx.EnforceIterationLimit()
@@ -227,12 +246,37 @@ func (e *Runner) execute(
 		}
 		if loopErr != nil {
 			execCtx.SetTermination(gent.TerminationError, nil,
-				fmt.Errorf("AgentLoop.Next (iteration %d): %w", execCtx.Iteration(), loopErr))
+				fmt.Errorf("Loop.Next (iteration %d): %w", execCtx.Iteration(), loopErr))
 			return e.finish(execCtx)
 		}
 		if result.Action == gent.LATerminate {
-			execCtx.SetFinalContentSource(result.ContentSource)
-			execCtx.SetTermination(gent.TerminationSuccess, result.Result, nil)
+			switch result.TerminationReason {
+			case gent.TerminationSuccess:
+				if result.Refusal != nil {
+					return nil, errors.New("gent: successful loop result has refusal")
+				}
+				if result.Value == nil {
+					return nil, errors.New("gent: successful loop result has no typed value")
+				}
+				decoded, err := execCtx.Codecs().Decode(*result.Value)
+				if err != nil {
+					return nil, err
+				}
+				nilInterface := decoded == nil && reflect.TypeFor[T]().Kind() == reflect.Interface
+				if _, ok := decoded.(T); !ok && !nilInterface {
+					return nil, fmt.Errorf("gent: loop output type %T does not match %T", decoded, *new(T))
+				}
+				execCtx.SetAcceptedValue(result.Value)
+				execCtx.SetFinalContentSource(result.ContentSource)
+				execCtx.SetTermination(gent.TerminationSuccess, result.Result, nil)
+			case gent.TerminationRefused:
+				if result.Refusal == nil || len(result.Result) > 0 {
+					return nil, errors.New("gent: invalid refused loop result")
+				}
+				execCtx.SetRefusal(result.Refusal)
+			default:
+				return nil, fmt.Errorf("gent: invalid terminal loop reason %q", result.TerminationReason)
+			}
 			return e.finish(execCtx)
 		}
 		if err := execCtx.CommitCheckpoint(gent.PhaseIterationCompleted); err != nil {
@@ -241,7 +285,7 @@ func (e *Runner) execute(
 	}
 }
 
-func (e *Runner) finish(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
+func (e *Runner[T]) finish(execCtx *gent.ExecutionContext) (*gent.ExecutionResult, error) {
 	if err := execCtx.RecordingError(); err != nil {
 		return nil, err
 	}
@@ -287,7 +331,7 @@ func terminateIfCanceled(execCtx *gent.ExecutionContext) bool {
 
 // compactIfNeeded checks the compaction trigger and runs the
 // strategy if triggered.
-func (e *Runner) compactIfNeeded(
+func (e *Runner[T]) compactIfNeeded(
 	execCtx *gent.ExecutionContext,
 ) error {
 	trigger := execCtx.CompactionTrigger()
@@ -357,7 +401,7 @@ func (e *Runner) compactIfNeeded(
 	if compactErr != nil {
 		return compactErr
 	}
-	execCtx.PublishCompaction(len(inputIds), len(proposal.Active), time.Since(started))
+	execCtx.PublishCompaction(len(inputIds), len(execCtx.ContextDraft().Active), time.Since(started))
 	if err := trigger.NotifyCompacted(execCtx); err != nil {
 		return err
 	}

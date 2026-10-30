@@ -319,12 +319,6 @@ func (s *ExecutionStats) GetToolCallCount() int64 {
 	return s.GetCounter(SCToolCalls)
 }
 
-// GetFormatParseErrorTotal returns the total number of format parse
-// errors (aggregated from children).
-func (s *ExecutionStats) GetFormatParseErrorTotal() int64 {
-	return s.GetCounter(SCFormatParseErrorTotal)
-}
-
 // GetIterations returns the current iteration count (aggregated
 // from children).
 func (s *ExecutionStats) GetIterations() int64 {

@@ -9,9 +9,9 @@ import (
 	"github.com/rickchristie/gent/trace"
 )
 
-func resumeSaved(worker context.Context, saved gent.RunView, agent *react.Agent,
+func resumeSaved(worker context.Context, saved gent.RunView, agent *react.Agent[string],
 	writer gent.Recorder, seq *trace.Sequencer, codecs *gent.CodecRegistry,
-) (*gent.ExecutionResult, error) {
+) (string, *gent.ExecutionResult, error) {
 	runner := executor.NewRunner(agent, executor.DefaultConfig())
 	return runner.Resume(worker, saved, gent.RestoreBindings{
 		Recorder: writer, Codecs: codecs,

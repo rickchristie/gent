@@ -26,8 +26,7 @@ func IsLifecycleEvent(event gent.Event) bool {
 		*gent.AfterToolCallEvent,
 		*gent.LimitExceededEvent,
 		*gent.ParseErrorEvent,
-		*gent.ValidatorCalledEvent,
-		*gent.ValidatorResultEvent,
+		*gent.OutputValidationEvent,
 		*gent.ErrorEvent,
 		*gent.CompactionEvent:
 		return true
@@ -84,10 +83,6 @@ func CountEventTypes(events []gent.Event) map[string]int {
 			counts["LimitExceededEvent"]++
 		case *gent.ParseErrorEvent:
 			counts["ParseErrorEvent"]++
-		case *gent.ValidatorCalledEvent:
-			counts["ValidatorCalledEvent"]++
-		case *gent.ValidatorResultEvent:
-			counts["ValidatorResultEvent"]++
 		case *gent.ErrorEvent:
 			counts["ErrorEvent"]++
 		case *gent.CompactionEvent:
@@ -155,7 +150,7 @@ func assertEventEqual(
 	case *gent.AfterIterationEvent:
 		act := actual.(*gent.AfterIterationEvent)
 		assertBaseEvent(t, index, exp.BaseEvent, act.BaseEvent, prevTimestamp)
-		// Full comparison of AgentLoopResult including NextPrompt
+		// Compare the full loop result, including its typed value and delivery content.
 		assert.Equal(t, exp.Result, act.Result, msgFmt("Result"), index)
 		assert.GreaterOrEqual(t, act.Duration, time.Duration(0),
 			msgFmt("Duration"), index)
@@ -216,20 +211,6 @@ func assertEventEqual(
 		if exp.Error != nil {
 			assert.NotNil(t, act.Error, msgFmt("Error should not be nil"), index)
 		}
-
-	case *gent.ValidatorCalledEvent:
-		act := actual.(*gent.ValidatorCalledEvent)
-		assertBaseEvent(t, index, exp.BaseEvent, act.BaseEvent, prevTimestamp)
-		assert.Equal(t, exp.ValidatorName, act.ValidatorName, msgFmt("ValidatorName"), index)
-		assert.Equal(t, exp.Answer, act.Answer, msgFmt("Answer"), index)
-
-	case *gent.ValidatorResultEvent:
-		act := actual.(*gent.ValidatorResultEvent)
-		assertBaseEvent(t, index, exp.BaseEvent, act.BaseEvent, prevTimestamp)
-		assert.Equal(t, exp.ValidatorName, act.ValidatorName, msgFmt("ValidatorName"), index)
-		assert.Equal(t, exp.Answer, act.Answer, msgFmt("Answer"), index)
-		assert.Equal(t, exp.Accepted, act.Accepted, msgFmt("Accepted"), index)
-		assert.Equal(t, exp.Feedback, act.Feedback, msgFmt("Feedback"), index)
 
 	case *gent.ErrorEvent:
 		act := actual.(*gent.ErrorEvent)
@@ -316,10 +297,6 @@ func eventTypeName(event gent.Event) string {
 		return "LimitExceededEvent"
 	case *gent.ParseErrorEvent:
 		return "ParseErrorEvent"
-	case *gent.ValidatorCalledEvent:
-		return "ValidatorCalledEvent"
-	case *gent.ValidatorResultEvent:
-		return "ValidatorResultEvent"
 	case *gent.ErrorEvent:
 		return "ErrorEvent"
 	case *gent.CompactionEvent:

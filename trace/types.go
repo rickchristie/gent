@@ -19,7 +19,6 @@ const (
 	EventTypeContextFinished   EventType = "context_finished"
 	EventTypeIterationStarted  EventType = "iteration_started"
 	EventTypeIterationFinished EventType = "iteration_finished"
-	EventTypeSystemPrompt      EventType = "system_prompt"
 	EventTypeModelCallStarted  EventType = "model_call_started"
 	EventTypeModelCallFinished EventType = "model_call_finished"
 	EventTypeModelStreamChunk  EventType = "model_stream_chunk"
@@ -27,8 +26,7 @@ const (
 	EventTypeToolCallStarted   EventType = "tool_call_started"
 	EventTypeToolCallFinished  EventType = "tool_call_finished"
 	EventTypeParseError        EventType = "parse_error"
-	EventTypeValidatorCalled   EventType = "validator_called"
-	EventTypeValidatorResult   EventType = "validator_result"
+	EventTypeOutputValidation  EventType = "output_validation"
 	EventTypeError             EventType = "error"
 	EventTypeLimitExceeded     EventType = "limit_exceeded"
 	EventTypeCompaction        EventType = "compaction"
@@ -44,6 +42,7 @@ const (
 	RunStatusRunning       RunStatus = "running"
 	RunStatusSucceeded     RunStatus = "succeeded"
 	RunStatusFailed        RunStatus = "failed"
+	RunStatusRefused       RunStatus = "refused"
 	RunStatusCanceled      RunStatus = "canceled"
 	RunStatusLimitExceeded RunStatus = "limit_exceeded"
 )
@@ -55,6 +54,7 @@ const (
 	StepStatusInterrupted StepStatus = "interrupted"
 	StepStatusRunning     StepStatus = "running"
 	StepStatusSucceeded   StepStatus = "succeeded"
+	StepStatusRefused     StepStatus = "refused"
 	StepStatusFailed      StepStatus = "failed"
 	StepStatusCanceled    StepStatus = "canceled"
 )
@@ -112,6 +112,7 @@ type Snapshot struct {
 
 // RunResult contains final run output when configured.
 type RunResult struct {
+	Refusal           *gent.ModelRefusal     `json:"refusal,omitempty"`
 	TerminationReason gent.TerminationReason `json:"terminationReason"`
 	Output            any                    `json:"output,omitempty"`
 	Error             *Error                 `json:"error,omitempty"`
@@ -119,10 +120,10 @@ type RunResult struct {
 
 // Context is a materialized execution context record.
 type Context struct {
-	Content          string   `json:"content,omitempty"`
-	MessageId        string   `json:"messageId,omitempty"`
-	SourceMessageIds []string `json:"sourceMessageIds,omitempty"`
-	ContentTruncated bool     `json:"contentTruncated,omitempty"`
+	Content          []gent.ContentPart `json:"content,omitempty"`
+	MessageId        string             `json:"messageId,omitempty"`
+	SourceMessageIds []string           `json:"sourceMessageIds,omitempty"`
+	ContentTruncated bool               `json:"contentTruncated,omitempty"`
 
 	Id       string `json:"id"`
 	ParentId string `json:"parentId,omitempty"`
@@ -286,11 +287,11 @@ type RunStats struct {
 	ModelDurationMs int64 `json:"modelDurationMs"`
 	ToolDurationMs  int64 `json:"toolDurationMs"`
 
-	ParseErrorCount         int `json:"parseErrorCount"`
-	ValidatorRejectionCount int `json:"validatorRejectionCount"`
-	ErrorCount              int `json:"errorCount"`
-	LimitExceededCount      int `json:"limitExceededCount"`
-	CompactionCount         int `json:"compactionCount"`
+	ParseErrorCount      int `json:"parseErrorCount"`
+	OutputRejectionCount int `json:"outputRejectionCount"`
+	ErrorCount           int `json:"errorCount"`
+	LimitExceededCount   int `json:"limitExceededCount"`
+	CompactionCount      int `json:"compactionCount"`
 }
 
 // PayloadCaptureError replaces payloads that cannot be made JSON-safe.

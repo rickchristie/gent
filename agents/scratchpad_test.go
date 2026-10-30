@@ -18,32 +18,18 @@ import (
 // tags, matching format.XML behavior without importing the package.
 type testXMLFormat struct{}
 
-func (f *testXMLFormat) RegisterSection(
-	section gent.TextSection,
-) gent.TextFormat {
-	return f
-}
-
-func (f *testXMLFormat) DescribeStructure() string {
-	return ""
-}
-
-func (f *testXMLFormat) Parse(
-	execCtx *gent.ExecutionContext,
-	output string,
-) (map[string][]string, error) {
-	return nil, nil
-}
-
 func (f *testXMLFormat) FormatSections(
 	sections []gent.FormattedSection,
 ) string {
 	result := ""
 	for i, s := range sections {
 		if i > 0 {
-			result += "\n"
+			result += `
+`
 		}
-		result += fmt.Sprintf("<%s>\n%s\n</%s>", s.Name, s.Content, s.Name)
+		result += fmt.Sprintf(`<%s>
+%s
+</%s>`, s.Name, s.Content, s.Name)
 	}
 	return result
 }
@@ -84,7 +70,8 @@ func buildIteration(
 	if len(text) > 0 {
 		observation.Parts = append(observation.Parts, gent.TextContent{
 			Text: xmlFmt.FormatSections([]gent.FormattedSection{
-				{Name: "observation", Content: strings.Join(text, "\n")},
+				{Name: "observation", Content: strings.Join(text, `
+`)},
 			}),
 		})
 	}
@@ -144,7 +131,7 @@ func TestScratchpadToMessages(t *testing.T) {
 
 	// Helper: extract text content from messages for comparison.
 	extractTexts := func(
-		msgs []gent.ModelMessage,
+		msgs []*gent.ModelMessage,
 	) []string {
 		var texts []string
 		for _, msg := range msgs {
@@ -158,7 +145,7 @@ func TestScratchpadToMessages(t *testing.T) {
 	}
 
 	extractRoles := func(
-		msgs []gent.ModelMessage,
+		msgs []*gent.ModelMessage,
 	) []gent.ChatMessageType {
 		var roles []gent.ChatMessageType
 		for _, msg := range msgs {
@@ -284,7 +271,9 @@ func TestScratchpadToMessages(t *testing.T) {
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny, 72F\n</search>",
+									Text: `<search>
+Sunny, 72F
+</search>`,
 								},
 							},
 						},
@@ -297,7 +286,9 @@ func TestScratchpadToMessages(t *testing.T) {
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny, 72F\n</search>",
+									Text: `<search>
+Sunny, 72F
+</search>`,
 								},
 							},
 						},
@@ -348,7 +339,9 @@ Sunny, 72F
 								{
 									Name: "fetch",
 									Hash: "fetch:url=example.com",
-									Text: "<fetch>\nPage content\n</fetch>",
+									Text: `<fetch>
+Page content
+</fetch>`,
 								},
 							},
 						},
@@ -361,7 +354,9 @@ Sunny, 72F
 								{
 									Name: "fetch",
 									Hash: "fetch:url=example.com",
-									Text: "<fetch>\nPage content\n</fetch>",
+									Text: `<fetch>
+Page content
+</fetch>`,
 								},
 							},
 						},
@@ -374,7 +369,9 @@ Sunny, 72F
 								{
 									Name: "fetch",
 									Hash: "fetch:url=example.com",
-									Text: "<fetch>\nPage content\n</fetch>",
+									Text: `<fetch>
+Page content
+</fetch>`,
 								},
 							},
 						},
@@ -432,12 +429,16 @@ Page content
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny\n</search>",
+									Text: `<search>
+Sunny
+</search>`,
 								},
 								{
 									Name: "unique_tool",
 									Hash: "unique_tool:x=1",
-									Text: "<unique_tool>\nUnique result\n</unique_tool>",
+									Text: `<unique_tool>
+Unique result
+</unique_tool>`,
 								},
 							},
 						},
@@ -450,7 +451,9 @@ Page content
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny\n</search>",
+									Text: `<search>
+Sunny
+</search>`,
 								},
 							},
 						},
@@ -505,7 +508,9 @@ Sunny
 									Name:  "search",
 									Hash:  "search:q=weather",
 									Error: fmt.Errorf("timeout"),
-									Text:  "<search>\nError: timeout\n</search>",
+									Text: `<search>
+Error: timeout
+</search>`,
 								},
 							},
 						},
@@ -518,7 +523,9 @@ Sunny
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny\n</search>",
+									Text: `<search>
+Sunny
+</search>`,
 								},
 							},
 						},
@@ -569,7 +576,9 @@ Sunny
 								{
 									Name: "stateful_tool",
 									Hash: "stateful_tool:x=1",
-									Text: "<stateful_tool>\nResult A\n</stateful_tool>",
+									Text: `<stateful_tool>
+Result A
+</stateful_tool>`,
 								},
 							},
 						},
@@ -582,7 +591,9 @@ Sunny
 								{
 									Name: "stateful_tool",
 									Hash: "stateful_tool:x=1",
-									Text: "<stateful_tool>\nResult B\n</stateful_tool>",
+									Text: `<stateful_tool>
+Result B
+</stateful_tool>`,
 								},
 							},
 						},
@@ -630,7 +641,9 @@ Result B
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny\n</search>",
+									Text: `<search>
+Sunny
+</search>`,
 								},
 							},
 						},
@@ -643,7 +656,9 @@ Result B
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny\n</search>",
+									Text: `<search>
+Sunny
+</search>`,
 								},
 							},
 						},
@@ -689,7 +704,9 @@ Sunny
 								{
 									Name: "read",
 									Hash: "read:file=main.go",
-									Text: "<read>\nfunc main() {}\n</read>",
+									Text: `<read>
+func main() {}
+</read>`,
 								},
 							},
 						},
@@ -702,7 +719,9 @@ Sunny
 								{
 									Name: "read",
 									Hash: "read:file=main.go",
-									Text: "<read>\nfunc main() {}\n</read>",
+									Text: `<read>
+func main() {}
+</read>`,
 								},
 							},
 						},
@@ -715,7 +734,9 @@ Sunny
 								{
 									Name: "read",
 									Hash: "read:file=main.go",
-									Text: "<read>\nfunc main() {}\n</read>",
+									Text: `<read>
+func main() {}
+</read>`,
 								},
 							},
 						},
@@ -773,7 +794,9 @@ func main() {}
 								{
 									Name: "search",
 									Hash: "search:q=weather",
-									Text: "<search>\nSunny\n</search>",
+									Text: `<search>
+Sunny
+</search>`,
 								},
 							},
 						},
@@ -786,7 +809,9 @@ func main() {}
 								{
 									Name: "search",
 									Hash: "search:q=news",
-									Text: "<search>\nHeadlines\n</search>",
+									Text: `<search>
+Headlines
+</search>`,
 								},
 							},
 						},

@@ -18,13 +18,16 @@ func TestStreamMetadata(t *testing.T) {
 		input    input
 		expected expected
 	}
-	meta := []*MetaContent{{Type: MetaContentReasoning, Text: "Checked."},
-		{Type: MetaContentCommentary, Text: "Checking."},
-		{Type: MetaContentIntermediary, Text: "Done."}}
+	meta := []*MetaContent{{
+		Type:    MetaContentReasoning,
+		Content: []ContentPart{TextContent{Text: "Checked."}},
+	},
+		{Type: MetaContentCommentary, Content: []ContentPart{TextContent{Text: "Checking."}}},
+		{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "Done."}}}}
 	response := &ContentResponse{
 		Choices: []*ContentChoice{
-			{
-				CandidateContent: "Done.", MetaContent: meta,
+			{Completion: ModelCompletion{Status: ModelStatusAnswer},
+				CandidateContent: []ContentPart{TextContent{Text: "Done."}}, MetaContent: meta,
 			},
 		},
 	}
@@ -56,7 +59,7 @@ func TestStreamMetadata(t *testing.T) {
 			}
 			actual.response, actual.err = stream.Response()
 			assert.Equal(t, test.expected, actual)
-			assert.Equal(t, "", acc.Content())
+			assert.Equal(t, []ContentPart(nil), acc.Content())
 			assert.Equal(t, response, acc.Response())
 		})
 	}

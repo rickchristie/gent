@@ -117,7 +117,7 @@ func TestModelReplayCallOrder(t *testing.T) {
 				if !assert.Len(t, chunks, 1) {
 					return
 				}
-				actual.answers = append(actual.answers, response.Choices[0].CandidateContent)
+				actual.answers = append(actual.answers, gent.ContentText(response.Choices[0].CandidateContent))
 				actual.ids = append(actual.ids, chunks[0].ModelCallId)
 			}
 			actual.providerCalls = fresh.calls
@@ -175,7 +175,10 @@ func TestModelReplayRetriesFailedCall(t *testing.T) {
 				{
 					MetaContent: []*gent.MetaContent{
 						{
-							Type: gent.MetaContentIntermediary, Text: "partial",
+							Type: gent.MetaContentIntermediary,
+							Content: []gent.ContentPart{
+								gent.TextContent{Text: "partial"},
+							},
 						},
 					},
 				},
@@ -207,7 +210,7 @@ func TestModelReplayRetriesFailedCall(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			assert.Equal(t, test.expected, expected{response.Choices[0].CandidateContent,
+			assert.Equal(t, test.expected, expected{gent.ContentText(response.Choices[0].CandidateContent),
 				chunks[0].ModelCallId, fresh.calls, gent.ValidateBundle(view)})
 		})
 	}
@@ -240,33 +243,51 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 		input    input
 		expected expected
 	}
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{{CandidateContent: "hello",
+	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{{
+		CandidateContent: []gent.ContentPart{
+			gent.TextContent{Text: "hello"},
+		},
 		MetaContent: []*gent.MetaContent{
 			{
-				Type: gent.MetaContentReasoning, Text: "reason", MessageId: "reasoning",
+				Type: gent.MetaContentReasoning,
+				Content: []gent.ContentPart{
+					gent.TextContent{Text: "reason"},
+				},
+				MessageId: "reasoning",
 			},
-		}, StopReason: "stop"}, {
-		CandidateContent: "another choice",
-	}},
+		},
+		Completion: gent.ModelCompletion{
+			Status:         gent.ModelStatusAnswer,
+			ProviderReason: "stop",
+		}},
+		{Completion: gent.ModelCompletion{
+			Status: gent.ModelStatusAnswer,
+		},
+			CandidateContent: []gent.ContentPart{gent.TextContent{Text: "another choice"}},
+		}},
 		Info: &gent.GenerationInfo{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}
 	stamp := time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)
 	chunks := []gent.StreamChunk{{
 		MetaContent: []*gent.MetaContent{
 			{
-				Type: gent.MetaContentReasoning, Text: "reason", MessageId: "reasoning",
+				Type: gent.MetaContentReasoning,
+				Content: []gent.ContentPart{
+					gent.TextContent{Text: "reason"},
+				},
+				MessageId: "reasoning",
 			},
 		}, Timestamp: stamp,
 	},
 		{
 			MetaContent: []*gent.MetaContent{
 				{
-					Type: gent.MetaContentIntermediary, Text: "he",
+					Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "he"}},
 				},
 			}, Timestamp: stamp,
 		}, {
 			MetaContent: []*gent.MetaContent{
 				{
-					Type: gent.MetaContentIntermediary, Text: "llo",
+					Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "llo"}},
 				},
 			}, Timestamp: stamp,
 		}}
@@ -291,7 +312,10 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 						{
 							MetaContent: []*gent.MetaContent{
 								{
-									Type: gent.MetaContentIntermediary, Text: "partial",
+									Type: gent.MetaContentIntermediary,
+									Content: []gent.ContentPart{
+										gent.TextContent{Text: "partial"},
+									},
 								},
 							},
 						},

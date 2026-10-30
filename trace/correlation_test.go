@@ -37,7 +37,10 @@ func TestSequencerCallCorrelationRequiresIdentity(t *testing.T) {
 			Stream: &ModelStream{
 				MetaContent: []*gent.MetaContent{
 					{
-						Type: gent.MetaContentIntermediary, Text: "answer",
+						Type: gent.MetaContentIntermediary,
+						Content: []gent.ContentPart{
+							gent.TextContent{Text: "answer"},
+						},
 					},
 				}, ChunkCount: 1, LastChunkEventNumber: 3,
 			}},
@@ -64,7 +67,10 @@ func TestSequencerCallCorrelationRequiresIdentity(t *testing.T) {
 			recordTestValue(t, seq, "model_stream_chunk", gent.StreamChunk{
 				MetaContent: []*gent.MetaContent{
 					{
-						Type: gent.MetaContentIntermediary, Text: "answer",
+						Type: gent.MetaContentIntermediary,
+						Content: []gent.ContentPart{
+							gent.TextContent{Text: "answer"},
+						},
 					},
 				}, ModelCallId: test.input.modelCallId, StreamId: "stream",
 				ContextId: "ctx", Iteration: 1})

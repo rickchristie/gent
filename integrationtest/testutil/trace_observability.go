@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	genttrace "github.com/rickchristie/gent/trace"
@@ -147,12 +148,12 @@ func (r *traceStreamRenderer) writeModelChunk(event *genttrace.Event) {
 		return
 	}
 	payload := tracePayload(event)
-	content := traceString(payload, "content")
+	content := traceContentParts(payload["content"])
 	if items, ok := payload["metaContent"].([]any); ok {
 		for _, value := range items {
 			item, ok := value.(map[string]any)
 			if ok {
-				content += traceString(item, "text")
+				content += traceContentParts(item["content"])
 			}
 		}
 	}
@@ -167,6 +168,29 @@ func (r *traceStreamRenderer) writeModelChunk(event *genttrace.Event) {
 		r.finishContentLine()
 		fmt.Fprintf(r.w, "  [Stream Error: %s]\n", event.Error.Message)
 	}
+}
+
+// Trace payloads contain JSON-shaped content parts. Keep their order and show attachments as
+// labels; binary data must never be printed as text or as a large base64 string in the terminal.
+func traceContentParts(value any) string {
+	parts, _ := value.([]any)
+	var text strings.Builder
+	for _, value := range parts {
+		part := tracePayloadFromAny(value)
+		switch {
+		case part["Text"] != nil:
+			text.WriteString(traceString(part, "Text"))
+		case part["ContentPart"] != nil:
+			text.WriteString(traceContentParts([]any{part["ContentPart"]}))
+		case part["MIMEType"] != nil:
+			fmt.Fprintf(&text, "[Attachment: %s]", traceString(part, "MIMEType"))
+		case part["URL"] != nil:
+			fmt.Fprintf(&text, "[Image: %s]", traceString(part, "URL"))
+		default:
+			text.WriteString("[Content part]")
+		}
+	}
+	return text.String()
 }
 
 func (r *traceStreamRenderer) captureToolArgs(event *genttrace.Event) {

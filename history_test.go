@@ -38,14 +38,14 @@ func (r *historyRecorder) Save(ctx context.Context, batch *SaveBatch) error {
 }
 
 func TestOwnedHistoryAndSelectionChanges(t *testing.T) {
-	task := &Task{Text: "original task"}
+	task := NewTask(TextContent{Text: "original task"})
 	ctx := NewExecutionContext(
 		context.Background(),
 		"fixture",
 		NewBasicLoopData(task),
 		WithRunId("history-fixture"),
 	)
-	task.Text = "changed task"
+	task.Messages[0].Parts[0] = TextContent{Text: "changed task"}
 	original := &HistoryEntry{Origin: RecordOriginal, ExpireAfterIteration: 3,
 		Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
 			Parts: []ContentPart{TextContent{Text: "original policy"}}}}}
@@ -58,7 +58,7 @@ func TestOwnedHistoryAndSelectionChanges(t *testing.T) {
 	assert.NoError(t, ctx.CommitCheckpoint(PhaseInitial))
 	actualTask, err := ctx.Task()
 	assert.NoError(t, err)
-	assert.Equal(t, &Task{Text: "original task"}, actualTask)
+	assert.Equal(t, NewTask(TextContent{Text: "original task"}), actualTask)
 	records, err := ctx.Scratchpad()
 	assert.NoError(t, err)
 	assert.Equal(t, want, recordContent(records[0]))
@@ -102,7 +102,7 @@ func TestRunCommitVisibility(t *testing.T) {
 	ctx := NewExecutionContext(
 		context.Background(),
 		"fixture",
-		NewBasicLoopData(&Task{Text: "task"}),
+		NewBasicLoopData(NewTask(TextContent{Text: "task"})),
 		WithRunId("blocked-save"), WithRecorder(recorder),
 	)
 	observed := make(chan Event, 1)

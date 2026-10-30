@@ -124,12 +124,6 @@ func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
 				sub.OnAfterIteration(execCtx, e)
 			}
 		}
-	case *gent.BeforeSystemPromptEvent:
-		for _, s := range r.subscribers {
-			if sub, ok := s.(gent.BeforeSystemPromptSubscriber); ok {
-				sub.OnBeforeSystemPrompt(execCtx, e)
-			}
-		}
 	case *gent.BeforeModelCallEvent:
 		for _, s := range r.subscribers {
 			if sub, ok := s.(gent.BeforeModelCallSubscriber); ok {
@@ -160,16 +154,10 @@ func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {
 				sub.OnParseError(execCtx, e)
 			}
 		}
-	case *gent.ValidatorCalledEvent:
+	case *gent.OutputValidationEvent:
 		for _, s := range r.subscribers {
-			if sub, ok := s.(gent.ValidatorCalledSubscriber); ok {
-				sub.OnValidatorCalled(execCtx, e)
-			}
-		}
-	case *gent.ValidatorResultEvent:
-		for _, s := range r.subscribers {
-			if sub, ok := s.(gent.ValidatorResultSubscriber); ok {
-				sub.OnValidatorResult(execCtx, e)
+			if sub, ok := s.(gent.OutputValidationSubscriber); ok {
+				sub.OnOutputValidation(execCtx, e)
 			}
 		}
 	case *gent.ErrorEvent:

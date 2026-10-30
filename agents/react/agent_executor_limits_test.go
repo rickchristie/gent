@@ -8,7 +8,7 @@ import (
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/executor"
-	"github.com/rickchristie/gent/termination"
+	"github.com/rickchristie/gent/output"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,10 +30,20 @@ func (m *limitModel) GenerateContentStream(
 	if m.kind == "code" {
 		name, args = "run_code", `{"code":"throw new Error('failed');"}`
 	}
-	choice := &gent.ContentChoice{ToolCalls: []gent.ModelToolCall{{ID: fmt.Sprint(m.calls),
-		Type: "function", FunctionCall: &gent.FunctionCall{Name: name, Arguments: args}}}}
+	choice := &gent.ContentChoice{Completion: gent.ModelCompletion{
+		Status: gent.ModelStatusToolCalls,
+	},
+		ToolCalls: []gent.ModelToolCall{{ID: fmt.Sprint(m.calls),
+			Type: "function", FunctionCall: &gent.FunctionCall{Name: name, Arguments: args}}}}
 	if m.kind == "answer" {
-		choice = &gent.ContentChoice{CandidateContent: "invalid JSON"}
+		choice = &gent.ContentChoice{
+			Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+			CandidateContent: []gent.ContentPart{gent.TextContent{Text: "invalid JSON"}},
+		}
+	}
+	if m.kind == "custom" {
+		choice = &gent.ContentChoice{Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+			CandidateContent: []gent.ContentPart{gent.TextContent{Text: `{}`}}}
 	}
 	return gent.NewCompletedStream(&gent.ContentResponse{Choices: []*gent.ContentChoice{choice},
 		Info: &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5, TotalTokens: 15}}, nil), nil
@@ -75,8 +85,16 @@ func TestAgent_NativeLimits(t *testing.T) {
 			input{gent.SGToolCallsErrorConsecutiveFor + "work", "error", 1, true}},
 		{"argument parse errors", input{gent.SCToolchainParseErrorTotal, "parse", 1, false}},
 		{"consecutive argument errors", input{gent.SGToolchainParseErrorConsecutive, "parse", 1, true}},
-		{"answer parse errors", input{gent.SCTerminationParseErrorTotal, "answer", 1, false}},
-		{"consecutive answer errors", input{gent.SGTerminationParseErrorConsecutive, "answer", 1, true}},
+		{"answer parse errors", input{gent.SCOutputLocalRejectedTotal, "answer", 1, false}},
+		{"consecutive answer errors", input{gent.SGOutputLocalRejectedConsecutive, "answer", 1, true}},
+		{"output rejection", input{gent.SCOutputRejectedTotal, "answer", 1, false}},
+		{"consecutive rejection", input{gent.SGOutputRejectedConsecutive, "answer", 1, true}},
+		{"custom rejection", input{gent.SCOutputCustomRejectedTotal, "custom", 1, false}},
+		{"custom named rejection", input{gent.SCOutputCustomRejectedBy + "rule", "custom", 1, false}},
+		{
+			"custom consecutive rejection",
+			input{gent.SGOutputCustomRejectedConsecutive, "custom", 1, true},
+		},
 		{"code executions", input{gent.SCCodeExecutions, "code", 1, false}},
 		{"code errors", input{gent.SCCodeExecutionsError, "code", 1, false}},
 		{"consecutive code errors", input{gent.SGCodeExecutionsErrorConsecutive, "code", 1, true}},
@@ -95,19 +113,28 @@ func TestAgent_NativeLimits(t *testing.T) {
 				if test.input.kind == "code" {
 					chain = toolchain.NewJsToolChainWrapper(chain)
 				}
-				agent := NewAgent(model).WithToolChain(chain)
-				if test.input.kind == "answer" {
-					agent.WithTermination(termination.NewJSON[map[string]string]("answer"))
+				out, err := output.NewJsonOutput[map[string]string]()
+				if !assert.NoError(t, err) {
+					return
 				}
+				if test.input.kind == "custom" {
+					out.SetCustomValidator("rule", func(*gent.ExecutionContext, map[string]string) (
+						*gent.OutputValidationResult, error,
+					) {
+						return &gent.OutputValidationResult{Steering: []gent.ContentPart{
+							gent.TextContent{Text: "Return an approved result."}}}, nil
+					})
+				}
+				agent := NewWithOutput(model, out).WithToolChain(chain)
 				threshold := float64(stop-1) * test.input.increment
 				if test.input.key == gent.SCIterations.Self() {
 					threshold = float64(stop)
 				}
 				limit := gent.Limit{Type: gent.LimitExactKey, Key: test.input.key, MaxValue: threshold}
 				ctx := gent.NewExecutionContext(context.Background(), "limits",
-					gent.NewBasicLoopData(&gent.Task{Text: "Continue to use the tool."}))
+					gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Continue to use the tool."})))
 				ctx.SetLimits([]gent.Limit{limit})
-				result, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Execute(ctx)
+				_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 				if !assert.Error(t, err) {
 					return
 				}
@@ -150,9 +177,12 @@ func TestAgent_NativePrefixLimit(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var responses []*gent.ContentResponse
 			for i, name := range []string{"alpha", "beta", "beta", "beta"} {
-				choice := &gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
-					nativeTestCall(fmt.Sprint(i), name, "{}"),
-				}}
+				choice := &gent.ContentChoice{Completion: gent.ModelCompletion{
+					Status: gent.ModelStatusToolCalls,
+				},
+					ToolCalls: []gent.ModelToolCall{
+						nativeTestCall(fmt.Sprint(i), name, "{}"),
+					}}
 				responses = append(responses, nativeTestResponse(choice))
 			}
 			model := newMockModel(responses...)
@@ -166,9 +196,11 @@ func TestAgent_NativePrefixLimit(t *testing.T) {
 				}).Description("Do work").ParameterSchema(nil).MustBuild())
 			}
 			limit := gent.Limit{Type: gent.LimitKeyPrefix, Key: test.input.key, MaxValue: 2}
-			ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Use both tools."}))
+			ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{
+				Text: "Use both tools.",
+			})))
 			ctx.SetLimits([]gent.Limit{limit})
-			result, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Execute(ctx)
+			_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			assert.EqualError(t, err, fmt.Sprintf("limit exceeded: %s > 2", test.input.key))
 			assert.Equal(t, gent.TerminationLimitExceeded, result.TerminationReason)
 			assert.Equal(t, &limit, result.ExceededLimit)

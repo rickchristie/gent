@@ -26,7 +26,7 @@ type ModelCall struct {
 
 // NewModelCallRequest resolves option functions exactly once, before mutable request hooks.
 func NewModelCallRequest(
-	messages []ModelMessage,
+	messages []*ModelMessage,
 	options ...CallOption,
 ) ModelCallRequest {
 	var resolved CallOptions
@@ -52,14 +52,14 @@ type ContentResponse struct {
 type ContentChoice struct {
 	Continuation *ProviderContinuation
 
-	// CandidateContent is provider text to consider after tools and completion checks.
+	// CandidateContent is provider content to consider after tools and completion checks.
 	// It is not an accepted execution answer. Stream it as intermediary metadata.
-	CandidateContent string
+	CandidateContent []ContentPart
 	CandidateSource  *ContentSource
 
 	// MetaContent preserves ordered provider-visible metadata. Unknown types remain readable.
 	MetaContent []*MetaContent
-	StopReason  string
+	Completion  ModelCompletion
 	ToolCalls   []ModelToolCall
 }
 
@@ -115,7 +115,7 @@ type GenerationInfo struct {
 // Options contains meaningful resolved call options when the model wrapper can capture them.
 // OptionCaptureComplete must be false when provider-specific options cannot be fully introspected.
 type ModelCallRequest struct {
-	Messages          []ModelMessage
+	Messages          []*ModelMessage
 	Options           CallOptions
 	SelectionRevision HistoryRevision
 	ActiveEntryIds    []EntryId
@@ -146,7 +146,7 @@ type Stream interface {
 // StreamChunk represents a single chunk of streamed content with metadata.
 type StreamChunk struct {
 	// Content is the complete accepted execution answer. Only terminal publication sets it.
-	Content string
+	Content []ContentPart
 
 	// MetaContent contains provisional text deltas, reasoning, and provider commentary.
 	MetaContent []*MetaContent

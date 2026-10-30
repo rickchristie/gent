@@ -323,7 +323,7 @@ Next working context: [H1]`,
       });
     },
   );
-  await check('all 52 interfaces have on-demand contracts inside their lesson', async () => {
+  await check('all 47 interfaces have on-demand contracts inside their lesson', async () => {
     const covered = [];
     for (const item of lessons) {
       await lesson(item.id);
@@ -346,7 +346,7 @@ Next working context: [H1]`,
         .map((item) => item.id)
         .sort(),
     );
-    assert.equal(await text('#lesson-coverage'), '5 / 5 explored · all 52 interfaces connected');
+    assert.equal(await text('#lesson-coverage'), '5 / 5 explored · all 47 interfaces connected');
   });
   await check('each experiment fits narrow and tablet viewports and remains usable', async () => {
     for (const width of [900, 736, 390, 320]) {

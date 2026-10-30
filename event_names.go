@@ -35,16 +35,11 @@ const (
 	EventNameToolCallAfter  = "gent:tool_call:after"
 
 	// Errors and validation
-	EventNameParseError      = "gent:parse_error"
-	EventNameValidatorCalled = "gent:validator:called"
-	EventNameValidatorResult = "gent:validator:result"
-	EventNameError           = "gent:error"
+	EventNameParseError = "gent:parse_error"
+	EventNameError      = "gent:error"
 
 	// Limits
 	EventNameLimitExceeded = "gent:limit_exceeded"
-
-	// System prompt
-	EventNameSystemPromptBefore = "gent:system_prompt:before"
 
 	// Compaction
 	EventNameCompaction = "gent:compaction"
@@ -61,16 +56,5 @@ const (
 // ParseErrorType categorizes the source of a parse error.
 type ParseErrorType string
 
-const (
-	// ParseErrorTypeFormat indicates TextFormat failed to parse LLM output into sections.
-	ParseErrorTypeFormat ParseErrorType = "format"
-
-	// ParseErrorTypeToolchain indicates ToolChain failed to decode native tool arguments.
-	ParseErrorTypeToolchain ParseErrorType = "toolchain"
-
-	// ParseErrorTypeTermination indicates Termination failed to parse the answer section.
-	ParseErrorTypeTermination ParseErrorType = "termination"
-
-	// ParseErrorTypeSection indicates a TextSection failed to parse its content.
-	ParseErrorTypeSection ParseErrorType = "section"
-)
+// ParseErrorTypeToolchain identifies invalid native calls or JSON tool arguments.
+const ParseErrorTypeToolchain ParseErrorType = "toolchain"

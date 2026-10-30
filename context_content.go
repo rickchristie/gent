@@ -1,7 +1,5 @@
 package gent
 
-import "strings"
-
 // SetFinalContentSource links the next successful terminal result to its provisional messages.
 // The executor supplies AgentLoopResult.ContentSource. A custom executor may call this directly.
 func (ctx *ExecutionContext) SetFinalContentSource(source *ContentSource) {
@@ -21,16 +19,7 @@ func (ctx *ExecutionContext) queueFinalContent() error {
 	if reason != TerminationSuccess {
 		return nil
 	}
-	var text strings.Builder
-	for _, part := range result {
-		switch part := part.(type) {
-		case TextContent:
-			text.WriteString(part.Text)
-		case *TextContent:
-			text.WriteString(part.Text)
-		}
-	}
-	chunk := StreamChunk{Content: text.String(), MessageId: ctx.ContextId() + ":answer",
+	chunk := StreamChunk{Content: result, MessageId: ctx.ContextId() + ":answer",
 		ContextId: ctx.ContextId(), ParentContextId: ctx.ParentContextId(),
 		Iteration: ctx.Iteration(), Depth: ctx.Depth(), Source: ctx.BuildSourcePath(), Timestamp: stamp}
 	if source != nil {

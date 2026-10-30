@@ -29,7 +29,6 @@ Can you help me reschedule to a later flight on the same ` +
 			`day? I'd prefer an evening flight if possible.`,
 		MaxIterations:   15,
 		RegisterTools:   fixture.RegisterAllTools,
-		TimeProvider:    tp,
 		PolicySuggester: fixture.PolicySuggestionPrompt,
 		SystemPrompt: fmt.Sprintf(`## Task Description
 
@@ -86,7 +85,6 @@ Can you help me reschedule to a later flight on ` +
 				`flight if possible.`,
 			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
-			TimeProvider:    tp,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
 			SystemPrompt: fmt.Sprintf(`## Task Description
 
@@ -166,7 +164,6 @@ SkyWings is an international airline. Reply with customer's `+
 
 		MaxIterations:   15,
 		RegisterTools:   fixture.RegisterAllTools,
-		TimeProvider:    tp,
 		PolicySuggester: fixture.PolicySuggestionPrompt,
 	})
 }
@@ -216,7 +213,6 @@ SkyWings is an international airline. Reply with `+
 
 			MaxIterations:   20,
 			RegisterTools:   fixture.RegisterAllToolsSearch,
-			TimeProvider:    tp,
 			PolicySuggester: fixture.PolicySuggestionPrompt,
 		},
 	)

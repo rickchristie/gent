@@ -107,8 +107,8 @@ type CachedContent struct {
 
 func (CachedContent) isContentPart() {}
 
-func TextParts(role ChatMessageType, texts ...string) ModelMessage {
-	message := ModelMessage{Role: role, Parts: []ContentPart{}}
+func TextParts(role ChatMessageType, texts ...string) *ModelMessage {
+	message := &ModelMessage{Role: role, Parts: []ContentPart{}}
 	for _, text := range texts {
 		message.Parts = append(message.Parts, TextContent{Text: text})
 	}
@@ -142,6 +142,12 @@ type CallOptions struct {
 	ToolChoice             any
 	Metadata               map[string]any
 	ResponseMIMEType       string
+	ResponseSchema         map[string]any
+	ResponseModalities     []string
+	ImageMaxWidth          int
+	ImageMaxHeight         int
+	ImageMaxFileSizeBytes  int64
+	ImageMIMETypes         []string
 	StreamingFunc          func(context.Context, []byte) error         `json:"-"`
 	StreamingReasoningFunc func(context.Context, []byte, []byte) error `json:"-"`
 }

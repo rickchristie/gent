@@ -229,8 +229,10 @@ func (s *streamBuffer) CompleteWithGenerationInfo(info *GenerationInfo, err erro
 
 	var response *ContentResponse
 	if err == nil {
-		response = &ContentResponse{Choices: []*ContentChoice{{
-			CandidateContent: MetaText(metadata, MetaContentIntermediary),
+		response = &ContentResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
+			Status: ModelStatusAnswer,
+		},
+			CandidateContent: MetaParts(metadata, MetaContentIntermediary),
 			MetaContent:      metadata,
 		}}, Info: info}
 	}
@@ -306,13 +308,14 @@ func NewCompletedStream(resp *ContentResponse, err error) Stream {
 		for _, item := range choice.MetaContent {
 			s.SendMeta(item)
 		}
-		if choice.CandidateContent != "" && MetaText(choice.MetaContent, MetaContentIntermediary) == "" {
+		if len(choice.CandidateContent) > 0 &&
+			len(MetaParts(choice.MetaContent, MetaContentIntermediary)) == 0 {
 			id := ""
 			if choice.CandidateSource != nil && len(choice.CandidateSource.MessageIds) == 1 {
 				id = choice.CandidateSource.MessageIds[0]
 			}
 			s.SendMeta(&MetaContent{Type: MetaContentIntermediary,
-				Text: choice.CandidateContent, MessageId: id})
+				Content: choice.CandidateContent, MessageId: id})
 		}
 	}
 	s.Complete(resp, err)

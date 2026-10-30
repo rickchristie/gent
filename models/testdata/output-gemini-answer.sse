@@ -1,0 +1,4 @@
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"<answer>Done."}]}}]}
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"</answer>"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":5,"thoughtsTokenCount":3,"totalTokenCount":21,"cachedContentTokenCount":2}}
+

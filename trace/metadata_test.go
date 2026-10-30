@@ -37,7 +37,7 @@ func TestMetadataTraceRetention(t *testing.T) {
 				MaxMetaContentBytes: test.input.limit}
 			if test.input.redact {
 				cfg.Redactor = RedactorFuncs{Chunk: func(chunk gent.StreamChunk) gent.StreamChunk {
-					chunk.MetaContent[0].Text = "Removed."
+					chunk.MetaContent[0].Content = []gent.ContentPart{gent.TextContent{Text: "Removed."}}
 					return chunk
 				}}
 			}
@@ -47,7 +47,10 @@ func TestMetadataTraceRetention(t *testing.T) {
 			before := ctx.PublishBeforeModelCall("fixture", gent.NewModelCallRequest(nil))
 			err := ctx.EmitChunk(gent.StreamChunk{ModelCallId: before.ModelCallId,
 				ContextId: before.ContextId, MetaContent: []*gent.MetaContent{
-					{Type: gent.MetaContentCommentary, Text: "Checking."}}})
+					{
+						Type:    gent.MetaContentCommentary,
+						Content: []gent.ContentPart{gent.TextContent{Text: "Checking."}},
+					}}})
 			if !assert.NoError(t, err) || !assert.NoError(t, ctx.FlushProgress()) {
 				return
 			}

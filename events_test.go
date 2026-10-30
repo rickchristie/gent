@@ -24,8 +24,7 @@ func TestEvent_MarkerInterface(t *testing.T) {
 		&BeforeToolCallEvent{},
 		&AfterToolCallEvent{},
 		&ParseErrorEvent{},
-		&ValidatorCalledEvent{},
-		&ValidatorResultEvent{},
+		&OutputValidationEvent{},
 		&ErrorEvent{},
 		&LimitExceededEvent{},
 		&CommonEvent{},
@@ -143,35 +142,12 @@ func TestPublishParseError_SetsCorrectEventName(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 	execCtx.IncrementIteration()
 
-	event := execCtx.PublishParseError(ParseErrorTypeFormat, "invalid content", assert.AnError)
+	event := execCtx.PublishParseError(ParseErrorTypeToolchain, "invalid content", assert.AnError)
 
 	assert.Equal(t, EventNameParseError, event.EventName)
-	assert.Equal(t, ParseErrorTypeFormat, event.ErrorType)
+	assert.Equal(t, ParseErrorTypeToolchain, event.ErrorType)
 	assert.Equal(t, "invalid content", event.RawContent)
 	assert.Equal(t, assert.AnError, event.Error)
-}
-
-func TestPublishValidatorCalled_SetsCorrectEventName(t *testing.T) {
-	execCtx := NewExecutionContext(context.Background(), "test", nil)
-
-	event := execCtx.PublishValidatorCalled("my_validator", "answer text")
-
-	assert.Equal(t, EventNameValidatorCalled, event.EventName)
-	assert.Equal(t, "my_validator", event.ValidatorName)
-	assert.Equal(t, "answer text", event.Answer)
-}
-
-func TestPublishValidatorResult_SetsCorrectEventName(t *testing.T) {
-	execCtx := NewExecutionContext(context.Background(), "test", nil)
-	feedback := []FormattedSection{{Name: "error", Content: "too short"}}
-
-	event := execCtx.PublishValidatorResult("my_validator", "answer", false, feedback)
-
-	assert.Equal(t, EventNameValidatorResult, event.EventName)
-	assert.Equal(t, "my_validator", event.ValidatorName)
-	assert.Equal(t, "answer", event.Answer)
-	assert.False(t, event.Accepted)
-	assert.Equal(t, feedback, event.Feedback)
 }
 
 func TestPublishError_SetsCorrectEventName(t *testing.T) {
@@ -353,7 +329,7 @@ func TestEvents_HidesMutableEventUntilDispatchCompletes(t *testing.T) {
 
 	go func() {
 		published <- execCtx.PublishBeforeModelCall("gpt", ModelCallRequest{
-			Messages: []ModelMessage{
+			Messages: []*ModelMessage{
 				TextParts(ChatMessageTypeHuman, "original"),
 			},
 		})
@@ -1349,17 +1325,17 @@ func TestGauge_DoesNotPropagateToParent(t *testing.T) {
 	child := parent.SpawnChild("child", nil)
 
 	child.Stats().IncrGauge(
-		SGFormatParseErrorConsecutive, 3,
+		SGToolchainParseErrorConsecutive, 3,
 	)
 
 	assert.Equal(t, float64(3),
 		child.Stats().GetGauge(
-			SGFormatParseErrorConsecutive,
+			SGToolchainParseErrorConsecutive,
 		),
 		"child gauge should be 3")
 	assert.Equal(t, float64(0),
 		parent.Stats().GetGauge(
-			SGFormatParseErrorConsecutive,
+			SGToolchainParseErrorConsecutive,
 		),
 		"parent gauge should remain 0")
 }
@@ -1406,18 +1382,18 @@ func TestLimit_GaugeKeyWorksCorrectly(t *testing.T) {
 	ctx.SetLimits([]Limit{
 		{
 			Type:     LimitExactKey,
-			Key:      SGFormatParseErrorConsecutive,
+			Key:      SGToolchainParseErrorConsecutive,
 			MaxValue: 3,
 		},
 	})
 
-	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
-	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
-	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
+	ctx.Stats().IncrGauge(SGToolchainParseErrorConsecutive, 1)
+	ctx.Stats().IncrGauge(SGToolchainParseErrorConsecutive, 1)
+	ctx.Stats().IncrGauge(SGToolchainParseErrorConsecutive, 1)
 	assert.Nil(t, ctx.ExceededLimit(),
 		"gauge at 3 should not exceed MaxValue 3")
 
-	ctx.Stats().IncrGauge(SGFormatParseErrorConsecutive, 1)
+	ctx.Stats().IncrGauge(SGToolchainParseErrorConsecutive, 1)
 	assert.NotNil(t, ctx.ExceededLimit(),
 		"gauge at 4 should exceed MaxValue 3")
 }

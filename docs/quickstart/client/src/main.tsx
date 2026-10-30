@@ -1,7 +1,28 @@
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useRun } from "./useRun";
+import { type ContentPart } from "./state";
 import "./style.css";
+
+function Content({ parts }: { parts: ContentPart[] }) {
+  if (!parts.length) return <p>(empty answer)</p>;
+  return parts.map((part, index) => {
+    if ("Text" in part) return <span key={index} style={{ whiteSpace: "pre-wrap" }}>{part.Text}</span>;
+    if ("MIMEType" in part) {
+      const data = `data:${part.MIMEType};base64,${part.Data}`;
+      if (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(part.MIMEType)) {
+        return <img key={index} src={data} alt={`Generated image ${index + 1}`} />;
+      }
+      if (part.MIMEType === "application/pdf") {
+        return <a key={index} href={data} download="output.pdf">Download PDF</a>;
+      }
+      return <p key={index}>File: {part.MIMEType}</p>;
+    }
+    // Remote URLs are shown as text. Rendering a preview must not cause an automatic download.
+    if ("URL" in part) return <p key={index}>{part.URL}</p>;
+    return <p key={index}>(unsupported content part)</p>;
+  });
+}
 
 function App() {
   const [runId, setRunId] = useState(new URLSearchParams(location.search).get("run") ?? "");
@@ -69,11 +90,10 @@ function App() {
               <section key={`${preview.id}/${preview.attemptId}`} aria-label="Model preview">
                 <h2>Preview · {preview.status}</h2>
                 {parts.map((part, index) => (
-                  <p key={index}>
+                  <div key={index}>
                     <small>{part.type}</small>
-                    <br />
-                    {part.text}
-                  </p>
+                    <Content parts={part.content} />
+                  </div>
                 ))}
               </section>
             );
@@ -81,7 +101,7 @@ function App() {
           {state.answers.map((answer) => (
             <section key={answer.contextId} aria-label="Accepted answer">
               <h2>Accepted answer</h2>
-              <p>{answer.text || "(empty answer)"}</p>
+              <div className="answer-content"><Content parts={answer.content} /></div>
             </section>
           ))}
         </>

@@ -56,7 +56,7 @@ try {
     await expect(page.locator("#contract-detail h2")).toHaveText("Model");
   });
   await check("all interface declarations and empty search", async () => {
-    await expect(page.locator("#contract-list button")).toHaveCount(21);
+    await expect(page.locator("#contract-list button")).toHaveCount(18);
     // Check every displayed declaration against Go source so a missed rebuild fails this test.
     const names = await page.locator("#contract-list [data-contract]").evaluateAll((elements) =>
       elements.map((element) => element.dataset.contract),
@@ -269,7 +269,7 @@ Then call: get_policy({"policy_id":"return-window"})`);
     }
     await page.getByRole("button", { name: "Check answers", exact: true }).click();
     await expect(page.locator("#quiz-result")).toHaveText("5 / 5 — You have the complete path.");
-    await page.getByLabel("A new AgentLoop implementation", { exact: true }).check();
+    await page.getByLabel("A new Loop implementation", { exact: true }).check();
     await page.getByRole("button", { name: "Check answers", exact: true }).click();
     await expect(page.locator("#quiz-result")).toHaveText(
       "4 / 5 — Read the feedback and try again.",

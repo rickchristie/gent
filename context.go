@@ -39,7 +39,7 @@ type EventPublisher interface {
 //	    return &ToolResult[Output]{Text: result}, err
 //	}
 //
-// # Usage in Custom AgentLoop
+// # Usage in Custom Loop
 //
 // Read the owned Task and Scratchpad to build a request. Use GenerateContentStream on this
 // context to capture effective requests, chunks, responses, and usage before continuing.
@@ -124,6 +124,8 @@ type ExecutionContext struct {
 	// Termination
 	terminationReason TerminationReason
 	finalResult       []ContentPart
+	acceptedValue     *EncodedValue
+	refusal           *ModelRefusal
 	err               error
 
 	// Event publisher for dispatching events to subscribers (set by Executor)
@@ -337,7 +339,17 @@ func (ctx *ExecutionContext) ExceededLimit() *Limit {
 func (ctx *ExecutionContext) Result() *ExecutionResult {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
-	return ctx.result
+	if ctx.result == nil {
+		return nil
+	}
+	copy := *ctx.result
+	copy.Output = CloneContentParts(ctx.result.Output)
+	copy.Refusal = cloneRefusal(ctx.result.Refusal)
+	if ctx.result.ExceededLimit != nil {
+		limit := *ctx.result.ExceededLimit
+		copy.ExceededLimit = &limit
+	}
+	return &copy
 }
 
 // -----------------------------------------------------------------------------
@@ -633,7 +645,7 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 	if publisher != nil && !ctx.isRetryingTool(event) {
 		observed := event
 		switch event.(type) {
-		case *BeforeSystemPromptEvent, *BeforeModelCallEvent, *BeforeToolCallEvent:
+		case *BeforeModelCallEvent, *BeforeToolCallEvent:
 			// Request hooks intentionally modify the effective input before it is captured.
 		default:
 			var err error
@@ -741,8 +753,6 @@ func eventBase(event Event) *BaseEvent {
 		return &e.BaseEvent
 	case *AfterIterationEvent:
 		return &e.BaseEvent
-	case *BeforeSystemPromptEvent:
-		return &e.BaseEvent
 	case *BeforeModelCallEvent:
 		return &e.BaseEvent
 	case *AfterModelCallEvent:
@@ -753,9 +763,7 @@ func eventBase(event Event) *BaseEvent {
 		return &e.BaseEvent
 	case *ParseErrorEvent:
 		return &e.BaseEvent
-	case *ValidatorCalledEvent:
-		return &e.BaseEvent
-	case *ValidatorResultEvent:
+	case *OutputValidationEvent:
 		return &e.BaseEvent
 	case *ErrorEvent:
 		return &e.BaseEvent
@@ -888,13 +896,6 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 
 	case *ParseErrorEvent:
 		switch e.ErrorType {
-		case ParseErrorTypeFormat:
-			ctx.stats.incrCounterDirect(
-				SCFormatParseErrorTotal, 1,
-			)
-			ctx.stats.incrGaugeInternal(
-				SGFormatParseErrorConsecutive, 1,
-			)
 		case ParseErrorTypeToolchain:
 			ctx.stats.incrCounterDirect(
 				SCToolchainParseErrorTotal, 1,
@@ -902,35 +903,10 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 			ctx.stats.incrGaugeInternal(
 				SGToolchainParseErrorConsecutive, 1,
 			)
-		case ParseErrorTypeTermination:
-			ctx.stats.incrCounterDirect(
-				SCTerminationParseErrorTotal, 1,
-			)
-			ctx.stats.incrGaugeInternal(
-				SGTerminationParseErrorConsecutive, 1,
-			)
-		case ParseErrorTypeSection:
-			ctx.stats.incrCounterDirect(
-				SCSectionParseErrorTotal, 1,
-			)
-			ctx.stats.incrGaugeInternal(
-				SGSectionParseErrorConsecutive, 1,
-			)
 		}
 
-	case *ValidatorResultEvent:
-		if !e.Accepted {
-			ctx.stats.incrCounterDirect(
-				SCAnswerRejectedTotal, 1,
-			)
-			if e.ValidatorName != "" {
-				ctx.stats.incrCounterDirect(
-					SCAnswerRejectedBy+StatKey(e.ValidatorName),
-					1,
-				)
-			}
-		}
-
+	case *OutputValidationEvent:
+		ctx.updateOutputStats(e)
 	case *CompactionEvent:
 		ctx.stats.incrCounterDirect(SCCompactions, 1)
 	}
@@ -1103,6 +1079,7 @@ func (ctx *ExecutionContext) PublishAfterExecution(
 		TerminationReason: reason,
 		Error:             err,
 		Output:            ctx.FinalResult(),
+		Refusal:           ctx.Refusal(),
 		Duration:          ctx.Duration(),
 	}
 	ctx.publish(event)
@@ -1132,19 +1109,6 @@ func (ctx *ExecutionContext) PublishAfterIteration(
 	}
 	if len(iterationErrors) > 0 {
 		event.Error = iterationErrors[0]
-	}
-	ctx.publish(event)
-	return event
-}
-
-// PublishBeforeSystemPrompt publishes a BeforeSystemPromptEvent.
-// Returns the event so callers can use the (potentially modified) Sections field.
-func (ctx *ExecutionContext) PublishBeforeSystemPrompt(
-	sections []FormattedSection,
-) *BeforeSystemPromptEvent {
-	event := &BeforeSystemPromptEvent{
-		BaseEvent: BaseEvent{EventName: EventNameSystemPromptBefore},
-		Sections:  sections,
 	}
 	ctx.publish(event)
 	return event
@@ -1321,39 +1285,6 @@ func (ctx *ExecutionContext) PublishParseError(
 		ErrorType:  errorType,
 		RawContent: rawContent,
 		Error:      err,
-	}
-	ctx.publish(event)
-	return event
-}
-
-// PublishValidatorCalled publishes a ValidatorCalledEvent.
-func (ctx *ExecutionContext) PublishValidatorCalled(
-	validatorName string,
-	answer any,
-) *ValidatorCalledEvent {
-	event := &ValidatorCalledEvent{
-		BaseEvent:     BaseEvent{EventName: EventNameValidatorCalled},
-		ValidatorName: validatorName,
-		Answer:        answer,
-	}
-	ctx.publish(event)
-	return event
-}
-
-// PublishValidatorResult publishes a ValidatorResultEvent.
-// Stats updated: AnswerRejectedTotal, AnswerRejectedBy (when rejected).
-func (ctx *ExecutionContext) PublishValidatorResult(
-	validatorName string,
-	answer any,
-	accepted bool,
-	feedback []FormattedSection,
-) *ValidatorResultEvent {
-	event := &ValidatorResultEvent{
-		BaseEvent:     BaseEvent{EventName: EventNameValidatorResult},
-		ValidatorName: validatorName,
-		Answer:        answer,
-		Accepted:      accepted,
-		Feedback:      feedback,
 	}
 	ctx.publish(event)
 	return event
@@ -1579,24 +1510,38 @@ func (ctx *ExecutionContext) Depth() int {
 // This also populates the Result() field with an ExecutionResult containing
 // all termination information.
 func (ctx *ExecutionContext) SetTermination(
-	reason TerminationReason,
-	result []ContentPart,
-	err error,
+	reason TerminationReason, result []ContentPart, err error,
+) {
+	ctx.setTermination(reason, result, nil, err)
+}
+
+// SetRefusal records a native refusal outcome without accepting content. The executor commits
+// this outcome before returning it, just as it commits a successful typed result.
+func (ctx *ExecutionContext) SetRefusal(refusal *ModelRefusal) {
+	ctx.setTermination(TerminationRefused, nil, refusal, nil)
+}
+
+func (ctx *ExecutionContext) setTermination(
+	reason TerminationReason, result []ContentPart, refusal *ModelRefusal, err error,
 ) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 	ctx.terminationReason = reason
-	ctx.finalResult = result
+	if reason != TerminationSuccess {
+		ctx.acceptedValue = nil
+	}
+	ctx.finalResult = CloneContentParts(result)
+	ctx.refusal = cloneRefusal(refusal)
 	ctx.err = err
 	ctx.endTime = time.Now()
+	ctx.result = &ExecutionResult{TerminationReason: reason, Output: ctx.finalResult,
+		Refusal: ctx.refusal, Error: err, ExceededLimit: ctx.exceededLimit}
+}
 
-	// Populate the result for easy access via Result()
-	ctx.result = &ExecutionResult{
-		TerminationReason: reason,
-		Output:            result,
-		Error:             err,
-		ExceededLimit:     ctx.exceededLimit,
-	}
+func (ctx *ExecutionContext) Refusal() *ModelRefusal {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return cloneRefusal(ctx.refusal)
 }
 
 // TerminationReason returns why execution terminated.
@@ -1610,7 +1555,7 @@ func (ctx *ExecutionContext) TerminationReason() TerminationReason {
 func (ctx *ExecutionContext) FinalResult() []ContentPart {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
-	return ctx.finalResult
+	return CloneContentParts(ctx.finalResult)
 }
 
 // Error returns the error (if terminated with error).
@@ -1722,7 +1667,7 @@ func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) error {
 }
 
 func (ctx *ExecutionContext) emitChunk(chunk *StreamChunk) error {
-	if chunk.Content != "" || chunk.MessageId != "" || len(chunk.SourceMessageIds) != 0 {
+	if len(chunk.Content) > 0 || chunk.MessageId != "" || len(chunk.SourceMessageIds) != 0 {
 		return fmt.Errorf("gent: Content is reserved for terminal publication; emit MetaContent")
 	}
 	if chunk.Timestamp.IsZero() {

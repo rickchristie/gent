@@ -89,9 +89,13 @@ func (m *demoModel) GenerateContentStream(
 	context.Context,
 	gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	choice := &gent.ContentChoice{CandidateContent: "P10 permits the refund."}
+	choice := &gent.ContentChoice{
+		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+		CandidateContent: []gent.ContentPart{gent.TextContent{Text: "P10 permits the refund."}},
+	}
 	if !m.answer {
-		choice.CandidateContent = ""
+		choice.CandidateContent = nil
+		choice.Completion.Status = gent.ModelStatusToolCalls
 		choice.ToolCalls = []gent.ModelToolCall{{ID: "read-policy", Type: "function",
 			FunctionCall: &gent.FunctionCall{Name: "read_policy", Arguments: `{"id":"P10"}`}}}
 	}
@@ -102,7 +106,7 @@ func (m *demoModel) GenerateContentStream(
 	}, nil), nil
 }
 
-func newAgent(answer bool, calls *int) *react.Agent {
+func newAgent(answer bool, calls *int) *react.Agent[string] {
 	// This tool is a pure read, so an explicit retry is safe. Writing tools must consult
 	// durable receipts and reconcile effects, or let the model receive unknown-outcome guidance.
 	return react.NewAgent(&demoModel{answer: answer}).WithRecoveryVersion("history-example/v1").
@@ -144,9 +148,11 @@ func demonstrate(out io.Writer, stop gent.ExecutionPhase) error {
 	toolCalls := 0
 	agent := newAgent(false, &toolCalls)
 	ctx := gent.NewExecutionContext(worker, "refund", gent.NewBasicLoopData(
-		&gent.Task{Text: "May I receive a refund under policy P10?"}), gent.WithRunId(string(stop)),
+		gent.NewTask(gent.TextContent{
+			Text: "May I receive a refund under policy P10?",
+		})), gent.WithRunId(string(stop)),
 		gent.WithRecorder(firstWriter), gent.WithObserver(seq), gent.WithCodecs(store.codecs))
-	_, err = executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+	_, _, err = executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 	if !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("expected worker interruption, received %v", err)
 	}
@@ -170,7 +176,7 @@ func demonstrate(out io.Writer, stop gent.ExecutionPhase) error {
 	}
 	bindings.Recorder = newWriter
 	bindings.Observers = []gent.RecordedEventObserver{restoredSeq}
-	if _, err := freshExecutor.Resume(context.Background(), bundle, bindings); err != nil {
+	if _, _, err := freshExecutor.Resume(context.Background(), bundle, bindings); err != nil {
 		return err
 	}
 	terminal, err := store.load() // Finds the lost completion even if no later update arrives.
@@ -185,7 +191,7 @@ func demonstrate(out io.Writer, stop gent.ExecutionPhase) error {
 	if err != nil {
 		return err
 	}
-	result, err := freshExecutor.Continue(finished)
+	_, result, err := freshExecutor.Continue(finished)
 	if err != nil {
 		return err
 	}

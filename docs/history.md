@@ -45,7 +45,7 @@ ctx := gent.NewExecutionContext(worker, "refund", gent.NewBasicLoopData(task),
     gent.WithRecorder(recorder), gent.WithObserver(seq))
 agent := react.NewAgent(model).WithRecoveryVersion("refund-agent/v1")
 exec := executor.NewRunner(agent, executor.DefaultConfig())
-result, err := exec.Execute(ctx)
+answer, result, err := exec.Execute(ctx)
 ```
 
 Handle the returned error even if `result` is nil. A persistence failure may prevent a terminal
@@ -115,6 +115,26 @@ JSON decoding cannot restore concrete message parts or values hidden in metadata
 The same helpers encode/decode a complete `RunView`. `EncodedValue` keeps its tagged payload intact
 instead of recursively expanding already encoded JSON bytes.
 
+Ordinary byte buffers use one versioned base64 value. This avoids a separate type envelope for
+each byte in an image or PDF. Nil and empty buffers remain distinct. Named byte slices retain
+their declared type, and an explicitly registered value codec takes precedence. Decoding creates
+owned bytes; changing one restored image cannot change another restore or the saved record.
+
+Configure size limits before sharing a registry:
+
+```go
+codecs := gent.NewCodecRegistry(gent.WithCodecLimits(gent.CodecLimits{
+    MaxEncodedBytes: 64 << 20,
+    MaxBinaryBytes:  16 << 20,
+}))
+```
+
+Zero leaves a limit unset. The encoded limit bounds public record serialization and input before
+decoding. The binary limit applies to each ordinary byte buffer and is checked before allocating
+its decoded bytes. Custom codecs must bound allocations for their own application representations.
+Base64 still adds about one third to the byte size. This codec does not compress images, replace
+durable storage, or remove the ownership copies needed at public boundaries.
+
 `gent.ApplyBatch(view, batch, codecs)` reconstructs this transaction's materialized view. The codec
 argument may be omitted for built-in types. It checks numbering,
 run identity, revisions, entry references, and checkpoint consistency. It does not execute hooks,
@@ -168,7 +188,7 @@ configuring the agent and reuses those values for compatibility and requests.
 Adapters emit chunks through the returned stream; they must not publish duplicate Gent events. The
 managed boundary accepts chunks before delivering them live and records the final response, partial
 output, usage, and error. `Stream.Close` requests cancellation. `Response` waits until the producer
-finishes. The built-in LangChainGo adapter uses a bounded queue and cancellation-aware backpressure;
+finishes. Native adapters use bounded queues and cancellation-aware backpressure;
 custom adapters can use `NewBoundedStreamWithDuration` too. Its producer must run in a goroutine and
 call `Complete` after it actually stops, even on cancellation.
 
@@ -185,7 +205,7 @@ terminal restore returns the saved result without publishing a new answer. Dedup
 and event number. Use `CodecRegistry.DecodeEvent` for saved chunks; it supplies the envelope's
 cursor.
 See the [frontend contract](native-tools.md#frontend-and-storage-contract) for preview replacement,
-message IDs, trace limits, and provider completion states. The saved-run schema version is now 5.
+message IDs, trace limits, and provider completion states. The saved-run schema version is now 6.
 
 Only model, tool, and system-prompt before-hooks mutate effective input. Other lifecycle observers
 receive copies. The low-level typed `Publish...` helpers queue evidence and return event values;
@@ -231,7 +251,7 @@ seq, err := trace.RestoreSequencer(saved, trace.Config{Codecs: codecs})
 if err != nil {
     return err
 }
-result, err := freshExecutor.Resume(worker, saved, gent.RestoreBindings{
+answer, result, err := freshExecutor.Resume(worker, saved, gent.RestoreBindings{
     Recorder: replacementWriter,
     Observers: []gent.RecordedEventObserver{seq},
     Codecs: codecs,
@@ -297,16 +317,16 @@ an empty summary, so it cannot change when the callback or application state cha
 ### Compatibility and custom state
 
 Set ReAct's `WithRecoveryVersion` to identify application behavior: hooks, prompts, clocks, tool
-implementations and recovery handlers, validators, custom sections, and private provider defaults. Change it when their
-meaning changes. Built-in configuration hashes also include prompt/format/tool declarations, model
-identity/options, repetition settings, and compaction configuration.
-`LCGWrapper.WithRecoveryVersion` can identify configuration hidden inside its injected client.
-Credentials are always rebound.
+implementations and recovery handlers, output validation, and private provider defaults. Change the
+version when their meaning changes. Built-in configuration hashes include prompt/format/tool
+declarations, model identity/options, repetition settings, and compaction configuration.
+Native adapters identify their protocol, provider, endpoint, and model in recovery configuration.
+Credentials and HTTP clients are always rebound.
 
-Ordinary execution accepts custom clocks and prompt builders without a recovery version. The saved
-configuration is then marked unsupported for recovery. A nonterminal restore requires the version
-to have been set on the original agent. `WithClock` uses the standard prompt time formats;
-`WithTimeProvider` also supports custom formats.
+The starting prompt is caller-authored Task messages. Saved task text and attachments stay fixed.
+A request hook can add dynamic context without changing the saved task. Identify callback behavior
+with the agent recovery version, and save any required state through the checkpoint contract.
+Output configuration, result type, and codec version are also checked before terminal restore.
 
 Custom loops need an executor `RecoveryVersion` and `CheckpointState`. Stateful custom data,
 triggers, strategies, and other components implement that same explicit type/version/save/restore
@@ -344,7 +364,9 @@ the input selection, decision identity, model-call references, and error, then a
 with trigger state and checkpoint. Removal-only and failed compactions remain recorded.
 Summarization accepts only a completed, non-blank candidate. A metadata-only, incomplete, or
 tool-call response returns an error and leaves the active selection intact. This prevents an
-empty or partial summary from replacing usable working context.
+empty or partial summary from replacing usable working context. Custom models pass the same
+completion checks: an answer status with tool calls, inconsistent refusal data, or an unknown
+status cannot become a summary. The candidate's status label alone does not establish validity.
 
 `SavedError` preserves text, causes, standard Gent/context classifications, and `CodedError`
 application codes for `errors.Is`. It does not recreate arbitrary private error implementations. Use

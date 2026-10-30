@@ -31,22 +31,28 @@ type Schema struct {
 	compiled *jsonschema.Schema
 }
 
-// Raw returns the underlying map[string]any representation.
-// This is useful for serialization and passing to LLMs.
+// Raw returns an owned JSON representation. A request hook cannot change the compiled contract
+// or the schema used by a concurrent run through this map.
 func (s *Schema) Raw() map[string]any {
 	if s == nil {
 		return nil
 	}
-	return s.raw
+	return copySchemaValue(s.raw).(map[string]any)
 }
 
 // Validate validates the given data against the schema.
 // Returns nil if valid, or an error describing the validation failure.
-func (s *Schema) Validate(data map[string]any) error {
+func (s *Schema) Validate(data any) error {
 	if s == nil || s.compiled == nil {
 		return nil
 	}
-	if data == nil {
+	if object, ok := data.(map[string]any); ok && object == nil {
+		data = nil
+	}
+	if array, ok := data.([]any); ok && array == nil {
+		data = nil
+	}
+	if data == nil && s.raw["type"] == "object" {
 		return &ValidationError{
 			Err: fmt.Errorf(
 				"args is null or missing, expected object"+
@@ -413,9 +419,30 @@ func Compile(raw map[string]any) (*Schema, error) {
 	}
 
 	return &Schema{
-		raw:      raw,
+		raw:      schemaData.(map[string]any),
 		compiled: compiled,
 	}, nil
+}
+
+// Compiled schemas contain only JSON maps, arrays, and immutable scalar values. Copy those
+// containers without another encode/decode pass each time a model request needs a schema.
+func copySchemaValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(value))
+		for name, item := range value {
+			result[name] = copySchemaValue(item)
+		}
+		return result
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = copySchemaValue(item)
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 // MustCompile is like Compile but panics on error.
@@ -469,6 +496,7 @@ func Object(properties map[string]*Property, required ...string) map[string]any 
 
 // Property represents a property in an object schema.
 type Property struct {
+	nullable    bool
 	typ         string
 	description string
 	enum        []any
@@ -483,6 +511,19 @@ type Property struct {
 	required    []string
 	def         any // default value
 }
+
+// Schema returns a root value schema from the same builder used for object properties.
+func (p *Property) Schema() map[string]any { return p.build() }
+
+// Nullable permits JSON null. It does not make an object field optional.
+func (p *Property) Nullable() *Property {
+	p.nullable = true
+	return p
+}
+
+// Nullable permits null alongside a complete schema, including an object or array root.
+// Compile takes ownership; the builder remains a setup value owned by the caller.
+func Nullable(raw map[string]any) map[string]any { return nullable(raw) }
 
 func (p *Property) build() map[string]any {
 	m := map[string]any{}
@@ -525,6 +566,9 @@ func (p *Property) build() map[string]any {
 	}
 	if p.def != nil {
 		m["default"] = p.def
+	}
+	if p.nullable {
+		return nullable(m)
 	}
 
 	return m

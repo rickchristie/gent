@@ -109,6 +109,9 @@ func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, er
 		)
 	}
 	switch value.Type {
+	case "bytes":
+		data, err := r.decodeBytes(value.Data)
+		return reflect.ValueOf(data), err
 	case "encoded-value":
 		var saved EncodedValue
 		err := json.Unmarshal(value.Data, &saved)

@@ -12,11 +12,12 @@ own their agent behavior in Go.
 Gent is built around a few design choices.
 
 - Library first. Your application owns the process, storage, models, tools, and deployment.
-- Custom loops are normal. ReAct is included, but `Loop` is the core abstraction.
+- Custom loops are normal. ReAct is included, but `Loop[T]` is the core abstraction.
 - Tools stay typed. Tools receive typed Go input and return typed Go output.
+- Use native APIs when they provide the requested behavior. Local output validation always runs.
 - Tools use native API calls. A single contract covers direct tools, search, and JavaScript.
 - Code stays simple. Remove unused code and interfaces instead of keeping compatibility paths.
-- Limits are first-class. Iterations, tokens, tool calls, parse errors, and validators are tracked.
+- Limits are first-class. Iterations, tokens, tool calls, tool errors, and output rejections are tracked.
 - Streaming is always on. Model chunks can be observed in real time.
 - Retrieval is local-friendly. Optional ONNX embedding support runs on CPU.
 - Observability is built in. Execution contexts publish lifecycle, model, tool, limit, and diff
@@ -61,7 +62,7 @@ import (
     "github.com/rickchristie/gent/executor"
     "github.com/rickchristie/gent/models"
     "github.com/rickchristie/gent/schema"
-    "github.com/rickchristie/gent/termination"
+    "github.com/rickchristie/gent/output"
     "github.com/rickchristie/gent/toolchain"
 )
 
@@ -88,15 +89,17 @@ func runAgent(ctx context.Context, apiKey, modelName string) error {
     }
 
     tc := toolchain.New().RegisterTool(lookupOrder)
-    term := termination.NewText("answer").
-        WithGuidance("Write a concise answer for the user.")
-
-    agent := react.NewAgent(model).
-        WithBehaviorAndContext("You are a careful customer support agent.").
-        WithToolChain(tc).
-        WithTermination(term)
-
-    data := gent.NewBasicLoopData(&gent.Task{Text: "Where is order ORD-123?"})
+    out, err := output.NewJsonOutput[OrderStatus]()
+    if err != nil {
+        return err
+    }
+    agent := react.NewWithOutput(model, out).WithToolChain(tc)
+    task := &gent.Task{Messages: []*gent.ModelMessage{
+        gent.TextParts(gent.ChatMessageTypeSystem,
+            "You are a careful customer support agent. " + out.Instructions()),
+        gent.TextParts(gent.ChatMessageTypeHuman, "Where is order ORD-123?"),
+    }}
+    data := gent.NewBasicLoopData(task)
     execCtx := gent.NewExecutionContext(ctx, "support", data)
     execCtx.SetLimits([]gent.Limit{
         {Type: gent.LimitExactKey, Key: gent.SCIterations.Self(), MaxValue: 8},
@@ -104,33 +107,29 @@ func runAgent(ctx context.Context, apiKey, modelName string) error {
         {Type: gent.LimitExactKey, Key: gent.SCOutputTokens, MaxValue: 20000},
     })
 
-    exec := executor.NewRunner(agent, executor.DefaultConfig())
-    if _, err := exec.Execute(execCtx); err != nil {
+    runner := executor.NewRunner(agent, executor.DefaultConfig())
+    order, result, err := runner.Execute(execCtx)
+    if err != nil {
         return err
     }
-    if execCtx.TerminationReason() != gent.TerminationSuccess {
-        return fmt.Errorf("agent ended with %s", execCtx.TerminationReason())
+    if result.TerminationReason != gent.TerminationSuccess {
+        return fmt.Errorf("agent ended with %s", result.TerminationReason)
     }
-
-    for _, part := range execCtx.FinalResult() {
-        if text, ok := part.(gent.TextContent); ok {
-            fmt.Println(text.Text)
-        }
-    }
+    fmt.Println(order.ID, order.Status)
     return nil
 }
 ```
 
-`NewAgent` sends native tool schemas and reads structured calls. It preserves typed validation,
-limits, history, recovery, and local execution. `models.NewGrok` uses the same Responses contract.
-`models.NewLCGWrapper` remains available where the SDK can preserve the required provider data.
-See [native calls, search, JavaScript, and recovery](docs/native-tools.md).
+`NewWithOutput` infers `OrderStatus` as the result type. `NewAgent` uses `TextOutput` and returns
+`string`. The caller writes the complete system and user messages. Include `Instructions()` when
+useful; Gent does not append it. See [output and prompt ownership](docs/output.md),
+[provider adapters](docs/models.md), and [native calls and recovery](docs/native-tools.md).
 
 ## Main Concepts
 
 ### Executor
 
-`executor.Runner` owns the lifecycle:
+`executor.Runner[T]` owns the lifecycle:
 
 ```text
 BeforeExecution -> [BeforeIteration -> Loop.Next -> AfterIteration]* -> AfterExecution
@@ -141,19 +140,21 @@ error occurs.
 
 ### Loop
 
-`gent.Loop` is the core interface:
+`gent.Loop[T]` is the core interface:
 
 ```go
-type Loop interface {
+type Loop[T any] interface {
     Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, error)
+    Output() gent.Output[T]
 }
 ```
 
-Use `agents/react` when a ReAct loop fits. Implement `Loop` yourself when you want a planner,
+Use `agents/react` when a ReAct loop fits. Implement `Loop[T]` yourself when you want a planner,
 router, graph, multi-agent coordinator, deterministic workflow, or a domain-specific loop.
 
-Use `executor.NewRunner(loop, config)` without a type argument. The existing `AgentLoop[Data]`,
-`Executor[Data]`, and `executor.New[Data]` APIs remain supported for source compatibility.
+Use `executor.NewRunner(loop, config)`; Go infers `T` from the loop. `Execute` and `Resume` return
+`(T, *gent.ExecutionResult, error)`. Check the terminal reason before using the value: refusal,
+cancellation, and a run limit do not return an accepted value.
 
 ### LoopData
 
@@ -241,22 +242,30 @@ calls, hooks, typed inputs, and recovery. Each tool's `Recover` method returns a
 steering, and the recovered output when complete. The builder's default is unresolved. Gent saves
 that decision before using it; saved results always take precedence.
 
-### Termination
+### Output
 
-Termination decides when the model has produced a final answer:
+`Output[T]` configures native generation and processes a complete candidate. The four built-ins
+are `TextOutput`, `ImageOutput`, `JsonOutput[T]`, and `SchemaOutput[T]`.
 
 ```go
-term := termination.NewText("answer").
-    WithGuidance("Write the final answer here.")
+out, err := output.NewJsonOutput[*OrderStatus](
+    schema.Field("status").Enum("pending", "shipped", "delivered"),
+)
+if err != nil {
+    return err
+}
+agent := react.NewWithOutput(model, out)
 ```
 
-Use `termination.NewJSON[T]` when the final answer must be typed JSON, and attach validators when
-answers need business approval before acceptance.
+Local checks always run, followed by an optional typed custom validator. Rejection returns explicit
+steering and retains the candidate in history. Correction uses normal run limits. Native refusal
+ends the run separately. A successful checkpoint saves the typed value and delivery content before
+publishing accepted output. See [Output](docs/output.md) for validators, images, and custom processors.
 
 ### Limits And Stats
 
 Limits are configured on `ExecutionContext`, not the executor. They can cap iterations, token
-usage, tool calls, parse errors, tool errors, and validator rejections.
+usage, tool calls, tool argument errors, tool errors, and output rejections.
 
 ```go
 execCtx.SetLimits([]gent.Limit{
@@ -405,24 +414,20 @@ Start with the default ReAct stack, then replace only the layer you need.
 
 - Replace the model when you change providers or want a custom SDK integration.
 - Replace tool selection when you need search, custom visibility, or programmatic tool calling.
-- Replace termination when the final output should be plain text, typed JSON, or validator-gated.
-- Replace the system prompt builder when your domain needs a different prompt structure.
-- Replace `Loop` when ReAct is not the right control flow.
+- Select an `Output[T]` for text, images, typed JSON, or a custom contract.
+- Compose system instructions and user attachments in `Task.Messages`.
+- Replace `Loop[T]` when ReAct is not the required control flow.
 - Add limits before production traffic.
 - Subscribe to events for logging, metrics, tracing, and debugging.
 
 The smallest useful customization is usually a typed tool plus a few precise system instructions.
-The largest customization is a fully custom `Loop` that still reuses Gent's executor, context,
+The largest customization is a fully custom `Loop[T]` that still reuses Gent's executor, context,
 stats, limits, toolchains, and model wrappers.
 
-For a custom clock, supply one function. All existing prompt time helpers remain available:
-
-```go
-agent.WithClock(func() time.Time { return time.Now().In(userLocation) })
-```
-
-Use `WithTimeProvider` when you also need custom date or time formats. Ordinary execution does not
-require `WithRecoveryVersion`; set it before the original run when you need recovery.
+Compose time-dependent prompt text in the caller. `TimeProviderFunc` and `MockTimeProvider` can
+supply a custom or fixed clock to that code. Use a request hook for changing context.
+Gent does not expand prompt templates. Ordinary execution does not require `WithRecoveryVersion`;
+set it before the original run when callback or tool behavior needs a stable recovery identity.
 
 ## Production Notes
 
@@ -436,13 +441,13 @@ require `WithRecoveryVersion`; set it before the original run when you need reco
 
 ## Repository Map
 
-- `agent.go`: core `Loop`, `LoopData`, task, and iteration types.
+- `agent.go`: core `Loop[T]`, `LoopData`, task, and iteration types.
 - `context.go`: execution context, events, stats, limits, streams, and children.
 - `executor/`: executor lifecycle implementation.
 - `agents/react/`: default ReAct agent.
 - `toolchain/`: native registry, search, and JavaScript toolchains.
-- `termination/`: text and JSON answer termination.
-- `models/`: direct Responses adapters and the LangChainGo wrapper.
+- `output/`: text, image, and typed JSON output processing.
+- `models/`: ten native provider and local runtime adapters.
 - `search/`: ONNX embeddings, vector search, BM25, fusion, and chunking.
 - `cmd/gent/`: setup and model download CLI.
 

@@ -51,7 +51,9 @@ func TestHTTPStreaming(t *testing.T) {
 		return
 	}
 	assert.Equal(t, "no-store", response.Header.Get("Cache-Control"))
-	var snapshot BrowserState
+	var snapshot struct {
+		LastEventNumber string `json:"lastEventNumber"`
+	}
 	assert.NoError(t, json.NewDecoder(response.Body).Decode(&snapshot))
 	assert.NoError(t, response.Body.Close())
 	last, err := strconv.ParseUint(snapshot.LastEventNumber, 10, 64)
@@ -82,7 +84,7 @@ func TestHTTPStreaming(t *testing.T) {
 			assert.Equal(t, Answer{
 				ContextID: id + ":root", MessageID: id + ":root:answer",
 				SourceMessageIDs: []string{final.Previews[1].Parts[0].MessageId},
-				Text:             "Order order-1001 has shipped.",
+				Content:          []gent.ContentPart{gent.TextContent{Text: "Order order-1001 has shipped."}},
 			}, final.Answers[0])
 		}
 	}

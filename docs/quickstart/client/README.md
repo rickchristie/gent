@@ -50,3 +50,8 @@ that fixture; do not edit its event fields by hand.
 
 The repository browser check at `docs/quickstart/tests/gent-streaming.mjs` starts the real Go server and
 checks refresh, process restart, and recovery. It uses the production React build.
+
+The browser preserves each ordered content part. Text renders as escaped text; common image bytes
+render from their base64 JSON values; PDF bytes have a download link. Remote references remain text
+and do not cause an automatic fetch. Refusal is a terminal state with no accepted answer. The saved
+snapshot and live event reducer use the same content grouping, including empty accepted output.

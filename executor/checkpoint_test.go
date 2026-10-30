@@ -1,8 +1,11 @@
 package executor_test
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"fmt"
+	"github.com/rickchristie/gent/output"
 	"testing"
 
 	"github.com/rickchristie/gent"
@@ -20,7 +23,7 @@ type resumeLoop struct {
 func (loop *resumeLoop) ConfigureExecution(ctx *gent.ExecutionContext) error {
 	loop.configured++
 	loop.step = 0
-	loop.task = ctx.Data().GetTask().Text
+	loop.task = ctx.Data().GetTask().Messages[0].Parts[0].(gent.TextContent).Text
 	return nil
 }
 
@@ -31,8 +34,13 @@ func (loop *resumeLoop) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopResult,
 		return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 	}
 	text := fmt.Sprintf("%s:%d", loop.task, loop.step)
-	return &gent.AgentLoopResult{Action: gent.LATerminate,
-		Result: []gent.ContentPart{gent.TextContent{Text: text}}}, nil
+	return &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess, Action: gent.LATerminate,
+		Result: []gent.ContentPart{
+			gent.TextContent{Text: text},
+		},
+		Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+			gent.TextContent{Text: text},
+		}))}, nil
 }
 
 func (*resumeLoop) CheckpointType() string { return "test/resume-loop" }
@@ -96,8 +104,10 @@ func TestExecutorResume_ConfiguresBeforeRestoringState(t *testing.T) {
 			expected{1, 1, 2, result, nil}},
 		{"reject changed configuration", input{gent.PhaseIterationCompleted, "v2", false},
 			expected{1, 0, 0, nil, gent.ErrIncompatibleCheckpoint}},
-		{"reuse terminal result without configuration", input{gent.PhaseTerminal, "v2", false},
-			expected{0, 0, 0, result, nil}},
+		{"reuse terminal result after configuration check", input{gent.PhaseTerminal, "v1", false},
+			expected{1, 0, 0, result, nil}},
+		{"terminal rejects changed configuration", input{gent.PhaseTerminal, "v2", false},
+			expected{1, 0, 0, nil, gent.ErrIncompatibleCheckpoint}},
 		{"continue manually restored context", input{gent.PhaseIterationCompleted, "v1", true},
 			expected{1, 1, 2, result, nil}},
 		{"continue rejects changed executor", input{gent.PhaseIterationCompleted, "v2", true},
@@ -110,9 +120,9 @@ func TestExecutorResume_ConfiguresBeforeRestoringState(t *testing.T) {
 			store := &resumeRecorder{view: gent.RunView{SchemaVersion: gent.RunSchemaVersion,
 				RunId: "resume-test"}, stop: test.input.phase, cancel: cancel}
 			original := gent.NewExecutionContext(worker, "root",
-				gent.NewBasicLoopData(&gent.Task{Text: "original task"}),
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "original task"})),
 				gent.WithRunId("resume-test"), gent.WithRecorder(store))
-			_, err := executor.New[gent.LoopData](&resumeLoop{},
+			_, _, err := executor.NewRunner(&resumeLoop{},
 				executor.Config{RecoveryVersion: "v1"}).Execute(original)
 			if test.input.phase == gent.PhaseTerminal {
 				assert.NoError(t, err)
@@ -129,7 +139,7 @@ func TestExecutorResume_ConfiguresBeforeRestoringState(t *testing.T) {
 				return
 			}
 			fresh := &resumeLoop{}
-			exec := executor.New[gent.LoopData](fresh,
+			exec := executor.NewRunner(fresh,
 				executor.Config{RecoveryVersion: test.input.version})
 			var actual *gent.ExecutionResult
 			if test.input.manualRestore {
@@ -146,9 +156,9 @@ func TestExecutorResume_ConfiguresBeforeRestoringState(t *testing.T) {
 				if !assert.NoError(t, restoreErr) {
 					return
 				}
-				actual, err = exec.Continue(restored)
+				_, actual, err = exec.Continue(restored)
 			} else {
-				actual, err = exec.Resume(context.Background(), saved, gent.RestoreBindings{})
+				_, actual, err = exec.Resume(context.Background(), saved, gent.RestoreBindings{})
 			}
 			assert.ErrorIs(t, err, test.expected.err)
 			assert.Equal(t, test.expected.result, actual)
@@ -158,3 +168,5 @@ func TestExecutorResume_ConfiguresBeforeRestoringState(t *testing.T) {
 		})
 	}
 }
+
+func (*resumeLoop) Output() gent.Output[string] { return output.NewTextOutput() }

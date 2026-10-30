@@ -140,7 +140,7 @@ func TestNativeLive(t *testing.T) {
 			}
 			model := NewOpenAI(key, modelName)
 			if test.input.provider == "xai" {
-				model = NewGrok(key, modelName)
+				model = NewXAI(key, modelName)
 			}
 			var calls []string
 			program, err := liveToolChain(&calls, test.input.search)
@@ -160,7 +160,7 @@ Wait for that result before the next request. Then follow these instructions:
 			worker, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			ctx := gent.NewExecutionContext(worker, "live native",
-				gent.NewBasicLoopData(&gent.Task{Text: task}))
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: task})))
 			t.Cleanup(func() {
 				if !t.Failed() {
 					return
@@ -179,7 +179,7 @@ Wait for that result before the next request. Then follow these instructions:
 				}
 			})
 			ctx.SetLimits([]gent.Limit{{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 6}})
-			result, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Execute(ctx)
+			_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			if !assert.NoError(t, err) {
 				return
 			}

@@ -2,7 +2,6 @@ package trace
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/rickchristie/gent"
@@ -50,6 +49,12 @@ func (s *Sequencer) project(
 		if s.cfg.IncludeRunOutput {
 			result.Output = jsonSafeValue(s.cfg.redactor.RedactRunOutput(saved.Output))
 		}
+		if saved.Refusal != nil {
+			result.Refusal = &gent.ModelRefusal{Code: saved.Refusal.Code}
+			if s.cfg.IncludeRunOutput {
+				result.Refusal.Content = redactedContent(s.cfg.redactor, saved.Refusal.Content)
+			}
+		}
 		payload["terminationReason"], payload["result"] = saved.TerminationReason, result
 		payload["status"] = runStatus(saved.TerminationReason, event.Error)
 		payload["durationMs"] = saved.Duration.Milliseconds()
@@ -63,12 +68,6 @@ func (s *Sequencer) project(
 			if s.cfg.IncludeRunOutput && len(saved.Result.Result) > 0 {
 				payload["result"] = jsonSafeValue(s.cfg.redactor.RedactRunOutput(saved.Result.Result))
 			}
-		}
-	case *gent.BeforeSystemPromptEvent:
-		payload["sectionCount"] = len(saved.Sections)
-		payload["sectionNames"] = sectionNames(saved.Sections)
-		if s.cfg.IncludeSystemPrompt {
-			payload["sections"] = s.cfg.redactor.RedactSystemPrompt(saved.Sections)
 		}
 	case *gent.BeforeModelCallEvent:
 		event.StreamId, event.StreamTopicId = saved.StreamId, saved.StreamTopicId
@@ -101,11 +100,10 @@ func (s *Sequencer) project(
 	case *gent.ParseErrorEvent:
 		event.Error = redactError(s.cfg.redactor, saved.Error)
 		payload["errorType"] = saved.ErrorType
-	case *gent.ValidatorCalledEvent:
-		payload["validatorName"] = saved.ValidatorName
-	case *gent.ValidatorResultEvent:
-		payload["validatorName"], payload["accepted"] = saved.ValidatorName, saved.Accepted
-		payload["feedbackCount"] = len(saved.Feedback)
+	case *gent.OutputValidationEvent:
+		payload["name"], payload["stage"], payload["accepted"] = saved.Name, saved.Stage, saved.Accepted
+		payload["steeringCount"] = len(saved.Steering)
+		event.Error = redactError(s.cfg.redactor, saved.Error)
 	case *gent.ErrorEvent:
 		event.Error, event.Payload = redactError(s.cfg.redactor, saved.Error), nil
 	case *gent.LimitExceededEvent:
@@ -158,7 +156,7 @@ func (s *Sequencer) project(
 		payload["messageId"] = chunk.MessageId
 		payload["sourceMessageIds"] = append([]string(nil), chunk.SourceMessageIds...)
 		if s.cfg.IncludeChunkText {
-			payload["metaContent"] = jsonSafeValue(chunk.MetaContent)
+			payload["metaContent"] = gent.CloneMetaContent(chunk.MetaContent)
 		}
 		if s.cfg.IncludeRunOutput && recorded.Type == "execution_content" {
 			payload["content"] = chunk.Content
@@ -200,10 +198,11 @@ func (s *Sequencer) applyEvent(event *Event) {
 	case EventTypeParseError:
 		s.snapshot.Stats.ParseErrorCount++
 		s.appendError(event.Error)
-	case EventTypeValidatorResult:
+	case EventTypeOutputValidation:
 		payload, _ := event.Payload.(map[string]any)
-		if accepted, _ := payload["accepted"].(bool); !accepted {
-			s.snapshot.Stats.ValidatorRejectionCount++
+		if accepted, _ := payload["accepted"].(bool); !accepted && event.Error == nil &&
+			payload["stage"] == gent.OutputValidationProcess {
+			s.snapshot.Stats.OutputRejectionCount++
 		}
 	case EventTypeError:
 		s.snapshot.Stats.ErrorCount++
@@ -234,14 +233,6 @@ func modelUsage(response *gent.ContentResponse, inputTokens int, outputTokens in
 	return usage
 }
 
-func sectionNames(sections []gent.FormattedSection) []string {
-	result := make([]string, 0, len(sections))
-	for _, section := range sections {
-		result = append(result, section.Name)
-	}
-	return result
-}
-
 func intFromAny(value any) int {
 	switch v := value.(type) {
 	case int:
@@ -255,25 +246,16 @@ func intFromAny(value any) int {
 	}
 }
 
-// A run-output redactor may replace structured output with any value. Only text is suitable for
-// the final text channel; omit other forms instead of exposing the unredacted answer.
-func redactedContent(redactor Redactor, content string) string {
-	value := redactor.RedactRunOutput([]gent.ContentPart{gent.TextContent{Text: content}})
+// A redactor can replace output with a scalar or structured marker. Only explicit content parts
+// or text are delivered as content; other replacements omit the original to prevent disclosure.
+func redactedContent(redactor Redactor, content []gent.ContentPart) []gent.ContentPart {
+	value := redactor.RedactRunOutput(content)
 	switch output := value.(type) {
 	case string:
-		return output
+		return []gent.ContentPart{gent.TextContent{Text: output}}
 	case []gent.ContentPart:
-		var text strings.Builder
-		for _, part := range output {
-			switch part := part.(type) {
-			case gent.TextContent:
-				text.WriteString(part.Text)
-			case *gent.TextContent:
-				text.WriteString(part.Text)
-			}
-		}
-		return text.String()
+		return gent.CloneContentParts(output)
 	default:
-		return ""
+		return nil
 	}
 }

@@ -1,55 +1,72 @@
 {
   "final": {
-    "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+    "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
     "lastEventNumber": "24",
     "status": "succeeded",
     "previews": [
       {
-        "id": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:1",
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "id": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:1",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "status": "succeeded",
         "parts": []
       },
       {
-        "id": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "id": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "status": "succeeded",
         "parts": [
           {
             "type": "intermediary",
-            "text": "Order order-1001 has shipped. ",
-            "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer"
+            "content": [
+              {
+                "Text": "Order "
+              },
+              {
+                "Text": "order-1001 "
+              },
+              {
+                "Text": "has "
+              },
+              {
+                "Text": "shipped. "
+              }
+            ],
+            "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer"
           }
         ]
       }
     ],
     "answers": [
       {
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:answer",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:answer",
         "sourceMessageIds": [
-          "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer"
+          "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer"
         ],
-        "text": "Order order-1001 has shipped."
+        "content": [
+          {
+            "Text": "Order order-1001 has shipped."
+          }
+        ]
       }
     ]
   },
   "frames": [
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "1",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 1,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.282060558+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.051526332+07:00",
         "type": "execution_started",
         "eventName": "gent:execution:before",
         "source": "order-helper/0",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "payload": {
           "name": "order-helper"
         }
@@ -57,60 +74,35 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "2",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 2,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.287190606+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.054150008+07:00",
         "type": "iteration_started",
         "eventName": "gent:iteration:before",
         "iteration": 1,
         "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root"
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root"
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "3",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 3,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.291957042+07:00",
-        "type": "system_prompt",
-        "eventName": "gent:system_prompt:before",
-        "iteration": 1,
-        "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "payload": {
-          "sectionCount": 4,
-          "sectionNames": [
-            "behavior",
-            "instructions",
-            "critical_rules",
-            "answer_requirements"
-          ]
-        }
-      }
-    },
-    {
-      "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "4",
-      "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 4,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.293045479+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.058489837+07:00",
         "type": "model_call_started",
         "eventName": "gent:model_call:before",
         "iteration": 1,
         "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:1",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:1",
         "streamId": "iter-1",
         "streamTopicId": "llm-response",
         "payload": {
@@ -123,19 +115,19 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "5",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "4",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 5,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.302745237+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 4,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.064554269+07:00",
         "type": "model_call_finished",
         "eventName": "gent:model_call:after",
         "iteration": 1,
         "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:1",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:1",
         "streamId": "iter-1",
         "streamTopicId": "llm-response",
         "payload": {
@@ -154,41 +146,41 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "5",
+      "event": {
+        "eventNumber": 5,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.072650259+07:00",
+        "type": "checkpoint"
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "6",
       "event": {
         "eventNumber": 6,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.314588319+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.078491966+07:00",
         "type": "checkpoint"
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "7",
       "event": {
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 7,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.324369956+07:00",
-        "type": "checkpoint"
-      }
-    },
-    {
-      "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "8",
-      "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 8,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.334031875+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.085001779+07:00",
         "type": "tool_call_started",
         "eventName": "gent:tool_call:before",
         "iteration": 1,
         "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "toolCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:tool:1",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "toolCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:tool:1",
         "payload": {
           "name": "lookup_order"
         }
@@ -196,19 +188,19 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "9",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "8",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 9,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.345535004+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 8,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.091807163+07:00",
         "type": "tool_call_finished",
         "eventName": "gent:tool_call:after",
         "iteration": 1,
         "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "toolCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:tool:1",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "toolCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:tool:1",
         "payload": {
           "durationMs": 0,
           "name": "lookup_order"
@@ -217,96 +209,71 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "10",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "9",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 10,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.36042227+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 9,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.100209898+07:00",
         "type": "state_change",
         "eventName": "gent:state_change",
         "iteration": 1,
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "payload": {}
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "11",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "10",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 11,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.360232134+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 10,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.100097802+07:00",
         "type": "iteration_finished",
         "eventName": "gent:iteration:after",
         "iteration": 1,
         "source": "order-helper/1",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "payload": {
           "action": "c",
-          "durationMs": 68
+          "durationMs": 41
         }
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "12",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "11",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 12,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.382360942+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 11,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.111784567+07:00",
         "type": "iteration_started",
         "eventName": "gent:iteration:before",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root"
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root"
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "13",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "12",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 13,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.398147528+07:00",
-        "type": "system_prompt",
-        "eventName": "gent:system_prompt:before",
-        "iteration": 2,
-        "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "payload": {
-          "sectionCount": 4,
-          "sectionNames": [
-            "behavior",
-            "instructions",
-            "critical_rules",
-            "answer_requirements"
-          ]
-        }
-      }
-    },
-    {
-      "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "14",
-      "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 14,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.399277553+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 12,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.123691195+07:00",
         "type": "model_call_started",
         "eventName": "gent:model_call:before",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
         "streamId": "iter-2",
         "streamTopicId": "llm-response",
         "payload": {
@@ -319,26 +286,100 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "13",
+      "event": {
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 13,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.177631472+07:00",
+        "type": "model_stream_chunk",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "messageId": "",
+          "metaContent": [
+            {
+              "content": [
+                {
+                  "Text": "Order "
+                }
+              ],
+              "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer",
+              "type": "intermediary"
+            }
+          ],
+          "sourceMessageIds": null,
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "14",
+      "event": {
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 14,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.217717724+07:00",
+        "type": "model_stream_chunk",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
+        "streamId": "iter-2",
+        "streamTopicId": "llm-response",
+        "payload": {
+          "messageId": "",
+          "metaContent": [
+            {
+              "content": [
+                {
+                  "Text": "order-1001 "
+                }
+              ],
+              "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer",
+              "type": "intermediary"
+            }
+          ],
+          "sourceMessageIds": null,
+          "streamId": "iter-2",
+          "streamTopicId": "llm-response"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "15",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 15,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.458681778+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.257829468+07:00",
         "type": "model_stream_chunk",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
         "streamId": "iter-2",
         "streamTopicId": "llm-response",
         "payload": {
           "messageId": "",
           "metaContent": [
             {
-              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
-              "text": "Order ",
+              "content": [
+                {
+                  "Text": "has "
+                }
+              ],
+              "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer",
               "type": "intermediary"
             }
           ],
@@ -350,26 +391,30 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "16",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 16,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.498733675+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.298009587+07:00",
         "type": "model_stream_chunk",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
         "streamId": "iter-2",
         "streamTopicId": "llm-response",
         "payload": {
           "messageId": "",
           "metaContent": [
             {
-              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
-              "text": "order-1001 ",
+              "content": [
+                {
+                  "Text": "shipped. "
+                }
+              ],
+              "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer",
               "type": "intermediary"
             }
           ],
@@ -381,85 +426,23 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "17",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 17,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.538879289+07:00",
-        "type": "model_stream_chunk",
-        "iteration": 2,
-        "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
-        "streamId": "iter-2",
-        "streamTopicId": "llm-response",
-        "payload": {
-          "messageId": "",
-          "metaContent": [
-            {
-              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
-              "text": "has ",
-              "type": "intermediary"
-            }
-          ],
-          "sourceMessageIds": null,
-          "streamId": "iter-2",
-          "streamTopicId": "llm-response"
-        }
-      }
-    },
-    {
-      "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "18",
-      "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 18,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.579249259+07:00",
-        "type": "model_stream_chunk",
-        "iteration": 2,
-        "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
-        "streamId": "iter-2",
-        "streamTopicId": "llm-response",
-        "payload": {
-          "messageId": "",
-          "metaContent": [
-            {
-              "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer",
-              "text": "shipped. ",
-              "type": "intermediary"
-            }
-          ],
-          "sourceMessageIds": null,
-          "streamId": "iter-2",
-          "streamTopicId": "llm-response"
-        }
-      }
-    },
-    {
-      "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "19",
-      "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 19,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.597019312+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.314795222+07:00",
         "type": "model_call_finished",
         "eventName": "gent:model_call:after",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
         "streamId": "iter-2",
         "streamTopicId": "llm-response",
         "payload": {
-          "durationMs": 178,
+          "durationMs": 177,
           "model": "",
           "provider": "",
           "streamId": "iter-2",
@@ -474,48 +457,92 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "20",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "18",
       "event": {
-        "eventNumber": 20,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.620496401+07:00",
+        "eventNumber": 18,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.332937952+07:00",
         "type": "checkpoint"
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-      "eventNumber": "21",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "19",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
-        "eventNumber": 21,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.642272286+07:00",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 19,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.352285175+07:00",
+        "type": "output_validation",
+        "eventName": "gent:output:validation",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "payload": {
+          "accepted": true,
+          "name": "text",
+          "stage": "local",
+          "steeringCount": 0
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "20",
+      "event": {
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 20,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.352799909+07:00",
         "type": "state_change",
         "eventName": "gent:state_change",
         "iteration": 2,
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "payload": {}
       }
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+      "eventNumber": "21",
+      "event": {
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
+        "eventNumber": 21,
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.352426255+07:00",
+        "type": "output_validation",
+        "eventName": "gent:output:validation",
+        "iteration": 2,
+        "source": "order-helper/2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "payload": {
+          "accepted": true,
+          "name": "",
+          "stage": "process",
+          "steeringCount": 0
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "22",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 22,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.641887754+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.352506573+07:00",
         "type": "iteration_finished",
         "eventName": "gent:iteration:after",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "payload": {
           "action": "t",
-          "durationMs": 243,
+          "durationMs": 229,
           "result": [
             {
               "Text": "Order order-1001 has shipped."
@@ -526,20 +553,20 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "23",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 23,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.642142209+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.352664835+07:00",
         "type": "execution_finished",
         "eventName": "gent:execution:after",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
         "payload": {
-          "durationMs": 360,
+          "durationMs": 301,
           "result": {
             "output": [
               {
@@ -555,26 +582,30 @@
     },
     {
       "kind": "event",
-      "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+      "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
       "eventNumber": "24",
       "event": {
-        "attemptId": "f49871b67d38b453ecda2fb93d9d9a88",
+        "attemptId": "ad9bc5768a76f5aa7f96ced38fe3dec4",
         "eventNumber": 24,
-        "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
-        "ts": "2026-10-26T22:50:56.642134069+07:00",
+        "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
+        "ts": "2026-10-29T20:51:25.352644511+07:00",
         "type": "execution_content",
         "iteration": 2,
         "source": "order-helper/2",
-        "contextId": "FIIAJFMLUM2PLNEASE4S46NB4T:root",
-        "modelCallId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:model:2",
+        "contextId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root",
+        "modelCallId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:model:2",
         "streamId": "iter-2",
         "streamTopicId": "llm-response",
         "payload": {
-          "content": "Order order-1001 has shipped.",
-          "messageId": "FIIAJFMLUM2PLNEASE4S46NB4T:root:answer",
+          "content": [
+            {
+              "Text": "Order order-1001 has shipped."
+            }
+          ],
+          "messageId": "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:answer",
           "metaContent": null,
           "sourceMessageIds": [
-            "FIIAJFMLUM2PLNEASE4S46NB4T:root:message:16e0eb4f894cb6c7b8cd113399b5f2c3:answer"
+            "SHQ6W7B2OZWIJIU4UWYCB54YO3:root:message:7021f47f899971876af6fc7d78a860ea:answer"
           ],
           "streamId": "iter-2",
           "streamTopicId": "llm-response"
@@ -583,7 +614,7 @@
     }
   ],
   "initial": {
-    "runId": "FIIAJFMLUM2PLNEASE4S46NB4T",
+    "runId": "SHQ6W7B2OZWIJIU4UWYCB54YO3",
     "lastEventNumber": "0",
     "status": "pending",
     "previews": [],

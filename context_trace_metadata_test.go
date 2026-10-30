@@ -83,7 +83,7 @@ func TestExecutionContext_TraceMetadata_BaseEventAndChunkMetadata(t *testing.T) 
 	execCtx.EmitChunk(StreamChunk{
 		MetaContent: []*MetaContent{
 			{
-				Type: MetaContentIntermediary, Text: "hello",
+				Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "hello"}},
 			},
 		}, StreamId: "stream",
 	})

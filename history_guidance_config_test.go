@@ -32,7 +32,7 @@ func TestRecoveryRejectsChangedHandlerVersion(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			toolCalls := 0
-			build := func(model *guidanceModel, version string) *react.Agent {
+			build := func(model *guidanceModel, version string) *react.Agent[string] {
 				tool := &recoverySearchTool{gent.DefineTool("book",
 					func(context.Context, *bookingInput) (string, error) {
 						toolCalls++
@@ -67,7 +67,7 @@ func TestRecoveryRejectsChangedHandlerVersion(t *testing.T) {
 			ctx := gent.NewExecutionContext(worker, "booking", gent.NewBasicLoopData(nil),
 				gent.WithRunId("guidance-config"), gent.WithRecorder(store), gent.WithCodecs(store.codecs))
 			defer ctx.Release()
-			_, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+			_, _, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			if !assert.ErrorIs(t, err, context.Canceled) {
 				return
 			}

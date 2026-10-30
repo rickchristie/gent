@@ -1,9 +1,12 @@
 package trace
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/rickchristie/gent/output"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +31,12 @@ func (l *traceTestLoop) Next(execCtx *gent.ExecutionContext) (*gent.AgentLoopRes
 	if l.err != nil {
 		return nil, l.err
 	}
-	return &gent.AgentLoopResult{Action: gent.LATerminate, Result: l.result}, nil
+	return &gent.AgentLoopResult{
+		TerminationReason: gent.TerminationSuccess,
+		Action:            gent.LATerminate,
+		Result:            l.result,
+		Value:             genttest.Value(gent.ContentText(l.result)),
+	}, nil
 }
 
 func TestSequencer_EventNumbersReplayAndJSONSafety(t *testing.T) {
@@ -86,7 +94,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	assert.NoError(t, execCtx.FlushProgress())
 
 	request := gent.ModelCallRequest{
-		Messages: []gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
+		Messages: []*gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 		Options: gent.NewModelCallRequest(
 			nil, gent.WithTemperature(0.2), gent.WithMaxTokens(123)).Options,
 	}
@@ -97,7 +105,9 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	)
 	assert.NoError(t, execCtx.FlushProgress())
 	assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
-		MetaContent:   []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "hel"}},
+		MetaContent: []*gent.MetaContent{
+			{Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "hel"}}},
+		},
 		ModelCallId:   beforeModel.ModelCallId,
 		StreamId:      "stream",
 		StreamTopicId: "topic",
@@ -107,7 +117,9 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		ContextId:     beforeModel.ContextId,
 	}))
 	assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
-		MetaContent:   []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "lo"}},
+		MetaContent: []*gent.MetaContent{
+			{Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "lo"}}},
+		},
 		ModelCallId:   beforeModel.ModelCallId,
 		StreamId:      "stream",
 		StreamTopicId: "topic",
@@ -136,7 +148,11 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		gent.WithToolCallSource(beforeTool.Source),
 	)
 	assert.NoError(t, execCtx.FlushProgress())
-	execCtx.PublishAfterIteration(&gent.AgentLoopResult{Action: gent.LATerminate}, time.Millisecond)
+	execCtx.PublishAfterIteration(&gent.AgentLoopResult{
+		TerminationReason: gent.TerminationSuccess,
+		Action:            gent.LATerminate,
+		Value:             genttest.Value(""),
+	}, time.Millisecond)
 	assert.NoError(t, execCtx.FlushProgress())
 	execCtx.SetTermination(gent.TerminationSuccess, nil, nil)
 	execCtx.PublishAfterExecution(gent.TerminationSuccess, nil)
@@ -198,7 +214,7 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 		},
 	})
 	registry := events.NewRegistry()
-	childExec := executor.New[*gent.BasicLoopData](
+	childExec := executor.NewRunner(
 		&traceTestLoop{result: []gent.ContentPart{gent.TextContent{Text: "child result"}}},
 		executor.Config{Events: registry},
 	)
@@ -209,15 +225,15 @@ func TestSequencer_RunLifecycleIgnoresChildExecutionEvents(t *testing.T) {
 		result: []gent.ContentPart{gent.TextContent{Text: "root result"}},
 		beforeReturn: func(execCtx *gent.ExecutionContext) {
 			rootStartedTs = seq.Snapshot().StartedTs
-			childData := gent.NewBasicLoopData(&gent.Task{Text: "child task"})
+			childData := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "child task"}))
 			childCtx := execCtx.SpawnChild("child", childData)
 			childExec.Execute(childCtx)
 			afterChild = seq.Snapshot()
 			execCtx.CompleteChild(childCtx)
 		},
 	}
-	rootExec := executor.New[*gent.BasicLoopData](parentLoop, executor.Config{Events: registry})
-	rootData := gent.NewBasicLoopData(&gent.Task{Text: "root task"})
+	rootExec := executor.NewRunner(parentLoop, executor.Config{Events: registry})
+	rootData := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "root task"}))
 	rootCtx := gent.NewExecutionContext(
 		context.Background(),
 		"root",
@@ -321,7 +337,7 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 				terminationReason: gent.TerminationError,
 				status:            StepStatusFailed,
 				completed:         true,
-				errorMessage:      "AgentLoop.Next (iteration 1): child boom",
+				errorMessage:      "Loop.Next (iteration 1): child boom",
 			},
 		},
 		{
@@ -367,13 +383,13 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 			rootCtx := gent.NewExecutionContext(
 				goCtx,
 				"root",
-				gent.NewBasicLoopData(&gent.Task{Text: "root task"}),
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "root task"})),
 				gent.WithRunId(seq.Snapshot().RunId), gent.WithObserver(seq),
 			)
 			rootCtx.SetEventPublisher(registry)
 			childCtx := rootCtx.SpawnChild(
 				"child",
-				gent.NewBasicLoopData(&gent.Task{Text: "child task"}),
+				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "child task"})),
 			)
 			if tc.input.limits != nil {
 				childCtx.SetLimits(tc.input.limits)
@@ -382,7 +398,7 @@ func TestSequencer_ChildCompletePreservesTerminalContextStatus(t *testing.T) {
 				cancel()
 			}
 
-			childExec := executor.New[*gent.BasicLoopData](
+			childExec := executor.NewRunner(
 				tc.input.loop,
 				executor.Config{Events: registry},
 			)
@@ -424,13 +440,18 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 		BaseEvent: base,
 		Model:     "gpt",
 		Request: gent.ModelCallRequest{
-			Messages: []gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "secret")},
+			Messages: []*gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "secret")},
 		},
 		ModelCallId: "model-1",
 		StreamId:    "stream",
 	})
 	recordTestValue(t, seq, "model_stream_chunk", gent.StreamChunk{
-		MetaContent: []*gent.MetaContent{{Type: gent.MetaContentIntermediary, Text: "abcédef"}},
+		MetaContent: []*gent.MetaContent{
+			{
+				Type:    gent.MetaContentIntermediary,
+				Content: []gent.ContentPart{gent.TextContent{Text: "abcédef"}},
+			},
+		},
 		ModelCallId: "model-1",
 		StreamId:    "stream",
 		Source:      "main/1",
@@ -520,7 +541,7 @@ func TestSequencer_ConcurrentRecordingIsMonotonic(t *testing.T) {
 			assert.NoError(t, execCtx.EmitChunk(gent.StreamChunk{
 				MetaContent: []*gent.MetaContent{
 					{
-						Type: gent.MetaContentIntermediary, Text: "x",
+						Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{gent.TextContent{Text: "x"}},
 					},
 				}, StreamId: "s",
 			}))
@@ -598,3 +619,5 @@ func receiveOverflow(t *testing.T, ch <-chan OverflowInfo) OverflowInfo {
 		return OverflowInfo{}
 	}
 }
+
+func (*traceTestLoop) Output() gent.Output[string] { return output.NewTextOutput() }

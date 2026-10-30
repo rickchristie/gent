@@ -15,7 +15,10 @@ type OrderInput struct {
 	OrderID string `json:"order_id"`
 }
 
-func newAgent(model gent.Model) *react.Agent {
+const agentPrompt = `Help the user check an order.
+Use lookup_order for order facts. Do not invent a status.`
+
+func newAgent(model gent.Model) *react.Agent[string] {
 	tool := gent.DefineTool("lookup_order", lookupOrder).
 		Description("Read an order status.").
 		Parameters(schema.Field("order_id").
@@ -23,8 +26,6 @@ func newAgent(model gent.Model) *react.Agent {
 		Recovery(recoverOrder).MustBuild()
 	return react.NewAgent(model).RegisterTool(tool).
 		WithRecoveryVersion("order-streaming/v1").
-		WithBehaviorAndContext("Help the user check an order.").
-		WithCriticalRules("Use lookup_order for order facts. Do not invent a status.").
 		WithCallOptions(gent.WithMaxTokens(1024))
 }
 
@@ -50,11 +51,14 @@ func (m *DemoModel) GenerateContentStream(
 		}
 	}
 	return gent.NewCompletedStream(&gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{ToolCalls: []gent.ModelToolCall{{
-			ID: "order-read", Type: "function", FunctionCall: &gent.FunctionCall{
-				Name: "lookup_order", Arguments: `{"order_id":"order-1001"}`,
-			},
-		}}}},
+		Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
+			Status: gent.ModelStatusToolCalls,
+		},
+			ToolCalls: []gent.ModelToolCall{{
+				ID: "order-read", Type: "function", FunctionCall: &gent.FunctionCall{
+					Name: "lookup_order", Arguments: `{"order_id":"order-1001"}`,
+				},
+			}}}},
 	}, nil), nil
 }
 
@@ -78,14 +82,21 @@ func (m *DemoModel) answer(parent context.Context) (gent.Stream, error) {
 			case <-timer.C:
 			}
 			if !stream.SendMeta(&gent.MetaContent{
-				Type: gent.MetaContentIntermediary, MessageId: "answer", Text: word + " ",
+				Type:      gent.MetaContentIntermediary,
+				MessageId: "answer",
+				Content: []gent.ContentPart{
+					gent.TextContent{Text: word + " "},
+				},
 			}) {
 				stream.Complete(nil, context.Canceled)
 				return
 			}
 		}
 		stream.Complete(&gent.ContentResponse{Choices: []*gent.ContentChoice{{
-			CandidateContent: answer,
+			Completion: gent.ModelCompletion{
+				Status: gent.ModelStatusAnswer,
+			},
+			CandidateContent: []gent.ContentPart{gent.TextContent{Text: answer}},
 			// The accepted answer must name the same local message as its preview chunks.
 			CandidateSource: &gent.ContentSource{MessageIds: []string{"answer"}},
 		}}}, nil)

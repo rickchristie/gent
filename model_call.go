@@ -53,6 +53,10 @@ func (ctx *ExecutionContext) GenerateContentStream(
 	if err != nil {
 		return nil, ctx.stopRecording(err)
 	}
+	expectedOutput, err := captureOutputControls(request.Options)
+	if err != nil {
+		return nil, err
+	}
 	before := ctx.PublishBeforeModelCall(call.Model, request, WithModelCallId(call.Id),
 		WithModelStream(call.StreamId, call.StreamTopicId), WithModelCallSource(call.Source),
 		WithModelProvider(call.Provider))
@@ -67,6 +71,9 @@ func (ctx *ExecutionContext) GenerateContentStream(
 		return nil, ctx.stopRecording(err)
 	}
 	request = owned.(ModelCallRequest)
+	if err := checkOutputControls(expectedOutput, request.Options); err != nil {
+		return nil, err
+	}
 	if err := ctx.FlushProgress(); err != nil {
 		return nil, err
 	}
@@ -107,10 +114,10 @@ func (ctx *ExecutionContext) GenerateContentStream(
 			chunk = cloneStreamChunk(chunk)
 			// A model cannot accept the execution result. Even custom adapters that send
 			// Content are shown as provisional text until the executor commits success.
-			if chunk.Content != "" {
+			if len(chunk.Content) > 0 {
 				chunk.MetaContent = append(chunk.MetaContent, &MetaContent{
-					Type: MetaContentIntermediary, Text: chunk.Content})
-				chunk.Content = ""
+					Type: MetaContentIntermediary, Content: chunk.Content})
+				chunk.Content = nil
 			}
 			for _, item := range chunk.MetaContent {
 				item.MessageId = scopedMessageId(messagePrefix, item.MessageId)
@@ -173,7 +180,7 @@ func scopeResponseMessages(
 		for _, item := range choice.MetaContent {
 			item.MessageId = scopedMessageId(prefix, item.MessageId)
 		}
-		if choice.CandidateContent == "" {
+		if len(choice.CandidateContent) == 0 {
 			continue
 		}
 		source := cloneContentSource(choice.CandidateSource)

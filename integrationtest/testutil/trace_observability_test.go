@@ -2,6 +2,9 @@ package testutil
 
 import (
 	"bytes"
+	"context"
+
+	"github.com/rickchristie/gent"
 	"testing"
 	"time"
 
@@ -53,7 +56,10 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 				{Type: genttrace.EventTypeIterationStarted, Iteration: 1},
 				{Type: genttrace.EventTypeModelStreamChunk, Iteration: 1,
 					StreamTopicId: llmResponseTopic,
-					Payload:       map[string]any{"metaContent": []any{map[string]any{"type": "commentary", "text": "Checking."}}}},
+					Payload: map[string]any{
+						"metaContent": []any{map[string]any{
+							"type": "commentary", "content": traceTextParts("Checking.")}},
+					}},
 			}},
 			expected: expected{output: `
 --- Iteration 1 ---
@@ -68,13 +74,13 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 					Type:          genttrace.EventTypeModelStreamChunk,
 					Iteration:     1,
 					StreamTopicId: llmResponseTopic,
-					Payload:       map[string]any{"content": "hello "},
+					Payload:       map[string]any{"content": traceTextParts("hello ")},
 				},
 				{
 					Type:          genttrace.EventTypeModelStreamChunk,
 					Iteration:     1,
 					StreamTopicId: llmResponseTopic,
-					Payload:       map[string]any{"content": "world"},
+					Payload:       map[string]any{"content": traceTextParts("world")},
 				},
 			}},
 			expected: expected{output: `
@@ -90,7 +96,7 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 					Type:          genttrace.EventTypeModelStreamChunk,
 					Iteration:     1,
 					StreamTopicId: "other-topic",
-					Payload:       map[string]any{"content": "hidden"},
+					Payload:       map[string]any{"content": traceTextParts("hidden")},
 				},
 			}},
 			expected: expected{output: `
@@ -105,7 +111,7 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 					Type:          genttrace.EventTypeModelStreamChunk,
 					Iteration:     1,
 					StreamTopicId: llmResponseTopic,
-					Payload:       map[string]any{"content": "Checking the booking."},
+					Payload:       map[string]any{"content": traceTextParts("Checking the booking.")},
 				},
 				{Type: genttrace.EventTypeIterationFinished, Iteration: 1},
 				{Type: genttrace.EventTypeIterationStarted, Iteration: 2},
@@ -134,7 +140,11 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 					Type:          genttrace.EventTypeModelStreamChunk,
 					Iteration:     3,
 					StreamTopicId: llmResponseTopic,
-					Payload:       map[string]any{"metaContent": []any{map[string]any{"type": "reasoning", "text": "The booking is confirmed."}}},
+					Payload: map[string]any{
+						"metaContent": []any{
+							map[string]any{"type": "reasoning", "content": traceTextParts("The booking is confirmed.")},
+						},
+					},
 				},
 			}},
 			expected: expected{output: `
@@ -177,7 +187,7 @@ func TestTraceStreamRenderer_Consume(t *testing.T) {
 					Type:          genttrace.EventTypeModelStreamChunk,
 					Iteration:     1,
 					StreamTopicId: llmResponseTopic,
-					Payload:       map[string]any{"content": "Checking the booking."},
+					Payload:       map[string]any{"content": traceTextParts("Checking the booking.")},
 				},
 				{
 					Type:          genttrace.EventTypeModelStreamChunk,
@@ -316,7 +326,7 @@ func TestTraceEventLogger_WritesEventsAndSnapshot(t *testing.T) {
 			snapshotOutput: `
 >>> FinalTraceSnapshot
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "runId": "run",
   "status": "succeeded",
   "startedTs": "2026-05-10T12:00:00Z",
@@ -336,7 +346,7 @@ func TestTraceEventLogger_WritesEventsAndSnapshot(t *testing.T) {
     "modelDurationMs": 0,
     "toolDurationMs": 0,
     "parseErrorCount": 0,
-    "validatorRejectionCount": 0,
+    "outputRejectionCount": 0,
     "errorCount": 0,
     "limitExceededCount": 0,
     "compactionCount": 0
@@ -369,4 +379,75 @@ func jsonFromBlock(t *testing.T, output string) string {
 	start := bytes.IndexByte([]byte(output), '{')
 	require.GreaterOrEqual(t, start, 0)
 	return output[start:]
+}
+
+func traceTextParts(value string) []any {
+	return []any{map[string]any{"Text": value}}
+}
+
+func TestTraceStreamRendererRealContentParts(t *testing.T) {
+	type input struct{ chunk gent.StreamChunk }
+	type expected struct{ output string }
+	type testCase struct {
+		name     string
+		input    input
+		expected expected
+	}
+	cases := []testCase{
+		{"intermediary", input{gent.StreamChunk{MetaContent: []*gent.MetaContent{{
+			Type:    gent.MetaContentIntermediary,
+			Content: []gent.ContentPart{gent.TextContent{Text: "Done."}},
+		}}}}, expected{`  LLM: Done.
+`}},
+		{"commentary and reasoning", input{gent.StreamChunk{MetaContent: []*gent.MetaContent{
+			{Type: gent.MetaContentCommentary,
+				Content: []gent.ContentPart{gent.TextContent{Text: "Checking. "}}},
+			{Type: gent.MetaContentReasoning,
+				Content: []gent.ContentPart{&gent.TextContent{Text: "The order is paid."}}},
+		}}}, expected{`  LLM: Checking. The order is paid.
+`}},
+		{"ordered text and binary", input{gent.StreamChunk{MetaContent: []*gent.MetaContent{{
+			Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{
+				gent.TextContent{Text: "Report "},
+				gent.BinaryContent{MIMEType: "application/pdf", Data: []byte{1, 2, 3}},
+				&gent.TextContent{Text: " and "},
+				&gent.BinaryContent{MIMEType: "image/png", Data: []byte{4, 5}},
+			}}}}}, expected{`  LLM: Report [Attachment: application/pdf] and [Attachment: image/png]
+`}},
+		{"image URL", input{gent.StreamChunk{MetaContent: []*gent.MetaContent{{
+			Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{
+				gent.ImageURLContent{URL: "https://images.test/one.png"},
+			}}}}}, expected{`  LLM: [Image: https://images.test/one.png]
+`}},
+		{"cached text", input{gent.StreamChunk{MetaContent: []*gent.MetaContent{{
+			Type: gent.MetaContentIntermediary, Content: []gent.ContentPart{
+				gent.CachedContent{ContentPart: gent.TextContent{Text: "Cached."}},
+			},
+		}}}}, expected{`  LLM: Cached.
+`}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			seq, err := NewIntegrationTrace("render")
+			if !assert.NoError(t, err) {
+				return
+			}
+			var rendered bytes.Buffer
+			wait := StartTraceStreamOutput(seq, &rendered)
+			t.Cleanup(func() { seq.Close(); wait() })
+			ctx := gent.NewExecutionContext(context.Background(), "render", nil,
+				gent.WithRunId("render"), gent.WithObserver(seq))
+			defer ctx.Release()
+			before := ctx.PublishBeforeModelCall("fixture", gent.NewModelCallRequest(nil))
+			chunk := test.input.chunk
+			chunk.ModelCallId, chunk.ContextId = before.ModelCallId, before.ContextId
+			chunk.StreamTopicId = llmResponseTopic
+			if !assert.NoError(t, ctx.EmitChunk(chunk)) || !assert.NoError(t, ctx.FlushProgress()) {
+				return
+			}
+			seq.Close()
+			wait()
+			assert.Equal(t, test.expected, expected{rendered.String()})
+		})
+	}
 }

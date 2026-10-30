@@ -39,7 +39,13 @@ func TestResponsesReasoningAndSavedEvidence(t *testing.T) {
 	const message = `{"type":"message","role":"assistant","phase":"final_answer","content":[
 {"type":"output_text","text":"Done."}]}`
 	choice := func(raw, summary string) *gent.ContentChoice {
-		return &gent.ContentChoice{CandidateContent: "Done.", StopReason: "stop",
+		return &gent.ContentChoice{CandidateContent: []gent.ContentPart{
+			gent.TextContent{Text: "Done."},
+		},
+			Completion: gent.ModelCompletion{
+				Status:         gent.ModelStatusAnswer,
+				ProviderReason: "completed",
+			},
 			MetaContent:     responseTestMeta(summary),
 			CandidateSource: &gent.ContentSource{MessageIds: []string{"output:2"}},
 			Continuation: &gent.ProviderContinuation{Provider: "openai",
@@ -176,12 +182,28 @@ func responseTestMeta(summary string) []*gent.MetaContent {
 	var meta []*gent.MetaContent
 	if summary != "" {
 		meta = append(meta,
-			&gent.MetaContent{Type: gent.MetaContentReasoning, Text: "I checked ", MessageId: "output:0"},
-			&gent.MetaContent{Type: gent.MetaContentReasoning, Text: "the result.", MessageId: "output:0"})
+			&gent.MetaContent{
+				Type:      gent.MetaContentReasoning,
+				Content:   []gent.ContentPart{gent.TextContent{Text: "I checked "}},
+				MessageId: "output:0",
+			},
+			&gent.MetaContent{
+				Type:      gent.MetaContentReasoning,
+				Content:   []gent.ContentPart{gent.TextContent{Text: "the result."}},
+				MessageId: "output:0",
+			})
 	}
 	return append(meta,
 		&gent.MetaContent{
-			Type: gent.MetaContentCommentary, Text: "Checking the result.", MessageId: "output:1",
+			Type: gent.MetaContentCommentary,
+			Content: []gent.ContentPart{
+				gent.TextContent{Text: "Checking the result."},
+			},
+			MessageId: "output:1",
 		},
-		&gent.MetaContent{Type: gent.MetaContentIntermediary, Text: "Done.", MessageId: "output:2"})
+		&gent.MetaContent{
+			Type:      gent.MetaContentIntermediary,
+			Content:   []gent.ContentPart{gent.TextContent{Text: "Done."}},
+			MessageId: "output:2",
+		})
 }

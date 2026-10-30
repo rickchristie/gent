@@ -1,4 +1,10 @@
-export type Part = { type: string; text: string; messageId: string };
+// These are the JSON shapes of Gent's text, binary, and URL content values.
+// Data is base64 on the JSON wire. Unknown native parts stay visible as an unsupported part.
+export type ContentPart =
+  | { Text: string }
+  | { MIMEType: string; Data: string }
+  | { URL: string; Detail?: string };
+export type Part = { type: string; content: ContentPart[]; messageId: string };
 export type Preview = {
   id: string;
   attemptId: string;
@@ -10,7 +16,7 @@ export type Answer = {
   contextId: string;
   messageId: string;
   sourceMessageIds: string[] | null;
-  text: string;
+  content: ContentPart[];
 };
 export type State = {
   runId: string;
@@ -29,7 +35,7 @@ export type TraceEvent = {
   payload?: {
     status?: string;
     metaContent?: Part[];
-    content?: string;
+    content?: ContentPart[];
     messageId?: string;
     sourceMessageIds?: string[];
   };
@@ -52,11 +58,13 @@ export function cursor(value: string): bigint {
 }
 
 function appendParts(parts: Part[], added: Part[]): Part[] {
-  const next = parts.map((part) => ({ ...part }));
+  const next = structuredClone(parts);
   for (const part of added) {
+    if (!part.content.length) continue;
     const last = next.at(-1);
-    if (last?.type === part.type && last.messageId === part.messageId) last.text += part.text;
-    else next.push({ ...part });
+    if (last?.type === part.type && last.messageId === part.messageId) {
+      last.content.push(...structuredClone(part.content));
+    } else next.push(structuredClone(part));
   }
   return next;
 }
@@ -115,7 +123,7 @@ export function applyEvent(state: State, frame: Frame): State {
       contextId: event.contextId!,
       messageId: payload.messageId!,
       sourceMessageIds: payload.sourceMessageIds ?? [],
-      text: payload.content ?? "",
+      content: structuredClone(payload.content ?? []),
     };
     const exists = state.answers.some((item) => item.contextId === answer.contextId);
     next.answers = exists
@@ -133,5 +141,5 @@ export function catchUp(snapshot: State, buffered: Frame[]): State {
 }
 
 export function terminal(state: State): boolean {
-  return ["succeeded", "failed", "canceled", "limit_exceeded"].includes(state.status);
+  return ["succeeded", "refused", "failed", "canceled", "limit_exceeded"].includes(state.status);
 }

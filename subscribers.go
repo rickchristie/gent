@@ -51,13 +51,6 @@ type AfterIterationSubscriber interface {
 	OnAfterIteration(execCtx *ExecutionContext, event *AfterIterationEvent)
 }
 
-// BeforeSystemPromptSubscriber receives BeforeSystemPromptEvent events.
-// Subscribers can modify or replace event.Sections to dynamically alter
-// the system prompt on each iteration.
-type BeforeSystemPromptSubscriber interface {
-	OnBeforeSystemPrompt(execCtx *ExecutionContext, event *BeforeSystemPromptEvent)
-}
-
 // BeforeModelCallSubscriber receives BeforeModelCallEvent events.
 type BeforeModelCallSubscriber interface {
 	OnBeforeModelCall(execCtx *ExecutionContext, event *BeforeModelCallEvent)
@@ -81,16 +74,6 @@ type AfterToolCallSubscriber interface {
 // ParseErrorSubscriber receives ParseErrorEvent events.
 type ParseErrorSubscriber interface {
 	OnParseError(execCtx *ExecutionContext, event *ParseErrorEvent)
-}
-
-// ValidatorCalledSubscriber receives ValidatorCalledEvent events.
-type ValidatorCalledSubscriber interface {
-	OnValidatorCalled(execCtx *ExecutionContext, event *ValidatorCalledEvent)
-}
-
-// ValidatorResultSubscriber receives ValidatorResultEvent events.
-type ValidatorResultSubscriber interface {
-	OnValidatorResult(execCtx *ExecutionContext, event *ValidatorResultEvent)
 }
 
 // ErrorSubscriber receives ErrorEvent events.

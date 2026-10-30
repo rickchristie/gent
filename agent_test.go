@@ -11,50 +11,21 @@ import (
 // -----------------------------------------------------------------------------
 
 func TestBasicLoopData_GetTask(t *testing.T) {
-	type input struct {
-		task *Task
-	}
-
-	type expected struct {
-		text string
-	}
-
-	tests := []struct {
+	type input struct{ task *Task }
+	type expected struct{ task *Task }
+	type testCase struct {
 		name     string
 		input    input
 		expected expected
-	}{
-		{
-			name: "task with text",
-			input: input{
-				task: &Task{Text: "test input"},
-			},
-			expected: expected{
-				text: "test input",
-			},
-		},
-		{
-			name: "nil task",
-			input: input{
-				task: nil,
-			},
-			expected: expected{
-				text: "",
-			},
-		},
 	}
-
-	for _, tt := range tests {
+	cases := []testCase{
+		{"text", input{NewTask(TextContent{Text: "test input"})},
+			expected{NewTask(TextContent{Text: "test input"})}},
+		{"nil", input{}, expected{}},
+	}
+	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			data := NewBasicLoopData(tt.input.task)
-
-			result := data.GetTask()
-
-			if tt.input.task == nil {
-				assert.Nil(t, result)
-			} else {
-				assert.Equal(t, tt.expected.text, result.Text)
-			}
+			assert.Equal(t, tt.expected.task, NewBasicLoopData(tt.input.task).GetTask())
 		})
 	}
 }

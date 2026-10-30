@@ -25,14 +25,20 @@ func (m *drainRequiredSummaryModel) GenerateContentStream(
 		stream.chunks <- gent.StreamChunk{
 			MetaContent: []*gent.MetaContent{
 				{
-					Type: gent.MetaContentIntermediary, Text: "drained",
+					Type: gent.MetaContentIntermediary,
+					Content: []gent.ContentPart{
+						gent.TextContent{Text: "drained"},
+					},
 				},
 			},
 		}
 		stream.chunks <- gent.StreamChunk{
 			MetaContent: []*gent.MetaContent{
 				{
-					Type: gent.MetaContentIntermediary, Text: " summary",
+					Type: gent.MetaContentIntermediary,
+					Content: []gent.ContentPart{
+						gent.TextContent{Text: " summary"},
+					},
 				},
 			},
 		}
@@ -54,8 +60,13 @@ func (s *drainRequiredSummaryStream) Chunks() <-chan gent.StreamChunk {
 func (s *drainRequiredSummaryStream) Response() (*gent.ContentResponse, error) {
 	<-s.responseDone
 	return &gent.ContentResponse{
-		Choices: []*gent.ContentChoice{{CandidateContent: "drained summary"}},
-		Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: "drained summary"}},
+			},
+		},
+		Info: &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5},
 	}, nil
 }
 
@@ -200,8 +211,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  0,
 				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
-					"\nSummary of steps 1-3" +
-					"\n</prior_work_summary>\n",
+					`
+Summary of steps 1-3` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -225,8 +239,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  2,
 				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
-					"\nSummary of old 1-2" +
-					"\n</prior_work_summary>\n",
+					`
+Summary of old 1-2` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -249,8 +266,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  0,
 				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
-					"\nUpdated summary" +
-					"\n</prior_work_summary>\n",
+					`
+Updated summary` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -273,8 +293,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  1,
 				pinnedCount:    1,
 				summaryContains: "<prior_work_summary>" +
-					"\nSummary of old" +
-					"\n</prior_work_summary>\n",
+					`
+Summary of old` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -298,8 +321,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  0,
 				pinnedCount:    2,
 				summaryContains: "<prior_work_summary>" +
-					"\nSummary of a and b" +
-					"\n</prior_work_summary>\n",
+					`
+Summary of a and b` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -321,8 +347,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  0,
 				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
-					"\nSummary with text only" +
-					"\n</prior_work_summary>\n",
+					`
+Summary with text only` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -351,8 +380,9 @@ func TestSummarization_Compact(t *testing.T) {
 		{
 			name: "custom prompt is used",
 			input: input{
-				keepRecent:    0,
-				customPrompt:  "Summarize: %s\n%s",
+				keepRecent: 0,
+				customPrompt: `Summarize: %s
+%s`,
 				scratchpad:    []*gent.HistoryEntry{makeIter("x")},
 				modelResponse: "Custom summarized",
 			},
@@ -362,8 +392,11 @@ func TestSummarization_Compact(t *testing.T) {
 				keptOriginals:  0,
 				pinnedCount:    0,
 				summaryContains: "<prior_work_summary>" +
-					"\nCustom summarized" +
-					"\n</prior_work_summary>\n",
+					`
+Custom summarized` +
+					`
+</prior_work_summary>
+`,
 				inputTokensStat:  10,
 				outputTokensStat: 5,
 			},
@@ -757,7 +790,8 @@ func TestSummarization_WithPromptSingleMessage(
 
 	mockFmt := tt.NewMockFormat()
 	strategy := NewSummarization(model, mockFmt).
-		WithPrompt("Custom: %s\n%s")
+		WithPrompt(`Custom: %s
+%s`)
 
 	data := gent.NewBasicLoopData(nil)
 

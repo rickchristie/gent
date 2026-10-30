@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
@@ -31,10 +30,14 @@ func (m *recoveryModel) GenerateContentStream(
 	_ context.Context, request gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	m.requests = append(m.requests, request)
-	choice := &gent.ContentChoice{CandidateContent: "Policy P10 permits it."}
+	choice := &gent.ContentChoice{
+		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+		CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
+	}
 	if !m.answer && len(m.requests) == 1 {
-		choice.CandidateContent = "Read the policy."
+		choice.CandidateContent = []gent.ContentPart{gent.TextContent{Text: "Read the policy."}}
 		for _, id := range []string{"policy-a", "policy-b"} {
+			choice.Completion.Status = gent.ModelStatusToolCalls
 			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: id, Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}})
 		}
@@ -47,7 +50,7 @@ func (m *recoveryModel) GenerateContentStream(
 
 func newRecoveryAgent(model *recoveryModel, calls *[]gent.ToolIdentity,
 	recovery ...gent.ToolRecoveryFunc,
-) *react.Agent {
+) *react.Agent[string] {
 	var handler gent.ToolRecoveryFunc
 	if len(recovery) != 0 {
 		handler = recovery[0]
@@ -60,8 +63,7 @@ func newRecoveryAgent(model *recoveryModel, calls *[]gent.ToolIdentity,
 		*calls = append(*calls, identity)
 		return input.Id + ": exact original text", nil
 	}).Description("Read the original policy").ParameterSchema(nil).Recovery(handler).MustBuild()
-	return react.NewAgent(model).RegisterTool(tool).WithRecoveryVersion("recovery-fixture/v1").
-		WithTimeProvider(gent.NewMockTimeProvider(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
+	return react.NewAgent(model).RegisterTool(tool).WithRecoveryVersion("recovery-fixture/v1")
 }
 
 type recoveryStore struct {
@@ -98,7 +100,7 @@ func (s *recoveryStore) Save(_ context.Context, batch *gent.SaveBatch) error {
 	return nil
 }
 
-func recoveryBindings(t *testing.T, agent *react.Agent) gent.RestoreBindings {
+func recoveryBindings(t *testing.T, agent *react.Agent[string]) gent.RestoreBindings {
 	t.Helper()
 	codecs := gent.NewCodecRegistry()
 	if !assert.NoError(t, agent.RegisterCodecs(codecs)) {
@@ -107,7 +109,7 @@ func recoveryBindings(t *testing.T, agent *react.Agent) gent.RestoreBindings {
 	return gent.RestoreBindings{Codecs: codecs}
 }
 
-func resumeRecovery(agent *react.Agent, saved gent.RunView, bindings gent.RestoreBindings) (
+func resumeRecovery(agent *react.Agent[string], saved gent.RunView, bindings gent.RestoreBindings) (
 	*gent.ExecutionContext, *gent.ExecutionResult, error,
 ) {
 	var restored *gent.ExecutionContext
@@ -119,7 +121,7 @@ func resumeRecovery(agent *react.Agent, saved gent.RunView, bindings gent.Restor
 		}
 		return nil
 	}
-	result, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Resume(
+	_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Resume(
 		context.Background(), saved, bindings)
 	return restored, result, err
 }
@@ -141,10 +143,12 @@ func saveInterruptedRun(
 	var calls []gent.ToolIdentity
 	agent := newRecoveryAgent(model, &calls)
 	ctx := gent.NewExecutionContext(worker, "root", gent.NewBasicLoopData(
-		&gent.Task{Text: "Read policy P10 twice, then answer."}), gent.WithRunId("recovery"),
+		gent.NewTask(gent.TextContent{
+			Text: "Read policy P10 twice, then answer.",
+		})), gent.WithRunId("recovery"),
 		gent.WithRecorder(store), gent.WithCodecs(store.codecs))
 	ctx.SetLimits(nil)
-	_, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Execute(ctx)
+	_, _, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 	if !assert.ErrorIs(t, err, context.Canceled) {
 		t.FailNow()
 	}
@@ -219,7 +223,7 @@ func TestHistoryRecovery_Boundaries(t *testing.T) {
 			finished, err := gent.RestoreExecutionContext(context.Background(), terminal,
 				gent.RestoreBindings{Codecs: bindings.Codecs})
 			if assert.NoError(t, err) {
-				out, err := executor.New[gent.LoopData](agent, executor.DefaultConfig()).Continue(
+				_, out, err := executor.NewRunner(agent, executor.DefaultConfig()).Continue(
 					finished,
 				)
 				assert.NoError(t, err)
@@ -286,9 +290,9 @@ func TestHistoryRecovery_FreshProcess(t *testing.T) {
 		var baselineCalls []gent.ToolIdentity
 		baselineAgent := newRecoveryAgent(baselineModel, &baselineCalls)
 		baseline := gent.NewExecutionContext(context.Background(), "root", gent.NewBasicLoopData(
-			&gent.Task{Text: "Read policy P10 twice, then answer."}))
+			gent.NewTask(gent.TextContent{Text: "Read policy P10 twice, then answer."})))
 		baseline.SetLimits(nil)
-		_, err = executor.New[gent.LoopData](baselineAgent, executor.DefaultConfig()).Execute(
+		_, _, err = executor.NewRunner(baselineAgent, executor.DefaultConfig()).Execute(
 			baseline,
 		)
 		assert.NoError(t, err)
@@ -319,10 +323,13 @@ func TestHistoryRecovery_FreshProcess(t *testing.T) {
 }
 
 func recoveryChoice() *gent.ContentChoice {
-	return &gent.ContentChoice{ToolCalls: []gent.ModelToolCall{
-		{ID: "policy-a", Type: "function",
-			FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
-		{ID: "policy-b", Type: "function",
-			FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
-	}}
+	return &gent.ContentChoice{Completion: gent.ModelCompletion{
+		Status: gent.ModelStatusToolCalls,
+	},
+		ToolCalls: []gent.ModelToolCall{
+			{ID: "policy-a", Type: "function",
+				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
+			{ID: "policy-b", Type: "function",
+				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
+		}}
 }

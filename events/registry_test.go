@@ -287,7 +287,7 @@ func TestRegistry_Dispatch_ParseErrorEvent(t *testing.T) {
 
 	execCtx := gent.NewExecutionContext(context.Background(), "test", nil)
 	event := &gent.ParseErrorEvent{
-		ErrorType:  gent.ParseErrorTypeFormat,
+		ErrorType:  gent.ParseErrorTypeToolchain,
 		RawContent: "invalid",
 	}
 

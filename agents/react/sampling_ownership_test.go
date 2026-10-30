@@ -1,5 +1,7 @@
 package react
 
+import genttest "github.com/rickchristie/gent/internal/tt"
+
 import (
 	"context"
 	"fmt"
@@ -25,7 +27,14 @@ func (*samplingEchoModel) GenerateContentStream(_ context.Context, request gent.
 	gent.Stream, error,
 ) {
 	content := fmt.Sprintf("%.1f %.1f", *request.Options.Temperature, *request.Options.TopP)
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{{CandidateContent: content}}}
+	response := &gent.ContentResponse{
+		Choices: []*gent.ContentChoice{
+			{
+				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
+				CandidateContent: []gent.ContentPart{gent.TextContent{Text: content}},
+			},
+		},
+	}
 	return gent.NewCompletedStream(response, nil), nil
 }
 
@@ -42,8 +51,14 @@ func TestAgentSamplingHooksOwnOptions(t *testing.T) {
 		expected expected
 	}
 	answer := func(content string) callResult {
-		return callResult{result: &gent.AgentLoopResult{Action: gent.LATerminate,
-			Result: []gent.ContentPart{gent.TextContent{Text: content}}}}
+		return callResult{result: &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess,
+			Action: gent.LATerminate,
+			Result: []gent.ContentPart{
+				gent.TextContent{Text: content},
+			},
+			Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+				gent.TextContent{Text: content},
+			}))}}
 	}
 	cases := []testCase{
 		{"temperature", input{func(o *gent.CallOptions) { *o.Temperature = 0.1 }},
@@ -59,7 +74,9 @@ func TestAgentSamplingHooksOwnOptions(t *testing.T) {
 				WithCallOptions(gent.WithTemperature(0.8), gent.WithTopP(0.9))
 			var actual expected
 			for call := range 2 {
-				ctx := newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Give the answer."}))
+				ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{
+					Text: "Give the answer.",
+				})))
 				if call == 0 {
 					ctx.SetEventPublisher(&samplingHook{change: test.input.change})
 				}
@@ -86,7 +103,9 @@ func TestAgentSamplingHooksConcurrent(t *testing.T) {
 	results := make([]chan expected, 2)
 	contexts := make([]*gent.ExecutionContext, 2)
 	for worker := range results {
-		contexts[worker] = newTestExecCtx(gent.NewBasicLoopData(&gent.Task{Text: "Give the answer."}))
+		contexts[worker] = newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{
+			Text: "Give the answer.",
+		})))
 		results[worker] = make(chan expected, 1)
 		go func() {
 			ctx := contexts[worker]
@@ -113,9 +132,14 @@ func TestAgentSamplingHooksConcurrent(t *testing.T) {
 	// Both hooks have changed their own values before either adapter reads them.
 	for worker, content := range []string{"0.0 0.1", "0.1 0.2"} {
 		actual := <-results[worker]
-		want := expected{result: &gent.AgentLoopResult{Action: gent.LATerminate,
+		want := expected{result: &gent.AgentLoopResult{TerminationReason: gent.TerminationSuccess,
+			Action:        gent.LATerminate,
 			Result:        []gent.ContentPart{gent.TextContent{Text: content}},
-			ContentSource: nativeTestSource(contexts[worker], 1)}}
+			ContentSource: nativeTestSource(contexts[worker], 1),
+			Value: genttest.Value(gent.ContentText([]gent.ContentPart{
+				gent.TextContent{Text: content},
+			})),
+		}}
 		assert.Equal(t, want, actual)
 	}
 }

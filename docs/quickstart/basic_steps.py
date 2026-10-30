@@ -24,8 +24,8 @@ STEPS = [
             ("gent", "Provides the shared task, model, tool, and execution types."),
             ("agents/react + executor",
              "Provide the standard loop and the runner that executes it."),
-            ("schema + toolchain + termination",
-             "Describe tool input, register tools, and set answer guidance."),
+            ("schema + toolchain",
+             "Describe tool input and register tools."),
         ],
         "done": "You have a Go module that points to your Gent checkout and a main.go file.",
     },
@@ -79,9 +79,9 @@ STEPS = [
             ("toolchain.New() + RegisterTool",
              "Create a gent.ToolChain and make lookup_order available."),
             ("react.NewAgent(model)",
-             "Create the standard gent.Loop. You do not implement Next()."),
-            ("termination.NewText", "Set guidance for a plain text answer. A text termination is "
-             "already the default; this explicit value lets you add your own guidance."),
+             "Create the standard gent.Loop[string] with TextOutput. You do not implement Next()."),
+            ("WithToolChain", "Connect the registry. Task messages supply the instructions. "
+             "Use react.NewWithOutput for a different typed output contract."),
             ("executor.NewRunner",
              "Give the loop to the runner. The runner manages repeated iterations."),
         ],
@@ -89,13 +89,13 @@ STEPS = [
     },
     {
         "id": "task", "short": "Create a task", "title": "Give each question its own context.",
-        "intro": "The task contains the user’s question. ExecutionContext holds this run’s "
+        "intro": "The task contains the caller-authored system and user messages. ExecutionContext holds this run’s "
                  "history, statistics, and limits.",
         "action": "Start the ask() function below. Step 6 completes its body. Start with "
                   "DefaultLimits so the standard error limits stay in place when you reduce "
                   "the iteration limit.",
         "location": "main.go · start of ask() · completed in step 6",
-        "code": extract("func ask(", "\tresult, err := runner.Execute(execCtx)"),
+        "code": extract("func ask(", "\tanswer, result, err := runner.Execute(execCtx)"),
         "notes": [
             ("NewBasicLoopData",
              "Use the standard gent.LoopData implementation to supply the Task."),
@@ -114,14 +114,14 @@ STEPS = [
         "action": "Continue the ask() function with this code. Handle the returned error first. "
                   "Then check the termination reason and read the text output.",
         "location": "main.go · rest of ask() · includes its closing brace",
-        "code": extract("\tresult, err := runner.Execute(execCtx)", "func run()"),
+        "code": extract("\tanswer, result, err := runner.Execute(execCtx)", "func run()"),
         "notes": [
             ("runner.Execute(execCtx)",
              "Run the loop. The runner also releases the execution context when it returns."),
             ("TerminationSuccess",
              "Confirm that the run produced an accepted answer before using it."),
-            ("gent.TextContent", "Read the text part. result.Output is a slice of ContentPart, "
-             "so it is not a bare string."),
+            ("Typed answer", "TextOutput returns a string directly. The execution result also "
+             "keeps ordered delivery parts for display and saved replay."),
         ],
         "done": "ask() now returns the final answer or an error to your application.",
     },

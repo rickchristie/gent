@@ -19,7 +19,7 @@ type iterationFrame struct {
 	ToolPlanActive bool
 }
 
-func (r *Agent) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
+func (r *Agent[T]) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopResult, error) {
 	result, err := r.next(ctx)
 	if err == nil {
 		ctx.ClearCheckpointState("gent:react_frame", "gent:tool_plan", "gent:search_seen")
@@ -28,27 +28,26 @@ func (r *Agent) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopResult, error) 
 }
 
 // WithRecoveryVersion identifies application behavior that cannot be derived from declarative
-// configuration, including custom prompts, clocks, hooks, validators, and tool implementations.
-func (r *Agent) WithRecoveryVersion(version string) *Agent {
+// configuration, including custom hooks, validators, and tool implementations.
+func (r *Agent[T]) WithRecoveryVersion(version string) *Agent[T] {
 	r.recoveryVersion = version
 	return r
 }
 
-func (r *Agent) RegisterCodecs(registry *gent.CodecRegistry) error {
-	if err := registry.RegisterValueType(reflect.TypeOf(iterationFrame{})); err != nil {
+func (r *Agent[T]) RegisterCodecs(registry *gent.CodecRegistry) error {
+	if err := registry.RegisterValueType(reflect.TypeFor[T]()); err != nil {
 		return err
 	}
-	if codecs, ok := r.termination.(interface {
-		RegisterCodecs(*gent.CodecRegistry) error
-	}); ok {
-		if err := codecs.RegisterCodecs(registry); err != nil {
-			return err
-		}
+	if err := registry.RegisterValueType(reflect.TypeOf(iterationFrame{})); err != nil {
+		return err
 	}
 	return r.toolChain.RegisterCodecs(registry)
 }
 
-func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
+func (r *Agent[T]) ConfigureExecution(ctx *gent.ExecutionContext) error {
+	if err := gent.PrepareOutput(ctx, r.output); err != nil {
+		return err
+	}
 	if err := r.RegisterCodecs(ctx.Codecs()); err != nil {
 		return err
 	}
@@ -61,14 +60,10 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 		return err
 	}
 	configuration := map[string]any{
-		"version": 2, "application": r.recoveryVersion, "behavior": r.behaviorAndContext,
-		"rules":      r.criticalRules,
+		"version": 3, "application": r.recoveryVersion,
 		"formatType": fmt.Sprintf("%T", r.format), "tools": r.toolChain.RecoveryConfig(),
-		"toolchainType": fmt.Sprintf("%T", r.toolChain), "termination": r.termination.Guidance(),
-		"terminationType": fmt.Sprintf(
-			"%T",
-			r.termination,
-		), "modelType": fmt.Sprintf(
+		"toolchainType": fmt.Sprintf("%T", r.toolChain), "output": fmt.Sprintf("%T", r.output),
+		"modelType": fmt.Sprintf(
 			"%T",
 			r.model,
 		),
@@ -105,7 +100,7 @@ func (r *Agent) ConfigureExecution(ctx *gent.ExecutionContext) error {
 	return ctx.SetCompatibility(manifest)
 }
 
-func (r *Agent) repetitionConfiguration() map[string]any {
+func (r *Agent[T]) repetitionConfiguration() map[string]any {
 	configuration := map[string]any{}
 	value := reflect.ValueOf(r.repetitionConfig)
 	for i := 0; i < value.NumField(); i++ {
@@ -117,7 +112,7 @@ func (r *Agent) repetitionConfiguration() map[string]any {
 	return configuration
 }
 
-func (r *Agent) loadFrame(ctx *gent.ExecutionContext) (*iterationFrame, error) {
+func (r *Agent[T]) loadFrame(ctx *gent.ExecutionContext) (*iterationFrame, error) {
 	if err := r.RegisterCodecs(ctx.Codecs()); err != nil {
 		return nil, err
 	}
@@ -146,7 +141,7 @@ func saveFrame(ctx *gent.ExecutionContext, frame *iterationFrame) error {
 }
 
 // executeToolPlan keeps the saved execution path for native calls.
-func (r *Agent) executeToolPlan(
+func (r *Agent[T]) executeToolPlan(
 	ctx *gent.ExecutionContext, frame *iterationFrame,
 	prepare func() (*gent.ToolPlan, error),
 	execute func(

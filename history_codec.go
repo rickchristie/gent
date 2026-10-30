@@ -39,12 +39,16 @@ type CodecRegistry struct {
 	mu     sync.RWMutex
 	byType map[reflect.Type]registeredValue
 	byId   map[string]registeredValue
+	limits CodecLimits
 }
 
-func NewCodecRegistry() *CodecRegistry {
+func NewCodecRegistry(options ...CodecOption) *CodecRegistry {
 	r := &CodecRegistry{
 		byType: map[reflect.Type]registeredValue{},
 		byId:   map[string]registeredValue{},
+	}
+	for _, option := range options {
+		option(r)
 	}
 	values := []any{false, "", int(0), int8(0), int16(0), int32(0), int64(0), uint(0), uint8(0),
 		uint16(0), uint32(0), uint64(0), float32(0), float64(0), json.Number(""), time.Duration(0),
@@ -56,7 +60,13 @@ func NewCodecRegistry() *CodecRegistry {
 		CacheControl{}, ToolChainResult{}, ToolCallResult{},
 		ToolRecoveryResponse{}, ToolRecoveryResult(""),
 		HistoryEntry{}, MessageContent{},
-		Task{}, ProviderContinuation{}, ContentResponse{}, ContentChoice{},
+		Task{},
+		ProviderContinuation{},
+		ContentResponse{},
+		ContentChoice{},
+		ModelCompletion{},
+		ModelRefusal{},
+		ModelStatus(""),
 		GenerationInfo{}, CallOptions{}, MetaContent{}, ContentSource{},
 		ToolDefinition{}, FunctionDefinition{}, ToolChoice{}, FunctionReference{},
 		ModelMessage{}, ThinkingConfig{}, ThinkingMode(""), json.RawMessage{},
@@ -87,11 +97,18 @@ func (r *CodecRegistry) Marshal(value any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(encoded)
+	data, err := json.Marshal(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return data, r.checkEncodedSize(len(data))
 }
 
 // Unmarshal restores a Marshal result using the same versioned type registrations.
 func (r *CodecRegistry) Unmarshal(data []byte, target any) error {
+	if err := r.checkEncodedSize(len(data)); err != nil {
+		return err
+	}
 	destination := reflect.ValueOf(target)
 	if destination.Kind() != reflect.Pointer || destination.IsNil() {
 		return errors.New("gent: decode target must be a non-nil pointer")
@@ -123,12 +140,21 @@ func (r *CodecRegistry) Unmarshal(data []byte, target any) error {
 }
 
 func cloneOwned[T any](registry *CodecRegistry, value T) (T, error) {
-	encoded, err := registry.Encode(value)
+	cloned, err := registry.Clone(value)
 	if err != nil {
 		var zero T
 		return zero, err
 	}
-	return decodeAs[T](registry, encoded)
+	if cloned == nil {
+		var zero T
+		return zero, nil
+	}
+	result, ok := cloned.(T)
+	if !ok {
+		var zero T
+		return zero, fmt.Errorf("gent: cloned %T, expected %T", cloned, zero)
+	}
+	return result, nil
 }
 
 func (r *CodecRegistry) add(value registeredValue) {
@@ -152,6 +178,9 @@ func (r *CodecRegistry) Register(sample any, codec ValueCodec) error {
 func (r *CodecRegistry) register(id string, version int, typ reflect.Type, codec ValueCodec) error {
 	if id == "" || version < 1 || typ == nil {
 		return errors.New("gent: invalid codec registration")
+	}
+	if id == "bytes" {
+		return errors.New("gent: codec name bytes is reserved")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -182,7 +211,11 @@ func (r *CodecRegistry) lookupId(id string) (registeredValue, bool) {
 // Encode takes ownership by returning newly allocated bytes. Cyclic values are rejected rather
 // than retained as pointers into caller-owned state.
 func (r *CodecRegistry) Encode(value any) (EncodedValue, error) {
-	return r.encode(reflect.ValueOf(value), make(map[any]bool), 0)
+	result, err := r.encode(reflect.ValueOf(value), make(map[any]bool), 0)
+	if err != nil {
+		return EncodedValue{}, err
+	}
+	return result, r.checkEncodedSize(len(result.Data))
 }
 
 func encoded(id string, value any) (EncodedValue, error) {
@@ -382,6 +415,14 @@ func (r *CodecRegistry) encodeContainer(
 	visiting map[any]bool,
 	depth int,
 ) (EncodedValue, error) {
+	// A byte buffer is one value, not a sequence of independently typed numbers. Named slices
+	// keep their outer type envelope; registered custom codecs have already taken precedence.
+	if v.Kind() == reflect.Slice && v.Type().Elem() == reflect.TypeFor[byte]() {
+		if err := r.checkBinarySize(v.Len()); err != nil {
+			return EncodedValue{}, err
+		}
+		return encoded("bytes", v.Bytes())
+	}
 	name, err := r.typeName(v.Type().Elem())
 	if err != nil {
 		return EncodedValue{}, err
@@ -437,6 +478,9 @@ func (r *CodecRegistry) encodeContainer(
 
 // Decode validates every type and version before constructing an owned Go value.
 func (r *CodecRegistry) Decode(value EncodedValue) (any, error) {
+	if err := r.checkEncodedSize(len(value.Data)); err != nil {
+		return nil, err
+	}
 	v, err := r.decode(value, 0)
 	if err != nil {
 		return nil, err
@@ -448,6 +492,24 @@ func (r *CodecRegistry) Decode(value EncodedValue) (any, error) {
 }
 
 func (r *CodecRegistry) Clone(value any) (any, error) {
+	// Limits on the wire representation need the exact encoded size. Otherwise owned copies
+	// can retain registered Go types directly, without building and parsing temporary JSON.
+	if r.limits.MaxEncodedBytes == 0 {
+		result, supported, err := r.cloneValue(reflect.ValueOf(value), make(map[any]bool), 0)
+		if err != nil {
+			return nil, err
+		}
+		if supported {
+			if !result.IsValid() {
+				return nil, nil
+			}
+			return result.Interface(), nil
+		}
+	}
+	return r.cloneThroughCodec(value)
+}
+
+func (r *CodecRegistry) cloneThroughCodec(value any) (any, error) {
 	encoded, err := r.Encode(value)
 	if err != nil {
 		return nil, err

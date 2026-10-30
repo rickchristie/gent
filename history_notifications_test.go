@@ -89,7 +89,9 @@ func TestChildTasksAreOwnedBeforeConcurrentCheckpoints(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			child := root.SpawnChild("child", NewBasicLoopData(&Task{Text: "saved child task"}))
+			child := root.SpawnChild("child", NewBasicLoopData(NewTask(TextContent{
+				Text: "saved child task",
+			})))
 			assert.NoError(t, root.CompleteChild(child))
 		}()
 	}
@@ -100,7 +102,7 @@ func TestChildTasksAreOwnedBeforeConcurrentCheckpoints(t *testing.T) {
 		for _, child := range bundle.Checkpoint.Contexts[1:] {
 			task, err := decodeAs[*Task](root.Codecs(), child.Task)
 			assert.NoError(t, err)
-			assert.Equal(t, &Task{Text: "saved child task"}, task)
+			assert.Equal(t, NewTask(TextContent{Text: "saved child task"}), task)
 		}
 	}
 	workers.Wait()

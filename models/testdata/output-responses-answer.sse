@@ -1,0 +1,8 @@
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","phase":"final_answer"}}
+
+data: {"type":"response.output_text.delta","output_index":0,"delta":"<answer>Done."}
+
+data: {"type":"response.output_text.delta","output_index":0,"delta":"</answer>"}
+
+data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"<answer>Done.</answer>"}]}],"usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21,"input_tokens_details":{"cached_tokens":2},"output_tokens_details":{"reasoning_tokens":3}}}}
+

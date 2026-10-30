@@ -17,11 +17,15 @@ import (
 	"github.com/rickchristie/gent/models"
 	"github.com/rickchristie/gent/policy"
 	"github.com/rickchristie/gent/search"
-	"github.com/rickchristie/gent/termination"
 	"github.com/rickchristie/gent/toolchain"
 )
 
 // SamplePolicies contains invented rules for this lesson. Replace them with your own rules.
+const agentPrompt = `Help a customer understand the store's return rules.
+Search the policies before you answer a policy question.
+If search returns a title or a snippet, use get_policy to read the full policy first.
+Use only the policy text you read. Do not approve a refund or invent missing facts.`
+
 func SamplePolicies() []*policy.Policy {
 	return []*policy.Policy{
 		{
@@ -51,7 +55,7 @@ After the report is checked, the customer can request a replacement or a refund.
 // BuildRunner indexes the policies at startup. Keep the embedder open while the runner is in use.
 func BuildRunner(
 	ctx context.Context, model gent.Model, embedder search.Embedder, mode policy.SearchResultMode,
-) (*executor.Runner, error) {
+) (*executor.Runner[string], error) {
 	policies := SamplePolicies()
 	lookup, err := policy.NewPolicySearchTool(ctx, embedder, policies)
 	if err != nil {
@@ -63,22 +67,17 @@ func BuildRunner(
 	if mode != policy.SearchResultFull {
 		chain.RegisterTool(policy.NewGetPolicyTool(policies))
 	}
-	term := termination.NewText("answer").WithGuidance(
-		"State the policy ID and the conditions that apply. Ask for any missing facts.",
-	)
 	loop := react.NewAgent(model).
-		WithToolChain(chain).
-		WithTermination(term).
-		WithBehaviorAndContext("Help a customer understand the store's return rules.").
-		WithCriticalRules(`Search the policies before you answer a policy question.
-If search returns a title or a snippet, use get_policy to read the full policy first.
-Use only the policy text you read. Do not approve a refund or invent missing facts.`)
+		WithToolChain(chain)
 	return executor.NewRunner(loop, executor.DefaultConfig()), nil
 }
 
 // Answer uses a new execution context so history and limits belong to this question.
-func Answer(ctx context.Context, runner *executor.Runner, question string) (string, error) {
-	data := gent.NewBasicLoopData(&gent.Task{Text: question})
+func Answer(ctx context.Context, runner *executor.Runner[string], question string) (string, error) {
+	data := gent.NewBasicLoopData(&gent.Task{Messages: []*gent.ModelMessage{
+		gent.TextParts(gent.ChatMessageTypeSystem, agentPrompt),
+		gent.TextParts(gent.ChatMessageTypeHuman, question),
+	}})
 	execCtx := gent.NewExecutionContext(ctx, "policy-help", data)
 	limits := gent.DefaultLimits()
 	for i := range limits {
@@ -87,21 +86,14 @@ func Answer(ctx context.Context, runner *executor.Runner, question string) (stri
 		}
 	}
 	execCtx.SetLimits(limits)
-	result, err := runner.Execute(execCtx)
+	answer, result, err := runner.Execute(execCtx)
 	if err != nil {
 		return "", err
 	}
 	if result.TerminationReason != gent.TerminationSuccess {
 		return "", fmt.Errorf("run ended with %s: %v", result.TerminationReason, result.Error)
 	}
-	if len(result.Output) != 1 {
-		return "", fmt.Errorf("expected one text answer, got %d parts", len(result.Output))
-	}
-	text, ok := result.Output[0].(gent.TextContent)
-	if !ok {
-		return "", fmt.Errorf("expected text answer, got %T", result.Output[0])
-	}
-	return text.Text, nil
+	return answer, nil
 }
 
 func NewEmbedder() (search.Embedder, error) {

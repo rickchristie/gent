@@ -25,7 +25,11 @@ func (f responseTransport) RoundTrip(request *http.Request) (*http.Response, err
 func sseResponse(payloads ...string) *http.Response {
 	var body strings.Builder
 	for _, payload := range payloads {
-		body.WriteString("data: " + strings.ReplaceAll(payload, "\n", "\ndata: ") + "\n\n")
+		body.WriteString("data: " + strings.ReplaceAll(payload, `
+`, `
+data: `) + `
+
+`)
 	}
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}},
 		Body: io.NopCloser(strings.NewReader(body.String()))}
@@ -97,7 +101,7 @@ tool.call({tool:"read",args:{id:first.output.next_id}});`
 				}
 				return sseResponse(string(payload)), nil
 			})
-			build := func() *react.Agent {
+			build := func() *react.Agent[string] {
 				model := NewResponses(&ResponsesConfig{
 					Provider: test.input.provider, BaseURL: "https://fixture.test/v1",
 					APIKey: "fixture-key", Model: "fixture", HTTPClient: &http.Client{Transport: transport}})
@@ -115,7 +119,7 @@ tool.call({tool:"read",args:{id:first.output.next_id}});`
 				return react.NewAgent(model).WithToolChain(chain).WithRecoveryVersion("responses/v1")
 			}
 			agent := build()
-			loopData := gent.NewBasicLoopData(&gent.Task{Text: "Read a record."})
+			loopData := gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read a record."}))
 			ctx := gent.NewExecutionContext(context.Background(), "fixture", loopData)
 			assert.NoError(t, agent.ConfigureExecution(ctx))
 			_, err = agent.Next(ctx)
@@ -145,7 +149,7 @@ tool.call({tool:"read",args:{id:first.output.next_id}});`
 			}
 			assert.Equal(t, test.expected, expected{calls, result.Result[0].(gent.TextContent).Text})
 			assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCCodeExecutions))
-			assert.Equal(t, []any{reasoning, commentary, call}, requests[1]["input"].([]any)[2:5])
+			assert.Equal(t, []any{reasoning, commentary, call}, requests[1]["input"].([]any)[1:4])
 			assert.Equal(t, false, requests[0]["store"])
 			assert.Equal(t, true, requests[0]["stream"])
 			assert.Equal(t, "fixture", requests[0]["model"])
@@ -172,9 +176,9 @@ func TestResponsesStreamFailures(t *testing.T) {
 	cases := []testCase{
 		{"unknown stream phase", input{payload: `{"type":"response.output_item.added",
 "output_index":0,"item":{"type":"message","phase":"unknown"}}`},
-			expected{"Responses stream ended without a final response", 1}},
+			expected{"model stream ended without a terminal event", 1}},
 		{"truncated", input{payload: `{"type":"response.output_text.delta","delta":"partial"}`},
-			expected{"Responses stream ended without a final response", 1}},
+			expected{"model stream ended without a terminal event", 1}},
 		{"failed", input{payload: `{"type":"response.failed",
 "response":{"status":"failed","error":{"code":"bad","message":"failed"}}}`},
 			expected{"Responses bad: failed", 1}},
@@ -199,7 +203,7 @@ func TestResponsesStreamFailures(t *testing.T) {
 					requests++
 					return sseResponse(test.input.payload), nil
 				})}})
-			request := gent.NewModelCallRequest([]gent.ModelMessage{
+			request := gent.NewModelCallRequest([]*gent.ModelMessage{
 				{Role: gent.ChatMessageTypeAI, Continuation: test.input.continuation},
 			})
 			stream, err := model.GenerateContentStream(context.Background(), request)

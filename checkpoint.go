@@ -62,6 +62,8 @@ type SavedCheckpointState struct {
 }
 
 type SavedOutcome struct {
+	Value       *EncodedValue     `json:"value,omitempty"`
+	Refusal     *EncodedValue     `json:"refusal,omitempty"`
 	Reason      TerminationReason `json:"reason"`
 	Result      EncodedValue      `json:"result"`
 	Error       *SavedError       `json:"error,omitempty"`
