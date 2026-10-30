@@ -1,266 +1,179 @@
 package gent
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/rickchristie/gent/internal/buffer"
 )
 
-// UnsubscribeFunc is a function that cancels a stream subscription.
-// After calling, the subscription channel will be closed and no more chunks
-// will be delivered. Safe to call multiple times.
+// UnsubscribeFunc cancels a subscription and discards its queued chunks. Repeated calls are safe.
 type UnsubscribeFunc func()
 
-// streamSubscription represents a single subscription to the stream hub.
-type streamSubscription struct {
-	id     uint64
-	buffer *buffer.Unbounded[StreamChunk]
+// StreamSubscription receives live chunks. Err reports overflow or a delivery timeout separately
+// from persistence errors. Close discards queued data; Done closes when its delivery worker stops.
+type StreamSubscription struct {
+	queue *buffer.Delivery[StreamChunk]
+	close func(bool)
 }
 
-// streamHub manages stream subscriptions and chunk distribution.
-// All methods are concurrent-safe.
+// Chunks returns owned chunks in sequence order. The channel closes when delivery stops.
+func (s *StreamSubscription) Chunks() <-chan StreamChunk { return s.queue.Receive() }
+
+// Err returns the delivery failure, or nil for normal closure. Read it after Done closes.
+func (s *StreamSubscription) Err() error { return s.queue.Err() }
+
+// Done closes after the delivery worker has stopped and released its queued data.
+func (s *StreamSubscription) Done() <-chan struct{} { return s.queue.Done() }
+
+// Close discards pending delivery and waits for its worker. Repeated calls are safe.
+func (s *StreamSubscription) Close() { s.close(true) }
+
+type streamFilter struct{ stream, topic string }
+
+// streamHub sends to independent bounded queues. It never invokes application code.
 type streamHub struct {
-	mu sync.RWMutex
-
-	// Subscription channels (unbounded buffers)
-	allSubscribers []*streamSubscription
-	byStreamId     map[string][]*streamSubscription
-	byTopicId      map[string][]*streamSubscription
-
-	// State
-	closed bool
-
-	// Subscription ID counter
-	nextId uint64
+	mu          sync.Mutex
+	subscribers map[*StreamSubscription]streamFilter
+	closed      bool
 }
 
-// newStreamHub creates a new streamHub.
 func newStreamHub() *streamHub {
-	return &streamHub{
-		byStreamId: make(map[string][]*streamSubscription),
-		byTopicId:  make(map[string][]*streamSubscription),
-	}
+	return &streamHub{subscribers: make(map[*StreamSubscription]streamFilter)}
 }
 
-// subscribeAll creates a subscription that receives all chunks.
-// Returns a channel and an unsubscribe function.
+func (h *streamHub) subscribe(
+	filter streamFilter, cfg DeliveryConfig,
+) (*StreamSubscription, error) {
+	cfg, err := deliveryConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	sub := &StreamSubscription{queue: buffer.NewDelivery[StreamChunk](
+		cfg.MaxEvents, cfg.MaxBytes, cfg.Timeout)}
+	sub.close = func(discard bool) {
+		h.mu.Lock()
+		delete(h.subscribers, sub)
+		h.mu.Unlock()
+		if discard {
+			sub.queue.Discard()
+			<-sub.queue.Done()
+			return
+		}
+		sub.queue.Close()
+	}
+	h.mu.Lock()
+	if h.closed {
+		sub.queue.Close()
+	} else {
+		h.subscribers[sub] = filter
+	}
+	h.mu.Unlock()
+	go func() {
+		<-sub.queue.Done()
+		h.mu.Lock()
+		delete(h.subscribers, sub)
+		h.mu.Unlock()
+	}()
+	return sub, nil
+}
+
 func (h *streamHub) subscribeAll() (<-chan StreamChunk, UnsubscribeFunc) {
-	return h.subscribeAllWithMode(true)
+	sub := h.subscribeDefault(streamFilter{})
+	return sub.Chunks(), sub.Close
 }
 
 func (h *streamHub) subscribeAllDraining() (<-chan StreamChunk, UnsubscribeFunc) {
-	return h.subscribeAllWithMode(false)
+	sub := h.subscribeDefault(streamFilter{})
+	return sub.Chunks(), func() { sub.close(false) }
 }
 
-func (h *streamHub) subscribeAllWithMode(
-	discardOnUnsubscribe bool,
-) (<-chan StreamChunk, UnsubscribeFunc) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.closed {
-		// Return closed channel
-		ch := make(chan StreamChunk)
-		close(ch)
-		return ch, func() {}
-	}
-
-	sub := &streamSubscription{
-		id:     h.nextId,
-		buffer: buffer.NewUnbounded[StreamChunk](),
-	}
-	h.nextId++
-	h.allSubscribers = append(h.allSubscribers, sub)
-
-	unsubscribe := func() {
-		h.unsubscribeAll(sub, discardOnUnsubscribe)
-	}
-
-	return sub.buffer.Receive(), unsubscribe
-}
-
-// unsubscribeAll removes a subscription from allSubscribers.
-func (h *streamHub) unsubscribeAll(sub *streamSubscription, discard bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	closeSubscriptionBuffer(sub, discard)
-
-	for i, s := range h.allSubscribers {
-		if s.id == sub.id {
-			h.allSubscribers = append(h.allSubscribers[:i], h.allSubscribers[i+1:]...)
-			return
-		}
-	}
-}
-
-// subscribeToStream creates a subscription for a specific streamId.
-// Returns (nil, nil) if streamId is empty.
-func (h *streamHub) subscribeToStream(streamId string) (<-chan StreamChunk, UnsubscribeFunc) {
-	if streamId == "" {
+func (h *streamHub) subscribeToStream(id string) (<-chan StreamChunk, UnsubscribeFunc) {
+	if id == "" {
 		return nil, nil
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.closed {
-		ch := make(chan StreamChunk)
-		close(ch)
-		return ch, func() {}
-	}
-
-	sub := &streamSubscription{
-		id:     h.nextId,
-		buffer: buffer.NewUnbounded[StreamChunk](),
-	}
-	h.nextId++
-	h.byStreamId[streamId] = append(h.byStreamId[streamId], sub)
-
-	unsubscribe := func() {
-		h.unsubscribeFromStream(streamId, sub, true)
-	}
-
-	return sub.buffer.Receive(), unsubscribe
+	sub := h.subscribeDefault(streamFilter{stream: id})
+	return sub.Chunks(), sub.Close
 }
 
-// unsubscribeFromStream removes a subscription from byStreamId.
-func (h *streamHub) unsubscribeFromStream(
-	streamId string,
-	sub *streamSubscription,
-	discard bool,
-) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	closeSubscriptionBuffer(sub, discard)
-
-	subs := h.byStreamId[streamId]
-	for i, s := range subs {
-		if s.id == sub.id {
-			h.byStreamId[streamId] = append(subs[:i], subs[i+1:]...)
-			if len(h.byStreamId[streamId]) == 0 {
-				delete(h.byStreamId, streamId)
-			}
-			return
-		}
-	}
-}
-
-// subscribeToTopic creates a subscription for a specific topicId.
-// Returns (nil, nil) if topicId is empty.
-func (h *streamHub) subscribeToTopic(topicId string) (<-chan StreamChunk, UnsubscribeFunc) {
-	if topicId == "" {
+func (h *streamHub) subscribeToTopic(id string) (<-chan StreamChunk, UnsubscribeFunc) {
+	if id == "" {
 		return nil, nil
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.closed {
-		ch := make(chan StreamChunk)
-		close(ch)
-		return ch, func() {}
-	}
-
-	sub := &streamSubscription{
-		id:     h.nextId,
-		buffer: buffer.NewUnbounded[StreamChunk](),
-	}
-	h.nextId++
-	h.byTopicId[topicId] = append(h.byTopicId[topicId], sub)
-
-	unsubscribe := func() {
-		h.unsubscribeFromTopic(topicId, sub, true)
-	}
-
-	return sub.buffer.Receive(), unsubscribe
+	sub := h.subscribeDefault(streamFilter{topic: id})
+	return sub.Chunks(), sub.Close
 }
 
-// unsubscribeFromTopic removes a subscription from byTopicId.
-func (h *streamHub) unsubscribeFromTopic(
-	topicId string,
-	sub *streamSubscription,
-	discard bool,
-) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	closeSubscriptionBuffer(sub, discard)
-
-	subs := h.byTopicId[topicId]
-	for i, s := range subs {
-		if s.id == sub.id {
-			h.byTopicId[topicId] = append(subs[:i], subs[i+1:]...)
-			if len(h.byTopicId[topicId]) == 0 {
-				delete(h.byTopicId, topicId)
-			}
-			return
-		}
+func (h *streamHub) subscribeDefault(filter streamFilter) *StreamSubscription {
+	sub, err := h.subscribe(filter, DeliveryConfig{})
+	if err != nil {
+		panic(err)
 	}
+	return sub
 }
 
-func closeSubscriptionBuffer(sub *streamSubscription, discard bool) {
-	if discard {
-		sub.buffer.Discard()
-		return
-	}
-	sub.buffer.Close()
+// SubscribeAllWithConfig exposes delivery limits and the reason for subscription closure.
+func (ctx *ExecutionContext) SubscribeAllWithConfig(
+	cfg DeliveryConfig,
+) (*StreamSubscription, error) {
+	return ctx.streamHub.subscribe(streamFilter{}, cfg)
 }
 
-// emit sends a chunk to all relevant subscribers.
-// This method is concurrent-safe and never blocks.
+// SubscribeToStreamWithConfig receives one stream with explicit limits. The ID must be nonempty.
+func (ctx *ExecutionContext) SubscribeToStreamWithConfig(
+	id string, cfg DeliveryConfig,
+) (*StreamSubscription, error) {
+	if id == "" {
+		return nil, errors.New("gent: empty stream identity")
+	}
+	return ctx.streamHub.subscribe(streamFilter{stream: id}, cfg)
+}
+
+// SubscribeToTopicWithConfig receives one topic with explicit limits. The ID must be nonempty.
+func (ctx *ExecutionContext) SubscribeToTopicWithConfig(
+	id string, cfg DeliveryConfig,
+) (*StreamSubscription, error) {
+	if id == "" {
+		return nil, errors.New("gent: empty topic identity")
+	}
+	return ctx.streamHub.subscribe(streamFilter{topic: id}, cfg)
+}
+
 func (h *streamHub) emit(chunk StreamChunk) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.closed {
 		return
 	}
-
-	// Send to all subscribers
-	for _, sub := range h.allSubscribers {
-		sub.buffer.Send(cloneStreamChunk(chunk))
-	}
-
-	// Send to stream-specific subscribers
-	if chunk.StreamId != "" {
-		for _, sub := range h.byStreamId[chunk.StreamId] {
-			sub.buffer.Send(cloneStreamChunk(chunk))
+	size := chunkSize(chunk)
+	for sub, filter := range h.subscribers {
+		if filter.stream != "" && filter.stream != chunk.StreamId {
+			continue
 		}
-	}
-
-	// Send to topic-specific subscribers
-	if chunk.StreamTopicId != "" {
-		for _, sub := range h.byTopicId[chunk.StreamTopicId] {
-			sub.buffer.Send(cloneStreamChunk(chunk))
+		if filter.topic != "" && filter.topic != chunk.StreamTopicId {
+			continue
+		}
+		owned := cloneStreamChunk(chunk)
+		if chunk.Err != nil {
+			owned.Err = SaveError(chunk.Err)
+		}
+		if !sub.queue.Send(owned, size) {
+			delete(h.subscribers, sub)
 		}
 	}
 }
 
-// close closes all subscription channels.
-// Safe to call multiple times.
+// close drains queued chunks with a finite timeout. Unsubscribe discards them when a consumer
+// leaves, so no delivery worker can remain blocked indefinitely after an execution ends.
 func (h *streamHub) close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
 	if h.closed {
 		return
 	}
 	h.closed = true
-
-	// Close all subscriber buffers
-	for _, sub := range h.allSubscribers {
-		sub.buffer.Close()
+	for sub := range h.subscribers {
+		sub.queue.Close()
 	}
-	for _, subs := range h.byStreamId {
-		for _, sub := range subs {
-			sub.buffer.Close()
-		}
-	}
-	for _, subs := range h.byTopicId {
-		for _, sub := range subs {
-			sub.buffer.Close()
-		}
-	}
+	clear(h.subscribers)
 }

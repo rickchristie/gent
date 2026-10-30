@@ -142,6 +142,11 @@ func (ctx *ExecutionContext) GenerateContentStream(
 				continue
 			}
 			output.Send(chunk)
+			recordingErr = ctx.flushPendingLimit()
+			if recordingErr != nil {
+				cancel()
+				provider.Close()
+			}
 		}
 		response, providerErr := provider.Response()
 		if response != nil && recordingErr == nil {

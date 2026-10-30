@@ -42,7 +42,7 @@ func TestHTTPStreaming(t *testing.T) {
 		return
 	}
 	defer func() { assert.NoError(t, conn.Close()) }()
-	assert.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	assert.NoError(t, conn.SetReadDeadline(time.Now().Add(20*time.Second)))
 	var ready Frame
 	assert.NoError(t, conn.ReadJSON(&ready))
 	assert.Equal(t, Frame{Kind: "ready", RunID: id}, ready)
@@ -59,6 +59,9 @@ func TestHTTPStreaming(t *testing.T) {
 	last, err := strconv.ParseUint(snapshot.LastEventNumber, 10, 64)
 	assert.NoError(t, err)
 	for {
+		// Match the client's inactivity timeout. A healthy stream can take longer than five
+		// seconds in total, including while the race detector checks database and event copies.
+		assert.NoError(t, conn.SetReadDeadline(time.Now().Add(20*time.Second)))
 		var frame Frame
 		if !assert.NoError(t, conn.ReadJSON(&frame)) {
 			return
@@ -67,6 +70,10 @@ func TestHTTPStreaming(t *testing.T) {
 			break
 		}
 		assert.Equal(t, id, frame.RunID)
+		if frame.Kind == "heartbeat" {
+			assert.Equal(t, Frame{Kind: "heartbeat", RunID: id}, frame)
+			continue
+		}
 		number, err := strconv.ParseUint(frame.EventNumber, 10, 64)
 		assert.NoError(t, err)
 		if number <= last {

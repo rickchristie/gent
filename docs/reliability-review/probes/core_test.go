@@ -62,12 +62,15 @@ func TestReviewSharedAgent(t *testing.T) {
 		input    input
 		expected expected
 	}
-	want := expected{result: gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
-		Output: []gent.ContentPart{gent.TextContent{Text: "done"}}}}
+	// TextFormat controls tool rendering. TextOutput keeps answer wrappers as literal text.
 	tests := []testCase{
-		{"XML", input{format.NewXML(), `<answer>done</answer>`}, want},
+		{"XML", input{format.NewXML(), `<answer>done</answer>`}, expected{
+			result: gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
+				Output: []gent.ContentPart{gent.TextContent{Text: `<answer>done</answer>`}}}}},
 		{"Markdown", input{format.NewMarkdown(), `# answer
-done`}, want},
+done`}, expected{result: gent.ExecutionResult{TerminationReason: gent.TerminationSuccess,
+			Output: []gent.ContentPart{gent.TextContent{Text: `# answer
+done`}}}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,7 +220,7 @@ func reviewBufferWorkers() int {
 	for _, entry := range strings.Split(string(stack[:n]), `
 
 `) {
-		if strings.Contains(entry, "internal/buffer.(*Unbounded") {
+		if strings.Contains(entry, "internal/buffer.(*Delivery") {
 			count++
 		}
 	}
@@ -302,15 +305,17 @@ func TestReviewDrainedBufferReleasesValues(t *testing.T) {
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	b := buffer.NewUnbounded[[]byte]()
+	b := buffer.NewDelivery[[]byte](32, 32<<20, time.Minute)
 	for i := 0; i < 32; i++ {
 		data := make([]byte, 1<<20)
 		data[0] = byte(i)
-		b.Send(data)
+		assert.True(t, b.Send(data, len(data)))
 	}
 	b.Close()
 	for range b.Receive() {
 	}
+	<-b.Done()
+	assert.NoError(t, b.Err())
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	runtime.KeepAlive(b)

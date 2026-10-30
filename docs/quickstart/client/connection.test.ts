@@ -133,3 +133,51 @@ test("a full buffer reconnects, and cleanup aborts pending fetches", async () =>
   await turn();
   assert.deepEqual(h.states, []);
 });
+
+test("a saved refresh behind live progress keeps the current unsaved suffix", async () => {
+  const h = harness(5);
+  try {
+    h.sockets[0].send(ready);
+    h.loads[0].resolve(initial);
+    await turn();
+    h.sockets[0].send(change("1"));
+    h.sockets[0].send(change("2"));
+    await until(() => h.loads.length === 2);
+    h.sockets[0].send(change("3"));
+    h.loads[1].resolve({ ...initial, lastEventNumber: "1" });
+    await turn();
+    assert.deepEqual(h.states.at(-1), { ...initial, lastEventNumber: "3" });
+    assert.equal(h.sockets.length, 1);
+    assert.equal(h.statuses.at(-1), "Live");
+  } finally {
+    h.stop();
+  }
+});
+
+test("recovery replaces a higher preview and ignores old frames and fetch replies", async () => {
+  const h = harness(5);
+  try {
+    h.sockets[0].send(ready);
+    h.loads[0].resolve(initial);
+    await turn();
+    h.sockets[0].send(change("1"));
+    h.sockets[0].send(change("2"));
+    await until(() => h.loads.length === 2);
+    const staleMessage = h.sockets[0].onmessage;
+    h.sockets[0].send({ kind: "resync", runId: "run" });
+    await until(() => h.sockets.length === 2);
+    h.sockets[1].send(ready);
+    h.loads[2].resolve({ ...initial, lastEventNumber: "1" });
+    await turn();
+    assert.deepEqual(h.states.at(-1), { ...initial, lastEventNumber: "1" });
+    staleMessage?.call(h.sockets[0] as unknown as WebSocket,
+      new MessageEvent("message", { data: JSON.stringify(change("99")) }));
+    h.loads[1].resolve({ ...initial, lastEventNumber: "99" });
+    await turn();
+    assert.deepEqual(h.states.at(-1), { ...initial, lastEventNumber: "1" });
+    h.sockets[1].send(change("2"));
+    assert.deepEqual(h.states.at(-1), { ...initial, lastEventNumber: "2" });
+  } finally {
+    h.stop();
+  }
+});

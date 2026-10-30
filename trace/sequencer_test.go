@@ -156,7 +156,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	assert.NoError(t, execCtx.FlushProgress())
 	execCtx.SetTermination(gent.TerminationSuccess, nil, nil)
 	execCtx.PublishAfterExecution(gent.TerminationSuccess, nil)
-	assert.NoError(t, execCtx.FlushProgress())
+	assert.NoError(t, execCtx.CommitCheckpoint(gent.PhaseTerminal))
 
 	snapshot := seq.Snapshot()
 	require.Len(t, snapshot.ModelCalls, 1)
@@ -549,6 +549,7 @@ func TestSequencer_ConcurrentRecordingIsMonotonic(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+	assert.NoError(t, execCtx.FlushProgress())
 
 	snapshot := seq.Snapshot()
 	require.Len(t, snapshot.RecentEvents, workers)

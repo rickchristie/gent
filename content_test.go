@@ -92,6 +92,7 @@ func TestMetadataSubscribersOwnTheirChunks(t *testing.T) {
 		{Type: "progress", Content: []ContentPart{TextContent{Text: "Checking."}}, MessageId: "message"},
 	}
 	assert.Equal(t, want, two.MetaContent)
+	assert.NoError(t, ctx.FlushProgress())
 	view, err := ctx.Export()
 	assert.NoError(t, err)
 	value, err := ctx.DecodeEvent(view.Activity[0])

@@ -31,9 +31,8 @@ func (ctx *ExecutionContext) queueFinalContent() error {
 	if err != nil {
 		return err
 	}
-	ctx.run.pending = append(ctx.run.pending, &RecordedEvent{Type: "execution_content",
+	return ctx.run.queueEvent(&RecordedEvent{Type: "execution_content",
 		ContextId: chunk.ContextId, ParentContextId: chunk.ParentContextId,
 		Iteration: chunk.Iteration, AttemptId: ctx.run.attempt, ModelCallId: chunk.ModelCallId,
 		Ts: stamp, Payload: &value})
-	return nil
 }

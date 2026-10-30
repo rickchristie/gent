@@ -8,7 +8,7 @@ server or network
 connection to read. There is no completion tracker or stored lesson progress.
 
 1. **Simple agent:** one Go file with a model, tool, standard ReAct loop, task, and result.
-2. **Saved streaming API:** the same loop with a database recorder, accepted events, and API routes.
+2. **Saved streaming API:** the same loop with grouped saves, live events, and API routes.
 3. **React streaming client:** buffer events, load state, skip covered events, and keep listening.
 4. **Resume a saved run:** load the full saved state, fence the writer, and restore fresh bindings.
 

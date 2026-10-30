@@ -45,7 +45,9 @@ export function connectRun(
     const socket = transport.open(runId);
     let state: State | null = null;
     let buffer: Frame[] = [];
+    let bufferNumbers = new Set<string>();
     let bufferBytes = 0;
+    let savedCursor = 0n;
     let loading = false;
     let ready = false;
     let controller: AbortController | null = null;
@@ -63,6 +65,7 @@ export function connectRun(
       socket.onmessage = socket.onclose = socket.onerror = null;
       socket.close();
       buffer = [];
+      bufferNumbers.clear();
     };
 
     function reconnect(reason: string) {
@@ -89,12 +92,18 @@ export function connectRun(
         const snapshot = await transport.load(runId, controller.signal);
         if (!valid()) return;
         if (snapshot.runId !== runId) throw new Error("Wrong snapshot run");
-        if (state && cursor(snapshot.lastEventNumber) < cursor(state.lastEventNumber)) {
-          throw new Error("Snapshot cursor moved backwards");
+        if (cursor(snapshot.lastEventNumber) < savedCursor) {
+          throw new Error("Saved cursor moved backwards");
         }
+        savedCursor = cursor(snapshot.lastEventNumber);
+        // Keep this connection's unsaved suffix across refreshes. On reconnect, both the
+        // preview and this buffer start again from the saved state, even at a lower cursor.
         state = catchUp(snapshot, buffer);
-        buffer = [];
-        bufferBytes = 0;
+        buffer = buffer.filter((frame) => frame.kind === "event" &&
+          cursor(frame.eventNumber) > savedCursor);
+        bufferNumbers = new Set(buffer.flatMap((frame) =>
+          frame.kind === "event" ? [frame.eventNumber] : []));
+        bufferBytes = buffer.reduce((size, frame) => size + JSON.stringify(frame).length * 2, 0);
         loading = false;
         attempt = 0;
         publish(state);
@@ -132,14 +141,16 @@ export function connectRun(
         }
         if (frame.kind === "heartbeat") return;
         if (frame.kind !== "event") throw new Error("Unknown frame kind");
-        if (!state || loading) {
+        if (cursor(frame.eventNumber) > savedCursor && !bufferNumbers.has(frame.eventNumber)) {
           buffer.push(frame);
+          bufferNumbers.add(frame.eventNumber);
           bufferBytes += String(message.data).length * 2;
-          if (buffer.length > 1024 || bufferBytes > 2 * 1024 * 1024) {
-            reconnect("snapshot buffer is full");
-          }
+        }
+        if (buffer.length > 1024 || bufferBytes > 2 * 1024 * 1024) {
+          reconnect("snapshot buffer is full");
           return;
         }
+        if (!state || loading) return;
         state = applyEvent(state, frame);
         publish(state);
         if (terminal(state)) void refresh();

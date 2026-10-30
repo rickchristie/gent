@@ -42,10 +42,19 @@ if err != nil {
 }
 ctx := gent.NewExecutionContext(worker, "refund", gent.NewBasicLoopData(task),
     gent.WithRunId(runID), gent.WithCodecs(codecs),
-    gent.WithRecorder(recorder), gent.WithObserver(seq))
+    gent.WithRecorder(recorder),
+    gent.WithCheckpointPolicy(gent.CheckpointPolicy{MaxEvents: 256, MaxBytes: 1024 * 1024}))
+defer ctx.Release()
+feed, err := seq.Follow(ctx, gent.DeliveryConfig{})
+if err != nil {
+    return err
+}
 agent := react.NewAgent(model).WithRecoveryVersion("refund-agent/v1")
 exec := executor.NewRunner(agent, executor.DefaultConfig())
 answer, result, err := exec.Execute(ctx)
+if displayErr := feed.Wait(); displayErr != nil {
+    log.Printf("live display stopped: %v", displayErr)
+}
 ```
 
 Handle the returned error even if `result` is nil. A persistence failure may prevent a terminal
@@ -53,20 +62,21 @@ checkpoint. Constructors with a task preserve its original value; unknown task c
 `RecordingError()` and `Execute` before any external call. Register custom content codecs before
 constructing that context.
 
-`WithRecorder` installs the application storage boundary. `WithObserver` installs an accepted-event
-observer, including a sequencer. Use the same codec registry in the recorder when storing custom
-content. The execution context owns numbering and acceptance.
-No recorder means in-memory acceptance only. Mutable execution hooks still use the event registry.
+`WithRecorder` installs the blocking storage boundary. `seq.Follow` projects live progress before
+persistence through an independent bounded queue. Its errors do not reject a saved checkpoint.
+Use `WithObserver(seq)` instead when the display must receive committed events only; do not attach
+both paths to one sequencer. Use the same codec registry in the recorder for custom content.
+The execution context owns numbering and acceptance. Without a recorder, acceptance is in memory
+only. Mutable execution hooks still use the event registry and finish before input is frozen.
 
-`trace.Sequencer` projects accepted canonical numbers. `gent.RecordedEvent` holds the lossless
-activity record. `trace.Event` is its JSON-safe display projection; it has the
-same event number, but can be redacted and truncated. Keeping these types separate prevents display
-settings from becoming a restoration format. Live observation and restored traces use the same
-direct projection. Replay never needs a live execution context or dispatches a mutation hook.
-Call correlation uses the recorded logical call ID and attempt ID. Matching a stream or tool name
-cannot establish which call produced an event; events with missing or unknown call IDs remain
-visible
-without updating another call's summary.
+`trace.Sequencer` preserves the execution's event numbers. `gent.RecordedEvent` holds the lossless
+activity record. `trace.Event` is its JSON-safe display projection; it has the same event number,
+but can be redacted and truncated. Keeping these types separate prevents display settings from
+becoming a restoration format. Live observation and restored traces use the same direct projection.
+Replay never needs a live execution context or dispatches a mutation hook. Call correlation uses the
+recorded logical call ID and attempt ID. Matching a stream or tool name cannot establish which call
+produced an event; events with missing or unknown call IDs remain visible without updating another
+call's summary.
 
 ## Edit context through owned values
 
@@ -142,32 +152,65 @@ tools, stats publishers, or limits. A database still supplies atomicity and fenc
 The execution context serializes local acceptance; the database supplies the distributed writer
 lease.
 
-Gent assigns numbers and freezes the candidate before `Save`. Readers and accepted subscribers
-continue seeing the old cursor while saving. A successful acknowledgment promotes the whole batch.
-Internal commits share already frozen payloads and calculate the digest once. Ownership copies are
-made at application boundaries, avoiding repeated serialization for each streamed token.
-The private event and batch indexes grow only after acceptance. `Export` copies those indexes under
-the run lock before copying payloads, so a caller can read or change its snapshot during recording.
+Gent freezes each event and assigns its number before live delivery. `Export` and committed
+observers retain the old saved cursor while Save blocks. Success advances the entire group. Live
+consumers can already have seen that group's events; commit does not deliver them twice. Internal
+commits share frozen payloads and calculate one digest per save request. Ownership copies at
+application boundaries prevent consumers and recorders from changing retained evidence. The private
+event and batch indexes grow only after acceptance. `Export` copies those indexes under the run lock
+before copying payloads, so a caller can read or change its snapshot during recording.
 `PersistenceError` retains the exact failed or uncertain batch and stops further execution. No next
 model or tool effect starts after that failure. `ctx.RetrySave(worker)` retries the same batch and
-identity;
-do not manufacture a new batch ID after a lost acknowledgment. After recovery, load the store's
-accepted run and resume on a fresh execution context. Retrying a save does not clear the failed
-execution's cancellation or restart its model/tool work.
+identity; do not manufacture a new batch ID after a lost acknowledgment. After recovery, load the
+store's accepted run and resume on a fresh execution context. Retrying a save does not clear the
+failed execution's cancellation or restart its model/tool work.
 
 Publication failure after a storage commit does not mean the transaction failed. Handle delivery
 separately, using a transactional outbox or the full-view reload protocol. Do not report a committed
 transaction as rejected just because a browser or message bus is unavailable.
 
 Already observed evidence can be saved after worker cancellation. Saves use an independent context
-with a 30-second timeout; the application must still reject a stale writer. This is why cancellation
-alone cannot replace storage fencing.
+with a configurable `CheckpointPolicy.SaveTimeout` (30 seconds by default). The application must
+still reject a stale writer. Cancellation alone cannot replace storage fencing.
 
 Executors release their execution context on every return path, after final evidence is accepted
 when possible. Release cancels context-bound work and closes stream subscriptions for draining.
 `CompleteChild` also releases child work. Direct users of `NewExecutionContext` must defer
-`ctx.Release()`. Release is safe to repeat and does not change a saved outcome or mark a successful
-execution as interrupted. Explicit application cancellation still uses `CancelRun`.
+`ctx.Release()`. Queue drains have finite timeouts. Cancellation also closes live delivery, while
+already observed evidence can still be saved. Release is safe to repeat and does not change a saved
+outcome or mark a successful execution as interrupted. Explicit application cancellation still uses
+`CancelRun`.
+
+## Grouped saves and live queue limits
+
+`WithCheckpointPolicy` controls pending progress independently of display queues. The defaults are
+256 pending events or 1 MiB of encoded event data. Either threshold causes a blocking
+`FlushProgress` with no new checkpoint. The saved cursor advances; the resumable control cursor
+stays unchanged. Only the captured prefix is released after Save returns nil. Later concurrent
+events stay pending. One oversized event is saved whole. A failed or uncertain save stops execution
+and retains the exact request for reconciliation. Zero fields select defaults; negative values are
+invalid.
+
+For example, with checkpoint 1, chunks 2, 3, and 4 can be saved as one progress group. Saved state
+then ends at 4, but control still resumes from 1. If the provider stops before a complete response
+is saved, recovery retries that call. Complete saved responses and tool results remain reusable.
+Normal responses below the threshold save their chunks at completion. Early saves do not bound
+total memory: `RunView.Activity` still retains accepted events, and model responses retain content.
+Concurrent producers can exceed a pending threshold while an earlier save blocks; each producer
+waits at the threshold before its next event. Custom providers must bound their upstream queues.
+
+Use `ctx.SubscribeEvents(gent.DeliveryConfig{...})` for the full numbered live feed, or
+`SubscribeAllWithConfig`, `SubscribeToStreamWithConfig`, and `SubscribeToTopicWithConfig` for
+chunks. A subscription exposes its channel, `Err`, `Done`, and `Close`. The defaults are 4,096
+queued or in-flight events, 8 MiB of encoded data, and 30 seconds per delivery. Zero selects
+defaults. Negative settings are invalid. Overflow or timeout discards that subscriber's queue and
+reports `ErrDeliveryOverflow` or `ErrDeliveryTimeout`. Other consumers and persistence continue.
+Socket writers need their own deadlines. `Close` discards pending delivery and waits for its worker.
+
+`trace.Sequencer.SubscribeWithLimits` uses the same configuration. Convenience `Subscribe` and
+context chunk methods use finite defaults. Trace's older `SubscribeWithConfig` retains count-based
+drop policies; use `SubscribeWithLimits` for byte limits and timeouts. Slow overflow callbacks have
+one worker with coalesced notifications. Application callbacks and redactors must return promptly.
 
 ## Exact model requests and tool evidence
 
@@ -186,8 +229,10 @@ evaluates option functions once. ReAct's `WithCallOptions` resolves its function
 configuring the agent and reuses those values for compatibility and requests.
 
 Adapters emit chunks through the returned stream; they must not publish duplicate Gent events. The
-managed boundary accepts chunks before delivering them live and records the final response, partial
-output, usage, and error. `Stream.Close` requests cancellation. `Response` waits until the producer
+managed boundary freezes and delivers chunks live, then saves the group with the complete response,
+usage, continuation data, tool requests, and error. `Response()` waits for this save. A provider
+request is saved before the provider starts. Tool readiness and results also remain blocking save
+boundaries. `Stream.Close` requests cancellation. `Response` waits until the producer
 finishes. Native adapters use bounded queues and cancellation-aware backpressure;
 custom adapters can use `NewBoundedStreamWithDuration` too. Its producer must run in a goroutine and
 call `Complete` after it actually stops, even on cancellation.
@@ -200,16 +245,19 @@ without moving the root checkpoint. No final event is emitted for an error, canc
 
 Observers and context subscriptions see this final event only after the save succeeds. It does not
 add a model request, output tokens, or another history message. `RetrySave` reconciles an uncertain
-save without notifying the old worker's subscribers. Reconnect reads the accepted events, and a
-terminal restore returns the saved result without publishing a new answer. Deduplicate by run ID
-and event number. Use `CodecRegistry.DecodeEvent` for saved chunks; it supplies the envelope's
-cursor.
-See the [frontend contract](native-tools.md#frontend-and-storage-contract) for preview replacement,
-message IDs, trace limits, and provider completion states. The saved-run schema version is now 6.
+save without repeating live chunk delivery. Committed observers receive the saved group. Reconnect
+reads the accepted events, and a terminal restore returns the saved result without publishing a new
+answer. Deduplicate by run ID and event number within the current connection. After worker recovery,
+discard the old preview and reset to saved state, even when its cursor is lower. Use
+`CodecRegistry.DecodeEvent` for saved chunks; it supplies the envelope's cursor. See the [frontend
+contract](native-tools.md#frontend-and-storage-contract) for preview replacement, message IDs, trace
+limits, and provider completion states. The saved-run schema version is now 6.
 
-Only model, tool, and system-prompt before-hooks mutate effective input. Other lifecycle observers
+Only model and tool before-hooks mutate effective input. Other lifecycle observers
 receive copies. The low-level typed `Publish...` helpers queue evidence and return event values;
-managed execution checks `RecordingError` and crosses explicit acceptance barriers. Custom callers
+managed execution checks `RecordingError` and crosses explicit acceptance barriers.
+`PublishAfterExecution` freezes its lifecycle event for the terminal save, so a concurrent progress
+save cannot publish success without the saved outcome. Custom callers
 must check `FlushProgress` before external work. Generic `Publish` returns an error directly.
 
 All ToolChains implement `NativeTools`, `PrepareCalls`, and `ExecuteNext`. Plans save logical call
@@ -382,11 +430,16 @@ Local retention and redaction only affect display. Canonical runs retain the ful
 task, requests, outputs, and evidence; apply application access controls to those reads.
 `IncludeRunOutput` and `RedactRunOutput` apply to iteration and final execution results.
 
-A joining observer buffers updates, loads a full view through cursor C, discards buffered duplicates
-through C, then applies contiguous later updates. Reload on a gap. Periodically reload even without
-a gap so a lost terminal update is eventually discovered. A checkpoint at event 120 with saved
-progress through 128 resumes numbering at 129. Reloading through 130 includes a missing event 129;
-the next update to apply is 131. Slow or bounded display subscribers cannot alter durable ordering.
+A joining live consumer subscribes, loads a full saved view through cursor C, skips duplicates
+through C, and applies contiguous later events. The server must also supply the unsaved prefix
+already emitted before subscription, or close and retry when that prefix is unavailable. Retain the
+current connection's unsaved suffix across periodic reads: a saved snapshot can be behind its live
+preview. On worker recovery, discard the old connection and suffix, install the saved snapshot even
+at a lower cursor, and ignore old socket callbacks and in-flight state reads. Reload on a gap.
+Periodically reload even without a gap so a lost terminal update is eventually discovered. A
+checkpoint at event 120 with saved progress through 128 resumes numbering at 129. Reloading through
+130 includes a missing event 129; the next update to apply is 131. Slow or bounded display
+subscribers cannot alter durable ordering.
 
 Permanent tests cover subprocess recovery, recorder failure boundaries, retries, exact resumed
 requests, two summaries, immutable views, cursor/delta replay, lost completion, interrupted model

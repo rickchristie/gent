@@ -521,6 +521,7 @@ func TestExecutionContext_EmitChunkRecordsWithoutListeners(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recording 1000 chunks exceeded five seconds")
 	}
+	assert.NoError(t, ctx.FlushProgress())
 	ctx.CloseStreams()
 	bundle, err := ctx.Export()
 	assert.NoError(t, err)

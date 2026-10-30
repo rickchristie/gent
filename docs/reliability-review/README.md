@@ -41,8 +41,8 @@ The existing save failure, retry, replay, checkpoint, and output tests remain in
 permit is occupied, repeated and concurrent inference, repeated close, and close during native use.
 The close test starts a separate process, including in race builds. The checked-in quantized model
 checks exact vectors without a model download. Existing cached-model ranking tests still run.
-[Trace tests](../../trace/subscription_lifetime_test.go) cover empty and unread bounded or unbounded
-queues with both close orders and concurrent unsubscribe.
+[Trace tests](../../trace/subscription_lifetime_test.go) cover empty and unread queues with default
+or configured bounds with both close orders and concurrent unsubscribe.
 
 The test setup no longer downloads models before `m.Run`. Missing model files or a missing native
 runtime can skip the applicable checks; model, tokenizer, and inference errors now fail once those
@@ -326,7 +326,8 @@ work. Also check long FlatIndex scans and regex search, which currently do not p
 
 ### R10 P2 Drained queues retain their previous payloads
 
-Sources: [internal/buffer/unbounded.go](../../internal/buffer/unbounded.go), lines 96–100;
+Original source: `internal/buffer/unbounded.go`, lines 96–100 (replaced by the bounded
+[delivery queue](../../internal/buffer/delivery.go));
 [stream.go](../../stream.go), lines 134–139.
 
 Both queues remove their first item by reslicing without clearing the old slot. An empty slice

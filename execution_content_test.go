@@ -144,7 +144,16 @@ func TestExecutionContent_FailuresKeepOnlyPreviews(t *testing.T) {
 			}
 			bundle, err := ctx.Export()
 			assert.NoError(t, err)
-			assert.Equal(t, live, contentChunks(t, bundle.Activity, ctx.Codecs()))
+			saved := contentChunks(t, bundle.Activity, ctx.Codecs())
+			if test.input.cancel {
+				// Cancellation closes live delivery. Its saved evidence can include chunks
+				// received after cancellation, but every delivered chunk must match exactly.
+				if !assert.LessOrEqual(t, len(live), len(saved)) {
+					return
+				}
+				saved = append([]gent.StreamChunk(nil), saved[:len(live)]...)
+			}
+			assert.Equal(t, live, saved)
 			assert.Equal(t, gent.PhaseTerminal, bundle.Checkpoint.Phase)
 		})
 	}

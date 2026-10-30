@@ -118,9 +118,21 @@ func (ctx *ExecutionContext) recordEvent(event Event) error {
 		recorded.ToolCallId = e.ToolCallId
 	}
 	ctx.run.mu.Lock()
-	ctx.run.pending = append(ctx.run.pending, recorded)
+	if recorded.Type == "execution_finished" {
+		// Assign this event's sequence only inside its terminal save group. Other contexts can
+		// still save progress while completion hooks finish, without exposing an unsaved outcome.
+		err = ctx.run.err
+		if err == nil {
+			ctx.terminalEvent = recorded
+		}
+	} else {
+		err = ctx.run.queueEvent(recorded)
+	}
 	ctx.run.mu.Unlock()
-	return nil
+	if err != nil {
+		return ctx.stopRecording(err)
+	}
+	return ctx.flushPendingLimit()
 }
 
 func (ctx *ExecutionContext) recordChunk(chunk *StreamChunk) error {
@@ -131,19 +143,30 @@ func (ctx *ExecutionContext) recordChunk(chunk *StreamChunk) error {
 	ctx.run.mu.Lock()
 	recorded := &RecordedEvent{Type: "model_stream_chunk",
 		ContextId: chunk.ContextId, ParentContextId: chunk.ParentContextId,
-		Iteration: chunk.Iteration,
+		Iteration: chunk.Iteration, Ts: chunk.Timestamp,
 		AttemptId: ctx.run.attempt, ModelCallId: chunk.ModelCallId, Payload: &value}
-	ctx.run.pending = append(ctx.run.pending, recorded)
-	ctx.run.mu.Unlock()
-	// Synchronous acceptance supplies bounded backpressure. The producer cannot outrun storage,
-	// and stream consumers receive a chunk only after its save succeeds.
-	if err := ctx.FlushProgress(); err != nil {
-		return err
+	err = ctx.run.queueEvent(recorded)
+	if err == nil {
+		var frozen any
+		frozen, err = ctx.run.codecs.DecodeEvent(recorded)
+		if err == nil {
+			chunk.RunId, chunk.EventNumber = recorded.RunId, recorded.EventNumber
+			chunk.Timestamp = chunk.Timestamp.Round(0)
+			if ctx.run.deferLive {
+				if ctx.run.delayedChunks == nil {
+					ctx.run.delayedChunks = make(map[uint64]delayedStreamChunk)
+				}
+				ctx.run.delayedChunks[recorded.EventNumber] = delayedStreamChunk{
+					owner: ctx, chunk: frozen.(StreamChunk)}
+			} else {
+				ctx.emitStreamChunk(frozen.(StreamChunk))
+			}
+		}
 	}
-	ctx.run.mu.RLock()
-	chunk.RunId, chunk.EventNumber = recorded.RunId, recorded.EventNumber
-	ctx.run.mu.RUnlock()
-	chunk.Timestamp = chunk.Timestamp.Round(0)
+	ctx.run.mu.Unlock()
+	if err != nil {
+		return ctx.stopRecording(err)
+	}
 	return nil
 }
 

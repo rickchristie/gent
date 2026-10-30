@@ -78,7 +78,8 @@ func TestReliabilityRestoreFailureReleasesConfiguredWork(t *testing.T) {
 }
 
 func TestReliabilityExportDuringAcceptance(t *testing.T) {
-	ctx := gent.NewExecutionContext(context.Background(), "test", nil)
+	ctx := gent.NewExecutionContext(context.Background(), "test", nil,
+		gent.WithCheckpointPolicy(gent.CheckpointPolicy{MaxEvents: 16}))
 	defer ctx.Release()
 	if !assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{
 		MetaContent: []*gent.MetaContent{
@@ -92,6 +93,7 @@ func TestReliabilityExportDuringAcceptance(t *testing.T) {
 	})) {
 		return
 	}
+	assert.NoError(t, ctx.FlushProgress())
 	first, err := ctx.Export()
 	if !assert.NoError(t, err) {
 		return
@@ -125,7 +127,7 @@ func TestReliabilityExportDuringAcceptance(t *testing.T) {
 			}
 			assert.NoError(t, gent.ValidateBundle(view))
 			assert.Len(t, view.Activity, int(view.LastAppliedEventNumber))
-			assert.Len(t, view.Batches, int(view.LastAppliedEventNumber))
+			assert.Len(t, view.Batches, 1+int(view.LastAppliedEventNumber-1)/16)
 			// Public snapshots are caller-owned, including the growing indexes and payloads.
 			clear(view.Batches)
 			view.Activity[0].Type = "changed by caller"
@@ -137,7 +139,7 @@ func TestReliabilityExportDuringAcceptance(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NoError(t, gent.ValidateBundle(last))
 	assert.Len(t, last.Activity, 129)
-	assert.Len(t, last.Batches, 129)
+	assert.Len(t, last.Batches, 9)
 	assert.Equal(t, first.Activity, last.Activity[:1])
 	assert.Len(t, first.Activity, 1)
 	assert.Len(t, first.Batches, 1)

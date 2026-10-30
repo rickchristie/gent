@@ -26,6 +26,12 @@ func RestoreSequencer(saved gent.RunView, cfg Config) (*Sequencer, error) {
 func (s *Sequencer) ObserveCommitted(
 	events []*gent.RecordedEvent, registry *gent.CodecRegistry,
 ) error {
+	return s.observeEvents(events, registry)
+}
+
+func (s *Sequencer) observeEvents(
+	events []*gent.RecordedEvent, registry *gent.CodecRegistry,
+) error {
 	s.observeMu.Lock()
 	defer s.observeMu.Unlock()
 	for _, recorded := range events {

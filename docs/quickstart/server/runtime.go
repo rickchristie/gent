@@ -91,7 +91,13 @@ func (a *API) start(runID, question string, resume bool) error {
 			}})
 			ctx := gent.NewExecutionContext(worker, "order-helper", data,
 				gent.WithRunId(runID), gent.WithCodecs(a.store.codecs),
-				gent.WithRecorder(writer), gent.WithObserver(seq))
+				gent.WithRecorder(writer))
+			feed, err := seq.Follow(ctx, gent.DeliveryConfig{})
+			if err != nil {
+				ctx.Release()
+				log.Printf("start live display: %v", err)
+				return
+			}
 			limits := gent.DefaultLimits()
 			for i := range limits {
 				if limits[i].Key == gent.SCIterations.Self() {
@@ -100,6 +106,9 @@ func (a *API) start(runID, question string, resume bool) error {
 			}
 			ctx.SetLimits(limits)
 			_, _, runErr = runner.Execute(ctx)
+			if err := feed.Wait(); err != nil {
+				log.Printf("live display stopped: %v", err)
+			}
 		}
 		if runErr != nil {
 			log.Printf("run %s stopped: %v", runID, runErr)

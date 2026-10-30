@@ -155,7 +155,9 @@ type StreamChunk struct {
 	MessageId        string
 	SourceMessageIds []string
 
-	// EventNumber is the accepted event cursor. Use RunId and EventNumber to deduplicate delivery.
+	// RunId identifies the logical execution. EventNumber is the fixed live event position.
+	// A live chunk can precede its save. Deduplicate within one connection; after recovery,
+	// discard the old preview and start from saved state, which can have a lower cursor.
 	RunId       string
 	EventNumber uint64
 

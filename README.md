@@ -173,8 +173,10 @@ type SessionData struct {
 ### History and continuation
 
 `ExecutionContext` accepts typed history, activity, and checkpoints together. Supply application
-storage with `gent.WithRecorder` and attach a `trace.Sequencer` with `gent.WithObserver`. Use
-`CodecRegistry.Marshal`/`Unmarshal` for saved runs and `Runner.Resume` for continuation.
+storage with `gent.WithRecorder`. Use `trace.Sequencer.Follow` for live progress before persistence,
+or `gent.WithObserver` for committed events only. `CheckpointPolicy` groups stream chunks into
+blocking saves; `DeliveryConfig` bounds each live consumer. Use `CodecRegistry.Marshal`/`Unmarshal`
+for saved runs and `Runner.Resume` for continuation.
 Completed tools and saved model decisions survive
 worker replacement. Uncertain tool outcomes require an explicit recovery decision.
 

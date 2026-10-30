@@ -40,12 +40,9 @@ export type TraceEvent = {
     sourceMessageIds?: string[];
   };
 };
-export type Frame = {
-  kind: "ready" | "event" | "resync" | "heartbeat";
-  runId: string;
-  eventNumber?: string;
-  event?: TraceEvent;
-};
+export type Frame =
+  | { kind: "event"; runId: string; eventNumber: string; event: TraceEvent }
+  | { kind: "ready" | "resync" | "heartbeat"; runId: string };
 
 export class Gap extends Error {}
 
@@ -72,16 +69,17 @@ function appendParts(parts: Part[], added: Part[]): Part[] {
 // This reducer matches the small BrowserState returned by this example's API.
 // It does not claim to implement all fields of trace.Snapshot or restore a Gent RunView.
 export function applyEvent(state: State, frame: Frame): State {
-  if (frame.runId !== state.runId || frame.event?.runId !== state.runId) {
+  if (frame.kind !== "event") throw new Error("Expected an event frame");
+  if (frame.runId !== state.runId || frame.event.runId !== state.runId) {
     throw new Error("Wrong run");
   }
-  const number = cursor(frame.eventNumber!);
+  const number = cursor(frame.eventNumber);
   const previous = cursor(state.lastEventNumber);
   if (number <= previous) return state;
   if (number !== previous + 1n) throw new Gap("Missing event: reload the saved state");
-  const event = frame.event!;
+  const event = frame.event;
   const payload = event.payload ?? {};
-  const next = { ...state, lastEventNumber: frame.eventNumber! };
+  const next = { ...state, lastEventNumber: frame.eventNumber };
   if (event.type === "execution_started") next.status = "running";
   if (event.type === "execution_finished") next.status = payload.status!;
   if (event.type === "limit_exceeded") next.status = "limit_exceeded";

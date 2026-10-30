@@ -78,7 +78,9 @@ type CheckpointState interface {
 }
 
 type RestoreBindings struct {
-	Recorder           Recorder
+	Recorder Recorder
+	// CheckpointPolicy applies pending-save limits to the replacement worker.
+	CheckpointPolicy   CheckpointPolicy
 	Observers          []RecordedEventObserver
 	Codecs             *CodecRegistry
 	Data               LoopData

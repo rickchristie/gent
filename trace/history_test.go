@@ -84,6 +84,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 			},
 		}))
 	}
+	assert.NoError(t, ctx.FlushProgress())
 	bundle, err := ctx.Export()
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(120), bundle.Checkpoint.EventNumber)
@@ -117,6 +118,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 			},
 		},
 	}))
+	assert.NoError(t, restored.FlushProgress())
 	events, err := fresh.EventsAfter(129)
 	assert.NoError(t, err)
 	assert.Equal(t, StitchStatusGap, ValidateStitch(128, events).Status)
@@ -131,6 +133,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 			},
 		},
 	}))
+	assert.NoError(t, restored.FlushProgress())
 	events, err = fresh.EventsAfter(reloaded.LastAppliedEventNumber)
 	assert.NoError(t, err)
 	assert.Equal(t, StitchStatusOK, ValidateStitch(130, events).Status)

@@ -7,9 +7,12 @@ func (ctx *ExecutionContext) RecordInterruption(cause error) error {
 		return ctx.stopRecording(err)
 	}
 	ctx.run.mu.Lock()
-	ctx.run.pending = append(ctx.run.pending, &RecordedEvent{Type: "attempt_interrupted",
+	err = ctx.run.queueEvent(&RecordedEvent{Type: "attempt_interrupted",
 		ContextId: ctx.ContextId(), Iteration: ctx.Iteration(),
 		AttemptId: ctx.run.attempt, Payload: &value})
 	ctx.run.mu.Unlock()
+	if err != nil {
+		return ctx.stopRecording(err)
+	}
 	return ctx.FlushProgress()
 }

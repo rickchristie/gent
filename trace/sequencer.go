@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -8,7 +9,8 @@ import (
 	"github.com/rickchristie/gent/internal/buffer"
 )
 
-// Sequencer projects accepted events into display snapshots and bounded live subscriptions.
+// Sequencer projects frozen events into display snapshots and bounded subscriptions.
+// Follow receives live progress; ObserveCommitted receives saved progress only.
 type Sequencer struct {
 	observeMu sync.Mutex
 	closeMu   sync.Mutex
@@ -229,27 +231,32 @@ func (s *Sequencer) sendLive(event *Event) {
 }
 
 type liveSubscriber struct {
-	id uint64
+	id       uint64
+	delivery *buffer.Delivery[*Event]
 
-	unbounded  *buffer.Unbounded[*Event]
 	bounded    chan *Event
 	policy     OverflowPolicy
 	onOverflow func(OverflowInfo)
+	overflow   chan OverflowInfo
 
 	closeOnce sync.Once
 }
 
 func (s *liveSubscriber) receive() <-chan *Event {
-	if s.unbounded != nil {
-		return s.unbounded.Receive()
+	if s.delivery != nil {
+		return s.delivery.Receive()
 	}
 	return s.bounded
 }
 
 func (s *liveSubscriber) send(event *Event) bool {
-	if s.unbounded != nil {
-		s.unbounded.Send(event)
-		return true
+	if s.delivery != nil {
+		data, err := json.Marshal(event)
+		if err != nil {
+			s.delivery.Fail(err)
+			return false
+		}
+		return s.delivery.Send(event, len(data))
 	}
 	select {
 	case s.bounded <- event:
@@ -302,13 +309,21 @@ func (s *liveSubscriber) notifyOverflow(info OverflowInfo) {
 	if s.onOverflow == nil {
 		return
 	}
-	go s.onOverflow(info)
+	// Coalesce notifications for a slow callback. One callback worker per subscription keeps
+	// repeated drops from creating an unbounded number of goroutines.
+	select {
+	case s.overflow <- info:
+	default:
+	}
 }
 
 func (s *liveSubscriber) close() {
 	s.closeOnce.Do(func() {
-		if s.unbounded != nil {
-			s.unbounded.Close()
+		if s.overflow != nil {
+			close(s.overflow)
+		}
+		if s.delivery != nil {
+			s.delivery.Close()
 			return
 		}
 		close(s.bounded)
@@ -316,9 +331,9 @@ func (s *liveSubscriber) close() {
 }
 
 func (s *liveSubscriber) discard() {
-	// A consumer can leave after graceful close has started draining.
-	if s.unbounded != nil {
-		s.unbounded.Discard()
+	if s.delivery != nil {
+		s.delivery.Discard()
+		<-s.delivery.Done()
 		return
 	}
 	s.close()

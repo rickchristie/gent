@@ -25,10 +25,10 @@ func TestSubscriptionCloseAndUnsubscribe(t *testing.T) {
 		expected expected
 	}
 	tests := []testCase{
-		{"unbounded close first", input{0, 8, "close"}, expected{}},
-		{"unbounded unsubscribe first", input{0, 8, "unsubscribe"}, expected{}},
-		{"unbounded simultaneous", input{0, 8, "concurrent"}, expected{}},
-		{"unbounded empty", input{0, 0, "concurrent"}, expected{}},
+		{"default close first", input{0, 8, "close"}, expected{}},
+		{"default unsubscribe first", input{0, 8, "unsubscribe"}, expected{}},
+		{"default simultaneous", input{0, 8, "concurrent"}, expected{}},
+		{"default empty", input{0, 0, "concurrent"}, expected{}},
 		{"bounded close first", input{8, 8, "close"}, expected{}},
 		{"bounded unsubscribe first", input{8, 8, "unsubscribe"}, expected{}},
 		{"bounded simultaneous", input{8, 8, "concurrent"}, expected{}},

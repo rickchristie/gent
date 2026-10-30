@@ -77,7 +77,8 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Use native API controls when the endpoint can enforce the declared contract
 - Unsupported input types return an error; adapters do not convert input files
 - Preserve native completion, refusal, tool IDs, and opaque continuation items
-- Managed calls record requests, chunks, responses, and usage before delivery
+- Managed calls freeze and number live chunks before delivery; grouped saves persist them later
+- Request and response saves block dependent model, tool, and output processing
 - Adapters return a Stream and Complete only after producer cleanup, including cancellation
 - Content and MetaContent retain ordered text and binary parts; only accepted output is Content
 - See `docs/models.md` for endpoint-specific support and limitations
@@ -126,7 +127,8 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Central hub: holds LoopData, Stats, Events, Limits, streaming subscriptions
 - SpawnChild() creates nested context with shared stats propagation
 - PublishXXX() runs mutable hooks and queues frozen evidence; stats updates enforce limits
-- FlushProgress/CommitCheckpoint accept evidence before StateChange and trace observers see it
+- FlushProgress/CommitCheckpoint accept evidence before committed observers see it
+- SubscribeEvents and trace.Sequencer.Follow receive live evidence before its grouped save
 
 ## Data Flow (ReAct Agent)
 1. Runner.Execute configures a typed output contract on the caller's ExecutionContext

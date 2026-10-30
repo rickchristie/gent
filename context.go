@@ -127,13 +127,17 @@ type ExecutionContext struct {
 	acceptedValue     *EncodedValue
 	refusal           *ModelRefusal
 	err               error
+	// terminalEvent is frozen by PublishAfterExecution and queued only at the terminal save.
+	// run.mu protects it so a concurrent progress save cannot accept success without the outcome.
+	terminalEvent *RecordedEvent
 
 	// Event publisher for dispatching events to subscribers (set by Executor)
 	eventPublisher EventPublisher
 	eventDepth     map[uint64]int // tracks recursion depth per publishing goroutine
 
 	// Streaming support
-	streamHub *streamHub
+	streamHub   *streamHub
+	stopStreams func() bool
 
 	// Compaction configuration (optional)
 	compactionTrigger  CompactionTrigger
@@ -165,6 +169,7 @@ func NewExecutionContext(
 	// Create stats with back-reference for limit checking
 	execCtx.stats = newExecutionStatsWithContext(execCtx)
 	execCtx.initializeHistory(options)
+	execCtx.stopStreams = context.AfterFunc(ctx, execCtx.CloseStreams)
 	return execCtx
 }
 
@@ -223,6 +228,9 @@ func (ctx *ExecutionContext) Interrupt(cause error) {
 // It does not change the result or save an outcome. Executors call it on every return path;
 // callers that manage an ExecutionContext directly should defer it. Repeated calls are safe.
 func (ctx *ExecutionContext) Release() {
+	if ctx.stopStreams != nil {
+		ctx.stopStreams()
+	}
 	ctx.cancel(errExecutionReleased)
 	for _, child := range ctx.Children() {
 		child.Release()
@@ -1069,7 +1077,8 @@ func (ctx *ExecutionContext) PublishBeforeExecution() *BeforeExecutionEvent {
 	return event
 }
 
-// PublishAfterExecution publishes an AfterExecutionEvent.
+// PublishAfterExecution runs the completion hooks and freezes an AfterExecutionEvent.
+// CommitCheckpoint(PhaseTerminal) saves it with the outcome before live consumers see success.
 func (ctx *ExecutionContext) PublishAfterExecution(
 	reason TerminationReason,
 	err error,
@@ -1423,6 +1432,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	// Create stats with back-reference to child for limit checking
 	// Stats also link to parent stats for real-time aggregation
 	child.stats = newExecutionStatsWithContextAndParent(child, ctx.stats)
+	child.stopStreams = context.AfterFunc(child.Context(), child.CloseStreams)
 
 	ctx.children = append(ctx.children, child)
 	ctx.mu.Unlock()
@@ -1601,10 +1611,9 @@ func (ctx *ExecutionContext) Duration() time.Duration {
 //   - The unsubscribe function is called, discarding any queued chunks for this subscriber
 //   - The ExecutionContext terminates (CloseStreams is called), after queued chunks drain
 //
-// IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
-// emitters never block. The subscriber is responsible for consuming chunks in a
-// timely manner. If the subscriber cannot keep up, memory usage will grow
-// unboundedly. Consider unsubscribing if the subscriber falls too far behind.
+// Delivery uses the finite DeliveryConfig defaults. Overflow or a delivery timeout closes
+// this subscription and discards queued chunks. Use the matching WithConfig method to set
+// limits and read the closure error. A slow subscriber does not block execution or Save.
 func (ctx *ExecutionContext) SubscribeAll() (<-chan StreamChunk, UnsubscribeFunc) {
 	return ctx.streamHub.subscribeAll()
 }
@@ -1626,10 +1635,9 @@ func (ctx *ExecutionContext) SubscribeAllDraining() (<-chan StreamChunk, Unsubsc
 //   - The unsubscribe function is called, discarding any queued chunks for this subscriber
 //   - The ExecutionContext terminates (CloseStreams is called), after queued chunks drain
 //
-// IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
-// emitters never block. The subscriber is responsible for consuming chunks in a
-// timely manner. If the subscriber cannot keep up, memory usage will grow
-// unboundedly. Consider unsubscribing if the subscriber falls too far behind.
+// Delivery uses the finite DeliveryConfig defaults. Overflow or a delivery timeout closes
+// this subscription and discards queued chunks. Use the matching WithConfig method to set
+// limits and read the closure error. A slow subscriber does not block execution or Save.
 func (ctx *ExecutionContext) SubscribeToStream(
 	streamId string,
 ) (<-chan StreamChunk, UnsubscribeFunc) {
@@ -1646,24 +1654,28 @@ func (ctx *ExecutionContext) SubscribeToStream(
 //   - The unsubscribe function is called, discarding any queued chunks for this subscriber
 //   - The ExecutionContext terminates (CloseStreams is called), after queued chunks drain
 //
-// IMPORTANT: Memory consideration - chunks are buffered without limit to ensure
-// emitters never block. The subscriber is responsible for consuming chunks in a
-// timely manner. If the subscriber cannot keep up, memory usage will grow
-// unboundedly. Consider unsubscribing if the subscriber falls too far behind.
+// Delivery uses the finite DeliveryConfig defaults. Overflow or a delivery timeout closes
+// this subscription and discards queued chunks. Use the matching WithConfig method to set
+// limits and read the closure error. A slow subscriber does not block execution or Save.
 func (ctx *ExecutionContext) SubscribeToTopic(
 	topicId string,
 ) (<-chan StreamChunk, UnsubscribeFunc) {
 	return ctx.streamHub.subscribeToTopic(topicId)
 }
 
-// EmitChunk emits a streaming chunk to all relevant subscribers.
+// EmitChunk freezes and publishes a live chunk, then checks pending-save thresholds.
+// Delivery does not wait for a consumer. If a threshold is reached, the grouped save blocks
+// until commit. Otherwise the event stays pending until the next explicit save boundary.
 // Called by model wrappers during streaming. Automatically propagates to parent while preserving
 // child-populated metadata; parent contexts only fill fields that are still empty.
 // Safe for concurrent use.
 //
 // If chunk.Source is empty, it will be populated with BuildSourcePath().
 func (ctx *ExecutionContext) EmitChunk(chunk StreamChunk) error {
-	return ctx.emitChunk(&chunk)
+	if err := ctx.emitChunk(&chunk); err != nil {
+		return err
+	}
+	return ctx.flushPendingLimit()
 }
 
 func (ctx *ExecutionContext) emitChunk(chunk *StreamChunk) error {
@@ -1694,7 +1706,7 @@ func (ctx *ExecutionContext) emitChunk(chunk *StreamChunk) error {
 	return nil
 }
 
-func (ctx *ExecutionContext) emitAcceptedChunk(chunk StreamChunk) {
+func (ctx *ExecutionContext) emitStreamChunk(chunk StreamChunk) {
 
 	// Emit to local subscribers
 	ctx.streamHub.emit(chunk)
@@ -1706,14 +1718,23 @@ func (ctx *ExecutionContext) emitAcceptedChunk(chunk StreamChunk) {
 	ctx.mu.RUnlock()
 
 	if parent != nil {
-		parent.emitAcceptedChunk(chunk)
+		parent.emitStreamChunk(chunk)
 	}
 }
 
-// CloseStreams closes all subscription channels. Called by Executor on termination.
-// Safe to call multiple times.
+// CloseStreams starts a bounded drain of this context's chunk subscriptions and, for the root,
+// all live event subscriptions. Cancellation and Release call it. Repeated calls are safe.
 func (ctx *ExecutionContext) CloseStreams() {
 	ctx.streamHub.close()
+	if ctx.Parent() == nil {
+		ctx.run.mu.Lock()
+		ctx.run.liveClosed = true
+		for sub := range ctx.run.liveSubscribers {
+			sub.queue.Close()
+		}
+		clear(ctx.run.liveSubscribers)
+		ctx.run.mu.Unlock()
+	}
 }
 
 // BuildSourcePath returns the hierarchical source path for this context.

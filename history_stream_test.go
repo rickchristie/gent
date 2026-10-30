@@ -63,8 +63,9 @@ func TestExecutionContext_ObserversDoNotBlockRecording(t *testing.T) {
 						return
 					}
 				}
+				err := root.FlushProgress()
 				root.CloseStreams()
-				done <- nil
+				done <- err
 			}()
 			// The held subscriber has consumed nothing. Completion proves independence without a
 			// throughput assertion against durable serialization or the race runtime.

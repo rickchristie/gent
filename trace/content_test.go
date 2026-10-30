@@ -96,6 +96,7 @@ func TestTraceMetadataOrderAndSharedLimit(t *testing.T) {
 		assert.NoError(t, ctx.EmitChunk(gent.StreamChunk{ModelCallId: before.ModelCallId,
 			MetaContent: []*gent.MetaContent{meta}}))
 	}
+	assert.NoError(t, ctx.FlushProgress())
 	want := []*gent.MetaContent{
 		{
 			Type:      gent.MetaContentReasoning,

@@ -20,7 +20,7 @@ def step(key, short, title, intro, action, path, start, end, notes, result, extr
 
 SERVER = {
     "id": "server", "name": "Saved streaming API", "tag": "02 / GO + DATABASE",
-    "summary": "Save accepted run state, then send numbered events to the browser.",
+    "summary": "Stream numbered progress and save ordered groups for recovery.",
     "goal": "a Go API with a durable run store, full-state reads, and a WebSocket feed.",
     "project": "server",
     "steps": [
@@ -36,8 +36,8 @@ SERVER = {
                   "and GENT_MODEL to use models.NewOpenAI instead."),
              ], "The same agent can run now and continue on a fresh worker later."),
         step("save", "Save to the database", "Implement gent.Recorder.Save.",
-             "Gent passes a SaveBatch at each acceptance boundary, including streamed progress. "
-             "A batch can contain events, history changes, runtime counters, and a checkpoint.",
+             "Gent groups pending events at model and tool boundaries, or a configured size limit. "
+             "Save blocks until commit. Streaming chunks do not each require a transaction.",
              "Add store.go. Put this method on Writer. Commit all state in one database "
              "transaction and return nil only after the transaction succeeds.",
              "server/store.go", "// Save is the Gent", None, [
@@ -51,11 +51,11 @@ SERVER = {
                   "This short-run example rewrites one full RunView; a larger store should keep "
                   "append-only batches and maintain its view in the same transaction."),
              ], "A saved view and its cursor always describe the same committed data."),
-        step("observe", "Attach the recorder", "Save first. Observe accepted events second.",
-             "trace.Sequencer receives accepted events through WithObserver. Gent calls the "
-             "recorder before it publishes those events. Raw provider callbacks are too early.",
-             "In API.start in runtime.go, create one sequencer per active run, then use "
-             "WithRecorder, WithObserver, and WithCodecs when you create the execution context.",
+        step("observe", "Attach the recorder", "Separate live progress from blocking saves.",
+             "trace.Sequencer.Follow receives live progress through a bounded queue. Events can "
+             "arrive before Save. The accepted answer waits for the terminal save to succeed.",
+             "In API.start in runtime.go, attach WithRecorder and WithCodecs to the context. "
+             "Call seq.Follow before Execute, then wait for its delivery worker after execution.",
              "server/runtime.go", "\t\t\tdata := gent.NewBasicLoopData", "\t\tif runErr != nil", [
                  ("trace.NewSequencer(runID, displayConfig(codecs))", "Create seq before this "
                   "block. displayConfig enables preview chunks and accepted answer content."),
@@ -63,7 +63,7 @@ SERVER = {
                   "request. Refreshing the browser must not cancel the agent."),
                  ("PersistenceError", "A failed or uncertain save stops new external work. "
                   "Reconcile the same batch with RetrySave, or load the accepted database view."),
-             ], "Database acceptance controls what a connected browser is allowed to see."),
+             ], "Live progress can precede persistence. A final accepted answer cannot."),
         step("state", "Provide the state API", "Return a complete display state and its cursor.",
              "GET /api/runs/{id}/state loads one committed RunView, rebuilds the trace, and "
              "returns the subset needed by this React client. It also works after a restart.",
@@ -83,14 +83,14 @@ SERVER = {
              "Add this subscription block inside streamEvents in http.go. The full file "
              "selects the active sequencer or restores an idle run from the database first.",
              "server/http.go", "\t// Install the bounded subscription", "\ttick :=", [
-                 ("SubscribeWithConfig", "Use a bounded queue. OverflowCloseSubscriber closes "
-                  "a slow subscription instead of blocking the agent or silently losing events."),
+                 ("SubscribeWithLimits", "Limit events, bytes, and delivery time. A slow queue "
+                  "closes and reports its error without blocking the agent or rejecting Save."),
                  ("ready", "The client starts buffering as soon as it receives events. It "
                   "fetches the snapshot only after it receives ready for the correct run ID."),
                  ("Connection ownership", "One goroutine reads control messages and one writes "
                   "data. Deadlines, ping/pong, unsubscribe, and Close release socket resources."),
              ], "Every event after ready is covered by the subscription or a later full reload."),
-        step("events", "Send accepted changes", "Forward every numbered event.",
+        step("events", "Send live changes", "Forward every numbered event.",
              "A client must see every cursor position, even when an event has no visible text. "
              "Do not filter the stream down to token events and then require contiguous numbers.",
              "Continue streamEvents with this loop. Send trace.Event inside an event frame. "
@@ -102,7 +102,7 @@ SERVER = {
                   "failed socket write must not turn a committed database save into a failure."),
                  ("Worker changes", "An idle subscriber reconnects when a new worker starts. "
                   "A finished worker releases its sequencer and leaves the database view intact."),
-             ], "The socket sends accepted changes. The database remains the source of truth."),
+             ], "The socket sends live progress. The database remains the source of saved state."),
         step("run", "Run the API", "Expose the routes and start the service.",
              "The complete server includes HTTP handlers, the database adapter, the model factory, "
              "and service shutdown. It listens on 127.0.0.1:8080 by default.",
@@ -131,7 +131,7 @@ CLIENT = {
     "steps": [
         step("cursor", "Define the cursor", "Use the event number, not the iteration count.",
              "trace.Event.EventNumber and trace.Snapshot.LastEventNumber share one run-wide "
-             "sequence. RunView.LastAppliedEventNumber is the equivalent cursor in saved state.",
+             "sequence. RunView.LastAppliedEventNumber is the saved cursor and can lag.",
              "Create src/state.ts. Add the types from Complete files and this cursor parser. "
              "Our API sends cursor values as decimal strings, so use BigInt for comparisons.",
              "client/src/state.ts", "export class Gap", "function appendParts", [
@@ -140,7 +140,7 @@ CLIENT = {
                  ("HistoryRevision / draft Revision", "These identify history changes or local "
                   "edits. They are not the cursor for the complete event feed."),
                  ("Run ID + cursor", "Reject another run's snapshot or event. Compare cursors "
-                  "only within the same run."),
+                  "within the current connection. Recovery replaces the preview from saved state."),
              ], "The browser can compare exact event numbers, including values above 2^53.",
              '<div class="flow-strip">Subscribe → ready → buffer → snapshot C → discard ≤ C '
              '→ apply C+1 → listen</div>'),
@@ -159,19 +159,19 @@ CLIENT = {
                  ("Attempt identity", "Keep retries separate with ModelCallId plus AttemptId. "
                   "This uses one root context; child context trees need a matching reducer."),
              ], "Duplicate events cannot duplicate text. A gap triggers a fresh state read."),
-        step("buffer", "Connect and buffer", "Keep buffering while the snapshot is loading.",
-             "A token can arrive while the HTTP state request is in flight. Buffer it instead "
-             "of applying it to incomplete state. Limit the queue to keep memory use bounded.",
+        step("buffer", "Connect and buffer", "Retain events until saved state covers them.",
+             "Live text can arrive before its database save. Keep the unsaved suffix across "
+             "periodic snapshots. Limit the queue, and discard it when the connection changes.",
              "Create src/connection.ts from Complete files. Add this message handler inside "
              "connect(). It waits for ready and buffers events until the snapshot is installed.",
              "client/src/connection.ts", "    socket.onmessage = (message)",
              "    socket.onclose = ()", [
                  ("ready before fetch", "WebSocket open alone is not sufficient. The ready "
-                  "message confirms the server has installed the accepted-event subscription."),
+                  "message confirms the live subscription exists and backlog was captured."),
                  ("While loading", "Continue adding events to the queue. Never pause the socket "
                   "listener while awaiting fetch."),
                  ("Bounded buffering", "At 1,024 events or 2 MiB, reconnect and load a fresh "
-                  "snapshot. The new snapshot covers the discarded accepted events."),
+                  "snapshot. Unsaved preview can be lost; the new connection resets its cursor."),
              ], "Events have one ordered path before, during, and after the snapshot request."),
         step("catchup", "Install and catch up", "Replace state, skip duplicates, drain the buffer.",
              "Suppose the buffer contains events 80, 81, and 82. A complete snapshot through 81 "
@@ -182,8 +182,8 @@ CLIENT = {
              "    socket.onmessage = (message)", [
                  ("One in-flight state read", "The loading flag prevents overlapping fetches. "
                   "Generation checks reject responses from a replaced connection."),
-                 ("Periodic refresh", "Reload every five seconds, even when no gap is visible. "
-                  "This finds a lost final update that has no later event to reveal the gap."),
+                 ("Periodic refresh", "Reload every five seconds. Keep buffered events beyond the "
+                  "saved cursor; it can lag the preview. This also finds a lost final update."),
                  ("Full terminal snapshot", "A terminal display event can precede other events "
                   "in its batch. Stop only after a full saved snapshot confirms completion."),
              ], "The page reaches the same view as the server without applying any event twice."),
@@ -258,7 +258,7 @@ RECOVERY = {
         step("tools", "Handle uncertain tools", "Do not blindly repeat an external write.",
              "A process can stop after a tool changes an external system but before its result "
              "is saved. A tool-ready checkpoint alone cannot prove whether the tool completed.",
-             "Set Recovery(recoverOrder) on the lookup tool builder in agent.go. This allows retry for "
+             "Set Recovery(recoverOrder) on the tool builder in agent.go. This allows retry for "
              "lookup_order because it is a read. Return unresolved for an unknown write outcome.",
              "server/agent.go", "// The order lookup reads", None, [
                  ("ToolRecoveryCompleted", "Return the complete saved result when an external "
@@ -272,14 +272,14 @@ RECOVERY = {
              ], "Completed steps are reused. Each unknown outcome has an explicit policy."),
         step("resume", "Resume the runner", "Call Resume with fresh runtime bindings.",
              "Rebuild the trace with trace.RestoreSequencer(saved, displayConfig(codecs)), then "
-             "pass the new recorder, codecs, and observer to Runner.Resume. Tools own recovery.",
+             "pass the new recorder and codecs to Runner.Resume. Attach Follow in Configure.",
              "Add recover.go and call resumeSaved from the resume branch in API.start. Reuse "
              "the stored run ID. Do not create a new Task or call Execute on a new context.",
              "server/recover.go", "func resumeSaved", None, [
                  ("Runner.Resume", "Configures the fresh agent, checks compatibility, restores "
                   "state, and continues from the saved control boundary."),
                  ("Cursor after recovery", "The next event follows RunView.LastAppliedEventNumber, "
-                  "even if the checkpoint cursor is older. The frontend protocol stays the same."),
+                  "even if the checkpoint is older. Reset the frontend, even at a lower cursor."),
                  ("Preserved limits", "Counters, original limits, and absolute deadlines survive "
                   "restoration. Restarting the worker does not extend the original deadline."),
                  ("Terminal run", "A saved terminal run returns its recorded outcome without "

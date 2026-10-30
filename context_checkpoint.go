@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"time"
 )
 
 // FlushProgress accepts all queued evidence without moving the resumable control boundary.
@@ -37,12 +36,12 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 			return ctx.stopRecording(err)
 		}
 	}
+	run.mu.Lock()
 	contexts := run.root.allContexts()
 	runtimeState := RuntimeState{}
 	for _, child := range contexts {
 		runtimeState.Contexts = append(runtimeState.Contexts, child.runtimeSnapshot())
 	}
-	run.mu.Lock()
 	runtimeState.Contexts = append(runtimeState.Contexts, cloneWire(run.archivedRuntime)...)
 	runtimeState.Allocation = run.allocation
 	var checkpoint *Checkpoint
@@ -52,10 +51,20 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 		checkpoint, err = ctx.prepareCheckpoint(phase, contexts, runtimeState)
 	}
 	if err == nil && phase == PhaseTerminal && ctx.phase != PhaseTerminal {
-		err = ctx.queueFinalContent()
+		if ctx.terminalEvent != nil {
+			err = run.queueEvent(ctx.terminalEvent)
+			ctx.terminalEvent = nil
+		}
+		if err == nil {
+			err = ctx.queueFinalContent()
+		}
+	}
+	if err == nil && len(run.pending) == 0 && checkpoint != nil {
+		err = run.queueEvent(&RecordedEvent{Type: "checkpoint"})
 	}
 	events := append([]*RecordedEvent(nil), run.pending...)
 	pendingCount := len(events)
+	pendingBytes := run.pendingBytes
 	run.mu.Unlock()
 	if err != nil {
 		return ctx.stopRecording(err)
@@ -65,7 +74,8 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 	}
 	// A canceled worker must still be able to record already observed evidence. Storage adapters
 	// fence stale workers; the independent bounded context is not permission to ignore a lease.
-	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx.Context()), 30*time.Second)
+	saveCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx.Context()), run.policy.SaveTimeout)
 	defer cancel()
 	batch, err := run.accept(saveCtx, &SaveBatch{Events: events, Checkpoint: checkpoint,
 		Runtime: runtimeState})
@@ -73,13 +83,31 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 		return ctx.stopRecording(err)
 	}
 	run.mu.Lock()
-	for i, event := range events {
-		event.RunId, event.EventNumber = batch.Events[i].RunId, batch.Events[i].EventNumber
+	for i, event := range batch.Events {
+		run.publishLive(event, run.pendingSizes[i])
+	}
+	// Publish accepted final content before releasing later model chunks. Both subscription
+	// paths must preserve sequence order even when a child produces data during this save.
+	if err := ctx.emitCommittedChunks(batch.Events); err != nil {
+		run.mu.Unlock()
+		return ctx.stopRecording(err)
 	}
 	clear(run.pending[:pendingCount])
 	run.pending = run.pending[pendingCount:]
+	run.pendingSizes = run.pendingSizes[pendingCount:]
+	run.pendingBytes -= pendingBytes
 	if len(run.pending) == 0 {
 		run.pending = nil
+		run.pendingSizes = nil
+	}
+	run.deferLive = false
+	for i, event := range run.pending {
+		if event.Type == "execution_finished" || event.Type == "execution_content" {
+			run.deferLive = true
+		}
+		if !run.deferLive {
+			run.publishLive(event, run.pendingSizes[i])
+		}
 	}
 	if phase != "" {
 		ctx.phase = phase
@@ -87,13 +115,6 @@ func (ctx *ExecutionContext) flushHistory(phase ExecutionPhase) error {
 			ctx.completedIteration = ctx.Iteration()
 		}
 	}
-	run.mu.Unlock()
-	// Stream queues do not call application code. Deliver under the acceptance lock, before
-	// queuing observers, so a delayed observer cannot let Release close a later chunk's stream.
-	if err := ctx.emitCommittedChunks(batch.Events); err != nil {
-		return ctx.stopRecording(err)
-	}
-	run.mu.Lock()
 	run.notifications = append(run.notifications, committedNotification{ctx, batch.Events})
 	run.mu.Unlock()
 	run.flushMu.Unlock()
@@ -139,7 +160,7 @@ func (ctx *ExecutionContext) dispatchCommitted(events []*RecordedEvent) error {
 		if observer == nil {
 			continue
 		}
-		owned, err := cloneOwned(ctx.run.codecs, events)
+		owned, err := cloneRecordedEvents(ctx.run.codecs, events)
 		if err != nil {
 			return err
 		}
@@ -158,11 +179,7 @@ func (ctx *ExecutionContext) dispatchCommitted(events []*RecordedEvent) error {
 				break
 			}
 		}
-		change, err := cloneOwned(ctx.run.codecs, *recorded.Change)
-		if err != nil {
-			return err
-		}
-		stored, err := cloneOwned(ctx.run.codecs, change)
+		stored, err := cloneOwned(ctx.run.codecs, *recorded.Change)
 		if err != nil {
 			return err
 		}
@@ -170,24 +187,27 @@ func (ctx *ExecutionContext) dispatchCommitted(events []*RecordedEvent) error {
 			EventNumber: recorded.EventNumber, AttemptId: recorded.AttemptId,
 			Timestamp: recorded.Ts, ContextId: recorded.ContextId,
 			ParentContextId: recorded.ParentContextId, Iteration: recorded.Iteration},
-			Change: change}
+			Change: stored}
 		owner.mu.Lock()
-		owner.events = append(owner.events, &StateChangeEvent{BaseEvent: event.BaseEvent,
-			Change: stored})
+		owner.events = append(owner.events, event)
 		publisher := owner.eventPublisher
 		owner.mu.Unlock()
 		if publisher != nil {
-			publisher.Dispatch(owner, event)
+			change, err := cloneOwned(ctx.run.codecs, stored)
+			if err != nil {
+				return err
+			}
+			publisher.Dispatch(owner, &StateChangeEvent{BaseEvent: event.BaseEvent, Change: change})
 		}
 	}
 	return nil
 }
 
-// emitCommittedChunks delivers only durable text. Observer notification is independent of the
-// unbounded subscription queues; a slow observer must not hold the last answer until after release.
+// emitCommittedChunks delivers terminal content only. Model chunks were already delivered live
+// and must not be repeated when their grouped save commits.
 func (ctx *ExecutionContext) emitCommittedChunks(events []*RecordedEvent) error {
 	for _, recorded := range events {
-		if recorded.Type == "model_stream_chunk" || recorded.Type == "execution_content" {
+		if recorded.Type == "execution_content" {
 			value, err := ctx.DecodeEvent(recorded)
 			if err != nil {
 				return err
@@ -196,7 +216,7 @@ func (ctx *ExecutionContext) emitCommittedChunks(events []*RecordedEvent) error 
 			chunk.RunId, chunk.EventNumber = recorded.RunId, recorded.EventNumber
 			for _, owner := range ctx.run.root.allContexts() {
 				if owner.ContextId() == recorded.ContextId {
-					owner.emitAcceptedChunk(chunk)
+					owner.emitStreamChunk(chunk)
 					break
 				}
 			}
@@ -335,13 +355,17 @@ func RestoreExecutionContext(
 		worker, deadlineCancel = context.WithDeadline(worker, *state.Deadline)
 	}
 	ctx := NewExecutionContext(worker, state.Name, data, WithCodecs(registry),
-		WithRunId(bundle.RunId), WithRecorder(bindings.Recorder))
+		WithRunId(bundle.RunId), WithRecorder(bindings.Recorder),
+		WithCheckpointPolicy(bindings.CheckpointPolicy))
 	ctx.deadlineCancel = deadlineCancel
 	defer func() {
 		if restored == nil {
 			ctx.Release()
 		}
 	}()
+	if err := ctx.RecordingError(); err != nil {
+		return nil, err
+	}
 	// RestoreBindings is caller-owned; binding components must not mutate its map on retries.
 	components := make(map[string]CheckpointState, len(bindings.Components))
 	for name, component := range bindings.Components {
@@ -437,13 +461,18 @@ func RestoreExecutionContext(
 	ctx.state = cloneWire(state.State)
 	ctx.phase = checkpoint.Phase
 	ctx.restored = true
-	ctx.run = &executionRun{view: bundle, recorder: bindings.Recorder,
-		observers: append([]RecordedEventObserver(nil), bindings.Observers...),
-		codecs:    registry, id: bundle.RunId,
-		attempt: randomIdentity(), allocation: bundle.Runtime.Allocation, root: ctx,
-		working: bundle.History, compatibility: cloneWire(checkpoint.Compatibility),
-		extensions: cloneWire(state.Extensions),
-		archived:   cloneWire(checkpoint.Contexts[1:])}
+	// Keep the context's subscription registry: Configure can attach live consumers before
+	// restoration. Their close handles must continue to refer to this same run and its locks.
+	ctx.run.mu.Lock()
+	ctx.run.view = bundle
+	ctx.run.nextEventNumber = bundle.LastAppliedEventNumber
+	ctx.run.liveEventNumber = bundle.LastAppliedEventNumber
+	ctx.run.allocation = bundle.Runtime.Allocation
+	ctx.run.working = bundle.History
+	ctx.run.compatibility = cloneWire(checkpoint.Compatibility)
+	ctx.run.extensions = cloneWire(state.Extensions)
+	ctx.run.archived = cloneWire(checkpoint.Contexts[1:])
+	ctx.run.mu.Unlock()
 	for _, runtime := range bundle.Runtime.Contexts {
 		if runtime.ContextId != ctx.contextId {
 			ctx.run.archivedRuntime = append(ctx.run.archivedRuntime, cloneWire(runtime))
@@ -521,7 +550,12 @@ func RestoreExecutionContext(
 			return nil, err
 		}
 	}
-	ctx.run.pending = append(ctx.run.pending, &RecordedEvent{Type: "attempt_started",
+	ctx.run.mu.Lock()
+	err = ctx.run.queueEvent(&RecordedEvent{Type: "attempt_started",
 		ContextId: ctx.contextId, Iteration: ctx.iteration, AttemptId: ctx.run.attempt})
+	ctx.run.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return ctx, nil
 }

@@ -23,9 +23,11 @@ both HTTP and WebSocket API calls to port 8080.
 2. Buffer events. Wait for `ready`, which confirms the server subscription exists.
 3. Load the latest full display state with its `lastEventNumber` cursor.
 4. Skip buffered events at or below that cursor. Apply the next contiguous event numbers.
-5. Drain the buffer in the same JavaScript task, then apply new events directly.
-6. On a gap, overflow, or disconnect, reconnect and repeat. Periodic snapshots also catch a lost
-   final event that has no later event to expose the gap.
+5. Apply the buffer in the same JavaScript task, then apply new events directly. Retain events
+   beyond the saved cursor across periodic snapshot reads, which can be behind the live preview.
+6. On a gap, overflow, or disconnect, reconnect and repeat. Discard the old preview and reset from
+   saved state, even at a lower cursor. Ignore old callbacks and fetch responses. Periodic snapshots
+   also catch a lost final event that has no later event to expose the gap.
 
 `state.ts` is the reducer for the server's small `BrowserState` format. It does not implement
 every field of Gent's trace snapshot. It uses `BigInt` with decimal strings, so cursor comparison
@@ -34,6 +36,7 @@ the cursor. Run IDs are checked before any state is applied.
 
 `connection.ts` owns one socket and one state request at a time. It bounds the buffer to 1,024
 events or 2 MiB, aborts old requests, and rejects stale responses by connection generation.
+That generation belongs to the local connection; the protocol adds no worker-attempt token.
 It stops only after a complete terminal snapshot. A terminal event can precede other events in
 the same accepted batch, so that event alone is not enough to close the feed.
 
@@ -48,7 +51,8 @@ IDs, buffer overflow, reconnect, cleanup, and a lost terminal event. The reducer
 is also compared with a real Gent snapshot in `trace-fixture.json`. The Go HTTP test generates
 that fixture; do not edit its event fields by hand.
 
-The repository browser check at `docs/quickstart/tests/gent-streaming.mjs` starts the real Go server and
+The repository browser check at `docs/quickstart/tests/gent-streaming.mjs` starts the real Go server
+and
 checks refresh, process restart, and recovery. It uses the production React build.
 
 The browser preserves each ordered content part. Text renders as escaped text; common image bytes

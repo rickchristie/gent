@@ -13,11 +13,12 @@ import (
 type ContextOption func(*contextOptions)
 
 type contextOptions struct {
-	runId         string
-	recorder      Recorder
-	observers     []RecordedEventObserver
-	codecs        *CodecRegistry
-	compatibility CompatibilityManifest
+	runId            string
+	recorder         Recorder
+	observers        []RecordedEventObserver
+	codecs           *CodecRegistry
+	compatibility    CompatibilityManifest
+	checkpointPolicy CheckpointPolicy
 }
 
 func WithRunId(runId string) ContextOption {
@@ -55,6 +56,15 @@ type executionRun struct {
 	allocation      uint64
 	working         HistorySnapshot
 	pending         []*RecordedEvent
+	pendingSizes    []int
+	pendingBytes    int
+	policy          CheckpointPolicy
+	nextEventNumber uint64
+	liveEventNumber uint64
+	deferLive       bool
+	liveClosed      bool
+	liveSubscribers map[*EventSubscription]struct{}
+	delayedChunks   map[uint64]delayedStreamChunk
 	err             error
 	compatibility   CompatibilityManifest
 	root            *ExecutionContext
@@ -62,6 +72,13 @@ type executionRun struct {
 	extensions      map[string]SavedCheckpointState
 	archived        []ContextCheckpoint
 	archivedRuntime []ContextRuntime
+}
+
+// delayedStreamChunk keeps the source context while a terminal save holds live sequence order.
+// The caller's ContextId metadata can differ from the context that owns the subscription.
+type delayedStreamChunk struct {
+	owner *ExecutionContext
+	chunk StreamChunk
 }
 
 func randomIdentity() string {
@@ -86,13 +103,13 @@ func (ctx *ExecutionContext) initializeHistory(options []ContextOption) {
 	if runId == "" {
 		runId = "run:" + randomIdentity()
 	}
-	var initErr error
+	policy, initErr := checkpointPolicy(cfg.checkpointPolicy)
 	ctx.run = &executionRun{recorder: cfg.recorder, observers: cfg.observers,
 		view:   RunView{SchemaVersion: RunSchemaVersion, RunId: runId, Batches: map[string]string{}},
 		codecs: cfg.codecs, id: runId,
 		attempt: randomIdentity(), compatibility: cloneWire(
 			cfg.compatibility,
-		), root: ctx, err: initErr}
+		), root: ctx, err: initErr, policy: policy}
 	ctx.contextId = runId + ":root"
 	ctx.state = map[string]EncodedValue{}
 	ctx.phase = PhaseInitial
@@ -278,12 +295,15 @@ func (ctx *ExecutionContext) UpdateHistory(update HistoryUpdate) error {
 		ctx.state[state.Name] = cloneWire(state.Value)
 	}
 	ctx.draftRevision++
-	ctx.run.pending = append(ctx.run.pending, &RecordedEvent{Type: "state_change",
+	err = ctx.run.queueEvent(&RecordedEvent{Type: "state_change",
 		ContextId: ctx.contextId, Iteration: iteration, AttemptId: ctx.run.attempt,
 		EventName: EventNameStateChange, Change: &change})
 	ctx.run.mu.Unlock()
+	if err != nil {
+		return ctx.stopRecording(err)
+	}
 	ctx.Stats().SetGauge(SGScratchpadLength, float64(len(update.Active)))
-	return ctx.RecordingError()
+	return ctx.flushPendingLimit()
 }
 
 // AppendRecord is the ordinary append-and-select operation. Final answers can set active=false

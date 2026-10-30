@@ -109,8 +109,8 @@ func TestRunCommitVisibility(t *testing.T) {
 	ctx.SetEventPublisher(historyPublisher(func(_ *ExecutionContext, event Event) {
 		observed <- event
 	}))
-	assert.NoError(t, ctx.AppendRecord(&HistoryEntry{Origin: RecordOriginal}, true))
 	start := time.Now()
+	assert.NoError(t, ctx.AppendRecord(&HistoryEntry{Origin: RecordOriginal}, true))
 	done := make(chan error, 1)
 	go func() { done <- ctx.CommitCheckpoint(PhaseInitial) }()
 	<-recorder.entered

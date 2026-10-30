@@ -65,12 +65,13 @@ copies use `json.Number` to keep numeric constraints exact, including large inte
 `ParameterSchema(raw)` replaces input inference with a full JSON Schema and cannot be mixed with
 field settings. Use it for recursive types, embedded fields, JSON `string` tags, or custom JSON
 encodings. Map and interface inputs also need an explicit parameter schema. Nil omits schema
-constraints; use an inferred `struct{}` input for a tool that must receive no arguments. `OutputSchema(raw)` replaces output inference; nil omits the output description. Output
+constraints; use an inferred `struct{}` input for a tool that must receive no arguments.
+`OutputSchema(raw)` replaces output inference; nil omits the output description. Output
 schemas describe the text result; Gent does not validate returned results against them.
 
-`Strict(true)` passes the strict flag to the provider. Provider support and accepted schema
-keywords can differ. Gent validates arguments against the supplied schema before it converts them
-or calls the tool. The builder compiles both schemas to catch invalid definitions during setup. The registry
+`Strict(true)` passes the strict flag to the provider. Provider support and accepted schema keywords
+can differ. Gent validates arguments against the supplied schema before it converts them or calls
+the tool. The builder compiles both schemas to catch invalid definitions during setup. The registry
 keeps a compiled input validator for calls; no schema inference or compilation occurs per call.
 
 Search metadata, policy, recovery, strict mode, output schema, and deduplication are all methods
@@ -150,9 +151,12 @@ signatures with their parts; Chat endpoints retain the assistant's reasoning and
 
 ### Frontend and storage contract
 
-Use `ExecutionContext.SubscribeAll()` for accepted live chunks, or `RecordedEventObserver` for
-accepted events. The same stream carries provisional metadata and the accepted answer. The provider
-`Stream` carries provisional chunks and a candidate response; it never accepts an execution answer.
+Use `ExecutionContext.SubscribeAllWithConfig(DeliveryConfig)` for live chunks, or
+`SubscribeEvents(DeliveryConfig)` for the full numbered feed. Provisional chunks can arrive before
+their grouped save. `RecordedEventObserver` remains committed-only. The same chunk subscription
+carries provisional metadata and, after the terminal save succeeds, the accepted answer. The
+provider `Stream` carries provisional chunks and a candidate response; it never accepts an execution
+answer.
 
 1. Append each metadata delta to the preview identified by its `MessageId` and type. Keep entry
 order.
@@ -160,8 +164,15 @@ order.
    Hide or replace previews whose IDs occur in `SourceMessageIds`. Other updates can remain visible.
 3. Identify an answer by its `ContextId` and final `MessageId`. Child contexts have separate
 answers.
-4. Deduplicate delivery by `(RunId, EventNumber)`. On reconnect, decode saved events with
-   `CodecRegistry.DecodeEvent`, which fills these cursor fields from the accepted envelope.
+4. Deduplicate delivery by `(RunId, EventNumber)` within the current connection. After recovery,
+   discard the old preview and reset from saved state even at a lower cursor. Ignore callbacks
+   from the old connection. Decode saved events with `CodecRegistry.DecodeEvent`, which fills
+   these cursor fields from the saved envelope.
+
+Live queues have configurable count, byte, and timeout limits. A slow subscriber is disconnected
+without stopping execution. Reconnect and reload saved state after `ErrDeliveryOverflow` or
+`ErrDeliveryTimeout`. Keep unsaved live events across periodic saved-state refreshes on the same
+connection. See [grouped saves and live limits](history.md#grouped-saves-and-live-queue-limits).
 
 For example, a model can stream ` { "status" : "done" } ` as intermediary text. If the JSON
 output processor accepts it, the final event contains `{"status":"done"}`. The final snapshot
@@ -197,9 +208,11 @@ saved history retains the complete bytes.
 
 `StreamAccumulator` keeps metadata separate from `Content`; use one accumulator per context.
 Stream helpers copy responses and metadata. Provider metadata uses built-in wire types such as
-maps, slices, scalars, time values, and raw JSON. Convert SDK objects to these types before completion.
+maps, slices, scalars, time values, and raw JSON. Convert SDK objects to these types before
+completion.
 Provider callback options such as `WithStreamingFunc` expose raw intermediary deltas before Gent's
-save barrier. Use accepted events or context subscriptions for database and WebSocket delivery.
+save barrier. Use `Recorder.Save` for persistence and bounded live subscriptions for WebSocket
+delivery. Keep socket errors separate from storage results.
 
 ## ToolChain contract
 

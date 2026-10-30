@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/trace"
 )
 
@@ -115,10 +116,27 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 		defer seq.Close()
 	}
 	// Install the bounded subscription before sending ready. A slow socket cannot block Save.
-	updates, unsubscribe := seq.SubscribeWithConfig(trace.SubscribeConfig{
-		BufferSize: 256, OverflowPolicy: trace.OverflowCloseSubscriber,
+	subscription, err := seq.SubscribeWithLimits(gent.DeliveryConfig{
+		MaxEvents: 256, MaxBytes: 2 * 1024 * 1024, Timeout: 5 * time.Second,
 	})
-	defer unsubscribe()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	defer subscription.Close()
+	updates := subscription.Events()
+	// Include the unsaved prefix that was already projected before this subscription existed.
+	// The frontend deduplicates overlap with its saved snapshot and with queued live events.
+	saved, err := a.store.load(id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	backlog, err := seq.EventsAfter(saved.LastAppliedEventNumber)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	upgrader := websocket.Upgrader{} // The default checks that Origin matches the request host.
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -152,6 +170,12 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 		log.Printf("write ready: %v", err)
 		return
 	}
+	for _, event := range backlog {
+		if err := socketWrite(conn, eventFrame(event)); err != nil {
+			log.Printf("write buffered event: %v", err)
+			return
+		}
+	}
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	for {
@@ -162,6 +186,9 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case event, ok := <-updates:
 			if !ok {
+				if err := subscription.Err(); err != nil {
+					log.Printf("live subscription stopped: %v", err)
+				}
 				if err := socketWrite(conn, Frame{Kind: "resync", RunID: id}); err != nil {
 					log.Printf("write resync: %v", err)
 				}
