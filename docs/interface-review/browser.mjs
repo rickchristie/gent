@@ -9,7 +9,8 @@ const launch = { headless: true };
 if (process.env.GENT_REVIEW_CHROMIUM) launch.executablePath = process.env.GENT_REVIEW_CHROMIUM;
 const browser = await chromium.launch(launch);
 const url = new URL('./gent-interfaces.html', import.meta.url).href;
-const catalog = JSON.parse(await readFile('/tmp/gent-interface-catalog.json', 'utf8'));
+const catalogPath = process.argv[2] || '/tmp/gent-interface-catalog.json';
+const catalog = JSON.parse(await readFile(catalogPath, 'utf8'));
 const expectedInterfaces = catalog.declarations.filter((item) => item.kind === 'interface');
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
@@ -150,7 +151,7 @@ try {
   });
 
   await check(
-    'embedded contracts, method comments, and previous signatures are inspectable',
+    'embedded contracts, method comments, and available previous signatures are inspectable',
     async () => {
       await open('gent.Loop');
       await page.locator('.detail-section .related [data-open="gent.Output"]').first().click();
@@ -158,16 +159,19 @@ try {
       await page.getByText('Declared methods (3)', { exact: true }).click();
       await page.locator('.method-row summary').first().click();
       assert.equal(await page.locator('.method-row[open]').count(), 1);
-      await open('gent.Loop');
-      await page
-        .getByText(`Previous declaration at ${catalog.head.slice(0, 8)}`, {
-          exact: true,
-        })
-        .click();
-      assert.equal(
-        await text('.previous-code code'),
-        catalog.declarations.find((item) => item.id === 'gent.Loop').previous,
-      );
+      // A clean checkout has no previous signatures because extraction compares with HEAD.
+      const previous = expectedInterfaces.find((item) => item.previous);
+      await open(previous?.id || 'gent.Loop');
+      if (previous) {
+        await page
+          .getByText(`Previous declaration at ${catalog.head.slice(0, 8)}`, {
+            exact: true,
+          })
+          .click();
+        assert.equal(await text('.previous-code code'), previous.previous);
+      } else {
+        assert.equal(await page.locator('.previous-code').count(), 0);
+      }
       await page.screenshot({
         path: '/tmp/gent-interface-toolchain-desktop.png',
         fullPage: true,

@@ -96,10 +96,11 @@ func (run *executionRun) publishLive(event *RecordedEvent, size int) {
 func (ctx *ExecutionContext) flushPendingLimit() error {
 	run := ctx.run
 	run.mu.RLock()
-	flush := !run.deferLive && (len(run.pending) >= run.policy.MaxEvents ||
-		run.pendingBytes >= run.policy.MaxBytes)
+	flush := len(run.pending) >= run.policy.MaxEvents || run.pendingBytes >= run.policy.MaxBytes
 	run.mu.RUnlock()
 	if flush {
+		// Terminal delivery can be deferred while another context saves. Producers must still
+		// wait at the pending limit; FlushProgress waits behind that save through flushMu.
 		return ctx.FlushProgress()
 	}
 	return ctx.RecordingError()

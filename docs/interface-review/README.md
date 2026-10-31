@@ -52,6 +52,10 @@ The build rejects undocumented or removed interfaces and broken related-contract
 It also requires the five lessons to cover every named interface exactly once, so new API surfaces
 cannot silently become reference-only material.
 Rerun extraction whenever Go files change; the page is a snapshot, not a live source viewer.
+Comment edits can move declarations and invalidate source links. Extract again before a release,
+then rebuild and check the page with that same catalog. The browser check accepts a catalog path
+as its first argument, like the builder, so separate checks can use separate temporary files.
+After a commit, a clean checkout has no previous signatures because the comparison uses `HEAD`.
 
 ## Maintain the explanations
 

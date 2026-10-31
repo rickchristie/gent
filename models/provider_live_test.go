@@ -218,6 +218,7 @@ func TestLiveImages(t *testing.T) {
 				SetMaxFileSizeBytes(8 << 20).SetMaxWidth(2048).SetMaxHeight(2048)
 			execCtx := liveExecutionContext(ctx, "image", out.Instructions(),
 				"Generate one 512 by 512 image of a solid blue square. Return only the JPEG image.")
+			defer logLiveImageFailure(t, execCtx)
 			agent := react.NewWithOutput(newLiveModel(provider, &config), out).
 				WithCallOptions(gent.WithMaxTokens(2048))
 			values, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(execCtx)
@@ -239,5 +240,41 @@ func TestLiveImages(t *testing.T) {
 			assert.LessOrEqual(t, decoded.Width, 2048)
 			assert.LessOrEqual(t, decoded.Height, 2048)
 		})
+	}
+}
+
+// Report validation and part sizes so a live failure can be diagnosed without image bytes,
+// provider continuation data, or credentials in the test log.
+func logLiveImageFailure(t *testing.T, ctx *gent.ExecutionContext) {
+	t.Helper()
+	if !t.Failed() {
+		return
+	}
+	for _, event := range ctx.Events() {
+		switch event := event.(type) {
+		case *gent.OutputValidationEvent:
+			t.Logf("image validation: iteration=%d stage=%s accepted=%t steering=%q error=%v",
+				event.Iteration, event.Stage, event.Accepted, gent.ContentText(event.Steering), event.Error)
+		case *gent.AfterModelCallEvent:
+			if event.Error != nil {
+				t.Logf("image call: iteration=%d error=%v", event.Iteration, event.Error)
+				continue
+			}
+			for _, choice := range event.Response.Choices {
+				var parts []string
+				for _, part := range choice.CandidateContent {
+					switch part := part.(type) {
+					case gent.BinaryContent:
+						parts = append(parts, fmt.Sprintf("%s: %d bytes", part.MIMEType, len(part.Data)))
+					case gent.TextContent:
+						parts = append(parts, fmt.Sprintf("text: %d bytes", len(part.Text)))
+					default:
+						parts = append(parts, fmt.Sprintf("%T", part))
+					}
+				}
+				t.Logf("image completion: iteration=%d status=%s reason=%q parts=%v",
+					event.Iteration, choice.Completion.Status, choice.Completion.ProviderReason, parts)
+			}
+		}
 	}
 }

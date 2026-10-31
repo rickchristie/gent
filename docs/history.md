@@ -198,6 +198,8 @@ Normal responses below the threshold save their chunks at completion. Early save
 total memory: `RunView.Activity` still retains accepted events, and model responses retain content.
 Concurrent producers can exceed a pending threshold while an earlier save blocks; each producer
 waits at the threshold before its next event. Custom providers must bound their upstream queues.
+This wait also applies while a terminal save holds back live delivery. The waiting progress save
+uses the same save lock, so it cannot overtake the terminal outcome or release later chunks early.
 
 Use `ctx.SubscribeEvents(gent.DeliveryConfig{...})` for the full numbered live feed, or
 `SubscribeAllWithConfig`, `SubscribeToStreamWithConfig`, and `SubscribeToTopicWithConfig` for
@@ -206,6 +208,9 @@ queued or in-flight events, 8 MiB of encoded data, and 30 seconds per delivery. 
 defaults. Negative settings are invalid. Overflow or timeout discards that subscriber's queue and
 reports `ErrDeliveryOverflow` or `ErrDeliveryTimeout`. Other consumers and persistence continue.
 Socket writers need their own deadlines. `Close` discards pending delivery and waits for its worker.
+Receiving an event releases its count and byte capacity before the next send is checked. One
+delivery worker owns both operations, so a consumer can receive an event and immediately emit
+another without a false overflow. Queue acceptance never waits for that consumer to receive.
 
 `trace.Sequencer.SubscribeWithLimits` uses the same configuration. Convenience `Subscribe` and
 context chunk methods use finite defaults. Trace's older `SubscribeWithConfig` retains count-based
