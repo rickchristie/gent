@@ -25,6 +25,20 @@
 - **ALWAYS make main branch a single trunk line**. No merge commits, squash and rebase when needed.
 </critical_behavior>
 
+<gent_design_principles>
+# Gent design principles
+
+- Prefer explicit interfaces. Result structs and typed enums must show possible states and fields to
+  check. This keeps expected control flow visible in the interface.
+- Use explicit result types for expected failures and other conditions that callers must handle.
+- Do not use error types or error constructors to represent expected states.
+- Use `error` for an unexpected operation failure with no accepted result. Use explicit result
+  states for expected conditions that the caller must handle.
+- A `Tool.Call` or `Tool.Recover` error ends that operation, not the agent run. Send safe steering
+  to the model. Keep raw errors and rejected returns in private diagnostic records.
+- Cancellation, storage failures, and run limits retain their separate run-level contracts.
+</gent_design_principles>
+
 <critical_constraints>
 # Critical Constraints
 
