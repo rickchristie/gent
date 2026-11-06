@@ -274,16 +274,23 @@ func (m *Responses) inputItems(messages []*gent.ModelMessage) ([]any, error) {
 				return nil, fmt.Errorf("cannot replay %s items through %s", saved.Provider, m.config.Provider)
 			}
 			for _, item := range saved.Items {
-				if !json.Valid(item) {
-					return nil, errors.New("invalid saved provider item")
+				replayed, err := m.replayItem(item)
+				if err != nil {
+					return nil, err
 				}
-				items = append(items, item)
+				items = append(items, replayed)
 			}
 			continue
 		}
 		role, err := messageRole(message.Role)
 		if err != nil {
 			return nil, err
+		}
+		// Summaries and application-made assistant messages have no provider continuation.
+		// Responses treats their text as prior output, even though it is in the input list.
+		textType := "input_text"
+		if role == "assistant" {
+			textType = "output_text"
 		}
 		var content []any
 		flush := func() {
@@ -295,9 +302,9 @@ func (m *Responses) inputItems(messages []*gent.ModelMessage) ([]any, error) {
 		for _, part := range message.Parts {
 			switch p := partValue(part).(type) {
 			case gent.DataContent:
-				content = append(content, map[string]any{"type": "input_text", "text": p.String()})
+				content = append(content, map[string]any{"type": textType, "text": p.String()})
 			case gent.TextContent:
-				content = append(content, map[string]any{"type": "input_text", "text": p.Text})
+				content = append(content, map[string]any{"type": textType, "text": p.Text})
 			case gent.ImageURLContent:
 				image := map[string]any{"type": "input_image", "image_url": p.URL}
 				if p.Detail != "" {
@@ -553,6 +560,11 @@ func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ModelCall
 					Content:   []gent.ContentPart{gent.TextContent{Text: text.String()}},
 					MessageId: id,
 				})
+			// Image generation can end with an empty assistant text block. It has no answer
+			// bytes. Keep the raw item and metadata, but do not reject an image for empty text.
+			if text.Len() == 0 {
+				continue
+			}
 			if item.Phase == "" || item.Phase == "final_answer" {
 				// A Responses output can contain multiple assistant messages. Only the last
 				// message can be the answer candidate; earlier messages remain previews.

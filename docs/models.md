@@ -45,6 +45,21 @@ settings.
 Gemini puts the JSON controls in `generationConfig`. Live checks found that Gemini 2.5 Flash
 accepted `responseFormat.text` without enforcing JSON output. The adapter uses `responseMimeType`
 and `responseJsonSchema` so JSON output and correction work with that model.
+Gemini rejects those JSON fields with forced function calling (`ANY`). On a forced tool turn,
+Gent keeps the tool choice and omits answer JSON controls because no answer candidate is allowed.
+The original output schema stays available for local validation and later answer turns. The
+recorded schema decision states `forced tool choice has no answer candidate` for that turn.
+Gemini 2.x also rejects JSON controls with default or `auto` tool choice. When functions are
+available on these models, Gent omits the native JSON controls and records
+`model does not support JSON output with tools`. It retains the output schema for local validation.
+Native JSON controls apply when tools are absent or disabled with `none`.
+Gemini 3 and 4 support automatic tool selection with structured output, as documented in
+[Google's GenerateContent guide][gemini-tool-json].
+The request model override selects this capability. Unknown model aliases use local validation
+while tools are available. Include the output contract's `Instructions()` in the caller's prompt;
+the JSON instructions require raw JSON without Markdown fences, which local validation rejects.
+
+[gemini-tool-json]: https://ai.google.dev/gemini-api/docs/generate-content/structured-output
 
 Schema support differs across APIs. Gent checks supported keywords and structure before it sends a
 native answer schema. If an exact mapping is unavailable, it omits native schema enforcement and
@@ -130,6 +145,16 @@ system text blocks in its `system` field; Gemini uses `systemInstruction`. These
 system message inserted after conversation content because moving it would change its meaning.
 Other adapters retain the native role sequence.
 
+Application-made assistant text and compaction summaries have no provider continuation. Responses
+encodes their text and data parts as `output_text`; system and user text use `input_text`. Sending
+`input_text` in an assistant message causes OpenAI to reject the request. The summary keeps its
+assistant role. It does not need an application workaround that changes its role to system or user.
+See [OpenAI message mapping][openai-messages].
+
+Responses assistant messages cannot contain input images or files. Without a provider continuation,
+these parts use the configured unsupported-media steering, with the original bytes or URL retained
+in private preparation evidence. Tool replies keep their separate native media rules.
+
 | Input | OpenAI | xAI | Anthropic | Gemini | Chat runtimes / DeepSeek | Ollama | OpenRouter |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Image bytes | Yes | Yes | Yes | Yes | Runtimes: yes; DeepSeek: no | Yes | Model-dependent |
@@ -138,10 +163,9 @@ Other adapters retain the native role sequence.
 | Audio/video bytes | No | No | No | Supported MIME types | No | No | No |
 
 The image tests cover ordered bytes and pointer parts. Actual image support also depends on the
-selected model. Gemini inline input requires a supported MIME type. `ImageURLContent` does not
-carry one, so that adapter rejects it rather than fetch the URL and guess. Ollama carries one text
-string and an ordered image array; it joins text parts in their original order. Other protocols
-retain interleaved text and image blocks. No input URL is downloaded by Gent.
+selected model. Gemini and Ollama load image URLs and check the downloaded MIME type before sending
+inline bytes. Ollama carries one text string and an ordered image array; it joins text parts in
+their original order. Other protocols retain interleaved text and image blocks.
 
 ## Continuation and completion
 
@@ -150,6 +174,12 @@ items remain in `ProviderContinuation` and are replayed with native tool results
 signed thinking blocks. Gemini retains thought signatures on their original parts. Chat runtimes
 retain raw assistant fields, tool IDs, and reasoning data. Ollama correlates tool results by name;
 Gent's local call IDs do not replace its native fields.
+
+OpenAI image-generation items need a different replay form. The API resolves their IDs from server
+storage, even when the full item includes image bytes. With `store: false`, this causes HTTP 404.
+Gent sends the saved image bytes as labeled user input media and keeps the original item in
+`ProviderContinuation`. Other OpenAI items keep their exact native form. Saved native items take
+precedence over message `Parts`; replay does not load unused image URLs or prepare unused media.
 
 OpenRouter reasoning deltas are assembled into ordered summary and signed text blocks before
 replay. Block type, ID, index, and format determine whether adjacent fragments can be joined.
@@ -192,6 +222,10 @@ byte, pixel, and dimension limits always run locally. These adapters currently e
 output, not general audio generation. Custom loops can still supply other `BinaryContent` types to
 custom output processors.
 
+An empty Responses text block has no answer bytes and stays in metadata and native evidence only.
+This is common after image generation. Nonempty text, including whitespace, stays in the candidate
+and must pass the output contract. A text caption cannot bypass an image-only contract.
+
 ## Verification
 
 Deterministic HTTP fixtures cover all ten adapters: request fields, streaming, native tool replay,
@@ -207,6 +241,7 @@ model selection, and the mode that requires the complete matrix. Fixture success
 establish that a live deployment, model version, or account accepted a request.
 
 [openai-schema]: https://developers.openai.com/api/docs/guides/structured-outputs
+[openai-messages]: https://developers.openai.com/api/docs/guides/migrate-to-responses
 [anthropic-schema]: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
 [gemini-schema]: https://ai.google.dev/gemini-api/docs/generate-content/structured-output
 [xai-schema]: https://docs.x.ai/developers/model-capabilities/text/structured-outputs

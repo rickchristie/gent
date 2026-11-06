@@ -44,7 +44,9 @@ func TestGeminiToolOutputSchemaMapping(t *testing.T) {
 					Parts: []gent.ContentPart{mediaReply(t, test.input.parts...)}}}
 			}
 			body := map[string]any{}
-			assert.NoError(t, geminiTools(body, &options, messages))
+			forced, err := geminiTools(body, &options, messages)
+			assert.NoError(t, err)
+			assert.False(t, forced)
 			declaration := map[string]any{"name": "fetch", "description": "Fetch the order.",
 				"parametersJsonSchema": parameters}
 			if test.expected.native {

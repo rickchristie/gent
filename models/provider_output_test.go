@@ -92,7 +92,8 @@ func TestProvidersTypedOutputCorrection(t *testing.T) {
 		cases = append(cases, testCase{provider, input{provider}, expected{
 			value: providerOutputValue{3}, calls: []providerLookupInput{{7}},
 			validations: []providerOutputValue{{2}, {3}}, requests: 4, local: 1, custom: 1,
-			rejected: 2, reason: gent.TerminationSuccess, native: provider != "deepseek",
+			rejected: 2, reason: gent.TerminationSuccess,
+			native: provider != "deepseek" && provider != "gemini",
 		}})
 	}
 	for _, test := range cases {

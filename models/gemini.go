@@ -76,6 +76,26 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 		body["contents"] = prior.RequestContents
 		body["continuationToken"] = prior.Token
 	}
+	forceTools, err := geminiTools(body, o, request.Messages)
+	if err != nil {
+		return nil, nil, decision, err
+	}
+	// Gemini rejects ANY function calling with JSON output controls. That turn must produce a
+	// tool call, so it has no answer candidate to constrain. Keep the original output contract
+	// for local validation and apply its native schema again when an answer is permitted.
+	jsonUnavailable := ""
+	if forceTools {
+		jsonUnavailable = "forced tool choice has no answer candidate"
+	} else if len(o.Tools) > 0 && o.ToolChoice != "none" &&
+		!geminiToolJSON(o.Model, m.config.Model) {
+		// Gemini 2.x also rejects JSON controls with default or AUTO function calling.
+		// Keep the tools and the caller's output contract. Local validation still applies.
+		jsonUnavailable = "model does not support JSON output with tools"
+	}
+	if jsonUnavailable != "" && o.ResponseSchema != nil {
+		decision.Native = false
+		decision.Reason = jsonUnavailable
+	}
 	config := make(map[string]any)
 	if o.MaxTokens != 0 {
 		config["maxOutputTokens"] = o.MaxTokens
@@ -106,13 +126,17 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 	}
 	// GenerateContent models can accept responseFormat without enforcing its text schema.
 	// Use the established JSON fields, verified by the live output-correction tests.
-	if decision.Native {
-		config["responseMimeType"] = "application/json"
-		config["responseJsonSchema"] = o.ResponseSchema
-	} else if o.JSONMode || o.ResponseMIMEType == "application/json" {
-		config["responseMimeType"] = "application/json"
-	} else if o.ResponseMIMEType != "" && o.ResponseMIMEType != "text/plain" {
+	if o.ResponseMIMEType != "" && o.ResponseMIMEType != "text/plain" &&
+		o.ResponseMIMEType != "application/json" {
 		return nil, nil, decision, fmt.Errorf("unsupported Gemini output type %q", o.ResponseMIMEType)
+	}
+	if jsonUnavailable == "" {
+		if decision.Native {
+			config["responseMimeType"] = "application/json"
+			config["responseJsonSchema"] = o.ResponseSchema
+		} else if o.JSONMode || o.ResponseMIMEType == "application/json" {
+			config["responseMimeType"] = "application/json"
+		}
 	}
 	var modalities []string
 	for _, modality := range o.ResponseModalities {
@@ -134,10 +158,18 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 	if len(config) > 0 {
 		body["generationConfig"] = config
 	}
-	if err := geminiTools(body, o, request.Messages); err != nil {
-		return nil, nil, decision, err
-	}
 	return body, prior, decision, nil
+}
+
+// GenerateContent documents combined function calling and structured output for Gemini 3 and 4.
+// Unknown model aliases use local validation when tools are available. A request model override
+// takes precedence, as it does for the actual HTTP endpoint.
+func geminiToolJSON(selected, configured string) bool {
+	if selected == "" {
+		selected = configured
+	}
+	name := strings.TrimPrefix(selected, "models/")
+	return strings.HasPrefix(name, "gemini-3") || strings.HasPrefix(name, "gemini-4")
 }
 
 func geminiMetadata(body, config, metadata map[string]any) error {
@@ -189,11 +221,11 @@ func geminiMetadata(body, config, metadata map[string]any) error {
 
 func geminiTools(body map[string]any, options *gent.CallOptions,
 	messages []*gent.ModelMessage,
-) error {
+) (bool, error) {
 	var declarations []any
 	for _, tool := range options.Tools {
 		if tool.Type != "function" || tool.Function == nil {
-			return errors.New("Gemini requires function tool definitions")
+			return false, errors.New("Gemini requires function tool definitions")
 		}
 		f := tool.Function
 		declaration := map[string]any{"name": f.Name, "description": f.Description,
@@ -206,13 +238,13 @@ func geminiTools(body map[string]any, options *gent.CallOptions,
 		} else {
 			description, err := toolDescription(f)
 			if err != nil {
-				return err
+				return false, err
 			}
 			declaration["description"] = description
 		}
 		declarations = append(declarations, declaration)
 		if f.Strict {
-			return errors.New("Gemini does not support per-function strict settings")
+			return false, errors.New("Gemini does not support per-function strict settings")
 		}
 	}
 	if len(declarations) > 0 {
@@ -225,23 +257,23 @@ func geminiTools(body map[string]any, options *gent.CallOptions,
 	var config map[string]any
 	switch choice := value.(type) {
 	case nil:
-		return nil
+		return false, nil
 	case string:
 		mode := map[string]string{"auto": "AUTO", "required": "ANY", "none": "NONE"}[choice]
 		if mode == "" {
-			return fmt.Errorf("unsupported Gemini tool choice %q", choice)
+			return false, fmt.Errorf("unsupported Gemini tool choice %q", choice)
 		}
 		config = map[string]any{"mode": mode}
 	case gent.ToolChoice:
 		if choice.Type != "function" || choice.Function == nil {
-			return errors.New("Gemini named tool choice requires a function")
+			return false, errors.New("Gemini named tool choice requires a function")
 		}
 		config = map[string]any{"mode": "ANY", "allowedFunctionNames": []string{choice.Function.Name}}
 	default:
-		return fmt.Errorf("unsupported Gemini tool choice %T", value)
+		return false, fmt.Errorf("unsupported Gemini tool choice %T", value)
 	}
 	body["toolConfig"] = map[string]any{"functionCallingConfig": config}
-	return nil
+	return config["mode"] == "ANY", nil
 }
 
 // Before the first result, an object declaration describes the author's promised domain data.

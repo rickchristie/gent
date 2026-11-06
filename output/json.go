@@ -68,8 +68,11 @@ func newJSONOutput[T any](raw map[string]any) (jsonOutput[T], error) {
 	if err != nil {
 		return jsonOutput[T]{}, fmt.Errorf("output: describe JSON schema: %w", err)
 	}
+	// Some endpoints cannot combine native JSON controls and tools. The caller can include
+	// these instructions for that path; code fences still fail local validation.
 	return jsonOutput[T]{schema: compiled,
-		instructions: "Return one JSON value that matches this schema: " + string(encoded)}, nil
+		instructions: "Return one JSON value. Do not use Markdown code fences or other text. " +
+			"Match this schema: " + string(encoded)}, nil
 }
 
 func (o *JsonOutput[T]) SetCustomValidator(
@@ -129,7 +132,8 @@ func (o *jsonOutput[T]) Process(
 	}
 	var document any
 	if err := decodeJSON(text, &document); err != nil {
-		return reject[T](fmt.Sprintf("Invalid JSON: %v. Return one complete JSON value.", err)), nil
+		return reject[T](fmt.Sprintf("Invalid JSON: %v. "+
+			"Return one complete JSON value without Markdown code fences or other text.", err)), nil
 	}
 	if err := o.schema.Validate(document); err != nil {
 		return reject[T](fmt.Sprintf("The JSON does not match the schema: %v. Return corrected JSON.",

@@ -3,13 +3,13 @@ package models
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/rickchristie/gent"
 	"github.com/rickchristie/gent/agents/react"
 	"github.com/rickchristie/gent/executor"
+	"github.com/rickchristie/gent/output"
 	"github.com/rickchristie/gent/toolchain"
 	"github.com/stretchr/testify/assert"
 )
@@ -103,11 +103,11 @@ func liveToolChain(calls *[]string, withSearch bool) (*toolchain.JsToolChainWrap
 }
 
 // TestNativeLive requires real native calls. A text answer cannot satisfy the assertions.
-// Set either provider key to enable its cases. Optional model variables select another model.
+// Use the same provider matrix as the other live tests, including endpoint and model overrides.
 func TestNativeLive(t *testing.T) {
 	type input struct {
-		key, fallbackKey, modelKey, model, provider string
-		search                                      bool
+		provider liveProvider
+		search   bool
 	}
 	type expected struct {
 		calls    []string
@@ -125,33 +125,17 @@ func TestNativeLive(t *testing.T) {
 			{"read", &responseInput{ID: "record-9"}, "record-finished", nil},
 		}},
 	}
-	cases := []testCase{
-		{"OpenAI program", input{"GENT_TEST_OPENAI_KEY", "OPENAI_API_KEY",
-			"GENT_TEST_OPENAI_MODEL", gent.ModelOpenAIGPT54Mini, "openai", false}, want},
-		{"OpenAI search and program", input{"GENT_TEST_OPENAI_KEY", "OPENAI_API_KEY",
-			"GENT_TEST_OPENAI_MODEL", gent.ModelOpenAIGPT54Mini, "openai", true}, want},
-		{"Grok program", input{"GENT_TEST_XAI_KEY", "XAI_API_KEY",
-			"GENT_TEST_XAI_MODEL", gent.ModelXAIGrok43, "xai", false}, want},
-		{"Grok search and program", input{"GENT_TEST_XAI_KEY", "XAI_API_KEY",
-			"GENT_TEST_XAI_MODEL", gent.ModelXAIGrok43, "xai", true}, want},
+	var cases []testCase
+	for _, provider := range liveProviders() {
+		cases = append(cases,
+			testCase{provider.name + "/program", input{provider, false}, want},
+			testCase{provider.name + "/search and program", input{provider, true}, want})
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			key := os.Getenv(test.input.key)
-			if key == "" {
-				key = os.Getenv(test.input.fallbackKey)
-			}
-			if key == "" {
-				t.Skipf("live native test needs %s or %s", test.input.key, test.input.fallbackKey)
-			}
-			modelName := os.Getenv(test.input.modelKey)
-			if modelName == "" {
-				modelName = test.input.model
-			}
-			model := NewOpenAI(key, modelName)
-			if test.input.provider == "xai" {
-				model = NewXAI(key, modelName)
-			}
+			config := liveConfig(t, test.input.provider, false)
+			t.Parallel()
+			model := newLiveModel(test.input.provider, &config)
 			var calls []string
 			program, err := liveToolChain(&calls, test.input.search)
 			if !assert.NoError(t, err) {
@@ -167,7 +151,16 @@ Return only the text from read as the final answer, without quotes or formatting
 Wait for that result before the next request. Then follow these instructions:
 ` + task
 			}
-			agent := react.NewAgent(model).WithToolChain(program).
+			out := output.NewTextOutput().SetCustomValidator("live-program-result",
+				func(_ *gent.ExecutionContext, value string) (*gent.OutputValidationResult, error) {
+					if value != "record-finished" {
+						return &gent.OutputValidationResult{Steering: []gent.ContentPart{gent.TextPart(
+							`Return only the exact text from the saved read result, with no extra whitespace.
+The program and its tool calls are complete. Do not run them again.`)}}, nil
+					}
+					return &gent.OutputValidationResult{Accepted: true}, nil
+				})
+			agent := react.NewWithOutput(model, out).WithToolChain(program).
 				WithRecoveryVersion("live-native/v1").WithCallOptions(gent.WithMaxTokens(3000))
 			worker, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -191,12 +184,13 @@ Wait for that result before the next request. Then follow these instructions:
 				}
 			})
 			ctx.SetLimits([]gent.Limit{{Type: gent.LimitExactKey, Key: gent.SCIterations, MaxValue: 6}})
-			_, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
+			value, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(ctx)
 			if !assert.NoError(t, err) {
 				return
 			}
 			assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
-			assert.Equal(t, []gent.ContentPart{gent.TextContent{Text: "record-finished"}}, result.Output)
+			assert.Equal(t, "record-finished", value)
+			assert.Equal(t, "record-finished", gent.ContentText(result.Output))
 			programs, err := liveProgramCalls(ctx)
 			if !assert.NoError(t, err) {
 				return

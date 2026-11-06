@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -416,65 +417,99 @@ func RunStreamingNoListener(ctx context.Context, w io.Writer, _ StreamOutputConf
 
 // RunStreamingCancellation tests context cancellation stops the stream.
 func RunStreamingCancellation(ctx context.Context, w io.Writer, config StreamOutputConfig) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	model, err := createXAIModel(gent.ModelXAIGrok43)
 	if err != nil {
 		return err
 	}
+	return runStreamingCancellation(ctx, w, config, model)
+}
 
-	execCtx := gent.NewExecutionContext(ctx, "streaming-test", nil)
-	stream, err := execCtx.GenerateContentStream(
-		model,
-		gent.ModelCall{StreamId: "", StreamTopicId: ""},
+// A failed request or an early answer does not verify cancellation. Require five live chunks,
+// cancel that request, then wait for the provider's cancellation result and producer cleanup.
+func runStreamingCancellation(base context.Context, w io.Writer, config StreamOutputConfig,
+	model gent.Model,
+) error {
+	deadline, stop := context.WithTimeout(base, time.Minute)
+	defer stop()
+	worker, cancel := context.WithCancel(deadline)
+	defer cancel()
+	execCtx := gent.NewExecutionContext(worker, "streaming-test", nil)
+	defer execCtx.Release()
+	stream, err := execCtx.GenerateContentStream(model, gent.ModelCall{},
 		gent.NewModelCallRequest([]*gent.ModelMessage{
-			gent.TextParts(
-				gent.ChatMessageTypeHuman,
-				"Write a very long story about a programmer. Make it at least 500 words.",
-			),
-		}),
-	)
+			gent.TextParts(gent.ChatMessageTypeHuman,
+				"Write a very long story about a programmer. Make it at least 500 words."),
+		}, gent.WithMaxTokens(2048)))
 	if err != nil {
 		return fmt.Errorf("failed to start stream: %w", err)
 	}
-
-	fmt.Fprintln(w, "\n=== Cancellation Test ===")
-	if config.ShowChunkBoundaries {
-		fmt.Fprintln(w, "Starting stream, will cancel after 5 chunks (| = chunk boundary):")
-	} else {
-		fmt.Fprintln(w, "Starting stream, will cancel after 5 chunks:")
-	}
-
+	defer stream.Close()
 	cw := NewChunkWriterWithConfig(w, config)
+	defer cw.End()
+	var cleanup <-chan time.Time
+	var cancelledAt time.Time
+	chunks := 0
 	cancelled := false
-
-	for chunk := range stream.Chunks() {
-		if chunk.Err != nil {
-			fmt.Fprintf(w, "\nStream error (expected): %v\n", chunk.Err)
-			break
-		}
-		cw.Write(chunk)
-		chunks, _, _ := cw.Stats()
-		if chunks >= 5 && !cancelled {
-			if config.ShowChunkBoundaries {
-				fmt.Fprint(w, "| [CANCELLING]")
-			} else {
-				fmt.Fprint(w, " [CANCELLING]")
+	for {
+		select {
+		case <-deadline.Done():
+			return fmt.Errorf("cancellation check deadline: %w", deadline.Err())
+		case <-cleanup:
+			return errors.New("stream producer did not stop within five seconds after cancellation")
+		case chunk, ok := <-stream.Chunks():
+			if !ok {
+				_, err := stream.Response()
+				if !cancelled {
+					return fmt.Errorf("stream ended before cancellation (%d chunks): %w", chunks,
+						errors.Join(errors.New("cancellation not verified"), err))
+				}
+				if time.Since(cancelledAt) > 5*time.Second {
+					return errors.New("stream producer cleanup exceeded five seconds")
+				}
+				if !streamCancellationOnly(err) {
+					return fmt.Errorf("expected context cancellation, got %v", err)
+				}
+				cw.PrintStats()
+				return nil
 			}
-			cancel()
-			cancelled = true
+			if chunk.Err != nil {
+				if !cancelled || !streamCancellationOnly(chunk.Err) {
+					return fmt.Errorf("unexpected stream error: %w", chunk.Err)
+				}
+				continue
+			}
+			cw.Write(chunk)
+			if len(chunk.MetaContent) == 0 {
+				continue
+			}
+			chunks++
+			if chunks == 5 {
+				cancelled = true
+				cancelledAt = time.Now()
+				cancel()
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
+				cleanup = timer.C
+			}
 		}
 	}
-	cw.End()
+}
 
-	_, err = stream.Response()
-	if err != nil {
-		fmt.Fprintf(w, "Response error (expected): %v\n", err)
+// A joined close or transport error must not be hidden by a cancellation cause.
+func streamCancellationOnly(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		for _, cause := range causes {
+			if !streamCancellationOnly(cause) {
+				return false
+			}
+		}
+		return len(causes) > 0
 	}
-
-	cw.PrintStats()
-	return nil
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return streamCancellationOnly(wrapped.Unwrap())
+	}
+	return err == context.Canceled
 }
 
 // RunStreamingConcurrent tests multiple concurrent streams.

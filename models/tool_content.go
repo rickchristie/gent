@@ -22,8 +22,14 @@ func prepareMedia(ctx context.Context, client *http.Client, request *gent.ModelC
 	var prepared *gent.ModelCallRequest
 	steering := request.Options.SteeringMessages.Resolved()
 	for i, message := range request.Messages {
+		// Adapters replay the saved native items, not Parts. Do not load media that is unused
+		// or replace the evidence attached to a provider continuation.
+		if message.Continuation != nil {
+			continue
+		}
 		path := fmt.Sprintf("messages[%d].parts", i)
-		parts, changed, err := prepareMediaParts(ctx, client, message.Parts, endpoint, steering, path)
+		parts, changed, err := prepareMediaParts(ctx, client, message.Parts, endpoint, message.Role,
+			steering, path)
 		if err != nil {
 			return nil, err
 		}
@@ -46,10 +52,13 @@ func prepareMedia(ctx context.Context, client *http.Client, request *gent.ModelC
 }
 
 func prepareMediaParts(ctx context.Context, client *http.Client, parts []gent.ContentPart,
-	endpoint string, steering gent.SteeringMessages, path string,
+	endpoint string, role gent.ChatMessageType, steering gent.SteeringMessages, path string,
 ) ([]gent.ContentPart, bool, error) {
 	result := parts
 	changed := false
+	// Responses assistant content only accepts output text or refusals. Use the same steering
+	// contract as other unsupported media; sending input media here would reject the whole call.
+	textOnly := role == gent.ChatMessageTypeAI && (endpoint == "openai" || endpoint == "xai")
 	for i, part := range parts {
 		original := part
 		reason := ""
@@ -59,7 +68,7 @@ func prepareMediaParts(ctx context.Context, client *http.Client, parts []gent.Co
 		switch value := partValue(part).(type) {
 		case *gent.ModelToolCallResponse:
 			nested, updated, err := prepareMediaParts(ctx, client, value.Parts(), endpoint,
-				steering, location+".parts")
+				gent.ChatMessageTypeTool, steering, location+".parts")
 			if err != nil {
 				return nil, false, err
 			}
@@ -72,7 +81,7 @@ func prepareMediaParts(ctx context.Context, client *http.Client, parts []gent.Co
 			}
 		case gent.CachedContent:
 			nested, updated, err := prepareMediaParts(ctx, client, []gent.ContentPart{value.ContentPart},
-				endpoint, steering, location+".cached")
+				endpoint, role, steering, location+".cached")
 			if err != nil {
 				return nil, false, err
 			}
@@ -81,6 +90,10 @@ func prepareMediaParts(ctx context.Context, client *http.Client, parts []gent.Co
 				part, partChanged = value, true
 			}
 		case gent.ImageURLContent:
+			if textOnly {
+				part = unsupportedMedia(steering, "image URL: "+value.URL)
+				reason = "unsupported_media"
+			}
 			if endpoint == "gemini" || endpoint == "ollama" {
 				image, err := loadImage(ctx, client, value.URL)
 				if ctx.Err() != nil {
@@ -101,7 +114,7 @@ func prepareMediaParts(ctx context.Context, client *http.Client, parts []gent.Co
 				reason = "unsupported_media"
 			}
 		case gent.BinaryContent:
-			if !inputMIME(endpoint, value.MIMEType) {
+			if textOnly || !inputMIME(endpoint, value.MIMEType) {
 				part = unsupportedMedia(steering, value.MIMEType)
 				reason = "unsupported_media"
 			}

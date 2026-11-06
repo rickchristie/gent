@@ -62,7 +62,12 @@ func TestJsonOutputPointerValidation(t *testing.T) {
 					"into Go struct field order.quantity of type int8. Return corrected JSON.")}}},
 		{"multiple documents", input{`{"id":1,"quantity":2} true`}, expected{
 			result: &gent.OutputResult[*order]{Steering: text(
-				"Invalid JSON: more than one JSON value. Return one complete JSON value.")}}},
+				"Invalid JSON: more than one JSON value. " +
+					"Return one complete JSON value without Markdown code fences or other text.")}}},
+		{"code fence", input{"```json {\"id\":1,\"quantity\":2} ```"}, expected{
+			result: &gent.OutputResult[*order]{Steering: text(
+				"Invalid JSON: invalid character '`' looking for beginning of value. " +
+					"Return one complete JSON value without Markdown code fences or other text.")}}},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
