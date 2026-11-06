@@ -27,9 +27,13 @@ func (m *Gemini) RecoveryConfig() any {
 }
 
 func (m *Gemini) GenerateContentStream(ctx context.Context,
-	request gent.ModelCallRequest,
+	request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	body, prior, decision, err := m.requestBody(&request)
+	request, err := prepareMedia(ctx, m.config.HTTPClient, request, "gemini")
+	if err != nil {
+		return nil, err
+	}
+	body, prior, decision, err := m.requestBody(request)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +46,7 @@ func (m *Gemini) GenerateContentStream(ctx context.Context,
 	headers := http.Header{"X-Goog-Api-Key": {m.config.APIKey}, "Accept": {"text/event-stream"}}
 	return startProviderStream(ctx, m.config.HTTPClient, endpoint, headers, body,
 		func(ctx context.Context, response *http.Response, stream *gent.StreamWithDuration) (
-			*gent.ContentResponse, error,
+			*gent.ModelCallResponse, error,
 		) {
 			result, err := m.readResponse(ctx, response, stream, &request.Options, body, prior)
 			recordSchema(result, decision)
@@ -59,7 +63,8 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 		o.RepetitionPenalty != 0 {
 		return nil, nil, decision, errors.New("unsupported Gemini sampling option")
 	}
-	contents, system, prior, err := geminiMessages(request.Messages)
+	nativeMedia := geminiNativeToolMedia(o.Model, m.config.Model)
+	contents, system, prior, err := geminiMessages(request.Messages, nativeMedia)
 	if err != nil {
 		return nil, nil, decision, err
 	}
@@ -99,11 +104,13 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 	if err := geminiMetadata(body, config, o.Metadata); err != nil {
 		return nil, nil, decision, err
 	}
-	format := make(map[string]any)
+	// GenerateContent models can accept responseFormat without enforcing its text schema.
+	// Use the established JSON fields, verified by the live output-correction tests.
 	if decision.Native {
-		format["text"] = map[string]any{"mimeType": "APPLICATION_JSON", "schema": o.ResponseSchema}
+		config["responseMimeType"] = "application/json"
+		config["responseJsonSchema"] = o.ResponseSchema
 	} else if o.JSONMode || o.ResponseMIMEType == "application/json" {
-		format["text"] = map[string]any{"mimeType": "APPLICATION_JSON"}
+		config["responseMimeType"] = "application/json"
 	} else if o.ResponseMIMEType != "" && o.ResponseMIMEType != "text/plain" {
 		return nil, nil, decision, fmt.Errorf("unsupported Gemini output type %q", o.ResponseMIMEType)
 	}
@@ -122,15 +129,12 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 		if slices.Contains(o.ImageMIMETypes, "image/jpeg") {
 			image["mimeType"] = "IMAGE_JPEG"
 		}
-		format["image"] = image
-	}
-	if len(format) > 0 {
-		config["responseFormat"] = format
+		config["responseFormat"] = map[string]any{"image": image}
 	}
 	if len(config) > 0 {
 		body["generationConfig"] = config
 	}
-	if err := geminiTools(body, o); err != nil {
+	if err := geminiTools(body, o, request.Messages); err != nil {
 		return nil, nil, decision, err
 	}
 	return body, prior, decision, nil
@@ -183,15 +187,30 @@ func geminiMetadata(body, config, metadata map[string]any) error {
 	return nil
 }
 
-func geminiTools(body map[string]any, options *gent.CallOptions) error {
+func geminiTools(body map[string]any, options *gent.CallOptions,
+	messages []*gent.ModelMessage,
+) error {
 	var declarations []any
 	for _, tool := range options.Tools {
 		if tool.Type != "function" || tool.Function == nil {
 			return errors.New("Gemini requires function tool definitions")
 		}
 		f := tool.Function
-		declarations = append(declarations, map[string]any{"name": f.Name,
-			"description": f.Description, "parametersJsonSchema": f.Parameters})
+		declaration := map[string]any{"name": f.Name, "description": f.Description,
+			"parametersJsonSchema": f.Parameters}
+		// A single domain object maps directly to response. Text guidance remains outside it.
+		// Other declared shapes are descriptive text because functionResponse requires an object.
+		if f.OutputSchema != nil && f.OutputSchema["type"] == "object" &&
+			geminiResponseSchemaCompatible(messages, f.Name) {
+			declaration["responseJsonSchema"] = f.OutputSchema
+		} else {
+			description, err := toolDescription(f)
+			if err != nil {
+				return err
+			}
+			declaration["description"] = description
+		}
+		declarations = append(declarations, declaration)
 		if f.Strict {
 			return errors.New("Gemini does not support per-function strict settings")
 		}
@@ -223,4 +242,35 @@ func geminiTools(body map[string]any, options *gent.CallOptions) error {
 	}
 	body["toolConfig"] = map[string]any{"functionCallingConfig": config}
 	return nil
+}
+
+// Before the first result, an object declaration describes the author's promised domain data.
+// Once a result uses the ordered multipart envelope, keep its schema in description text instead
+// of declaring that the provider envelope itself is the domain object. Do not validate its values.
+func geminiResponseSchemaCompatible(messages []*gent.ModelMessage, name string) bool {
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			reply, ok := part.(*gent.ModelToolCallResponse)
+			if !ok || reply.Name() != name {
+				continue
+			}
+			parts := reply.Parts()
+			if len(parts) == 0 {
+				return false
+			}
+			data, ok := partValue(parts[0]).(gent.DataContent)
+			if !ok {
+				return false
+			}
+			if _, ok := data.Value().(map[string]any); !ok {
+				return false
+			}
+			for _, extra := range parts[1:] {
+				if _, text := partValue(extra).(gent.TextContent); !text {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }

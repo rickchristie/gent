@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"github.com/rickchristie/gent"
 	"testing"
 
 	"github.com/rickchristie/gent/search"
@@ -134,7 +135,7 @@ func TestPolicySearchTool_Call_NoResults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t,
 		"No policies found matching your query. Try different keywords or a broader search.",
-		result.Text)
+		gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_SingleResult(t *testing.T) {
@@ -158,7 +159,7 @@ Customers may cancel within 24 hours.`,
 
 ## Cancellation
 
-Customers may cancel within 24 hours.`, result.Text)
+Customers may cancel within 24 hours.`, gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_MultipleResults(t *testing.T) {
@@ -185,7 +186,7 @@ Cancel within 24 hours.
 
 # refund-policy
 
-Refund in 5-7 days.`, result.Text)
+Refund in 5-7 days.`, gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_EmptyQuery(t *testing.T) {
@@ -196,9 +197,10 @@ func TestPolicySearchTool_Call_EmptyQuery(t *testing.T) {
 		topK:     3,
 	}
 
-	_, err := tool.Call(context.Background(), PolicySearchInput{Query: ""})
-	assert.Error(t, err)
-	assert.Equal(t, "query is required", err.Error())
+	response, err := tool.Call(context.Background(), PolicySearchInput{Query: ""})
+	assert.NoError(t, err)
+	assert.Equal(t, &gent.ToolExecutionResponse{Status: gent.ToolInvalidArguments,
+		Instructions: "query must contain at least one character."}, response)
 }
 
 // ============================================================================
@@ -256,7 +258,7 @@ func TestPolicySearchTool_Call_SnippetOnly_SingleResult(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, `id: cancel-policy
-Cancel within 24 hours`, result.Text)
+Cancel within 24 hours`, gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_SnippetOnly_MultipleResults(t *testing.T) {
@@ -290,7 +292,7 @@ Cancel within 24 hours
 ---
 
 id: refund-policy
-Refund in 5-7 days`, result.Text)
+Refund in 5-7 days`, gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_FullContent_StillWorks(t *testing.T) {
@@ -316,7 +318,7 @@ func TestPolicySearchTool_Call_FullContent_StillWorks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `# cancel-policy
 
-Full cancellation policy content here.`, result.Text)
+Full cancellation policy content here.`, gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_TitleOnly_SingleResult(t *testing.T) {
@@ -341,7 +343,7 @@ func TestPolicySearchTool_Call_TitleOnly_SingleResult(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, `id: cancel-policy
-description: Cancellation terms and refund rules`, result.Text)
+description: Cancellation terms and refund rules`, gent.ContentTextData(result.Parts))
 }
 
 func TestPolicySearchTool_Call_TitleOnly_MultipleResults(t *testing.T) {
@@ -378,7 +380,7 @@ description: Cancellation terms
 ---
 
 id: refund-policy
-description: Refund processing timeline`, result.Text)
+description: Refund processing timeline`, gent.ContentTextData(result.Parts))
 }
 
 // ============================================================================
@@ -402,7 +404,7 @@ func TestGetPolicyTool_Call_Found(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `# cancel-policy
 
-Full cancellation policy content.`, result.Text)
+Full cancellation policy content.`, gent.ContentTextData(result.Parts))
 }
 
 func TestGetPolicyTool_Call_NotFound(t *testing.T) {
@@ -411,12 +413,13 @@ func TestGetPolicyTool_Call_NotFound(t *testing.T) {
 		policies: map[string]*Policy{},
 	}
 
-	_, err := tool.Call(
+	result, err := tool.Call(
 		context.Background(),
 		GetPolicyInput{PolicyID: "nonexistent"},
 	)
-	assert.Error(t, err)
-	assert.Equal(t, "policy not found: nonexistent", err.Error())
+	assert.NoError(t, err)
+	assert.Equal(t, &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+		Instructions: `Policy "nonexistent" was not found. Search for an available policy.`}, result)
 }
 
 func TestGetPolicyTool_Call_EmptyID(t *testing.T) {
@@ -425,11 +428,10 @@ func TestGetPolicyTool_Call_EmptyID(t *testing.T) {
 		policies: map[string]*Policy{},
 	}
 
-	_, err := tool.Call(
-		context.Background(), GetPolicyInput{PolicyID: ""},
-	)
-	assert.Error(t, err)
-	assert.Equal(t, "policy_id is required", err.Error())
+	response, err := tool.Call(context.Background(), GetPolicyInput{PolicyID: ""})
+	assert.NoError(t, err)
+	assert.Equal(t, &gent.ToolExecutionResponse{Status: gent.ToolInvalidArguments,
+		Instructions: "policy_id must contain at least one character."}, response)
 }
 
 func TestGetPolicyTool_ToolInterface(t *testing.T) {

@@ -30,10 +30,10 @@ func (t *mockIndexableTool) SyntheticQueries() []string   { return t.syntheticQu
 func (t *mockIndexableTool) Policy() string               { return "" }
 func (t *mockIndexableTool) Strict() bool                 { return false }
 func (t *mockIndexableTool) OutputSchema() map[string]any { return nil }
-func (t *mockIndexableTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+func (t *mockIndexableTool) Recover(context.Context, *gent.ToolRecoveryRequest[map[string]any]) (
 	*gent.ToolRecoveryResponse, error,
 ) {
-	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved}, nil
+	return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved}, nil
 }
 func (t *mockIndexableTool) ParameterSchema() map[string]any {
 	return nil
@@ -42,15 +42,12 @@ func (t *mockIndexableTool) ParameterSchema() map[string]any {
 func (t *mockIndexableTool) Call(
 	_ context.Context,
 	input map[string]any,
-) (*gent.ToolResult[string], error) {
-	return &gent.ToolResult[string]{Text: "ok"}, nil
+) (*gent.ToolExecutionResponse, error) {
+	return &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+		Parts: []gent.ContentPart{gent.TextPart("ok")}}, nil
 }
 
-func (t *mockIndexableTool) DeduplicateSummary(
-	input map[string]any, output string,
-) string {
-	return ""
-}
+func (t *mockIndexableTool) UnrecoverableErrorInstructions() string { return "" }
 
 func TestRegex_Id(t *testing.T) {
 	engine := NewRegexToolSearcher()
@@ -175,11 +172,11 @@ func TestRegex_IndexAll_Reindex(t *testing.T) {
 
 	results, err := engine.Search(context.Background(), "tool_a")
 	require.NoError(t, err)
-	assert.Empty(t, results)
+	assert.Empty(t, results.Names)
 
 	results, err = engine.Search(context.Background(), "tool_b")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"tool_b"}, results)
+	assert.Equal(t, []string{"tool_b"}, results.Names)
 }
 
 func TestRegex_Search(t *testing.T) {
@@ -353,15 +350,16 @@ func TestRegex_Search(t *testing.T) {
 			)
 
 			if tt.expected.err != nil {
-				assert.Error(t, err)
+				assert.NoError(t, err)
+				assert.Equal(t, gent.ToolInvalidArguments, results.Status)
 				return
 			}
 
 			require.NoError(t, err)
 			if len(tt.expected.names) == 0 {
-				assert.Empty(t, results)
+				assert.Empty(t, results.Names)
 			} else {
-				assert.Equal(t, tt.expected.names, results)
+				assert.Equal(t, tt.expected.names, results.Names)
 			}
 		})
 	}

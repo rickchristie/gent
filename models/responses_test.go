@@ -69,8 +69,8 @@ func TestResponsesNativeProgramAndContinuation(t *testing.T) {
 			var requests []map[string]any
 			var calls []string
 			program := `const first = tool.call({tool:"lookup",args:{id:"start"}});
-if (first.error) throw new Error(first.error);
-tool.call({tool:"read",args:{id:first.output.next_id}});`
+if (first.kind !== "execution") throw new Error("lookup unavailable");
+tool.call({tool:"read",args:{id:first.parts.find(part => part.kind === "data").data.next_id}});`
 			args, err := json.Marshal(map[string]string{"code": program})
 			assert.NoError(t, err)
 			reasoning := map[string]any{"id": "reasoning-1", "type": "reasoning",
@@ -106,14 +106,14 @@ tool.call({tool:"read",args:{id:first.output.next_id}});`
 					Provider: test.input.provider, BaseURL: "https://fixture.test/v1",
 					APIKey: "fixture-key", Model: "fixture", HTTPClient: &http.Client{Transport: transport}})
 				registry := toolchain.New().RegisterTool(gent.DefineTool("lookup",
-					func(_ context.Context, input *responseInput) (*responseOutput, error) {
+					func(_ context.Context, input *responseInput) (*gent.ToolExecutionResponse, error) {
 						calls = append(calls, "lookup:"+input.ID)
-						return &responseOutput{NextID: "record-9"}, nil
+						return capturedToolResponse(&responseOutput{NextID: "record-9"}, nil)
 					}).Description("Get the next record ID").ParameterSchema(responseInputSchema()).MustBuild()).
 					RegisterTool(gent.DefineTool("read",
-						func(_ context.Context, input *responseInput) (string, error) {
+						func(_ context.Context, input *responseInput) (*gent.ToolExecutionResponse, error) {
 							calls = append(calls, "read:"+input.ID)
-							return "record", nil
+							return capturedToolResponse("record", nil)
 						}).Description("Read the next record").ParameterSchema(responseInputSchema()).MustBuild())
 				chain := toolchain.NewJsToolChainWrapper(registry).WithDirectCallDisabled()
 				return react.NewAgent(model).WithToolChain(chain).WithRecoveryVersion("responses/v1")
@@ -302,7 +302,7 @@ func TestResponsesSamplingPresence(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			request := gent.NewModelCallRequest(nil, test.input.options...)
-			body, err := model.requestBody(&request)
+			body, err := model.requestBody(request)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expected, expected{body})
 		})

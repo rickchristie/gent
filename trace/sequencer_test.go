@@ -93,7 +93,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 	execCtx.PublishBeforeIteration()
 	assert.NoError(t, execCtx.FlushProgress())
 
-	request := gent.ModelCallRequest{
+	request := &gent.ModelCallRequest{
 		Messages: []*gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "hello")},
 		Options: gent.NewModelCallRequest(
 			nil, gent.WithTemperature(0.2), gent.WithMaxTokens(123)).Options,
@@ -128,7 +128,7 @@ func TestSequencer_SnapshotModelToolAndStreamCorrelation(t *testing.T) {
 		Depth:         beforeModel.Depth,
 		ContextId:     beforeModel.ContextId,
 	}))
-	response := &gent.ContentResponse{Info: &gent.GenerationInfo{
+	response := &gent.ModelCallResponse{Info: &gent.GenerationInfo{
 		InputTokens: 3, OutputTokens: 4, CachedInputTokens: 1, ReasoningTokens: 2, TotalTokens: 7,
 	}}
 	execCtx.PublishAfterModelCall(
@@ -439,7 +439,7 @@ func TestSequencer_RedactionMissingIdsAndUTF8Truncation(t *testing.T) {
 	recordTestValue(t, seq, "model_call_started", &gent.BeforeModelCallEvent{
 		BaseEvent: base,
 		Model:     "gpt",
-		Request: gent.ModelCallRequest{
+		Request: &gent.ModelCallRequest{
 			Messages: []*gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "secret")},
 		},
 		ModelCallId: "model-1",

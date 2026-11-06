@@ -261,7 +261,6 @@ func CreateToolChain(config TestConfig) gent.ToolChain {
 	switch config.ToolChain {
 	case ToolChainSearch:
 		tc := toolchain.NewSearch(config.SearchHintType).
-			WithSearchType(toolchain.SearchGet).
 			RegisterEngine(
 				toolchain.NewFusedToolSearcher(config.Embedder),
 			)

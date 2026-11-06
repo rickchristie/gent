@@ -15,7 +15,7 @@ import (
 )
 
 func TestHistoryRecovery_UncertainTool(t *testing.T) {
-	type input struct{ decision gent.ToolRecoveryResult }
+	type input struct{ decision gent.ToolRecoveryStatus }
 	type expected struct {
 		err        error
 		toolCalls  int
@@ -29,8 +29,8 @@ func TestHistoryRecovery_UncertainTool(t *testing.T) {
 	cases := []testCase{
 		{"default tool recovery", input{}, expected{nil, 0, 1}},
 		{"unresolved", input{gent.ToolRecoveryUnresolved}, expected{nil, 0, 1}},
-		{"retry authorized", input{gent.ToolRecoveryRetryAllowed}, expected{nil, 2, 1}},
-		{"completed externally", input{gent.ToolRecoveryCompleted}, expected{nil, 1, 1}},
+		{"retry authorized", input{gent.ToolRecoveryNotStarted}, expected{nil, 0, 1}},
+		{"completed externally", input{gent.ToolRecoveryCompleted}, expected{nil, 0, 1}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -39,20 +39,18 @@ func TestHistoryRecovery_UncertainTool(t *testing.T) {
 			model := &recoveryModel{answer: true}
 			var calls []gent.ToolIdentity
 			var bindings gent.RestoreBindings
-			var recovered *gent.ToolRecoveryRequest
-			var handler gent.ToolRecoveryFunc
+			var recovered *gent.ToolRecoveryRequest[recoveryInput]
+			var handler gent.ToolRecoveryFunc[recoveryInput]
 			if test.input.decision != "" {
-				handler = func(_ context.Context, request *gent.ToolRecoveryRequest) (
+				handler = func(_ context.Context, request *gent.ToolRecoveryRequest[recoveryInput]) (
 					*gent.ToolRecoveryResponse, error,
 				) {
 					recovered = request
-					input, err := bindings.Codecs.Decode(request.Input)
-					assert.NoError(t, err)
-					assert.Equal(t, recoveryInput{Id: "P10"}, input)
-					response := &gent.ToolRecoveryResponse{Result: test.input.decision}
-					if response.Result == gent.ToolRecoveryCompleted {
-						response.Output = &gent.ToolCallResult{Output: "P10: exact original text",
-							SummaryCaptured: true, Text: "<policy>P10: exact original text</policy>"}
+					assert.Equal(t, recoveryInput{Id: "P10"}, request.Input())
+					response := &gent.ToolRecoveryResponse{Status: test.input.decision}
+					if response.Status == gent.ToolRecoveryCompleted {
+						response.Execution = &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+							Parts: []gent.ContentPart{gent.TextPart("P10: exact original text")}}
 					}
 					return response, nil
 				}
@@ -72,9 +70,8 @@ func TestHistoryRecovery_UncertainTool(t *testing.T) {
 			} else {
 				assert.Equal(t, gent.PhaseTerminal, view.Checkpoint.Phase)
 			}
-			if test.input.decision == gent.ToolRecoveryRetryAllowed {
-				assert.Equal(t, recovered.ToolCallId, calls[0].ToolCallId)
-				assert.NotEqual(t, recovered.AttemptId, calls[0].AttemptId)
+			if recovered != nil {
+				assert.Equal(t, "policy", recovered.Name())
 			}
 		})
 	}
@@ -167,12 +164,15 @@ func TestToolRecovery_ReusesEffectiveInput(t *testing.T) {
 	newChain := func() *toolchain.Registry {
 		chain := toolchain.New()
 		chain.RegisterTool(gent.DefineTool("policy",
-			func(_ context.Context, input recoveryInput) (string, error) {
+			func(_ context.Context, input recoveryInput) (*gent.ToolExecutionResponse, error) {
 				got = append(got, input)
-				return fmt.Sprintf("policy %s", input.Id), nil
+				return capturedToolResponse(fmt.Sprintf("policy %s", input.Id), nil)
 			}).Description("lookup").ParameterSchema(nil).Recovery(
-			func(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
-				return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+			func(_ context.Context, request *gent.ToolRecoveryRequest[recoveryInput]) (
+				*gent.ToolRecoveryResponse, error,
+			) {
+				got = append(got, request.Input())
+				return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryNotStarted}, nil
 			}).MustBuild())
 		return chain
 	}
@@ -181,7 +181,7 @@ func TestToolRecovery_ReusesEffectiveInput(t *testing.T) {
 	hook := &toolInputHook{value: "effective"}
 	ctx.SetEventPublisher(events.NewRegistry().Subscribe(hook))
 	chain := newChain()
-	plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{{Type: "function",
+	plan, err := chain.PrepareCalls(ctx, []*gent.ModelToolCallRequest{{Type: "function",
 		FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"original"}`}}})
 	assert.NoError(t, err)
 	_, err = chain.ExecuteNext(ctx, plan, format.NewXML())

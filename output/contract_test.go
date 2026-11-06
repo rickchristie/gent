@@ -43,7 +43,7 @@ func TestJsonOutputOmissionTagsPreserveValueAndDelivery(t *testing.T) {
 				return
 			}
 			request := gent.NewModelCallRequest(nil)
-			assert.NoError(t, out.Configure(&request))
+			assert.NoError(t, out.Configure(request))
 			actual, err := json.Marshal(request.Options.ResponseSchema)
 			assert.NoError(t, err)
 			assert.JSONEq(t, `{"type":"object","additionalProperties":false,

@@ -5,13 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/rickchristie/gent/internal/modelcontext"
 )
 
 // GenerateContentStream is the managed model boundary. Hooks finish before the owned request is
 // accepted; the adapter receives precisely those options and messages. Completion waits for the
 // provider and accepted history, including when a consumer stops reading early.
 func (ctx *ExecutionContext) GenerateContentStream(
-	model Model, call ModelCall, request ModelCallRequest,
+	model Model, call ModelCall, request *ModelCallRequest, chains ...ToolChain,
 ) (Stream, error) {
 	if ctx == nil {
 		ctx = NewExecutionContext(context.Background(), "model", NewBasicLoopData(nil))
@@ -47,11 +49,29 @@ func (ctx *ExecutionContext) GenerateContentStream(
 	if stream != nil {
 		return stream, nil
 	}
-	// Hooks may change nested options and messages. Give them a request owned by this call so
-	// reusable agent settings and requests from other runs cannot change through shared pointers.
-	request, err = cloneOwned(ctx.Codecs(), request)
+	var chain ToolChain
+	if len(chains) > 1 {
+		return nil, errors.New("gent: model call accepts at most one tool chain")
+	}
+	if len(chains) == 1 {
+		chain = chains[0]
+	}
+	prepared := *request
+	prepared.Options.SteeringMessages = ctx.SteeringMessages()
+	request, err = model.PrepareRequest(ctx, &prepared, chain)
 	if err != nil {
-		return nil, ctx.stopRecording(err)
+		return nil, err
+	}
+	if request == nil {
+		return nil, errors.New("gent: model preparation returned no request")
+	}
+	// Only a mutable request hook needs an independent data tree. Without one, adapters read the
+	// owned parts directly and the recorder captures the effective request in serialized evidence.
+	if ctx.hasModelRequestHooks() {
+		request, err = cloneOwned(ctx.Codecs(), request)
+		if err != nil {
+			return nil, ctx.stopRecording(err)
+		}
 	}
 	expectedOutput, err := captureOutputControls(request.Options)
 	if err != nil {
@@ -66,11 +86,9 @@ func (ctx *ExecutionContext) GenerateContentStream(
 	if err := ctx.RecordingError(); err != nil {
 		return nil, err
 	}
-	owned, err := ctx.Codecs().Clone(before.Request)
-	if err != nil {
-		return nil, ctx.stopRecording(err)
-	}
-	request = owned.(ModelCallRequest)
+	// The hook transfers its request on return. Recorded evidence is already encoded; a second
+	// deep copy would only protect against a prohibited later edit by the hook.
+	request = before.Request
 	if err := checkOutputControls(expectedOutput, request.Options); err != nil {
 		return nil, err
 	}
@@ -81,6 +99,11 @@ func (ctx *ExecutionContext) GenerateContentStream(
 		return nil, err
 	}
 	providerCtx, cancel := context.WithCancel(ctx.Context())
+	providerCtx = modelcontext.WithRecorder(providerCtx, func(evidence map[string]any) error {
+		evidence["model_call_id"] = before.ModelCallId
+		ctx.PublishCommonEvent("gent:media_prepared", "Prepared media for model input.", evidence)
+		return ctx.FlushProgress()
+	})
 	provider, err := model.GenerateContentStream(providerCtx, request)
 	if err != nil {
 		cancel()
@@ -171,6 +194,20 @@ func (ctx *ExecutionContext) GenerateContentStream(
 	return output, nil
 }
 
+func (ctx *ExecutionContext) hasModelRequestHooks() bool {
+	ctx.mu.RLock()
+	publisher := ctx.eventPublisher
+	ctx.mu.RUnlock()
+	if publisher == nil {
+		return false
+	}
+	if hooks, ok := publisher.(interface{ HasBeforeModelCallSubscribers() bool }); ok {
+		return hooks.HasBeforeModelCallSubscribers()
+	}
+	// A custom dispatcher can edit the event. Its editable view must not change saved history.
+	return true
+}
+
 func scopedMessageId(prefix, local string) string {
 	if local == "" {
 		local = "message:0"
@@ -179,7 +216,7 @@ func scopedMessageId(prefix, local string) string {
 }
 
 func scopeResponseMessages(
-	call *BeforeModelCallEvent, prefix string, response *ContentResponse,
+	call *BeforeModelCallEvent, prefix string, response *ModelCallResponse,
 ) {
 	for index, choice := range response.Choices {
 		for _, item := range choice.MetaContent {

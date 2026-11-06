@@ -138,23 +138,23 @@ func TestCodecBinaryDecodeValidation(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"boundary", input{EncodedValue{"bytes", 1, json.RawMessage(`"AAH/"`)}, 3},
+		{"boundary", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"AAH/"`)}, 3},
 			expected{value: []byte{0, 1, 255}}},
-		{"padding boundary", input{EncodedValue{"bytes", 1, json.RawMessage(`"AP8="`)}, 2},
+		{"padding boundary", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"AP8="`)}, 2},
 			expected{value: []byte{0, 255}}},
-		{"two padding boundary", input{EncodedValue{"bytes", 1, json.RawMessage(`"/w=="`)}, 1},
+		{"two padding boundary", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"/w=="`)}, 1},
 			expected{value: []byte{255}}},
-		{"too large", input{EncodedValue{"bytes", 1, json.RawMessage(`"AAH/"`)}, 2},
+		{"too large", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"AAH/"`)}, 2},
 			expected{errorText: "gent: binary value exceeds 2 bytes"}},
-		{"version", input{EncodedValue{"bytes", 2, json.RawMessage(`"AAH/"`)}, 0},
+		{"version", input{EncodedValue{"bytes", "", 2, json.RawMessage(`"AAH/"`)}, 0},
 			expected{errorText: "gent: unsupported bytes version 2"}},
-		{"array", input{EncodedValue{"bytes", 1, json.RawMessage(`[0,1,255]`)}, 0},
+		{"array", input{EncodedValue{"bytes", "", 1, json.RawMessage(`[0,1,255]`)}, 0},
 			expected{errorText: "gent: byte payload must be a base64 string or null"}},
-		{"invalid alphabet", input{EncodedValue{"bytes", 1, json.RawMessage(`"!!!!"`)}, 0},
+		{"invalid alphabet", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"!!!!"`)}, 0},
 			expected{errorText: "illegal base64 data at input byte 0"}},
-		{"missing padding", input{EncodedValue{"bytes", 1, json.RawMessage(`"/w"`)}, 0},
+		{"missing padding", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"/w"`)}, 0},
 			expected{errorText: "illegal base64 data at input byte 0"}},
-		{"trailing bits", input{EncodedValue{"bytes", 1, json.RawMessage(`"/x=="`)}, 0},
+		{"trailing bits", input{EncodedValue{"bytes", "", 1, json.RawMessage(`"/x=="`)}, 0},
 			expected{errorText: "illegal base64 data at input byte 2"}},
 	}
 	for _, tt := range cases {

@@ -2,6 +2,7 @@ package jsruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -194,24 +195,22 @@ func stringifyArg(
 		return val.String()
 	}
 
-	// Use className to distinguish objects/arrays
-	// from boxed primitives
+	// Export uses *big.Int for bigint. This formats exact integers without changing the
+	// script's native JSON.stringify behavior.
 	switch obj.ClassName() {
 	case "Object", "Array":
-		stringify := vm.Get("JSON").
-			ToObject(vm).
-			Get("stringify")
-		fn, ok := sobek.AssertFunction(stringify)
-		if !ok {
-			return val.String()
+		stringify, ok := sobek.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
+		if ok {
+			text, err := stringify(sobek.Undefined(), val)
+			if err == nil {
+				return text.String()
+			}
 		}
-		result, err := fn(
-			sobek.Undefined(), val,
-		)
+		encoded, err := json.Marshal(val.Export())
 		if err != nil {
-			return val.String()
+			return "[Value cannot be formatted as JSON]"
 		}
-		return result.String()
+		return string(encoded)
 	default:
 		return val.String()
 	}

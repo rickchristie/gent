@@ -69,8 +69,10 @@ func TestCallToolReflect_DateStringToTime(t *testing.T) {
 		},
 	}
 
-	tool := gent.DefineTool("date_tool", func(ctx context.Context, input TimeInput) (string, error) {
-		return input.Date.Format("2006-01-02"), nil
+	tool := gent.DefineTool("date_tool", func(ctx context.Context, input TimeInput) (
+		*gent.ToolExecutionResponse, error,
+	) {
+		return capturedToolResponse(input.Date.Format("2006-01-02"), nil)
 	}).Description("Tool with date input").ParameterSchema(nil).MustBuild()
 
 	for _, tt := range tests {
@@ -84,7 +86,7 @@ func TestCallToolReflect_DateStringToTime(t *testing.T) {
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			require.NotNil(t, result)
-			output := result.Text.(string)
+			output := gent.ContentTextData(result.Parts)
 			assert.Equal(t, tt.expected.result, output)
 		})
 	}
@@ -133,8 +135,8 @@ func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
 	}
 
 	tool := gent.DefineTool("timestamp_tool",
-		func(ctx context.Context, input TimeInput) (string, error) {
-			return input.Timestamp.Format(time.RFC3339), nil
+		func(ctx context.Context, input TimeInput) (*gent.ToolExecutionResponse, error) {
+			return capturedToolResponse(input.Timestamp.Format(time.RFC3339), nil)
 		}).Description("Tool with timestamp input").ParameterSchema(nil).MustBuild()
 
 	for _, tt := range tests {
@@ -148,7 +150,7 @@ func TestCallToolReflect_TimestampStringToTime(t *testing.T) {
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			require.NotNil(t, result)
-			output := result.Text.(string)
+			output := gent.ContentTextData(result.Parts)
 			assert.Equal(t, tt.expected.result, output)
 		})
 	}
@@ -206,8 +208,8 @@ func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
 	}
 
 	tool := gent.DefineTool("duration_tool",
-		func(ctx context.Context, input DurationInput) (string, error) {
-			return input.Duration.String(), nil
+		func(ctx context.Context, input DurationInput) (*gent.ToolExecutionResponse, error) {
+			return capturedToolResponse(input.Duration.String(), nil)
 		}).Description("Tool with duration input").ParameterSchema(nil).MustBuild()
 
 	for _, tt := range tests {
@@ -221,7 +223,7 @@ func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
 
 			assert.ErrorIs(t, err, tt.expected.err)
 			require.NotNil(t, result)
-			output := result.Text.(string)
+			output := gent.ContentTextData(result.Parts)
 			assert.Equal(t, tt.expected.result, output)
 		})
 	}
@@ -232,10 +234,12 @@ func TestCallToolReflect_DurationStringToDuration(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestCallToolReflect_MixedTypes(t *testing.T) {
-	tool := gent.DefineTool("mixed_tool", func(ctx context.Context, input MixedInput) (string, error) {
-		return input.Name + "|" +
-			input.StartTime.Format("2006-01-02") + "|" +
-			input.Duration.String(), nil
+	tool := gent.DefineTool("mixed_tool", func(ctx context.Context, input MixedInput) (
+		*gent.ToolExecutionResponse, error,
+	) {
+		return capturedToolResponse(input.Name+"|"+
+			input.StartTime.Format("2006-01-02")+"|"+
+			input.Duration.String(), nil)
 	}).Description("Tool with mixed input types").ParameterSchema(nil).MustBuild()
 
 	args := map[string]any{
@@ -249,7 +253,7 @@ func TestCallToolReflect_MixedTypes(t *testing.T) {
 
 	require.NoError(t, err)
 	expected := "test-event|2026-06-15|2h30m0s"
-	output := result.Text.(string)
+	output := gent.ContentTextData(result.Parts)
 	assert.Equal(t, expected, output)
 }
 
@@ -259,13 +263,13 @@ func TestCallToolReflect_MixedTypes(t *testing.T) {
 
 func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 	tool := gent.DefineTool("map_tool",
-		func(ctx context.Context, input map[string]any) (string, error) {
+		func(ctx context.Context, input map[string]any) (*gent.ToolExecutionResponse, error) {
 			dateVal := input["date"]
 			_, isString := dateVal.(string)
 			if !isString {
-				return "not-a-string", nil
+				return capturedToolResponse("not-a-string", nil)
 			}
-			return "is-a-string", nil
+			return capturedToolResponse("is-a-string", nil)
 		}).Description("Tool with map[string]any input").ParameterSchema(nil).MustBuild()
 
 	args := map[string]any{
@@ -275,7 +279,7 @@ func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 	result, err := CallToolReflect(context.Background(), tool, args)
 
 	require.NoError(t, err)
-	output := result.Text.(string)
+	output := gent.ContentTextData(result.Parts)
 	assert.Equal(t, "is-a-string", output)
 }
 
@@ -285,8 +289,8 @@ func TestCallToolReflect_MapStringAny_NoConversion(t *testing.T) {
 
 func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 	tool := gent.DefineTool("yaml_time_tool",
-		func(ctx context.Context, input TimeInput) (string, error) {
-			return input.Date.Format("2006-01-02"), nil
+		func(ctx context.Context, input TimeInput) (*gent.ToolExecutionResponse, error) {
+			return capturedToolResponse(input.Date.Format("2006-01-02"), nil)
 		}).Description("Tool with time input").ParameterSchema(nil).MustBuild()
 
 	parsedTime := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
@@ -299,6 +303,6 @@ func TestCallToolReflect_YAMLParsedTimeToTime(t *testing.T) {
 
 	require.NoError(t, err)
 	expected := "2026-01-20"
-	output := result.Text.(string)
+	output := gent.ContentTextData(result.Parts)
 	assert.Equal(t, expected, output)
 }

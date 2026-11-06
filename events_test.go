@@ -87,7 +87,7 @@ func TestPublishAfterIteration_SetsCorrectEventName(t *testing.T) {
 func TestPublishBeforeModelCall_SetsCorrectEventName(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
 
-	event := execCtx.PublishBeforeModelCall("gpt-4", ModelCallRequest{})
+	event := execCtx.PublishBeforeModelCall("gpt-4", &ModelCallRequest{})
 
 	assert.Equal(t, EventNameModelCallBefore, event.EventName)
 	assert.Equal(t, "gpt-4", event.Model)
@@ -95,7 +95,7 @@ func TestPublishBeforeModelCall_SetsCorrectEventName(t *testing.T) {
 
 func TestPublishAfterModelCall_SetsCorrectEventName(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "test", nil)
-	response := &ContentResponse{
+	response := &ModelCallResponse{
 		Info: &GenerationInfo{
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -103,7 +103,7 @@ func TestPublishAfterModelCall_SetsCorrectEventName(t *testing.T) {
 	}
 
 	event := execCtx.PublishAfterModelCall(
-		"gpt-4", ModelCallRequest{}, response, 500*time.Millisecond, nil,
+		"gpt-4", &ModelCallRequest{}, response, 500*time.Millisecond, nil,
 	)
 
 	assert.Equal(t, EventNameModelCallAfter, event.EventName)
@@ -269,8 +269,8 @@ func TestEvents_RecordsAllPublishedEvents(t *testing.T) {
 	execCtx.PublishBeforeExecution()
 	execCtx.IncrementIteration()
 	execCtx.PublishBeforeIteration()
-	execCtx.PublishBeforeModelCall("gpt-4", ModelCallRequest{})
-	execCtx.PublishAfterModelCall("gpt-4", ModelCallRequest{}, nil, 0, nil)
+	execCtx.PublishBeforeModelCall("gpt-4", &ModelCallRequest{})
+	execCtx.PublishAfterModelCall("gpt-4", &ModelCallRequest{}, nil, 0, nil)
 	execCtx.PublishAfterIteration(nil, 0)
 	execCtx.PublishAfterExecution(TerminationSuccess, nil)
 
@@ -328,7 +328,7 @@ func TestEvents_HidesMutableEventUntilDispatchCompletes(t *testing.T) {
 	published := make(chan *BeforeModelCallEvent, 1)
 
 	go func() {
-		published <- execCtx.PublishBeforeModelCall("gpt", ModelCallRequest{
+		published <- execCtx.PublishBeforeModelCall("gpt", &ModelCallRequest{
 			Messages: []*ModelMessage{
 				TextParts(ChatMessageTypeHuman, "original"),
 			},
@@ -383,7 +383,7 @@ func receiveBeforeModelCallEvent(
 	}
 }
 
-func modelRequestTexts(request ModelCallRequest) []string {
+func modelRequestTexts(request *ModelCallRequest) []string {
 	texts := make([]string, 0)
 	for _, message := range request.Messages {
 		for _, part := range message.Parts {
@@ -754,7 +754,7 @@ func TestPublish_ConcurrentWithDifferentEventTypes(t *testing.T) {
 	go func() {
 		<-start
 		for i := 0; i < 50; i++ {
-			execCtx.PublishAfterModelCall("model", ModelCallRequest{}, nil, 0, nil)
+			execCtx.PublishAfterModelCall("model", &ModelCallRequest{}, nil, 0, nil)
 		}
 		done <- struct{}{}
 	}()
@@ -1509,8 +1509,8 @@ func TestGauge_LastIterationTokens_SetOnModelCall(
 
 	// First model call: 100 input, 50 output
 	ctx.PublishAfterModelCall(
-		"gpt-4", ModelCallRequest{},
-		&ContentResponse{
+		"gpt-4", &ModelCallRequest{},
+		&ModelCallResponse{
 			Info: &GenerationInfo{
 				InputTokens:  100,
 				OutputTokens: 50,
@@ -1547,8 +1547,8 @@ func TestGauge_LastIterationTokens_SetOnModelCall(
 	// Second model call (different model): 200 input, 100 output
 	// Gauges should accumulate within the same iteration
 	ctx.PublishAfterModelCall(
-		"claude", ModelCallRequest{},
-		&ContentResponse{
+		"claude", &ModelCallRequest{},
+		&ModelCallResponse{
 			Info: &GenerationInfo{
 				InputTokens:  200,
 				OutputTokens: 100,
@@ -1601,8 +1601,8 @@ func TestGauge_LastIterationTokens_ResetOnNewIteration(
 	ctx.IncrementIteration()
 	ctx.PublishBeforeIteration()
 	ctx.PublishAfterModelCall(
-		"gpt-4", ModelCallRequest{},
-		&ContentResponse{
+		"gpt-4", &ModelCallRequest{},
+		&ModelCallResponse{
 			Info: &GenerationInfo{
 				InputTokens:  100,
 				OutputTokens: 50,
@@ -1672,8 +1672,8 @@ func TestGauge_LastIterationTokens_DoesNotPropagateToParent(
 
 	// Child publishes AfterModelCallEvent
 	child.PublishAfterModelCall(
-		"gpt-4", ModelCallRequest{},
-		&ContentResponse{
+		"gpt-4", &ModelCallRequest{},
+		&ModelCallResponse{
 			Info: &GenerationInfo{
 				InputTokens:  500,
 				OutputTokens: 200,
@@ -1733,8 +1733,8 @@ func TestLimit_LastIterationTokensGaugeWorksCorrectly(
 
 	// Below limit — should not trigger
 	ctx.PublishAfterModelCall(
-		"gpt-4", ModelCallRequest{},
-		&ContentResponse{
+		"gpt-4", &ModelCallRequest{},
+		&ModelCallResponse{
 			Info: &GenerationInfo{
 				InputTokens:  200,
 				OutputTokens: 100,
@@ -1747,8 +1747,8 @@ func TestLimit_LastIterationTokensGaugeWorksCorrectly(
 
 	// Exceeds limit — should trigger
 	ctx.PublishAfterModelCall(
-		"gpt-4", ModelCallRequest{},
-		&ContentResponse{
+		"gpt-4", &ModelCallRequest{},
+		&ModelCallResponse{
 			Info: &GenerationInfo{
 				InputTokens:  200,
 				OutputTokens: 100,

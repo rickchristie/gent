@@ -111,7 +111,7 @@ func BeforeModelCall(depth, iteration int, model string) *gent.BeforeModelCallEv
 			Depth:     depth,
 		},
 		Model:   model,
-		Request: gent.ModelCallRequest{},
+		Request: &gent.ModelCallRequest{},
 	}
 }
 
@@ -128,8 +128,8 @@ func AfterModelCall(
 			Depth:     depth,
 		},
 		Model:   model,
-		Request: gent.ModelCallRequest{},
-		Response: &gent.ContentResponse{
+		Request: &gent.ModelCallRequest{},
+		Response: &gent.ModelCallResponse{
 			Info: &gent.GenerationInfo{InputTokens: inputTokens, OutputTokens: outputTokens},
 		},
 		InputTokens:  inputTokens,

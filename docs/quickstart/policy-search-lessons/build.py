@@ -30,8 +30,8 @@ CONTRACTS = [
      "Supplies chunks, the final response, and cancellation.",
      "An adapter must finish its producer before the final response completes."),
     ("Tool", "tool.go", "Tools", "Use PolicySearchTool",
-     "Defines typed input, schema, execution, and text output for one operation.",
-     "PolicySearchTool implements Tool[PolicySearchInput, string]. Its result is Markdown text."),
+     "Defines typed input, schema, execution responses, and recovery for one operation.",
+     "PolicySearchTool implements Tool[PolicySearchInput]. Its execution response has Markdown text."),
     ("ToolChain", "toolchain.go", "Tools", "Use Registry",
      "Selects native definitions, prepares a saved plan, and executes one call at a time.",
      "Use toolchain.New(). Register the policy tool before you share the runner."),
@@ -108,7 +108,8 @@ files = sorted({item[1] for item in CONTRACTS} | {
     "policy/policy.go", "policy/search.go", "search/normalize.go", "search/fused_index.go",
     "search/flat_index.go", "search/bleve_index.go", "agents/react/native.go",
     "agents/react/agent.go", "executor/executor.go", "limit.go", "search/README.md",
-    "output/text.go", "toolchain/registry.go", "toolchain/native.go", "toolchain/output.go",
+    "output/text.go", "toolchain/registry.go", "toolchain/native.go", "toolchain/execution.go",
+    "tool_record.go", "steering.go",
 })
 digest = hashlib.sha256()
 for name in files:

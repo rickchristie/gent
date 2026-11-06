@@ -60,7 +60,8 @@ func TestSchemaCompiledSnapshotOwnership(t *testing.T) {
 			"name": map[string]any{"type": "string", "description": "Customer name"},
 		}}
 	input["properties"].(map[string]any)["name"].(map[string]any)["type"] = "integer"
-	returned := compiled.Raw()
+	returned, err := Copy(compiled.Raw())
+	assert.NoError(t, err)
 	returned["required"].([]any)[0] = "changed"
 	returned["properties"].(map[string]any)["name"].(map[string]any)["description"] = "changed"
 	assert.Equal(t, expected, compiled.Raw())

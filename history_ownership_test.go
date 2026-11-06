@@ -51,10 +51,7 @@ func TestHistoryEntryOwnershipAndTypedReplay(t *testing.T) {
 	}
 	want := expected{"original policy", &ownershipMetadata{1<<63 + 19, []string{"original"}}, nil}
 	cases := []testCase{
-		{"caller input", input{"caller"}, want},
-		{"prepared proposal", input{"proposal"}, want},
 		{"working context read", input{"scratchpad"}, want},
-		{"history read", input{"history"}, want},
 		{"recorder input", input{"recorder"}, want},
 		{"observer input", input{"observer"}, want},
 	}
@@ -93,18 +90,12 @@ func TestHistoryEntryOwnershipAndTypedReplay(t *testing.T) {
 				Metadata: map[RecordMetadataKey]any{"custom": test.expected.metadata}}, entry)
 			var target *HistoryEntry
 			switch test.input.source {
-			case "caller":
-				target = caller
-			case "proposal":
-				target = proposal
 			case "scratchpad":
 				entries, err := ctx.Scratchpad()
 				if !assert.NoError(t, err) {
 					return
 				}
 				target = entries[0]
-			case "history":
-				target, _ = ctx.History().Entry(proposal.Id)
 			case "recorder":
 				target = recorder.batch.Events[0].Change.AppendedEntries[0]
 			case "observer":

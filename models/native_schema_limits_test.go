@@ -132,7 +132,7 @@ func TestAnthropicCombinedSchemaLimitKeepsExplicitToolContract(t *testing.T) {
 				gent.TextParts(gent.ChatMessageTypeHuman, "Read.")})
 			request.Options.ResponseSchema = sizedSchema(1, true)
 			for i := range test.input.toolCount {
-				request.Options.Tools = append(request.Options.Tools, gent.ToolDefinition{
+				request.Options.Tools = append(request.Options.Tools, &gent.ToolDefinition{
 					Type: "function", Function: &gent.FunctionDefinition{
 						Name: fmt.Sprintf("tool_%d", i), Strict: true,
 						Parameters: sizedSchema(test.input.optional, true)}})

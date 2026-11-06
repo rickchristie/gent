@@ -29,9 +29,13 @@ func (m *Ollama) RecoveryConfig() any {
 }
 
 func (m *Ollama) GenerateContentStream(ctx context.Context,
-	request gent.ModelCallRequest,
+	request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	body, decision, err := m.requestBody(&request)
+	request, err := prepareMedia(ctx, m.config.HTTPClient, request, "ollama")
+	if err != nil {
+		return nil, err
+	}
+	body, decision, err := m.requestBody(request)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +46,7 @@ func (m *Ollama) GenerateContentStream(ctx context.Context,
 	return startProviderStream(ctx, m.config.HTTPClient, m.config.BaseURL+"/api/chat",
 		headers, body, func(ctx context.Context, response *http.Response,
 			stream *gent.StreamWithDuration,
-		) (*gent.ContentResponse, error) {
+		) (*gent.ModelCallResponse, error) {
 			result, err := readOllama(ctx, response, stream, &request.Options)
 			recordSchema(result, decision)
 			return result, err
@@ -107,7 +111,11 @@ func (m *Ollama) requestBody(request *gent.ModelCallRequest) (
 				return nil, decision, errors.New("Ollama requires non-strict function tools")
 			}
 		}
-		body["tools"] = o.Tools
+		definitions, err := describedTools(o.Tools)
+		if err != nil {
+			return nil, decision, err
+		}
+		body["tools"] = definitions
 	}
 	if decision.Native {
 		body["format"] = o.ResponseSchema
@@ -154,6 +162,10 @@ func ollamaMetadata(body, metadata map[string]any) error {
 }
 
 func ollamaMessages(messages []*gent.ModelMessage) ([]any, error) {
+	messages, err := separateToolMedia(messages)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]any, 0, len(messages))
 	for _, message := range messages {
 		if saved := message.Continuation; saved != nil {
@@ -175,6 +187,8 @@ func ollamaMessages(messages []*gent.ModelMessage) ([]any, error) {
 		var calls []any
 		for _, part := range message.Parts {
 			switch p := partValue(part).(type) {
+			case gent.DataContent:
+				text.WriteString(p.String())
 			case gent.TextContent:
 				text.WriteString(p.Text)
 			case gent.BinaryContent:
@@ -182,18 +196,18 @@ func ollamaMessages(messages []*gent.ModelMessage) ([]any, error) {
 					return nil, fmt.Errorf("unsupported Ollama media %q", p.MIMEType)
 				}
 				images = append(images, base64.StdEncoding.EncodeToString(p.Data))
-			case gent.ModelToolCall:
+			case gent.ModelToolCallRequest:
 				if !json.Valid([]byte(p.FunctionCall.Arguments)) {
 					return nil, errors.New("invalid Ollama tool arguments")
 				}
 				calls = append(calls, map[string]any{"function": map[string]any{
 					"name": p.FunctionCall.Name, "arguments": json.RawMessage(p.FunctionCall.Arguments)}})
-			case gent.ToolCallResponse:
+			case *gent.ModelToolCallResponse:
 				if role != "tool" || len(message.Parts) != 1 {
 					return nil, errors.New("Ollama requires one tool result per tool message")
 				}
-				value["tool_name"] = p.Name
-				text.WriteString(p.Content)
+				value["tool_name"] = p.Name()
+				text.WriteString(gent.ContentTextData(p.Parts()))
 			default:
 				return nil, fmt.Errorf("unsupported Ollama content %T", part)
 			}
@@ -239,7 +253,7 @@ func (message *ollamaMessage) UnmarshalJSON(data []byte) error {
 
 func readOllama(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	if !strings.Contains(response.Header.Get("Content-Type"), "ndjson") {
 		var envelope ollamaEnvelope
 		if err := decodeProviderJSON(response.Body, &envelope); err != nil {
@@ -326,7 +340,7 @@ func readOllama(ctx context.Context, response *http.Response,
 	return nil, errors.New("Ollama stream ended without done")
 }
 
-func convertOllama(response *ollamaEnvelope) (*gent.ContentResponse, error) {
+func convertOllama(response *ollamaEnvelope) (*gent.ModelCallResponse, error) {
 	choice := &gent.ContentChoice{Continuation: &gent.ProviderContinuation{
 		Provider: "ollama", Items: []json.RawMessage{response.Message.raw}},
 		Completion: gent.ModelCompletion{ProviderReason: response.Reason}}
@@ -356,7 +370,7 @@ func convertOllama(response *ollamaEnvelope) (*gent.ContentResponse, error) {
 		}
 		// Ollama correlates results by tool_name. Gent supplies a local call ID when it prepares
 		// the execution plan; that ID is never inserted into these opaque provider items.
-		choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{Type: "function",
+		choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{Type: "function",
 			FunctionCall: &gent.FunctionCall{Name: call.Function.Name,
 				Arguments: string(call.Function.Arguments)}})
 	}
@@ -378,7 +392,7 @@ func convertOllama(response *ollamaEnvelope) (*gent.ContentResponse, error) {
 	if err := choice.ValidateCompletion(); err != nil {
 		return nil, err
 	}
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
+	return &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
 		InputTokens: response.Input, OutputTokens: response.Output,
 		TotalTokens: response.Input + response.Output, CachedInputTokens: response.Cached,
 	}}, nil

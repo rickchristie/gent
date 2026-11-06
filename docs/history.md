@@ -337,42 +337,57 @@ change the call order. New calls use IDs above the saved allocation counter.
 A canceled worker leaves an interrupted attempt and the last recovery checkpoint. `CancelRun`
 expresses intentional terminal cancellation. An absolute deadline cannot be extended by restarting.
 A terminal run returns its saved output/error without rebinding a provider, tool, or agent. Codecs
-for stored custom types are still required when decoding its history. A terminal run accepts no new
+for live custom state are still required; opaque completed-tool diagnostics need no old tool types. A terminal run accepts no new
 work. Application code must not replace a terminal failure with an empty success.
 
 ### Uncertain tools
 
-Saving tool-ready happens before calling the tool. The process can die after an external write but
-before its result is saved. Gent cannot determine whether that action occurred from a checkpoint.
-Each tool's `Recover` method receives a context and `*ToolRecoveryRequest`. The request contains
-the stable logical ID, interrupted attempt, original arguments, and saved effective input. It
-returns `*ToolRecoveryResponse` with `Result`, optional `SteeringMessage`, and optional `Output`.
-Use `ToolRecoveryCompleted` with the full `*ToolCallResult`, `ToolRecoveryRetryAllowed` only when
-another attempt is safe, or `ToolRecoveryUnresolved` when the outcome cannot be established.
-Only completed responses can have an output. Invalid responses and handler errors stop recovery.
+Gent saves effective typed input before calling a tool. A worker can stop after an external action
+but before the response is saved. A ready checkpoint cannot prove whether that action occurred.
+`Tool.Recover` receives `*ToolRecoveryRequest[I]` with the original identity and saved input. Gent
+restores that input without running before-call hooks or validating it against a newer schema.
 
-The builder's `.Recovery(handler)` sets this method. Its default returns unresolved. Static steering
-can be returned from the handler; no separate message setting or restore-time handler is needed.
-Gent always keeps the basic facts of an unknown outcome. Later unstarted calls get `not_started`
-results, and the model can make a new plan. Message text alone never authorizes a retry.
+Use Completed with the recovered `*ToolExecutionResponse`, NotStarted when evidence proves no
+execution, or Unresolved when the outcome cannot be confirmed. All three reports return control
+to the model. None authorizes automatic execution. Evidence Parts and Instructions accompany the
+report. Completed also retains the recovered response's parts and instructions.
 
-Accepted result evidence takes precedence over a recovery handler. Gent also saves a recovery
-decision before using it, so a lost acknowledgement does not lose the decision or message. A check
-must be safe to repeat if it stops before that save. An authorized retry uses the same logical ID,
-a new attempt, and the original effective input without rerunning its mutation hook. Steering is
-included in the recovered result or the retry's result. Tools can read `ToolIdentityFromContext`
-and pass the stable call ID to an external idempotency mechanism. Gent makes no exactly-once
-guarantee about external side effects.
+The model receives all completed replies and recovery reports through the original call IDs.
+It can review current state before requesting any new action. Calls that never reached ready are
+reported as NotStarted. Interrupted JavaScript returns saved and recovered inner evidence without
+restarting the script or restoring its VM.
 
-Tool summaries are captured once with the completed result. Recovery keeps that value, including
-an empty summary, so it cannot change when the callback or application state changes.
+A missing recovery binding, a failed typed-input reconstruction, a Go error, or an invalid recovery
+report produces safe RecoveryError guidance. Known execution errors are already accepted outcomes;
+they do not invoke recovery. Raw errors and rejected returns remain private. Cancellation, storage
+failure, and limits retain their separate run-level contracts.
+
+`ToolCallRecord` retains the accepted typed outcome and prepared `ModelToolCallResponse` together.
+Gent records original returns and effective input as opaque `EncodedValue` snapshots for diagnostics.
+Reading a completed record does not require the old tool registration or its Go input/output types.
+A fresh worker still needs a matching type registration to reconstruct unfinished typed input.
+
+Gent saves each outcome, reply, and its statistics before dependent work. A lost acknowledgement is
+resolved through saved evidence. Resume preserves the selected wording and byte selections. It does
+not render an old response again with new templates or count old observations again. A recovery
+check must be safe to repeat if its own result was never accepted. The original action is not retried.
+
+SteeringMessages and PTCIntegerMode are saved per execution and restored before resumed work.
+Call-error counters and gauges retain their saved values. Fresh Executed and Blocked reset consecutive
+call errors; InvalidArguments leaves them unchanged and increments separate counters. Recovery
+errors have their own counters. Recovery reports do not reset normal call-error gauges.
+
+Tools can pass `ToolIdentityFromContext`'s stable call ID to an external idempotency mechanism. Gent
+makes no exactly-once guarantee about external effects. Tool-result deduplication has been removed;
+compaction still uses its original history and checkpoint contracts.
 
 ### Compatibility and custom state
 
 Set ReAct's `WithRecoveryVersion` to identify application behavior: hooks, prompts, clocks, tool
 implementations and recovery handlers, output validation, and private provider defaults. Change the
-version when their meaning changes. Built-in configuration hashes include prompt/format/tool
-declarations, model identity/options, repetition settings, and compaction configuration.
+version when their meaning changes. Built-in configuration hashes include format, model identity/options,
+repetition settings, and compaction configuration. Tool catalogs and discovery metadata are excluded:
+a fresh process supplies its current catalog, while recorded definitions remain historical evidence.
 Native adapters identify their protocol, provider, endpoint, and model in recovery configuration.
 Credentials and HTTP clients are always rebound.
 
@@ -405,10 +420,23 @@ before another call when that save fails; an effect already in progress can stil
 `CodecRegistry` preserves dynamic types, large integers, named containers, bytes, media, cache
 duration, and typed tool metadata. Built-in tool/JSON-answer declarations register their types.
 Raw provider JSON is stored as bytes so serialization preserves its whitespace and escapes.
-Register values hidden inside `any` and custom content parts explicitly with a stable type name and
+DataPart captures structured output without an application codec. Byte parts are saved by Gent.
+For custom application state, register values hidden inside `any` with a stable type name and
 version, or supply a `ValueCodec` for private fields. Unknown types, cycles, callbacks, channels,
 and unsupported versions fail explicitly. Codecs must be deterministic local serialization
 functions, return fresh owned values, and keep their meaning stable by version.
+
+Default struct decoding matches saved Go field names. Added fields receive their Go zero value;
+removed fields are skipped without decoding their values. A rename is removal plus addition, even
+when a JSON tag is unchanged. Changes to a field's declared type fail, including string to any.
+The same rules apply inside nested structs and containers. Custom codecs retain their own rules.
+Application authors remain responsible for business invariants after an upgrade.
+
+`History()` and record getters return read-only views. `NewHistoryEntry` takes ownership of its
+input; its proposal can be edited until `UpdateHistory` accepts it. Do not change accepted values
+through retained aliases. `Export` is an independent mutable snapshot. Compaction strategies and
+mutable model-request hooks also receive independent data because those features permit edits.
+Do not clone read-only byte payloads at each step. See [ownership rules](ownership.md).
 
 Compaction strategies receive `CompactionInput{Revision, Entries}`. Each owned entry carries its
 identity; `EntryIds()` supplies the ordered IDs when needed. Strategies return `HistoryUpdate`,

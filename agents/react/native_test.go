@@ -4,6 +4,7 @@ import genttest "github.com/rickchristie/gent/internal/tt"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -17,16 +18,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func nativeTestCall(id, name, args string) gent.ModelToolCall {
-	return gent.ModelToolCall{ID: id, Type: "function",
+func nativeTestCall(id, name, args string) *gent.ModelToolCallRequest {
+	return &gent.ModelToolCallRequest{ID: id, Type: "function",
 		FunctionCall: &gent.FunctionCall{Name: name, Arguments: args}}
 }
 
-func nativeTestResponse(choice *gent.ContentChoice) *gent.ContentResponse {
+func nativeTestResponse(choice *gent.ContentChoice) *gent.ModelCallResponse {
 	if choice == nil {
-		return &gent.ContentResponse{}
+		return &gent.ModelCallResponse{}
 	}
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}}
+	return &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}}
 }
 
 func nativeTestSource(ctx *gent.ExecutionContext, call int) *gent.ContentSource {
@@ -47,38 +48,37 @@ func nativeTestSource(ctx *gent.ExecutionContext, call int) *gent.ContentSource 
 type nativeFinalModel struct{ *mockModel }
 
 func (model *nativeFinalModel) GenerateContentStream(_ context.Context,
-	request gent.ModelCallRequest) (gent.Stream, error) {
-	response, err := model.response(&request)
+	request *gent.ModelCallRequest) (gent.Stream, error) {
+	response, err := model.response(request)
 	stream := gent.NewStreamWithDuration()
 	stream.Complete(response, err)
 	return stream, nil
 }
 
 type nativeMediaTool struct {
-	gent.Tool[map[string]any, string]
+	gent.Tool[map[string]any]
 }
 
 func (tool *nativeMediaTool) Call(ctx context.Context, args map[string]any) (
-	*gent.ToolResult[string], error,
+	*gent.ToolExecutionResponse, error,
 ) {
 	result, err := tool.Tool.Call(ctx, args)
 	if err != nil {
 		return nil, err
 	}
 	result.Instructions = "Use the image."
-	result.Media = []gent.ContentPart{gent.ImageURLContent{URL: "https://example.com/record.png"}}
+	result.Parts = append(result.Parts, gent.ImageURLPart("https://example.com/record.png"))
 	return result, nil
 }
 
 func TestNativeAgent_RequestAndToolHistory(t *testing.T) {
 	var inputs []map[string]any
 	tool := &nativeMediaTool{gent.DefineTool("lookup",
-		func(_ context.Context, args map[string]any) (string, error) {
+		func(_ context.Context, args map[string]any) (*gent.ToolExecutionResponse, error) {
 			inputs = append(inputs, args)
-			return "record", nil
-		}).Description("Read a record").ParameterSchema(nil).
-		DeduplicateSummary(func(map[string]any, string) string { return "same record" }).MustBuild()}
-	calls := []gent.ModelToolCall{nativeTestCall("call-a", "lookup", `{"id":7}`),
+			return capturedToolResponse("record", nil)
+		}).Description("Read a record").ParameterSchema(nil).MustBuild()}
+	calls := []*gent.ModelToolCallRequest{nativeTestCall("call-a", "lookup", `{"id":7}`),
 		nativeTestCall("call-b", "lookup", `{"id":8}`)}
 	model := newMockModel(nativeTestResponse(&gent.ContentChoice{Completion: gent.ModelCompletion{
 		Status: gent.ModelStatusToolCalls,
@@ -110,14 +110,13 @@ func TestNativeAgent_RequestAndToolHistory(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	toolText := `<lookup>
-<result>
-record
-</result>
-<instructions>
-Use the image.
-</instructions>
-</lookup>`
+	makeReply := func(id string) *gent.ModelToolCallResponse {
+		parts := []gent.ContentPart{gent.TextPart("record"),
+			gent.ImageURLPart("https://example.com/record.png"), gent.TextPart("Use the image.")}
+		reply, err := preparedTestReply(id, "lookup", "record").WithParts(parts...)
+		assert.NoError(t, err)
+		return reply
+	}
 	assert.Equal(t, &gent.AgentLoopResult{Action: gent.LAContinue}, result)
 	result, err = agent.Next(ctx)
 	if !assert.NoError(t, err) {
@@ -138,29 +137,23 @@ Use the image.
 		&gent.ModelMessage{Role: gent.ChatMessageTypeAI, Parts: []gent.ContentPart{
 			gent.TextContent{Text: "I will check."}, calls[0], calls[1]}},
 		&gent.ModelMessage{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{
-			gent.ToolCallResponse{ToolCallID: "call-a", Name: "lookup", Content: toolText}}},
+			makeReply("call-a")}},
 		&gent.ModelMessage{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{
-			gent.ToolCallResponse{ToolCallID: "call-b", Name: "lookup", Content: toolText}}},
-		&gent.ModelMessage{Role: gent.ChatMessageTypeHuman, Parts: []gent.ContentPart{
-			gent.TextContent{Text: "Media from lookup (call call-a):"},
-			gent.ImageURLContent{URL: "https://example.com/record.png"},
-			gent.TextContent{Text: "Media from lookup (call call-b):"},
-			gent.ImageURLContent{URL: "https://example.com/record.png"}}})
+			makeReply("call-b")}})
 	assert.Equal(t, [][]*gent.ModelMessage{initial, want}, model.capturedMessages)
-	definitions := []gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
-		Name: "lookup", Description: `Read a record
-
-Returns: {"type":"string"}`,
+	definitions := []*gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
+		Name: "lookup", Description: "Read a record",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
 	}}}
 	wantOptions := gent.NewModelCallRequest(nil, gent.WithTemperature(0.4),
 		gent.WithTopP(0.9), gent.WithTools(definitions)).Options
+	wantOptions.SteeringMessages = gent.DefaultSteeringMessages()
 	wantOptions.ResponseMIMEType = "text/plain"
 	wantOptions.ResponseModalities = []string{"text"}
 	for _, options := range model.capturedOptions {
 		assert.Equal(t, wantOptions, gent.NewModelCallRequest(nil, options...).Options)
 	}
-	assert.Equal(t, []map[string]any{{"id": float64(7)}, {"id": float64(8)}}, inputs)
+	assert.Equal(t, []map[string]any{{"id": json.Number("7")}, {"id": json.Number("8")}}, inputs)
 	assert.Equal(t, int64(2), ctx.Stats().GetCounter(gent.SCToolCalls))
 	bundle, err := ctx.Export()
 	assert.NoError(t, err)
@@ -185,7 +178,7 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 				Status:         gent.ModelStatusIncomplete,
 				ProviderReason: "length",
 			},
-				ToolCalls: []gent.ModelToolCall{nativeTestCall("a", "lookup", "{}")}}},
+				ToolCalls: []*gent.ModelToolCallRequest{nativeTestCall("a", "lookup", "{}")}}},
 			expected{"The response was incomplete. Use a shorter answer or fewer tool calls.", 0}},
 		{"empty",
 			input{
@@ -196,16 +189,22 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 			input{&gent.ContentChoice{Completion: gent.ModelCompletion{
 				Status: gent.ModelStatusToolCalls,
 			},
-				ToolCalls: []gent.ModelToolCall{
+				ToolCalls: []*gent.ModelToolCallRequest{
 					nativeTestCall("a", "lookup", "{}"), nativeTestCall("a", "lookup", "{}")}}},
 			expected{`duplicate model tool call ID "a"`, 1}},
 		{"bad JSON",
 			input{&gent.ContentChoice{Completion: gent.ModelCompletion{
 				Status: gent.ModelStatusToolCalls,
 			},
-				ToolCalls: []gent.ModelToolCall{
+				ToolCalls: []*gent.ModelToolCallRequest{
 					nativeTestCall("a", "lookup", "{")}}},
-			expected{gent.ErrInvalidJSON.Error() + ": unexpected end of JSON input", 1}},
+			expected{gent.DefaultSteeringMessages().InvalidArguments + `
+Invalid arguments for tool "lookup".
+args: expected a complete JSON object with values compatible with the input schema.
+Expected input schema:
+{
+  "type": "object"
+}`, 0}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -215,9 +214,9 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 					CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Done."}},
 				}))
 			agent := NewAgent(model).RegisterTool(gent.DefineTool("lookup",
-				func(context.Context, map[string]any) (string, error) {
+				func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
 					t.Error("invalid response must not execute tools")
-					return "", nil
+					return capturedToolResponse("", nil)
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read."})))
 			result, err := agent.Next(ctx)
@@ -238,6 +237,17 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 					gent.TextContent{Text: "Done."},
 				})),
 			}, result)
+			if test.name == "bad JSON" {
+				messages := model.capturedMessages[1]
+				assert.Len(t, messages, 3)
+				reply := messages[2].Parts[0].(*gent.ModelToolCallResponse)
+				status, present := reply.ExecutionStatus()
+				assert.True(t, present)
+				assert.Equal(t, gent.ToolInvalidArguments, status)
+				assert.Equal(t, test.expected.feedback, gent.ContentTextData(reply.Parts()))
+				assert.Equal(t, int64(1), ctx.Stats().GetCounter(gent.SCToolCallsInvalidArgumentsTotal))
+				return
+			}
 			wantMessages := []*gent.ModelMessage{gent.TextParts(gent.ChatMessageTypeHuman, "Read.")}
 			if test.input.choice != nil && test.input.choice.Completion.Status == gent.ModelStatusAnswer {
 				wantMessages = append(wantMessages, &gent.ModelMessage{Role: gent.ChatMessageTypeAI})
@@ -247,7 +257,7 @@ func TestNativeAgent_RetryInvalidCalls(t *testing.T) {
 			assert.Equal(t, wantMessages, model.capturedMessages[1])
 			for _, message := range model.capturedMessages[1] {
 				for _, part := range message.Parts {
-					_, isCall := part.(gent.ModelToolCall)
+					_, isCall := part.(*gent.ModelToolCallRequest)
 					assert.False(t, isCall, "do not replay an invalid call group")
 				}
 			}
@@ -341,15 +351,16 @@ func TestNativeAgent_FinalOnlySizeAndRepetition(t *testing.T) {
 				Status: gent.ModelStatusToolCalls,
 			},
 				CandidateContent: []gent.ContentPart{gent.TextContent{Text: test.input.content}},
-				ToolCalls:        []gent.ModelToolCall{nativeTestCall("a", "lookup", test.input.args)}}))
+				ToolCalls: []*gent.ModelToolCallRequest{nativeTestCall("a", "lookup",
+					test.input.args)}}))
 			config := agentutil.DefaultRepetitionConfig()
 			config.Enabled = test.input.repetition
 			config.BlockSize = 50
 			agent := NewAgent(&nativeFinalModel{model}).WithMaxResponseChars(test.input.max).
 				WithRepetitionConfig(config).RegisterTool(gent.DefineTool("lookup",
-				func(context.Context, map[string]any) (string, error) {
+				func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
 					t.Error("truncated response must not execute tools")
-					return "", nil
+					return capturedToolResponse("", nil)
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read."})))
 			result, err := agent.Next(ctx)
@@ -389,18 +400,20 @@ func TestNativeAgent_ToolLimits(t *testing.T) {
 			model := newMockModel(nativeTestResponse(&gent.ContentChoice{Completion: gent.ModelCompletion{
 				Status: gent.ModelStatusToolCalls,
 			},
-				ToolCalls: []gent.ModelToolCall{
+				ToolCalls: []*gent.ModelToolCallRequest{
 					nativeTestCall("a", "first", "{}"), nativeTestCall("b", "second", "{}")}}),
 				nativeTestResponse(&gent.ContentChoice{Completion: gent.ModelCompletion{
 					Status: gent.ModelStatusToolCalls,
 				},
-					ToolCalls: []gent.ModelToolCall{
+					ToolCalls: []*gent.ModelToolCallRequest{
 						nativeTestCall("c", "second", "{}"), nativeTestCall("d", "first", "{}")}}))
 			agent := NewAgent(model)
 			for _, name := range []string{"first", "second"} {
-				agent.RegisterTool(gent.DefineTool(name, func(context.Context, map[string]any) (string, error) {
+				agent.RegisterTool(gent.DefineTool(name, func(context.Context, map[string]any) (
+					*gent.ToolExecutionResponse, error,
+				) {
 					effects = append(effects, name)
-					return "ok", nil
+					return capturedToolResponse("ok", nil)
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			}
 			ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read."})))
@@ -422,7 +435,7 @@ func TestNativeAgent_MissingCallID(t *testing.T) {
 	model := newMockModel(
 		nativeTestResponse(&gent.ContentChoice{
 			Completion: gent.ModelCompletion{Status: gent.ModelStatusToolCalls},
-			ToolCalls:  []gent.ModelToolCall{call},
+			ToolCalls:  []*gent.ModelToolCallRequest{call},
 		}),
 		nativeTestResponse(&gent.ContentChoice{
 			Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -430,7 +443,9 @@ func TestNativeAgent_MissingCallID(t *testing.T) {
 		}))
 	agent := NewAgent(model).WithToolChain(toolchain.New().RegisterTool(
 		gent.DefineTool("lookup",
-			func(context.Context, map[string]any) (string, error) { return "ok", nil }).Description("Read").
+			func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
+				return capturedToolResponse("ok", nil)
+			}).Description("Read").
 			ParameterSchema(nil).MustBuild()))
 	ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read."})))
 	_, err := agent.Next(ctx)
@@ -439,11 +454,14 @@ func TestNativeAgent_MissingCallID(t *testing.T) {
 	}
 	_, err = agent.Next(ctx)
 	assert.NoError(t, err)
-	saved := model.capturedMessages[1][1].Parts[0].(gent.ModelToolCall)
+	saved := model.capturedMessages[1][1].Parts[0].(*gent.ModelToolCallRequest)
 	assert.NotEmpty(t, saved.ID)
 	assert.Equal(t, "function", saved.Type)
 	assert.Equal(t, &gent.ModelMessage{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{
-		gent.ToolCallResponse{ToolCallID: saved.ID, Name: "lookup", Content: `<lookup>
-ok
-</lookup>`}}}, model.capturedMessages[1][2])
+		preparedTestReply(saved.ID, "lookup", "ok")}}, model.capturedMessages[1][2])
+}
+func (m *nativeFinalModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

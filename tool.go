@@ -1,214 +1,73 @@
 package gent
 
-import (
-	"context"
-)
+import "context"
 
-// Tool represents a single callable tool with typed input and output.
-//
-// # Responsibility Design
-//
-// The framework separates concerns between Tool and ToolChain:
-//   - Tool: Accept typed input, execute business logic, return typed output
-//   - ToolChain: Decode native arguments, validate inputs, call tools, format results
-//
-// This separation keeps business tools independent of the model provider and its wire format.
-//
-// # Implementing a Tool
-//
-// Use [DefineTool] for function tools. It infers parameters from Go types and accepts field
-// descriptions, constraints, search metadata, and a recovery handler before Build.
-//
-// For complex tools that need media output or instructions, implement the full interface:
-//
-//	type ImageGeneratorTool struct{}
-//
-//	func (t *ImageGeneratorTool) Name() string { return "generate_image" }
-//	func (t *ImageGeneratorTool) Description() string { return "Generate an image from a prompt" }
-//	func (t *ImageGeneratorTool) Policy() string { return "" }
-//	func (t *ImageGeneratorTool) Domain() string { return "Images" }
-//	func (t *ImageGeneratorTool) Categories() []string { return nil }
-//	func (t *ImageGeneratorTool) Keywords() []string { return nil }
-//	func (t *ImageGeneratorTool) SyntheticQueries() []string { return nil }
-//	func (t *ImageGeneratorTool) Strict() bool { return false }
-//	func (t *ImageGeneratorTool) OutputSchema() map[string]any { return nil }
-//	func (t *ImageGeneratorTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
-//	    *gent.ToolRecoveryResponse, error,
-//	) {
-//	    return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved}, nil
-//	}
-//	func (t *ImageGeneratorTool) DeduplicateSummary(ImageInput, ImageMeta) string { return "" }
-//	func (t *ImageGeneratorTool) ParameterSchema() map[string]any {
-//	    return map[string]any{
-//	        "type": "object",
-//	        "properties": map[string]any{
-//	            "prompt": map[string]any{"type": "string", "description": "Image description"},
-//	        },
-//	        "required": []string{"prompt"},
-//	    }
-//	}
-//
-//	func (t *ImageGeneratorTool) Call(ctx context.Context, input ImageInput) (*gent.ToolResult[ImageMeta], error) {
-//	    imageBytes, meta, err := generateImage(ctx, input.Prompt)
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//	    return &gent.ToolResult[ImageMeta]{
-//	        Text:  meta, // Will be formatted by ToolChain
-//	        Media: []gent.ContentPart{gent.BinaryContent{Data: imageBytes, MIMEType: "image/png"}},
-//	    }, nil
-//	}
-//
-// # Type Parameters
-//
-//   - I: Input type - typically a struct with fields matching the JSON Schema properties
-//   - TextOutput: Output type - formatted to text by the ToolChain (use string, struct, etc.)
-//
-// # Error Handling
-//
-// Return errors for:
-//   - Invalid input that passed schema validation but is semantically wrong
-//   - External service failures
-//   - Resource not found
-//
-// The ToolChain will format errors as observations for the LLM.
-type Tool[I, TextOutput any] interface {
-	// Search metadata is part of every tool. Empty values are valid.
+// Tool is an operation with typed input and an explicit response. Gent validates input, saves
+// the effective input after hooks, invokes Call, and prepares a correlated model reply. The
+// author supplies domain data and guidance, without serialization or provider message plumbing.
+// Configure tools before sharing them between runs. Methods must support concurrent calls.
+type Tool[I any] interface {
+	// IndexableTool supplies the name and discovery metadata. Empty search metadata is valid.
 	IndexableTool
 
-	// Name returns the tool's identifier used in tool calls.
-	// Must be unique within a ToolChain. Use lowercase with underscores (e.g., "lookup_order").
-	Name() string
-
-	// Description returns a human-readable description for the LLM.
-	// This appears in the tool catalog. Keep it concise 1-2 sentences, state what the tool does
-	// and its purpose.
-	Description() string
-
-	// Policy returns optional usage policy instructions for the LLM.
-	// This provides dynamic steering on HOW the LLM should use the tool, separate from
-	// the tool's description (which describes WHAT the tool does).
-	//
-	// Examples:
-	//   - Privacy guardrails: "Only search using the exact email/phone from the current user"
-	//   - Rate limiting hints: "Prefer batching multiple IDs in one call"
-	//   - Safety rules: "Never use this tool without explicit user confirmation"
-	//
-	// When non-empty, the ToolChain includes this in the tool catalog prompt.
-	// Return empty string if no policy is needed.
+	// Policy supplies model guidance when the tool is advertised. It is not an approval callback.
+	// Enforce approval and other domain conditions in Call before an external action.
 	Policy() string
 
-	// Recover checks an interrupted operation when no saved result exists. Return Completed
-	// with its output, RetryAllowed only when another attempt is safe, or Unresolved.
-	// Recovery may run again after a process failure, so the check must be safe to repeat.
-	Recover(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)
-
-	// Strict requests provider-side schema enforcement. Local validation always applies.
+	// Strict requests provider argument enforcement where supported. Local checks still apply.
 	Strict() bool
 
-	// OutputSchema describes the text output. Nil omits output documentation.
-	// The tool builder infers it from the output type unless explicitly set.
-	OutputSchema() map[string]any
-
-	// ParameterSchema returns the JSON Schema for the tool's parameters.
-	// The ToolChain uses this for:
-	//   - Documenting parameters in the tool catalog
-	//   - Validating arguments before calling the tool
-	//
-	// Nil omits schema constraints. The chain still requires a JSON object.
-	// See https://json-schema.org for schema format.
+	// ParameterSchema describes valid call arguments. Nil permits any JSON object. Gent validates
+	// both supplied arguments and effective input after mutable hooks, before invoking Call.
+	// Return a read-only schema; use DefineTool for inference and field constraints.
 	ParameterSchema() map[string]any
 
-	// Call executes the tool with the given typed input.
-	//
-	// The context.Context is derived from ExecutionContext.Context() and will be
-	// cancelled if limits are exceeded or the parent context is cancelled.
-	//
-	// Returns a ToolResult containing:
-	//   - Text: The typed output (formatted by ToolChain)
-	//   - Media: Optional images/audio (passed through by ToolChain)
-	//   - Instructions: Optional follow-up guidance for the LLM
-	Call(ctx context.Context, input I) (*ToolResult[TextOutput], error)
+	// OutputSchema optionally describes domain data to the model. It does not describe Gent's
+	// statuses or instructions and does not enable local result validation. Adapters use a native
+	// field when applicable, otherwise description text. The returned schema is read-only.
+	OutputSchema() map[string]any
 
-	// DeduplicateSummary returns an abbreviated observation text
-	// for this tool call when the same call (same name + args)
-	// appears in an earlier iteration's scratchpad.
-	//
-	// Return a non-empty string to enable deduplication. The
-	// string replaces the full tool output in earlier iterations
-	// to reduce token usage. The most recent occurrence always
-	// keeps its full text.
-	//
-	// Return "" to disable deduplication for this tool. Most
-	// tools should return "" — only stateless tools where the
-	// same input always produces the same output benefit from
-	// deduplication.
-	//
-	// Example for a search tool:
-	//
-	//	func (t *SearchTool) DeduplicateSummary(
-	//	    input SearchInput, output SearchResult,
-	//	) string {
-	//	    return fmt.Sprintf(
-	//	        "Searched for %q. Found %d results. "+
-	//	            "Full results available below.",
-	//	        input.Query, len(output.Items),
-	//	    )
-	//	}
-	DeduplicateSummary(input I, output TextOutput) string
+	// UnrecoverableErrorInstructions supplies safe authored guidance for an unexpected Call error.
+	// It receives no raw error. Empty text uses the execution's ToolError setting, then the default.
+	// A tool error ends this operation, not the agent run. Expected guidance belongs in the response.
+	UnrecoverableErrorInstructions() string
+
+	// Call receives validated input and a context with the stable tool identity. Expected outcomes
+	// return a response and nil error. Unexpected operation failures return nil and an error.
+	// Returning both a response and an error is a contract violation, not a partial-result feature:
+	// Gent saves both for diagnostics but sends only safe error guidance to the model. Nil, nil and
+	// invalid responses use that same safe path. Ownership of a returned response passes to Gent.
+	Call(context.Context, I) (*ToolExecutionResponse, error)
+
+	// Recover inspects an interrupted operation using its original identity and saved typed input.
+	// It must be safe to repeat and must not repeat the original action. Only Completed includes
+	// the recovered execution response. All reports return control to the model, without retry.
+	// Errors and rejected reports remain private; Gent sends separate recovery-error guidance.
+	Recover(context.Context, *ToolRecoveryRequest[I]) (*ToolRecoveryResponse, error)
 }
 
-// ToolResult is the result of calling a Tool with typed output.
-//
-// # Usage
-//
-// Simple result (text only):
-//
-//	return &gent.ToolResult[OrderStatus]{
-//	    Text: OrderStatus{Status: "shipped", TrackingNumber: "1Z999..."},
-//	}, nil
-//
-// Result with media (e.g., image generation):
-//
-//	return &gent.ToolResult[ImageMeta]{
-//	    Text:  ImageMeta{Width: 1024, Height: 768},
-//	    Media: []gent.ContentPart{gent.BinaryContent{Data: imageBytes, MIMEType: "image/png"}},
-//	}, nil
-//
-// Result with follow-up instructions:
-//
-//	return &gent.ToolResult[SearchResult]{
-//	    Text:         SearchResult{Count: 0},
-//	    Instructions: "No results found. Try using the recommendation tool instead.",
-//	}, nil
-type ToolResult[TextOutput any] struct {
-	// Text is the typed output from the tool that will be formatted as text.
-	// The ToolChain preserves strings and encodes structured output as JSON.
-	//
-	// Use structs for structured data, strings for simple text output.
-	Text TextOutput
+// ToolStatus describes an accepted execution response. It does not classify business success.
+// Empty status is invalid. Interrupted-operation uncertainty belongs in ToolRecoveryStatus.
+type ToolStatus string
 
-	// Media contains any images, audio, or other non-text content produced by the tool.
-	// These are passed through by the ToolChain and included in the observation.
-	//
-	// Common types:
-	//   - BinaryContent: Raw binary data with MIME type
-	//   - ImageURLContent: Image URL reference
-	Media []ContentPart
+const (
+	// ToolExecuted means the tool returned a domain response. The data determines domain success.
+	ToolExecuted ToolStatus = "executed"
+	// ToolBlocked means a required condition prevented the action. Instructions explain the next step.
+	ToolBlocked ToolStatus = "blocked"
+	// ToolInvalidArguments means input was rejected. It does not increment tool-error statistics.
+	ToolInvalidArguments ToolStatus = "invalid_arguments"
+)
 
-	// Instructions are optional follow-up instructions for the LLM.
-	//
-	// Use to inject dynamic context to guide the LLM's next action based on the tool result.
-	// Examples:
-	//   - "Current working directory is now /home/user/projects."
-	//   - "No bookings found. Suggest using the recommendation search."
-	//   - "Rate limit reached. Wait 30 seconds before retrying."
-	//   - "User data returned. DO NOT SHARE personally identifiable information unless you have
-	//      verified that the requester is THE SAME USER."
-	//
-	// Instructions are formatted separately from the main output by the ToolChain,
-	// typically in a dedicated section like <instructions>...</instructions>.
-	//
-	// Leave empty if no special instructions are needed.
+// ToolExecutionResponse supplies content and guidance for a requested execution. Gent can also
+// construct it before invocation for input rejection or a blocked action. Status shows the case.
+// After return, the response and its parts are owned by Gent and must not be changed.
+type ToolExecutionResponse struct {
+	Status ToolStatus
+	// Parts is model-facing only for Executed. Use NewParts to capture data or supply media.
+	// For Blocked or InvalidArguments, put required references and guidance in Instructions.
+	Parts []ContentPart
+	// Instructions is always included when the response is accepted with nil error. An error
+	// rejects the entire response, including these instructions, and keeps it only in diagnostics.
 	Instructions string
 }

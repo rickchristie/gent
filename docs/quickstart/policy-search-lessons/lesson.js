@@ -498,10 +498,10 @@ Loop action: LAContinue`,
         2,
         1,
         "VALIDATOR RESULT / ILLUSTRATIVE",
-        `ValidationResult{
+        `gent.OutputValidationResult{
     Accepted: false,
-    Feedback: []FormattedSection{
-        {Name: "error", Content: "Include the policy ID."},
+    Steering: []gent.ContentPart{
+        gent.TextPart("Include the policy ID."),
     },
 }
 
@@ -518,23 +518,25 @@ Loop action: LAContinue`,
       step(
         "MODEL → POLICY TOOL",
         "The query is empty",
-        "The query " +
-          "field is a string, so schema validation passes. The policy tool rejects the empty " +
-          "string. The registry records an error observation.",
+        "The query schema " +
+          "requires at least one character. The registry returns InvalidArguments before " +
+          "calling the policy tool. The model gets correction details and the complete schema.",
         1,
         1,
-        "TOOL CALL AND ERROR",
+        "INVALID ARGUMENTS / EXCERPT",
         `search_policy({"query":""})
 
-Tool error: query is required
+Correction: query must contain at least one character.
+The response also includes the complete expected input schema.
 Loop action: LAContinue`,
       ),
       step(
         "MODEL → REGISTRY",
         "Retry with useful search text",
         "The next " +
-          "model call uses the error to choose a query. Success resets the consecutive " +
-          "tool-error gauges. Errors still remain in history and total error counts.",
+          "model call uses the correction to choose a query. InvalidArguments has its own " +
+          "counter and does not change consecutive tool errors. An Executed response resets " +
+          "the consecutive tool-error gauges.",
         2,
         2,
         "RETRY",

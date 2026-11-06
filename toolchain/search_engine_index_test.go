@@ -117,14 +117,14 @@ func TestIndexToolSearcher_WithBleveIndex(t *testing.T) {
 	// BM25 keyword match: "billing payment" should find the billing tool first.
 	results, err := engine.Search(ctx, "billing payment")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(results), 1)
-	assert.Equal(t, "get_billing_ledger", results[0])
+	require.GreaterOrEqual(t, len(results.Names), 1)
+	assert.Equal(t, "get_billing_ledger", results.Names[0])
 
 	// Exact tool name match should rank that tool first.
 	results, err = engine.Search(ctx, "cancel_reservation")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(results), 1)
-	assert.Equal(t, "cancel_reservation", results[0])
+	require.GreaterOrEqual(t, len(results.Names), 1)
+	assert.Equal(t, "cancel_reservation", results.Names[0])
 }
 
 func TestIndexToolSearcher_IndexAllReplacesExisting(t *testing.T) {
@@ -157,13 +157,13 @@ func TestIndexToolSearcher_IndexAllReplacesExisting(t *testing.T) {
 	// Old tool should be gone.
 	results, err := engine.Search(ctx, "old deprecated")
 	require.NoError(t, err)
-	assert.Empty(t, results)
+	assert.Empty(t, results.Names)
 
 	// New tool should be found.
 	results, err = engine.Search(ctx, "new current")
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "new_tool", results[0])
+	require.Len(t, results.Names, 1)
+	assert.Equal(t, "new_tool", results.Names[0])
 }
 
 func TestIndexToolSearcher_IdAndGuidance(t *testing.T) {

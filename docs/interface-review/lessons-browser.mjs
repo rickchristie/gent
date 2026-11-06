@@ -227,17 +227,17 @@ Next working context: [H1]`,
     },
   );
   await check(
-    'recovery provides guidance and shows duplicate effects when retry is allowed',
+    'recovery returns control to the model and a new call can repeat an effect',
     async () => {
       await lesson('restart');
       await click('restore');
       assert.equal(
         await text('#recovery-result'),
-        'unknown outcome; model receives recovery guidance',
+        'unresolved; model receives recovery guidance',
       );
       assert.equal(
         await text('#recovery-status'),
-        'The checkpoint proves intent, not outcome. Gent saves an unknown-outcome result with ' +
+        'The checkpoint proves intent, not outcome. Gent saves an Unresolved recovery report with ' +
           'recovery guidance. The model can check the refund service before making a new plan.',
       );
       assert.equal(await text('#attempt-id'), 'attempt: worker-B');
@@ -246,7 +246,7 @@ Next working context: [H1]`,
       assert.equal(await text('#refund-count'), '1');
       await page.uncheck('#idempotent-service');
       await click('restore');
-      await click('recover', 'retry');
+      await click('recover', 'new-call');
       assert.equal(await text('#refund-count'), '2');
       await page.screenshot({
         path: '/tmp/gent-learning-restart.png',
@@ -254,7 +254,7 @@ Next working context: [H1]`,
       });
       await page.check('#idempotent-service');
       await click('restore');
-      await click('recover', 'retry');
+      await click('recover', 'new-call');
       assert.equal(await text('#refund-count'), '1');
       await page.selectOption('#crash-point', 'after-result');
       await click('restore');
@@ -265,7 +265,10 @@ Next working context: [H1]`,
       await click('recover', 'completed');
       assert.equal(await text('#recovery-result'), 'no external receipt to return');
       assert.equal(await text('#refund-count'), '0');
-      await click('recover', 'retry');
+      await click('recover', 'not-started');
+      assert.equal(await text('#recovery-result'), 'not started; model decides next action');
+      assert.equal(await text('#refund-count'), '0');
+      await click('recover', 'new-call');
       assert.equal(await text('#refund-count'), '1');
       await page.locator('.compatibility-controls summary').click();
       await page.selectOption('#recovery-version', 'v2');
@@ -323,7 +326,7 @@ Next working context: [H1]`,
       });
     },
   );
-  await check('all 47 interfaces have on-demand contracts inside their lesson', async () => {
+  await check('all 48 interfaces have on-demand contracts inside their lesson', async () => {
     const covered = [];
     for (const item of lessons) {
       await lesson(item.id);
@@ -346,7 +349,7 @@ Next working context: [H1]`,
         .map((item) => item.id)
         .sort(),
     );
-    assert.equal(await text('#lesson-coverage'), '5 / 5 explored · all 47 interfaces connected');
+    assert.equal(await text('#lesson-coverage'), '5 / 5 explored · all 48 interfaces connected');
   });
   await check('each experiment fits narrow and tablet viewports and remains usable', async () => {
     for (const width of [900, 736, 390, 320]) {

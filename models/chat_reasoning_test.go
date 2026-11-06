@@ -114,8 +114,8 @@ data: [DONE]
 			}
 			messages = append(messages, &gent.ModelMessage{Role: gent.ChatMessageTypeAI,
 				Continuation: response.Choices[0].Continuation}, &gent.ModelMessage{
-				Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{gent.ToolCallResponse{
-					ToolCallID: "call-1", Name: "lookup", Content: "record-one"}}})
+				Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{preparedTestReply("call-1",
+					"lookup", "record-one")}})
 			stream, err = model.GenerateContentStream(context.Background(),
 				gent.NewModelCallRequest(messages))
 			if !assert.NoError(t, err) {

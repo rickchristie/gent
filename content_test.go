@@ -16,7 +16,7 @@ func TestContentChoiceCompletion(t *testing.T) {
 		input    input
 		expected expected
 	}
-	tool := []ModelToolCall{{ID: "lookup", Type: "function",
+	tool := []*ModelToolCallRequest{{ID: "lookup", Type: "function",
 		FunctionCall: &FunctionCall{Name: "lookup", Arguments: "{}"}}}
 	cases := []testCase{
 		{
@@ -118,7 +118,7 @@ func TestStreamOwnsMetadataAndResponse(t *testing.T) {
 			MessageId: "answer",
 		},
 	}
-	response := &ContentResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
+	response := &ModelCallResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
 		Status: ModelStatusAnswer,
 	},
 		CandidateContent: []ContentPart{
@@ -154,6 +154,9 @@ func TestStreamOwnsMetadataAndResponse(t *testing.T) {
 	first, err := stream.Response()
 	assert.NoError(t, err)
 	assert.Equal(t, want, first)
+	// Response is a read-only view. A consumer that needs an editable copy asks for one.
+	first, err = cloneOwned(NewCodecRegistry(), first)
+	assert.NoError(t, err)
 	first.Choices[0].MetaContent[0].Content = []ContentPart{
 		TextContent{Text: "reader changed response"},
 	}

@@ -13,6 +13,8 @@ import (
 type ContextOption func(*contextOptions)
 
 type contextOptions struct {
+	steeringMessages SteeringMessages
+	ptcIntegerMode   PTCIntegerMode
 	runId            string
 	recorder         Recorder
 	observers        []RecordedEventObserver
@@ -96,6 +98,7 @@ func (ctx *ExecutionContext) initializeHistory(options []ContextOption) {
 	for _, option := range options {
 		option(&cfg)
 	}
+	ctx.steeringMessages, ctx.ptcIntegerMode = cfg.steeringMessages, cfg.ptcIntegerMode
 	if cfg.codecs == nil {
 		cfg.codecs = NewCodecRegistry()
 	}
@@ -156,18 +159,13 @@ func (ctx *ExecutionContext) Task() (*Task, error) {
 	return decodeAs[*Task](ctx.run.codecs, ctx.savedTask)
 }
 
+// History returns a read-only view of accepted history. Entries and payloads must not be changed.
+// Later appends use new selection slices, so the retained view stays valid. Use Export for an
+// independent mutable snapshot or CompactionInput for a strategy's editable working view.
 func (ctx *ExecutionContext) History() HistorySnapshot {
-	// Accepted history is immutable. Copy only the requested history, not the full stream,
-	// checkpoint, and batch index that Export supplies to a persistence caller.
 	ctx.run.mu.RLock()
-	history := ctx.run.view.History
-	ctx.run.mu.RUnlock()
-	owned, err := cloneOwned(ctx.run.codecs, history)
-	if err != nil {
-		ctx.stopRecording(err)
-		return HistorySnapshot{}
-	}
-	return owned
+	defer ctx.run.mu.RUnlock()
+	return ctx.run.view.History
 }
 
 func (ctx *ExecutionContext) ContextDraft() ContextDraft {
@@ -183,6 +181,7 @@ func (ctx *ExecutionContext) Scratchpad() ([]*HistoryEntry, error) {
 
 // CompactionInput captures selection and revision under one lock. A strategy cannot accidentally
 // pair an old list of IDs with records from a concurrent context change.
+// Entries are independent mutable values because a strategy can edit a proposed replacement.
 func (ctx *ExecutionContext) CompactionInput() (CompactionInput, error) {
 	ctx.run.mu.RLock()
 	entries := make([]*HistoryEntry, len(ctx.active))
@@ -204,7 +203,9 @@ func (ctx *ExecutionContext) CompactionInput() (CompactionInput, error) {
 	return CompactionInput{Revision: revision, Entries: owned, Required: required}, err
 }
 
-// NewHistoryEntry freezes content now. Later caller mutations cannot change the proposed entry.
+// NewHistoryEntry assigns a new identity without changing the caller's entry header. It takes
+// ownership of nested payloads. The proposal can be edited until UpdateHistory accepts it.
+// Do not change transferred payloads through old aliases.
 func (ctx *ExecutionContext) NewHistoryEntry(input *HistoryEntry) (*HistoryEntry, error) {
 	if err := ctx.RecordingError(); err != nil {
 		return nil, err
@@ -212,10 +213,8 @@ func (ctx *ExecutionContext) NewHistoryEntry(input *HistoryEntry) (*HistoryEntry
 	if input == nil {
 		return nil, errors.New("gent: nil history entry")
 	}
-	entry, err := cloneOwned(ctx.run.codecs, input)
-	if err != nil {
-		return nil, err
-	}
+	value := *input
+	entry := &value
 	if entry.Kind == "" {
 		entry.Kind = HistoryMessages
 	}
@@ -225,17 +224,13 @@ func (ctx *ExecutionContext) NewHistoryEntry(input *HistoryEntry) (*HistoryEntry
 	ctx.run.allocation++
 	entry.Id = EntryId(fmt.Sprintf("%s:entry:%s:%d", ctx.run.id, ctx.run.attempt, ctx.run.allocation))
 	entry.RunId, entry.ContextId, entry.AttemptId = ctx.run.id, ctx.contextId, ctx.run.attempt
-	entry.Iteration, entry.Order, entry.CreatedAt = iteration, 0, time.Now()
+	entry.Iteration, entry.Order, entry.CreatedAt = iteration, 0, time.Now().UTC()
 	return entry, nil
 }
 
+// UpdateHistory accepts an owned proposal. On success, entries and payloads become read-only.
+// Event serialization captures durable evidence; another deep clone is not needed at submission.
 func (ctx *ExecutionContext) UpdateHistory(update HistoryUpdate) error {
-	// Freeze before accepting entries. Caller mutations must never rewrite historical evidence.
-	owned, err := cloneOwned(ctx.run.codecs, update)
-	if err != nil {
-		return err
-	}
-	update = owned
 	for _, entry := range update.AppendedEntries {
 		if entry == nil {
 			return errors.New("gent: nil history entry")
@@ -362,7 +357,6 @@ func (ctx *ExecutionContext) SetCheckpointState(name string, value any) error {
 func (ctx *ExecutionContext) CheckpointState(name string) (any, bool, error) {
 	ctx.run.mu.RLock()
 	value, ok := ctx.state[name]
-	value = cloneWire(value)
 	ctx.run.mu.RUnlock()
 	if !ok {
 		return nil, false, nil

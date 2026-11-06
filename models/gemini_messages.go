@@ -23,7 +23,23 @@ type geminiContinuation struct {
 	RequestContents json.RawMessage `json:"requestContents,omitempty"`
 }
 
-func geminiMessages(messages []*gent.ModelMessage) ([]any, []any, *geminiContinuation, error) {
+func geminiMessages(messages []*gent.ModelMessage, nativeMedia ...bool) (
+	[]any, []any, *geminiContinuation, error,
+) {
+	move := func(part gent.ContentPart) bool {
+		if len(nativeMedia) > 0 && !nativeMedia[0] {
+			return true
+		}
+		if binary, ok := partValue(part).(gent.BinaryContent); ok {
+			return !geminiToolMIME(binary.MIMEType)
+		}
+		return true
+	}
+	var err error
+	messages, err = separateSelectedToolMedia(messages, move)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	var result, system []any
 	var pending *geminiContinuation
 	callIDs := make(map[string]bool)
@@ -68,6 +84,14 @@ func geminiMessages(messages []*gent.ModelMessage) ([]any, []any, *geminiContinu
 		}
 		var parts []any
 		for _, part := range message.Parts {
+			if reply, ok := part.(*gent.ModelToolCallResponse); ok {
+				values, err := geminiToolResponse(reply, callIDs)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				parts = append(parts, values...)
+				continue
+			}
 			value, err := geminiPart(partValue(part), callIDs)
 			if err != nil {
 				return nil, nil, nil, err
@@ -97,6 +121,8 @@ func geminiMessages(messages []*gent.ModelMessage) ([]any, []any, *geminiContinu
 
 func geminiPart(part gent.ContentPart, callIDs map[string]bool) (map[string]any, error) {
 	switch p := part.(type) {
+	case gent.DataContent:
+		return map[string]any{"text": p.String()}, nil
 	case gent.TextContent:
 		return map[string]any{"text": p.Text}, nil
 	case gent.BinaryContent:
@@ -106,10 +132,9 @@ func geminiPart(part gent.ContentPart, callIDs map[string]bool) (map[string]any,
 		return map[string]any{"inlineData": map[string]any{"mimeType": p.MIMEType,
 			"data": base64.StdEncoding.EncodeToString(p.Data)}}, nil
 	case gent.ImageURLContent:
-		// Gemini fileData needs a MIME type and a supported file URI. ImageURLContent does not
-		// supply that contract; downloading or guessing its type would be input conversion.
+		// Shared media preparation resolves URL parts before native encoding.
 		return nil, errors.New("Gemini image input requires BinaryContent with a MIME type")
-	case gent.ModelToolCall:
+	case gent.ModelToolCallRequest:
 		if !json.Valid([]byte(p.FunctionCall.Arguments)) {
 			return nil, errors.New("invalid Gemini tool arguments")
 		}
@@ -120,13 +145,7 @@ func geminiPart(part gent.ContentPart, callIDs map[string]bool) (map[string]any,
 			callIDs[p.ID] = true
 		}
 		return map[string]any{"functionCall": call}, nil
-	case gent.ToolCallResponse:
-		response := map[string]any{"name": p.Name,
-			"response": map[string]any{"result": p.Content}}
-		if callIDs[p.ToolCallID] {
-			response["id"] = p.ToolCallID
-		}
-		return map[string]any{"functionResponse": response}, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported Gemini content %T", part)
 	}
@@ -142,4 +161,69 @@ func geminiInputMIME(mime string) bool {
 	video := "|video/mp4|video/mpeg|video/mov|video/avi|video/x-flv|video/webm|video/wmv|video/3gpp|"
 	return strings.Contains(images, "|"+mime+"|") || strings.Contains(audio, "|"+mime+"|") ||
 		strings.Contains(video, "|"+mime+"|")
+}
+
+// GenerateContent supports media inside a function response on Gemini 3 and newer. Older
+// models receive supported media after the complete response group, with source labels.
+func geminiNativeToolMedia(selected, configured string) bool {
+	if selected == "" {
+		selected = configured
+	}
+	name := strings.TrimPrefix(selected, "models/")
+	return strings.HasPrefix(name, "gemini-3")
+}
+
+func geminiToolResponse(reply *gent.ModelToolCallResponse, callIDs map[string]bool) ([]any, error) {
+	response := map[string]any{"name": reply.Name()}
+	if callIDs[reply.ToolCallID()] {
+		response["id"] = reply.ToolCallID()
+	}
+	var data []any
+	var guidance, media []any
+	var domain map[string]any
+	dataCount := 0
+	for i, part := range reply.Parts() {
+		switch value := partValue(part).(type) {
+		case gent.DataContent:
+			data = append(data, value.Value())
+			domain, _ = value.Value().(map[string]any)
+			dataCount++
+		case gent.TextContent:
+			data = append(data, value.Text)
+			guidance = append(guidance, map[string]any{"text": value.Text})
+		case gent.BinaryContent:
+			name := fmt.Sprintf("tool_part_%d", i)
+			media = append(media, map[string]any{"inlineData": map[string]any{
+				"mimeType": value.MIMEType, "data": base64.StdEncoding.EncodeToString(value.Data),
+				"displayName": name}})
+			data = append(data, map[string]any{"$ref": name})
+		default:
+			return nil, fmt.Errorf("unsupported Gemini function response content %T", part)
+		}
+	}
+	if dataCount == 1 && domain != nil && len(media) == 0 && len(data) > 0 &&
+		partIsData(reply.Parts()[0]) {
+		response["response"] = domain
+	} else {
+		response["response"] = map[string]any{"result": data}
+		guidance = nil
+	}
+	if len(media) > 0 {
+		response["parts"] = media
+	}
+	result := []any{map[string]any{"functionResponse": response}}
+	return append(result, guidance...), nil
+}
+
+func geminiToolMIME(mime string) bool {
+	switch mime {
+	case "image/png", "image/jpeg", "image/webp", "application/pdf", "text/plain":
+		return true
+	}
+	return false
+}
+
+func partIsData(part gent.ContentPart) bool {
+	_, ok := partValue(part).(gent.DataContent)
+	return ok
 }

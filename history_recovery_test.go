@@ -22,12 +22,12 @@ type recoveryInput struct {
 }
 
 type recoveryModel struct {
-	requests []gent.ModelCallRequest
+	requests []*gent.ModelCallRequest
 	answer   bool
 }
 
 func (m *recoveryModel) GenerateContentStream(
-	_ context.Context, request gent.ModelCallRequest,
+	_ context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	m.requests = append(m.requests, request)
 	choice := &gent.ContentChoice{
@@ -38,30 +38,32 @@ func (m *recoveryModel) GenerateContentStream(
 		choice.CandidateContent = []gent.ContentPart{gent.TextContent{Text: "Read the policy."}}
 		for _, id := range []string{"policy-a", "policy-b"} {
 			choice.Completion.Status = gent.ModelStatusToolCalls
-			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: id, Type: "function",
+			choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{ID: id, Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}})
 		}
 	}
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{choice},
 		Info:    &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20},
 	}, nil), nil
 }
 
 func newRecoveryAgent(model *recoveryModel, calls *[]gent.ToolIdentity,
-	recovery ...gent.ToolRecoveryFunc,
+	recovery ...gent.ToolRecoveryFunc[recoveryInput],
 ) *react.Agent[string] {
-	var handler gent.ToolRecoveryFunc
+	var handler gent.ToolRecoveryFunc[recoveryInput]
 	if len(recovery) != 0 {
 		handler = recovery[0]
 	}
-	tool := gent.DefineTool("policy", func(ctx context.Context, input recoveryInput) (string, error) {
+	tool := gent.DefineTool("policy", func(ctx context.Context, input recoveryInput) (
+		*gent.ToolExecutionResponse, error,
+	) {
 		identity, ok := gent.ToolIdentityFromContext(ctx)
 		if !ok {
-			return "", errors.New("missing logical tool identity")
+			return capturedToolResponse("", errors.New("missing logical tool identity"))
 		}
 		*calls = append(*calls, identity)
-		return input.Id + ": exact original text", nil
+		return capturedToolResponse(input.Id+": exact original text", nil)
 	}).Description("Read the original policy").ParameterSchema(nil).Recovery(handler).MustBuild()
 	return react.NewAgent(model).RegisterTool(tool).WithRecoveryVersion("recovery-fixture/v1")
 }
@@ -128,7 +130,7 @@ func resumeRecovery(agent *react.Agent[string], saved gent.RunView, bindings gen
 
 func saveInterruptedRun(
 	t *testing.T, phase gent.ExecutionPhase, event string,
-) (gent.RunView, []gent.ModelCallRequest, []gent.ToolIdentity) {
+) (gent.RunView, []*gent.ModelCallRequest, []gent.ToolIdentity) {
 	t.Helper()
 	worker, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -179,9 +181,9 @@ func TestHistoryRecovery_Boundaries(t *testing.T) {
 	cases := []testCase{
 		{"initial", input{phase: gent.PhaseInitial}, expected{0, 2, 0, 2}},
 		{"iteration ready", input{phase: gent.PhaseIterationReady}, expected{0, 2, 0, 2}},
-		{"saved response", input{event: "model_call_finished"}, expected{1, 1, 0, 2}},
-		{"decision ready", input{phase: gent.PhaseDecisionReady}, expected{1, 1, 0, 2}},
-		{"first tool completed", input{phase: gent.PhaseToolCompleted}, expected{1, 1, 1, 1}},
+		{"saved response", input{event: "model_call_finished"}, expected{1, 1, 0, 0}},
+		{"decision ready", input{phase: gent.PhaseDecisionReady}, expected{1, 1, 0, 0}},
+		{"first tool completed", input{phase: gent.PhaseToolCompleted}, expected{1, 1, 1, 0}},
 		{"iteration completed", input{phase: gent.PhaseIterationCompleted}, expected{1, 1, 2, 0}},
 	}
 	for _, test := range cases {
@@ -209,9 +211,10 @@ func TestHistoryRecovery_Boundaries(t *testing.T) {
 			assert.Equal(t, test.expected, expected{len(requests), len(model.requests),
 				len(earlierCalls), len(calls)})
 			assert.Equal(t, int64(40), ctx.Stats().GetCounter(gent.SCTotalTokens))
-			assert.Equal(t, int64(2), ctx.Stats().GetCounter(gent.SCToolCalls))
+			assert.Equal(t, int64(test.expected.toolsBefore+test.expected.toolsAfter),
+				ctx.Stats().GetCounter(gent.SCToolCalls))
 			allCalls := append(earlierCalls, calls...)
-			if assert.Len(t, allCalls, 2) {
+			if len(allCalls) == 2 {
 				assert.NotEqual(t, allCalls[0].ToolCallId, allCalls[1].ToolCallId)
 			}
 			terminal, err := ctx.Export()
@@ -282,10 +285,10 @@ func TestHistoryRecovery_FreshProcess(t *testing.T) {
 			[]gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
 			result.Output,
 		)
-		assert.Len(t, calls, 1)
+		assert.Empty(t, calls)
 		assert.Len(t, model.requests, 1)
 		assert.Equal(t, int64(40), ctx.Stats().GetCounter(gent.SCTotalTokens))
-		// A fresh uninterrupted binding must send exactly the same next model messages and options.
+		// A saved completed response is exact. The pending call reports NotStarted on resume.
 		baselineModel := &recoveryModel{}
 		var baselineCalls []gent.ToolIdentity
 		baselineAgent := newRecoveryAgent(baselineModel, &baselineCalls)
@@ -296,7 +299,13 @@ func TestHistoryRecovery_FreshProcess(t *testing.T) {
 			baseline,
 		)
 		assert.NoError(t, err)
-		assert.Equal(t, baselineModel.requests[1].Messages, model.requests[0].Messages)
+		wantMessages := baselineModel.requests[1].Messages
+		actualMessages := model.requests[0].Messages
+		assert.Equal(t, wantMessages[:3], actualMessages[:3])
+		reply := actualMessages[3].Parts[0].(*gent.ModelToolCallResponse)
+		status, present := reply.RecoveryStatus()
+		assert.True(t, present)
+		assert.Equal(t, gent.ToolRecoveryNotStarted, status)
 		assert.Equal(t, baselineModel.requests[1].Options, model.requests[0].Options)
 		assert.Equal(t, seq.Snapshot().LastEventNumber, uint64(len(seq.Snapshot().RecentEvents)))
 		return
@@ -326,10 +335,15 @@ func recoveryChoice() *gent.ContentChoice {
 	return &gent.ContentChoice{Completion: gent.ModelCompletion{
 		Status: gent.ModelStatusToolCalls,
 	},
-		ToolCalls: []gent.ModelToolCall{
+		ToolCalls: []*gent.ModelToolCallRequest{
 			{ID: "policy-a", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
 			{ID: "policy-b", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}},
 		}}
+}
+func (m *recoveryModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

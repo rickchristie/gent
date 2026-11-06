@@ -14,12 +14,12 @@ import (
 // GenerateContentStream returns fixed responses. The managed context publishes model events.
 type MockModel struct {
 	name      string
-	responses []*gent.ContentResponse
+	responses []*gent.ModelCallResponse
 	errors    []error
 	callCount int
 
 	// CapturedRequests and CapturedMessages contain each submitted request.
-	CapturedRequests []gent.ModelCallRequest
+	CapturedRequests []*gent.ModelCallRequest
 	CapturedMessages [][]*gent.ModelMessage
 }
 
@@ -38,7 +38,7 @@ func (m *MockModel) ModelName() string { return m.name }
 
 // AddResponse queues a response with the specified content and token counts.
 func (m *MockModel) AddResponse(content string, inputTokens, outputTokens int) *MockModel {
-	m.responses = append(m.responses, &gent.ContentResponse{
+	m.responses = append(m.responses, &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -53,11 +53,11 @@ func (m *MockModel) AddResponse(content string, inputTokens, outputTokens int) *
 	return m
 }
 
-// AddRawResponse queues a raw ContentResponse.
+// AddRawResponse queues a raw ModelCallResponse.
 // Use this when you need full control over the response
 // structure (e.g., empty Choices slice).
 func (m *MockModel) AddRawResponse(
-	resp *gent.ContentResponse,
+	resp *gent.ModelCallResponse,
 ) *MockModel {
 	m.responses = append(m.responses, resp)
 	return m
@@ -80,7 +80,7 @@ func (m *MockModel) CallCount() int {
 
 // GenerateContentStream returns a completed stream with the next configured response or error.
 func (m *MockModel) GenerateContentStream(
-	_ context.Context, request gent.ModelCallRequest,
+	_ context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	idx := m.callCount
 	m.callCount++
@@ -92,7 +92,7 @@ func (m *MockModel) GenerateContentStream(
 	if idx < len(m.responses) && m.responses[idx] != nil {
 		return gent.NewCompletedStream(m.responses[idx], nil), nil
 	}
-	response := &gent.ContentResponse{
+	response := &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -236,13 +236,18 @@ var _ gent.CompactionStrategy = (*MockCompactionStrategy)(nil)
 
 // AddToolCall queues a native function call with explicit arguments.
 func (m *MockModel) AddToolCall(name, arguments string, inputTokens, outputTokens int) *MockModel {
-	m.responses = append(m.responses, &gent.ContentResponse{
+	m.responses = append(m.responses, &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
 			Status: gent.ModelStatusToolCalls,
 		},
-			ToolCalls: []gent.ModelToolCall{{
+			ToolCalls: []*gent.ModelToolCallRequest{{
 				ID: "test-call", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments}}}}},
 		Info: &gent.GenerationInfo{InputTokens: inputTokens, OutputTokens: outputTokens}})
 	return m
+}
+func (m *MockModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

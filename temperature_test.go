@@ -15,7 +15,7 @@ type mockNamerModel struct {
 func (m *mockNamerModel) ModelName() string { return m.name }
 
 func (m *mockNamerModel) GenerateContentStream(
-	_ context.Context, _ ModelCallRequest,
+	_ context.Context, _ *ModelCallRequest,
 ) (Stream, error) {
 	return NewCompletedStream(nil, nil), nil
 }
@@ -24,7 +24,7 @@ func (m *mockNamerModel) GenerateContentStream(
 type mockPlainModel struct{}
 
 func (m *mockPlainModel) GenerateContentStream(
-	_ context.Context, _ ModelCallRequest,
+	_ context.Context, _ *ModelCallRequest,
 ) (Stream, error) {
 	return NewCompletedStream(nil, nil), nil
 }
@@ -279,4 +279,14 @@ func TestDefaultSamplingParams(t *testing.T) {
 				result.TopP.Value, 0.001, "top-p value")
 		})
 	}
+}
+func (m *mockNamerModel) PrepareRequest(ctx *ExecutionContext,
+	request *ModelCallRequest, chain ToolChain,
+) (*ModelCallRequest, error) {
+	return PrepareModelRequest(ctx, request, chain)
+}
+func (m *mockPlainModel) PrepareRequest(ctx *ExecutionContext,
+	request *ModelCallRequest, chain ToolChain,
+) (*ModelCallRequest, error) {
+	return PrepareModelRequest(ctx, request, chain)
 }

@@ -42,7 +42,7 @@ type streamBuffer struct {
 
 	// Final response (populated when complete)
 	responseMu   sync.Mutex
-	response     *ContentResponse
+	response     *ModelCallResponse
 	responseErr  error
 	responseDone chan struct{}
 
@@ -178,13 +178,13 @@ func (s *streamBuffer) SendError(err error) bool {
 
 // Complete marks the stream as complete with the final response.
 // This closes the stream and makes Response() return.
-func (s *streamBuffer) Complete(response *ContentResponse, err error) {
+func (s *streamBuffer) Complete(response *ModelCallResponse, err error) {
 	s.TryComplete(response, err)
 }
 
 // TryComplete marks the stream as complete and reports whether it completed the stream.
 // It returns false after a previous producer completion. Consumer Close only requests stopping.
-func (s *streamBuffer) TryComplete(response *ContentResponse, err error) bool {
+func (s *streamBuffer) TryComplete(response *ModelCallResponse, err error) bool {
 	s.mu.Lock()
 
 	if s.closed {
@@ -227,9 +227,9 @@ func (s *streamBuffer) CompleteWithGenerationInfo(info *GenerationInfo, err erro
 	metadata := s.metaAccum.snapshot()
 	s.mu.Unlock()
 
-	var response *ContentResponse
+	var response *ModelCallResponse
 	if err == nil {
-		response = &ContentResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
+		response = &ModelCallResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
 			Status: ModelStatusAnswer,
 		},
 			CandidateContent: MetaParts(metadata, MetaContentIntermediary),
@@ -251,16 +251,13 @@ func (s *streamBuffer) Chunks() <-chan StreamChunk {
 }
 
 // Response implements Stream.Response.
-// It blocks until the stream is complete.
-func (s *streamBuffer) Response() (*ContentResponse, error) {
+// It blocks until the stream is complete and returns a read-only view of the saved response.
+// Consumers that need to edit it must first make an independent copy.
+func (s *streamBuffer) Response() (*ModelCallResponse, error) {
 	<-s.responseDone
 	s.responseMu.Lock()
 	defer s.responseMu.Unlock()
-	response, err := cloneOwned(streamCodecs, s.response)
-	if err != nil {
-		return nil, errors.Join(s.responseErr, err)
-	}
-	return response, s.responseErr
+	return s.response, s.responseErr
 }
 
 // Close implements Stream.Close.
@@ -301,7 +298,7 @@ var _ Stream = (*streamBuffer)(nil)
 // response. The stream emits each non-empty text channel then closes.
 // This is used by mock models and non-streaming callers that need to satisfy the
 // [Model] interface without actual streaming.
-func NewCompletedStream(resp *ContentResponse, err error) Stream {
+func NewCompletedStream(resp *ModelCallResponse, err error) Stream {
 	s := newStreamBuffer()
 	if resp != nil && len(resp.Choices) > 0 {
 		choice := resp.Choices[0]

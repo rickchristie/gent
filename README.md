@@ -219,15 +219,21 @@ if err != nil {
 }
 ```
 
+The handler returns `(*gent.ToolExecutionResponse, error)`. Use Executed, Blocked, or
+InvalidArguments for expected outcomes. Build text, structured data, and media with `gent.NewParts`.
+Gent sends safe guidance for Go errors and saves the raw errors privately. Tool errors do not end
+the agent run. Accepted Instructions always reach the model.
+
 The builder uses Go types and `json` field names for the parameter schema. Fields are required by
 default; use `schema.Field("name").Optional()` to permit an absent field. `omitempty` does not make
-an input optional. `Build` checks schemas and copies configuration. `MustBuild` is available for
-fixed definitions where a configuration error should stop application startup.
+an input optional. `Build` checks schemas. Retained configuration and getter views are read-only.
+`MustBuild` is available for fixed definitions where a configuration error should stop startup.
 
-Set `Recovery(handler)`, `DeduplicateSummary(handler)`, `SyntheticQueries(...)`, `Strict(bool)`, or
-`OutputSchema(raw)` before building. `ParameterSchema(raw)` supplies a complete schema when type
-inference does not fit your input. It cannot be combined with `Parameters(...)`. For a tool with
-its own fields, media, or dynamic instructions, implement the full `gent.Tool[I, O]` interface.
+Set `Recovery(handler)`, `SyntheticQueries(...)`, `Strict(bool)`, or
+`OutputSchemaFrom(Order{})` before building. `ParameterSchema(raw)` supplies a complete schema when type
+inference does not fit your input. It cannot be combined with `Parameters(...)`. The builder's
+handler can return media and dynamic instructions. Implement `gent.Tool[I]` directly when a tool
+needs its own fields or method implementations.
 See [tool definitions](docs/native-tools.md#tool-definitions) for the complete contract.
 
 ### ToolChain
@@ -406,7 +412,7 @@ if err := tc.Initialize(); err != nil {
 agent := react.NewAgent(model).WithToolChain(tc)
 ```
 
-Search metadata is part of every `gent.Tool[I, O]`. Set the builder's domain, categories, keywords,
+Search metadata is part of every `gent.Tool[I]`. Set the builder's domain, categories, keywords,
 and example queries to help the search engine. `gent.IndexableTool` is the metadata view used by
 search engines; a separate wrapper is not needed.
 

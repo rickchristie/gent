@@ -9,7 +9,7 @@ import (
 func TestStreamMetadata(t *testing.T) {
 	type input struct{ completed bool }
 	type expected struct {
-		response *ContentResponse
+		response *ModelCallResponse
 		chunks   []StreamChunk
 		err      error
 	}
@@ -24,7 +24,7 @@ func TestStreamMetadata(t *testing.T) {
 	},
 		{Type: MetaContentCommentary, Content: []ContentPart{TextContent{Text: "Checking."}}},
 		{Type: MetaContentIntermediary, Content: []ContentPart{TextContent{Text: "Done."}}}}
-	response := &ContentResponse{
+	response := &ModelCallResponse{
 		Choices: []*ContentChoice{
 			{Completion: ModelCompletion{Status: ModelStatusAnswer},
 				CandidateContent: []ContentPart{TextContent{Text: "Done."}}, MetaContent: meta,

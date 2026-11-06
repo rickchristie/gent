@@ -228,8 +228,7 @@ func (e *Runner[T]) execute(
 			execCtx.SetTermination(gent.TerminationContextCanceled, nil, execCtx.Context().Err())
 			return e.finish(execCtx)
 		}
-		if errors.Is(loopErr, gent.ErrUncertainTool) ||
-			errors.Is(loopErr, gent.ErrUnsupportedRecovery) ||
+		if errors.Is(loopErr, gent.ErrUnsupportedRecovery) ||
 			errors.Is(loopErr, gent.ErrIncompatibleCheckpoint) {
 			if err := execCtx.RecordInterruption(loopErr); err != nil {
 				return nil, err

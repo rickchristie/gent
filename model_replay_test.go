@@ -14,7 +14,7 @@ import (
 func readModelCall(
 	t *testing.T, ctx *gent.ExecutionContext, model gent.Model, call gent.ModelCall,
 ) (
-	*gent.ContentResponse, []gent.StreamChunk,
+	*gent.ModelCallResponse, []gent.StreamChunk,
 ) {
 	t.Helper()
 	stream, err := ctx.GenerateContentStream(model, call, gent.NewModelCallRequest(nil))
@@ -135,7 +135,7 @@ func TestModelReplayCallOrder(t *testing.T) {
 }
 
 type savedChunkModel struct {
-	response *gent.ContentResponse
+	response *gent.ModelCallResponse
 	chunks   []gent.StreamChunk
 	err      error
 }
@@ -216,7 +216,7 @@ func TestModelReplayRetriesFailedCall(t *testing.T) {
 	}
 }
 
-func (model *savedChunkModel) GenerateContentStream(context.Context, gent.ModelCallRequest) (
+func (model *savedChunkModel) GenerateContentStream(context.Context, *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	stream := gent.NewStreamWithDuration()
@@ -233,7 +233,7 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 		retry  bool
 	}
 	type expected struct {
-		response      *gent.ContentResponse
+		response      *gent.ModelCallResponse
 		providerCalls int
 		totalTokens   int64
 		err           error
@@ -243,7 +243,7 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 		input    input
 		expected expected
 	}
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{{
+	response := &gent.ModelCallResponse{Choices: []*gent.ContentChoice{{
 		CandidateContent: []gent.ContentPart{
 			gent.TextContent{Text: "hello"},
 		},
@@ -306,7 +306,7 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 			}
 			call := gent.ModelCall{Id: "answer", StreamId: "stream", StreamTopicId: "topic"}
 			if test.input.retry {
-				failed := &savedChunkModel{response: &gent.ContentResponse{
+				failed := &savedChunkModel{response: &gent.ModelCallResponse{
 					Info: &gent.GenerationInfo{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}},
 					chunks: []gent.StreamChunk{
 						{
@@ -350,7 +350,7 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 			if !assert.NoError(t, cloneErr) {
 				return
 			}
-			want.response = owned.(*gent.ContentResponse)
+			want.response = owned.(*gent.ModelCallResponse)
 			prefix := strings.TrimSuffix(liveResponse.Choices[0].CandidateSource.MessageIds[0], "message:0")
 			for i, choice := range want.response.Choices {
 				choice.CandidateSource = &gent.ContentSource{ModelCallId: "answer",
@@ -365,4 +365,9 @@ func TestModelReplayKeepsStreamAndUsage(t *testing.T) {
 			assert.Equal(t, bundle, view)
 		})
 	}
+}
+func (m *savedChunkModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

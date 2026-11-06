@@ -235,6 +235,7 @@ func (ctx *ExecutionContext) prepareCheckpoint(
 	for i, child := range contexts {
 		child.mu.RLock()
 		state := ContextCheckpoint{
+			SteeringMessages: child.steeringMessages, PTCIntegerMode: child.ptcIntegerMode,
 			ContextId:          child.contextId,
 			ParentContextId:    child.parentContextId,
 			Name:               child.name,
@@ -380,6 +381,7 @@ func RestoreExecutionContext(
 		ctx.SetCompaction(bindings.CompactionTrigger, bindings.CompactionStrategy)
 	}
 	ctx.savedTask = cloneWire(state.Task)
+	ctx.steeringMessages, ctx.ptcIntegerMode = state.SteeringMessages, state.PTCIntegerMode
 	if bindings.Configure != nil {
 		if err := bindings.Configure(ctx); err != nil {
 			return nil, err
@@ -451,8 +453,10 @@ func RestoreExecutionContext(
 		}
 	}
 	ctx.data = data
+	ctx.steeringMessages, ctx.ptcIntegerMode = state.SteeringMessages, state.PTCIntegerMode
 	ctx.contextId = state.ContextId
 	ctx.savedTask = cloneWire(state.Task)
+	ctx.steeringMessages, ctx.ptcIntegerMode = state.SteeringMessages, state.PTCIntegerMode
 	ctx.startTime = state.StartedAt
 	ctx.limits = cloneLimits(state.Limits)
 	ctx.iteration = state.Iteration

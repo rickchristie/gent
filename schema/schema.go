@@ -15,7 +15,6 @@ package schema
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,13 +30,13 @@ type Schema struct {
 	compiled *jsonschema.Schema
 }
 
-// Raw returns an owned JSON representation. A request hook cannot change the compiled contract
-// or the schema used by a concurrent run through this map.
+// Raw returns a read-only JSON representation. Use Copy before editing a schema independently.
+// Managed model requests make their own mutable view before request hooks run.
 func (s *Schema) Raw() map[string]any {
 	if s == nil {
 		return nil
 	}
-	return copySchemaValue(s.raw).(map[string]any)
+	return s.raw
 }
 
 // Validate validates the given data against the schema.
@@ -256,12 +255,9 @@ func exampleValue(propMap map[string]any) any {
 	}
 }
 
-// FormatForLLM validates data against the schema and returns an
-// LLM-friendly error message if validation fails, or "" if valid.
-func (s *Schema) FormatForLLM(
-	toolName string,
-	data map[string]any,
-) string {
+// FormatForLLM returns safe correction details and the complete expected schema. It never
+// includes a raw validator error, rejected value, or custom format implementation error.
+func (s *Schema) FormatForLLM(toolName string, data map[string]any) string {
 	if s == nil {
 		return ""
 	}
@@ -269,46 +265,22 @@ func (s *Schema) FormatForLLM(
 	if err == nil {
 		return ""
 	}
+	return s.Correction(toolName, SafeValidationDetails(err))
+}
 
-	var sb strings.Builder
-	sb.WriteString("Invalid args for tool '")
-	sb.WriteString(toolName)
-	sb.WriteString("'.\nErrors:\n")
-
-	var ve *jsonschema.ValidationError
-	if errors.As(err, &ve) {
-		output := ve.BasicOutput()
-		for _, e := range output.Errors {
-			if e.Error == nil {
-				continue
-			}
-			msg := cleanErrorMsg(
-				e.Error.String(),
-				e.InstanceLocation,
-			)
-			if msg == "" {
-				continue
-			}
-			sb.WriteString("  - ")
-			sb.WriteString(msg)
-			sb.WriteString("\n")
-		}
-	} else {
-		msg := err.Error()
-		msg = strings.TrimPrefix(
-			msg, "schema validation failed: ",
-		)
-		sb.WriteString("  - ")
-		sb.WriteString(msg)
-		sb.WriteString("\n")
+// Correction combines safe authored details with the full schema. Callers can use it for parse
+// and typed-conversion failures too, so direct, shared, and PTC calls use the same message core.
+func (s *Schema) Correction(toolName, details string) string {
+	raw := map[string]any{"type": "object"}
+	if s != nil {
+		raw = s.raw
 	}
-
-	fields := s.DescribeFields()
-	if fields != "" {
-		sb.WriteString("Expected fields:\n")
-		sb.WriteString(fields)
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		panic(fmt.Errorf("compiled schema is not JSON: %w", err))
 	}
-	return sb.String()
+	return fmt.Sprintf("Invalid arguments for tool %q.\n%s\nExpected input schema:\n%s",
+		toolName, details, data)
 }
 
 // cleanErrorMsg strips noisy prefixes from jsonschema error messages
@@ -422,27 +394,6 @@ func Compile(raw map[string]any) (*Schema, error) {
 		raw:      schemaData.(map[string]any),
 		compiled: compiled,
 	}, nil
-}
-
-// Compiled schemas contain only JSON maps, arrays, and immutable scalar values. Copy those
-// containers without another encode/decode pass each time a model request needs a schema.
-func copySchemaValue(value any) any {
-	switch value := value.(type) {
-	case map[string]any:
-		result := make(map[string]any, len(value))
-		for name, item := range value {
-			result[name] = copySchemaValue(item)
-		}
-		return result
-	case []any:
-		result := make([]any, len(value))
-		for i, item := range value {
-			result[i] = copySchemaValue(item)
-		}
-		return result
-	default:
-		return value
-	}
 }
 
 // MustCompile is like Compile but panics on error.

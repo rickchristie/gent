@@ -14,17 +14,17 @@ def extract(start, end):
 STEPS = [
     {
         "id": "setup", "short": "Create the project", "title": "Create a Go project.",
-        "intro": "Make a small application with one file, main.go. Use the local Gent checkout "
+        "intro": "Make a small application with main.go and fixture.go. Use the local Gent checkout "
                  "so the code matches the API used in this guide.",
-        "action": "In a terminal, run the project commands below. Then create main.go and add "
+        "action": "In a terminal, run the project commands below. Download fixture.go from the complete project, then create main.go and add "
                   "these imports. The file will compile after you add the remaining steps.",
         "location": "main.go · package and imports",
-        "code": extract("package main", "type OrderInput"),
+        "code": extract("package main", "type ShipmentInput"),
         "notes": [
             ("gent", "Provides the shared task, model, tool, and execution types."),
             ("agents/react + executor",
              "Provide the standard loop and the runner that executes it."),
-            ("schema + toolchain",
+            ("toolchain",
              "Describe tool input and register tools."),
         ],
         "done": "You have a Go module that points to your Gent checkout and a main.go file.",
@@ -33,10 +33,10 @@ STEPS = [
         "id": "model", "short": "Connect a model", "title": "Create the model adapter.",
         "intro": "The standard loop needs a gent.Model. Use a ready-made provider adapter. "
                  "This example uses models.NewOpenAI.",
-        "action": "Create a run() error function. Put these lines at its start. Step 7 supplies "
+        "action": "Create a run() error function. Put these lines at its start. The final step supplies "
                   "the rest of run() and the main() entry point.",
         "location": "main.go · start of run() · fragment",
-        "code": extract('\tkey, modelName :=', '\trunner := newRunner(model)'),
+        "code": extract('\tkey, modelName :=', '\trunner := newRunner(model, newDemoShipping())'),
         "notes": [
             ("os.Getenv", "Read credentials and the model name from the process environment."),
             ("models.NewOpenAI(key, modelName)", "Create an adapter that implements gent.Model. "
@@ -47,37 +47,77 @@ STEPS = [
         "done": "You have a model value to pass to the standard ReAct agent.",
     },
     {
-        "id": "tool", "short": "Write one tool", "title": "Wrap your application function.",
-        "intro": "Give the agent a function it can call to get a fact. Here, lookup_order "
-                 "returns a fixed order record. In your app, this function can call your API.",
-        "action": "Add these types and the newOrderTool() function after the imports, "
-                  "outside run(). Use the JSON field name in each field setting.",
-        "location": "main.go · top-level types and newOrderTool()",
-        "code": extract("type OrderInput", "// Build the tool registry"),
+        "id": "tool", "short": "Define a tool", "title": "Describe a typed shipment tool.",
+        "intro": "The application owns shipment creation and approval. Gent validates the input, "
+                 "converts it to ShipmentInput, and saves the effective input before Call.",
+        "action": "Add these application types and the constructor. The complete download also "
+                  "contains fixture.go with a local service and a valid sample PDF.",
+        "location": "main.go · types and NewShipmentTool",
+        "code": extract("type ShipmentInput", "func (t *ShipmentTool) Call"),
         "notes": [
-            ("OrderInput + order_id",
-             "Define the typed input with JSON field names. The builder uses those names "
-             "and Go types to create the parameter schema."),
-            ("gent.DefineTool", "Add descriptions and constraints with Parameters, then build "
-             "gent.Tool[OrderInput, OrderStatus]. MustBuild checks fixed definitions at startup."),
-            ("Return a value or an error", "Return OrderStatus on success. The registry formats "
-             "structured output as JSON and reports tool errors to the loop."),
+            ("Typed input", "Use JSON field names. The builder can infer parameters from a struct "
+             "or accept the complete schema shown here."),
+            ("ShippingService", "Your service owns approval and the operation ledger. Policy text "
+             "is model guidance; it cannot enforce approval."),
+            ("DefineTool", "The builder supplies every Tool and IndexableTool metadata method."),
+            ("OutputSchemaFrom", "Describe domain data for the model. This does not validate "
+             "results, describe the PDF, or expose Gent status fields."),
+            ("Safe errors", "A Go error ends this operation. Gent sends this safe text to the model "
+             "and saves the raw error privately. The model decides how to continue."),
         ],
-        "done": "You have a typed tool. It is available to the agent after you register it "
-                "in step 4.",
+        "done": "The tool definition is ready. Next, return an explicit response.",
+    },
+    {
+        "id": "response", "short": "Return parts", "title": "Return domain data and a PDF.",
+        "intro": "Use Executed for a domain response and Blocked for a required approval. "
+                 "A declined shipment is still an Executed response.",
+        "action": "Add Call and result. Gent handles serialization, storage, provider messages, "
+                  "and media fallback. The tool author does not convert the struct to JSON.",
+        "location": "main.go · Call and result",
+        "code": extract("func (t *ShipmentTool) Call", "func (t *ShipmentTool) Recover"),
+        "notes": [
+            ("Stable identity", "Associate the operation and saved response with this call ID. "
+             "A new model request is a new call; recovery inspects the original ID."),
+            ("Blocked", "Put the approval reference in Instructions. Gent adds blocked guidance "
+             "and excludes response parts for this status."),
+            ("NewParts", "Data captures a portable value. PDF retains owned bytes. Build returns "
+             "one error and no partial content when capture fails."),
+            ("Executed", "The payload states business success. Parts and Instructions reach the "
+             "model in order. Unsupported media uses configured safe guidance."),
+        ],
+        "done": "The normal path handles creation, decline, approval, and unexpected errors.",
+    },
+    {
+        "id": "recovery", "short": "Inspect recovery", "title": "Report evidence after interruption.",
+        "intro": "Recover inspects the original operation. It does not execute it again. "
+                 "Gent supplies the already typed saved input.",
+        "action": "Add Recover. The demo service treats a missing record as Unresolved. It uses "
+                  "NotStarted only when its cancellation ledger supplies positive evidence.",
+        "location": "main.go · Recover",
+        "code": extract("func (t *ShipmentTool) Recover", "const agentPrompt"),
+        "notes": [
+            ("Typed recovery input", "Use request.Input directly. Tool authors do not decode "
+             "saved values or manage checkpoints."),
+            ("Completed", "Return the original execution response. An old response does not "
+             "prove that shipment information is still current."),
+            ("NotStarted", "Return control to the model. Gent does not execute the pending call."),
+            ("Unresolved", "Supply optional data or media evidence and instructions. The model "
+             "decides whether to inspect again, request approval, or make another plan."),
+        ],
+        "done": "Execution and recovery now share one complete tool contract.",
     },
     {
         "id": "agent", "short": "Build the agent",
         "title": "Register the tool and create the loop.",
         "intro": "Use Gent’s standard ReAct agent to call the model, execute tools, and check "
                  "the final answer. Your code supplies the tools and instructions.",
-        "action": "Add newRunner() after newOrderTool(). Configure it once, then reuse the "
+        "action": "Add newRunner() after NewShipmentTool(service). Configure it once, then reuse the "
                   "returned runner for separate questions.",
         "location": "main.go · newRunner(model gent.Model)",
-        "code": extract("// Build the tool registry", "func ask("),
+        "code": extract("const agentPrompt", "func ask("),
         "notes": [
             ("toolchain.New() + RegisterTool",
-             "Create a gent.ToolChain and make lookup_order available."),
+             "Create a gent.ToolChain and make create_shipment available."),
             ("react.NewAgent(model)",
              "Create the standard gent.Loop[string] with TextOutput. You do not implement Next()."),
             ("WithToolChain", "Connect the registry. Task messages supply the instructions. "
@@ -91,10 +131,10 @@ STEPS = [
         "id": "task", "short": "Create a task", "title": "Give each question its own context.",
         "intro": "The task contains the caller-authored system and user messages. ExecutionContext holds this run’s "
                  "history, statistics, and limits.",
-        "action": "Start the ask() function below. Step 6 completes its body. Start with "
+        "action": "Start the ask() function below. The next step completes its body. Start with "
                   "DefaultLimits so the standard error limits stay in place when you reduce "
                   "the iteration limit.",
-        "location": "main.go · start of ask() · completed in step 6",
+        "location": "main.go · start of ask() · completed in the next step",
         "code": extract("func ask(", "\tanswer, result, err := runner.Execute(execCtx)"),
         "notes": [
             ("NewBasicLoopData",
@@ -135,7 +175,7 @@ STEPS = [
         "location": "main.go · complete run() and main()",
         "code": EXAMPLE[EXAMPLE.index("func run() error"):].rstrip(),
         "notes": [
-            ("newRunner(model)", "Build the configuration once. A service can keep this runner and "
+            ("newRunner(model, newDemoShipping())", "Build the configuration once. A service can keep this runner and "
              "call ask() with a new context for each request."),
             ("context.WithTimeout", "Set a deadline for the question. Pass the request context "
              "instead of context.Background() when you use this in a server."),

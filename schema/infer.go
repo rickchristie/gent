@@ -35,6 +35,9 @@ func inferType(t reflect.Type, output bool, active map[reflect.Type]bool) (map[s
 	if t == reflect.TypeFor[time.Time]() {
 		return map[string]any{"type": "string", "format": "date-time"}, nil
 	}
+	if t == reflect.TypeFor[time.Duration]() && !output {
+		return map[string]any{"type": "string", "description": "Go duration, for example 1h30m."}, nil
+	}
 	if t == reflect.TypeFor[json.Number]() {
 		return map[string]any{"type": "number"}, nil
 	}

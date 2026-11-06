@@ -22,12 +22,12 @@ type savedReplyModel struct {
 }
 
 func (m *savedReplyModel) GenerateContentStream(
-	_ context.Context, _ gent.ModelCallRequest,
+	_ context.Context, _ *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	if m.calls >= len(m.responses) {
 		return nil, fmt.Errorf("unexpected model call %d", m.calls+1)
 	}
-	response := &gent.ContentResponse{
+	response := &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -377,4 +377,9 @@ func TestRunConcurrentHistoryAndIteration(t *testing.T) {
 	view, err := ctx.Export()
 	assert.NoError(t, err)
 	assert.Len(t, view.History.Entries, 100)
+}
+func (m *savedReplyModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

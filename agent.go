@@ -258,10 +258,9 @@ func GetImportanceScore(iter *HistoryEntry) (float64, bool) {
 // namespace.
 type MessageContentMetadataKey string
 
-// MMKToolChainResult stores the [*ToolChainResult] on an
-// observation [MessageContent]. Used by ScratchpadToMessages
-// to deduplicate repeated stateless tool calls.
-const MMKToolChainResult MessageContentMetadataKey = "gent:tool_chain_result"
+// MMKToolCallRecords stores []*ToolCallRecord as private execution evidence on a message.
+// Only the prepared responses in ModelMessage.Parts are sent to the model.
+const MMKToolCallRecords MessageContentMetadataKey = "gent:tool_call_records"
 
 // MessageContent is wrapper around [ModelMessage] used
 // in Loop.

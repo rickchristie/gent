@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/rickchristie/gent"
-	"github.com/rickchristie/gent/format"
 	"github.com/rickchristie/gent/policy"
 	"github.com/stretchr/testify/assert"
 )
@@ -36,18 +35,18 @@ func (*lessonEmbedder) EmbedTextBatch(ctx context.Context, texts []string) ([][]
 
 type lessonModel struct {
 	choices  []*gent.ContentChoice
-	requests []gent.ModelCallRequest
+	requests []*gent.ModelCallRequest
 }
 
 func (m *lessonModel) GenerateContentStream(
-	ctx context.Context, request gent.ModelCallRequest,
+	ctx context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	index := len(m.requests) % len(m.choices)
 	m.requests = append(m.requests, request)
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{m.choices[index]},
 	}, nil), nil
 }
@@ -56,7 +55,7 @@ func modelCall(id, name, arguments string) *gent.ContentChoice {
 	return &gent.ContentChoice{Completion: gent.ModelCompletion{
 		Status: gent.ModelStatusToolCalls,
 	},
-		ToolCalls: []gent.ModelToolCall{{
+		ToolCalls: []*gent.ModelToolCallRequest{{
 			ID: id, Type: "function",
 			FunctionCall: &gent.FunctionCall{Name: name, Arguments: arguments},
 		}}}
@@ -75,7 +74,7 @@ func TestLessonPolicyRun(t *testing.T) {
 		err         error
 		definitions []string
 		toolCalls   []string
-		lastResult  gent.ToolCallResponse
+		lastResult  *gent.ModelToolCallResponse
 	}
 	type testCase struct {
 		name     string
@@ -113,9 +112,6 @@ After the report is checked, the customer can request a replacement or a refund.
 		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 		CandidateContent: []gent.ContentPart{gent.TextContent{Text: answer}},
 	}
-	formatted := func(name, content string) string {
-		return format.NewXML().FormatSections([]gent.FormattedSection{{Name: name, Content: content}})
-	}
 	cases := []testCase{
 		{
 			name:  "full policies reach the next model call",
@@ -123,9 +119,8 @@ After the report is checked, the customer can request a replacement or a refund.
 			mocks: mocks{[]*gent.ContentChoice{searchCall, final}},
 			expected: expected{
 				answer: answer, definitions: []string{"search_policy"},
-				toolCalls: []string{"search_policy"},
-				lastResult: gent.ToolCallResponse{ToolCallID: "search-1", Name: "search_policy",
-					Content: formatted("search_policy", fullSearch)},
+				toolCalls:  []string{"search_policy"},
+				lastResult: preparedTestReply("search-1", "search_policy", fullSearch),
 			},
 		},
 		{
@@ -134,9 +129,8 @@ After the report is checked, the customer can request a replacement or a refund.
 			mocks: mocks{[]*gent.ContentChoice{searchCall, getCall, final}},
 			expected: expected{
 				answer: answer, definitions: []string{"search_policy", "get_policy"},
-				toolCalls: []string{"search_policy", "get_policy"},
-				lastResult: gent.ToolCallResponse{ToolCallID: "get-1", Name: "get_policy",
-					Content: formatted("get_policy", fullPolicy)},
+				toolCalls:  []string{"search_policy", "get_policy"},
+				lastResult: preparedTestReply("get-1", "get_policy", fullPolicy),
 			},
 		},
 		{
@@ -145,9 +139,8 @@ After the report is checked, the customer can request a replacement or a refund.
 			mocks: mocks{[]*gent.ContentChoice{searchCall, getCall, final}},
 			expected: expected{
 				answer: answer, definitions: []string{"search_policy", "get_policy"},
-				toolCalls: []string{"search_policy", "get_policy"},
-				lastResult: gent.ToolCallResponse{ToolCallID: "get-1", Name: "get_policy",
-					Content: formatted("get_policy", fullPolicy)},
+				toolCalls:  []string{"search_policy", "get_policy"},
+				lastResult: preparedTestReply("get-1", "get_policy", fullPolicy),
 			},
 		},
 	}
@@ -175,11 +168,11 @@ After the report is checked, the customer can request a replacement or a refund.
 				}
 				assert.Equal(t, test.expected.definitions, definitions)
 				var calls []string
-				var last gent.ToolCallResponse
+				var last *gent.ModelToolCallResponse
 				for _, message := range requests[len(requests)-1].Messages {
 					for _, part := range message.Parts {
-						if result, ok := part.(gent.ToolCallResponse); ok {
-							calls = append(calls, result.Name)
+						if result, ok := part.(*gent.ModelToolCallResponse); ok {
+							calls = append(calls, result.Name())
 							last = result
 						}
 					}
@@ -198,4 +191,9 @@ func TestLessonCanceledSetup(t *testing.T) {
 	assert.Nil(t, runner)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, "policy: failed to index policies: context canceled", fmt.Sprint(err))
+}
+func (m *lessonModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

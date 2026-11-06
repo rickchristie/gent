@@ -8,7 +8,12 @@ import (
 // Model is a provider adapter. The framework owns request capture, IDs, statistics and streaming.
 // Implementations honor cancellation and complete Response only after their producer has exited.
 type Model interface {
-	GenerateContentStream(context.Context, ModelCallRequest) (Stream, error)
+	// PrepareRequest resolves the current tool definitions and search configuration. It does
+	// not call the provider or run domain tools. The managed boundary then runs hooks and saves
+	// the effective request. chain is optional when a call has no tools.
+	PrepareRequest(*ExecutionContext, *ModelCallRequest, ToolChain) (*ModelCallRequest, error)
+
+	GenerateContentStream(context.Context, *ModelCallRequest) (Stream, error)
 }
 
 // ModelCall identifies a logical call independently from its physical worker attempt.
@@ -28,7 +33,7 @@ type ModelCall struct {
 func NewModelCallRequest(
 	messages []*ModelMessage,
 	options ...CallOption,
-) ModelCallRequest {
+) *ModelCallRequest {
 	var resolved CallOptions
 	WithStreamThinking(true)(&resolved)
 	for _, option := range options {
@@ -36,11 +41,11 @@ func NewModelCallRequest(
 			option(&resolved)
 		}
 	}
-	return ModelCallRequest{Messages: messages, Options: resolved, OptionCaptureComplete: true}
+	return &ModelCallRequest{Messages: messages, Options: resolved, OptionCaptureComplete: true}
 }
 
-// ContentResponse is a provider response. It does not establish execution success.
-type ContentResponse struct {
+// ModelCallResponse is a provider response. It does not establish execution success.
+type ModelCallResponse struct {
 	// Choices contains the generated content choices.
 	Choices []*ContentChoice
 
@@ -60,7 +65,7 @@ type ContentChoice struct {
 	// MetaContent preserves ordered provider-visible metadata. Unknown types remain readable.
 	MetaContent []*MetaContent
 	Completion  ModelCompletion
-	ToolCalls   []ModelToolCall
+	ToolCalls   []*ModelToolCallRequest
 }
 
 // GenerationInfo contains metadata about the generation including normalized token counts.
@@ -108,7 +113,7 @@ type GenerationInfo struct {
 	Duration time.Duration
 }
 
-// ModelCallRequest captures the debuggable and mutable parts of a model request.
+// *ModelCallRequest captures the debuggable and mutable parts of a model request.
 // Model-call events use this typed shape instead of raw message slices so subscribers, trace
 // capture, and tests all share one request contract.
 // Subscribers may modify Messages in BeforeModelCallEvent for ephemeral context injection.
@@ -133,10 +138,10 @@ type Stream interface {
 	// Provider chunks contain metadata or an error; execution completion publishes Content.
 	Chunks() <-chan StreamChunk
 
-	// Response blocks until streaming completes and returns the final ContentResponse.
+	// Response blocks until streaming completes and returns the final ModelCallResponse.
 	// Provider responses contain candidates and completion data, not an accepted execution answer.
 	// If an error occurred during streaming, it is returned here.
-	Response() (*ContentResponse, error)
+	Response() (*ModelCallResponse, error)
 
 	// Close cancels the stream and releases resources.
 	// It's safe to call multiple times.

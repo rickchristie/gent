@@ -155,7 +155,7 @@ func TestResponsesReasoningAndSavedEvidence(t *testing.T) {
 				return
 			}
 			var savedChunks []gent.StreamChunk
-			var savedResponses []*gent.ContentResponse
+			var savedResponses []*gent.ModelCallResponse
 			for _, event := range saved.Activity {
 				switch event.Type {
 				case "model_call_finished":
@@ -172,7 +172,7 @@ func TestResponsesReasoningAndSavedEvidence(t *testing.T) {
 					savedChunks = append(savedChunks, decoded.(gent.StreamChunk))
 				}
 			}
-			assert.Equal(t, []*gent.ContentResponse{result}, savedResponses)
+			assert.Equal(t, []*gent.ModelCallResponse{result}, savedResponses)
 			assert.Equal(t, chunks, savedChunks)
 		})
 	}

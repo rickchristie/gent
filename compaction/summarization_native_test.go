@@ -35,13 +35,9 @@ Arguments: {"id":7}
 Tool call "call-b": lookup
 Arguments: {"id":8}
 Tool result "call-a": lookup
-<lookup>
 record 7
-</lookup>
 Tool result "call-b": lookup
-<lookup>
 record 8
-</lookup>
 
 `, nil}},
 		{"calls with assistant text", input{"I will read both records."},
@@ -56,26 +52,22 @@ Arguments: {"id":7}
 Tool call "call-b": lookup
 Arguments: {"id":8}
 Tool result "call-a": lookup
-<lookup>
 record 7
-</lookup>
 Tool result "call-b": lookup
-<lookup>
 record 8
-</lookup>
 
 `, nil}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			model := tt.NewMockModel().AddRawResponse(&gent.ContentResponse{
+			model := tt.NewMockModel().AddRawResponse(&gent.ModelCallResponse{
 				Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
 					Status: gent.ModelStatusToolCalls,
 				},
 					CandidateContent: []gent.ContentPart{
 						gent.TextContent{Text: test.input.content},
 					},
-					ToolCalls: []gent.ModelToolCall{
+					ToolCalls: []*gent.ModelToolCallRequest{
 						{ID: "call-a", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "lookup", Arguments: `{"id":7}`}},
 						{ID: "call-b", Type: "function", FunctionCall: &gent.FunctionCall{
@@ -83,8 +75,8 @@ record 8
 					}}},
 			})
 			agent := react.NewAgent(model).RegisterTool(gent.DefineTool("lookup",
-				func(_ context.Context, args map[string]any) (string, error) {
-					return fmt.Sprintf("record %v", args["id"]), nil
+				func(_ context.Context, args map[string]any) (*gent.ToolExecutionResponse, error) {
+					return capturedToolResponse(fmt.Sprintf("record %v", args["id"]), nil)
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "summary", gent.NewBasicLoopData(
 				gent.NewTask(gent.TextContent{Text: "Read both records."})))

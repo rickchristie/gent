@@ -21,7 +21,7 @@ type bookingInput struct {
 type guidanceModel struct {
 	program, finish bool
 	script          string
-	requests        []gent.ModelCallRequest
+	requests        []*gent.ModelCallRequest
 }
 
 const interruptedScript = `tool.call({tool:"lookup",args:{request_id:"request-7"}});
@@ -29,7 +29,7 @@ tool.call({tool:"book",args:{request_id:"request-7"}});
 tool.call({tool:"later",args:{request_id:"request-7"}});`
 
 func (m *guidanceModel) GenerateContentStream(
-	_ context.Context, request gent.ModelCallRequest,
+	_ context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	m.requests = append(m.requests, request)
 	choice := &gent.ContentChoice{
@@ -42,7 +42,7 @@ func (m *guidanceModel) GenerateContentStream(
 		choice.CandidateContent = nil
 		for _, name := range []string{"lookup", "book", "later"} {
 			choice.Completion.Status = gent.ModelStatusToolCalls
-			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: "provider-" + name,
+			choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{ID: "provider-" + name,
 				Type: "function", FunctionCall: &gent.FunctionCall{
 					Name: name, Arguments: `{"request_id":"request-7"}`}})
 		}
@@ -56,11 +56,11 @@ func (m *guidanceModel) GenerateContentStream(
 				return nil, err
 			}
 			choice.Completion.Status = gent.ModelStatusToolCalls
-			choice.ToolCalls = []gent.ModelToolCall{{ID: "provider-program", Type: "function",
+			choice.ToolCalls = []*gent.ModelToolCallRequest{{ID: "provider-program", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "run_code", Arguments: string(args)}}}
 		}
 	}
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}}
+	response := &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}}
 	return gent.NewCompletedStream(response, nil), nil
 }
 
@@ -103,8 +103,8 @@ func (s *guidanceStore) Save(_ context.Context, batch *gent.SaveBatch) error {
 			if err != nil {
 				return err
 			}
-			result := value.(*gent.AfterToolCallEvent).Output.(*gent.ToolCallResult)
-			if result.Outcome == "unknown" {
+			result := value.(*gent.AfterToolCallEvent).Output.(*gent.ToolCallRecord)
+			if result.Kind() == gent.ToolResponseRecovery {
 				return errRecoveryAck
 			}
 		}
@@ -167,15 +167,17 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 					"later":  "Check whether the later operation completed.",
 				}
 				for _, name := range []string{"lookup", "book", "later"} {
-					tool := gent.DefineTool(name, func(_ context.Context, input *bookingInput) (string, error) {
+					tool := gent.DefineTool(name, func(_ context.Context, input *bookingInput) (
+						*gent.ToolExecutionResponse, error,
+					) {
 						effects[name]++
-						return name + ":" + input.RequestID, nil
+						return capturedToolResponse(name+":"+input.RequestID, nil)
 					}).Description("Booking operation").ParameterSchema(nil).
-						Recovery(func(context.Context, *gent.ToolRecoveryRequest) (
+						Recovery(func(context.Context, *gent.ToolRecoveryRequest[*bookingInput]) (
 							*gent.ToolRecoveryResponse, error,
 						) {
-							return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved,
-								SteeringMessage: messages[name]}, nil
+							return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+								Instructions: messages[name]}, nil
 						}).MustBuild()
 					chain.RegisterTool(&recoverySearchTool{tool})
 				}
@@ -236,10 +238,10 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 			defer restored.Release()
 			assert.Equal(t, gent.TerminationSuccess, result.TerminationReason)
 			assert.Equal(t, test.expected, expected{effects})
-			var outputs []gent.ToolCallResponse
+			var outputs []*gent.ModelToolCallResponse
 			for _, message := range freshModel.requests[0].Messages {
 				for _, part := range message.Parts {
-					if output, ok := part.(gent.ToolCallResponse); ok {
+					if output, ok := part.(*gent.ModelToolCallResponse); ok {
 						outputs = append(outputs, output)
 					}
 				}
@@ -249,42 +251,33 @@ func TestNativeRecoveryGuidance(t *testing.T) {
 				bookNumber = 3
 			}
 			bookID := fmt.Sprintf("%s:tool:%d", ctx.ContextId(), bookNumber)
-			bookText := fmt.Sprintf(`Tool book (call %s):
-%s
-
-Recovery guidance:
-Check the saved request ID with the booking service before booking again.`,
-				bookID, `The operation was interrupted. Its outcome is unknown.
-It may have completed. Check the current state before you decide whether to repeat it.`)
-			lookupText := `<lookup>
-lookup:request-7
-</lookup>`
-			laterText := "This call did not start. " +
-				"Review the interrupted operation before making a new plan."
-			wantOutputs := []gent.ToolCallResponse{
-				{ToolCallID: "provider-lookup", Name: "lookup", Content: lookupText},
-				{ToolCallID: "provider-book", Name: "book", Content: bookText},
-				{ToolCallID: "provider-later", Name: "later", Content: laterText},
+			// Recovery keeps the native call IDs and provides plain guidance without wrapper fields.
+			var replies []*gent.ModelToolCallResponse
+			for _, message := range freshModel.requests[0].Messages {
+				for _, part := range message.Parts {
+					if reply, ok := part.(*gent.ModelToolCallResponse); ok {
+						replies = append(replies, reply)
+					}
+				}
 			}
 			if test.input.program {
-				// The last script call was never prepared, so it has no saved call result.
-				wantOutputs = []gent.ToolCallResponse{{ToolCallID: "provider-program", Name: "run_code",
-					Content: fmt.Sprintf(`JavaScript execution was interrupted. The script will not be restarted.
-Script:
-%s
-
-%s
-
-%s
-
-Review these results and make a new plan.`,
-						interruptedScript, lookupText, bookText)}}
+				if assert.Len(t, replies, 1) {
+					assert.Equal(t, "provider-program", replies[0].ToolCallID())
+					assert.Equal(t, gent.ToolResponseRecovery, replies[0].Kind())
+				}
+			} else if assert.Len(t, replies, 3) {
+				assert.Equal(t, []string{"provider-lookup", "provider-book", "provider-later"},
+					[]string{replies[0].ToolCallID(), replies[1].ToolCallID(), replies[2].ToolCallID()})
+				assert.Equal(t, gent.ToolResponseExecution, replies[0].Kind())
+				assert.Equal(t, gent.ToolResponseRecovery, replies[1].Kind())
+				status, _ := replies[2].RecoveryStatus()
+				assert.Equal(t, gent.ToolRecoveryNotStarted, status)
 			}
-			assert.Equal(t, wantOutputs, outputs)
+
 			view, err := restored.Export()
 			assert.NoError(t, err)
 			assert.NoError(t, gent.ValidateBundle(view, restored.Codecs()))
-			var unknown []*gent.ToolCallResult
+			var unknown []*gent.ToolCallRecord
 			for _, event := range view.Activity {
 				if event.Type != "tool_call_finished" {
 					continue
@@ -293,23 +286,25 @@ Review these results and make a new plan.`,
 				if !assert.NoError(t, err) {
 					return
 				}
-				call := value.(*gent.AfterToolCallEvent).Output.(*gent.ToolCallResult)
-				if call.Outcome == "unknown" {
+				call := value.(*gent.AfterToolCallEvent).Output.(*gent.ToolCallRecord)
+				if call.Kind() == gent.ToolResponseRecovery && call.Name() == "book" {
 					unknown = append(unknown, call)
 				}
 			}
-			assert.Equal(t, []*gent.ToolCallResult{{Name: "book", ToolCallId: bookID,
-				AttemptId: ctx.AttemptId(), Args: map[string]any{"request_id": "request-7"},
-				Input: &bookingInput{RequestID: "request-7"}, Outcome: "unknown",
-				Error: gent.SaveError(gent.ErrUncertainTool), Text: bookText, SummaryCaptured: true,
-				Instructions: "Check the saved request ID with the booking service before booking again.",
-			}}, unknown)
+			if assert.Len(t, unknown, 1) {
+				record := unknown[0]
+				assert.Equal(t, "book", record.Name())
+				assert.Equal(t, bookID, record.ToolCallID())
+				assert.Equal(t, gent.ToolRecoveryUnresolved, record.Recovery().Status)
+				assert.Equal(t, "Check the saved request ID with the booking service before booking again.",
+					record.Recovery().Instructions)
+			}
 		})
 	}
 }
 
 type recoverySearchTool struct {
-	gent.Tool[*bookingInput, string]
+	gent.Tool[*bookingInput]
 }
 
 func (*recoverySearchTool) Domain() string             { return "bookings" }
@@ -323,7 +318,10 @@ func TestInterruptedProgramKeepsSearchDiscovery(t *testing.T) {
 		chain := toolchain.NewSearch(toolchain.SearchHintSimpleList).
 			RegisterEngine(toolchain.NewRegexToolSearcher())
 		chain.RegisterTool(&recoverySearchTool{gent.DefineTool("book",
-			func(context.Context, *bookingInput) (string, error) { effects++; return "booked", nil }).
+			func(context.Context, *bookingInput) (*gent.ToolExecutionResponse, error) {
+				effects++
+				return capturedToolResponse("booked", nil)
+			}).
 			Description("Book a flight").ParameterSchema(nil).MustBuild()})
 		if !assert.NoError(t, chain.Initialize()) {
 			t.FailNow()
@@ -363,5 +361,10 @@ tool.call({tool:"book",args:{request_id:"request-7"}});`}
 	for _, definition := range freshModel.requests[0].Options.Tools {
 		names = append(names, definition.Function.Name)
 	}
-	assert.Equal(t, []string{"tool_registry_search", "book", "run_code"}, names)
+	assert.Equal(t, []string{"tool_registry_search", "execute_tool", "run_code"}, names)
+}
+func (m *guidanceModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

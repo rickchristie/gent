@@ -82,7 +82,9 @@ func (e *IndexToolSearcher) IndexAll(tools []gent.IndexableTool) error {
 }
 
 // Search returns tool names ranked by relevance from the underlying SearchIndex.
-func (e *IndexToolSearcher) Search(ctx context.Context, query string) ([]string, error) {
+func (e *IndexToolSearcher) Search(ctx context.Context, query string) (
+	*gent.ToolSearchResult, error,
+) {
 	results, err := e.index.Search(ctx, query, e.topK)
 	if err != nil {
 		return nil, err
@@ -91,7 +93,7 @@ func (e *IndexToolSearcher) Search(ctx context.Context, query string) ([]string,
 	for i, r := range results {
 		names[i] = r.Id
 	}
-	return names, nil
+	return &gent.ToolSearchResult{Status: gent.ToolExecuted, Names: names}, nil
 }
 
 // Compile-time check.

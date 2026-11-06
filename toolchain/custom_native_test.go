@@ -18,12 +18,12 @@ type selectedTools struct {
 	name string
 }
 
-func (c *selectedTools) NativeTools(ctx *gent.ExecutionContext) ([]gent.ToolDefinition, error) {
+func (c *selectedTools) NativeTools(ctx *gent.ExecutionContext) ([]*gent.ToolDefinition, error) {
 	tools, err := c.Registry.NativeTools(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var selected []gent.ToolDefinition
+	var selected []*gent.ToolDefinition
 	for _, tool := range tools {
 		if tool.Function.Name == c.name {
 			selected = append(selected, tool)
@@ -54,7 +54,7 @@ func TestCustomNativeSelectionKeepsExecutionHooks(t *testing.T) {
 		inputs []*selectedInput
 		hooks  int
 		calls  int64
-		tools  [][]gent.ToolDefinition
+		tools  [][]*gent.ToolDefinition
 		result []gent.ContentPart
 		err    error
 	}
@@ -66,9 +66,9 @@ func TestCustomNativeSelectionKeepsExecutionHooks(t *testing.T) {
 			"required": []string{"id"}, "additionalProperties": false,
 		}
 		chain.RegisterTool(gent.DefineTool(name,
-			func(_ context.Context, input *selectedInput) (string, error) {
+			func(_ context.Context, input *selectedInput) (*gent.ToolExecutionResponse, error) {
 				inputs = append(inputs, input)
-				return "record", nil
+				return capturedToolResponse("record", nil)
 			}).Description("Read a record").ParameterSchema(inputSchema).MustBuild())
 	}
 	model := tt.NewMockModel().AddToolCall("lookup", `{"id":"raw"}`, 1, 1).
@@ -86,13 +86,13 @@ func TestCustomNativeSelectionKeepsExecutionHooks(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	var requests [][]gent.ToolDefinition
+	var requests [][]*gent.ToolDefinition
 	for _, request := range model.CapturedRequests {
 		requests = append(requests, request.Options.Tools)
 	}
 	assert.Equal(t, expected{
 		inputs: []*selectedInput{{ID: "checked"}}, hooks: 1, calls: 1,
-		tools:  [][]gent.ToolDefinition{definitions[:1], definitions[:1]},
+		tools:  [][]*gent.ToolDefinition{definitions[:1], definitions[:1]},
 		result: []gent.ContentPart{gent.TextContent{Text: "Done."}},
 	}, expected{
 		inputs: inputs, hooks: hook.calls, calls: ctx.Stats().GetCounter(gent.SCToolCalls),

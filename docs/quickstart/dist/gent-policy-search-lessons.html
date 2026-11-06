@@ -1367,7 +1367,7 @@ input[type="radio"] {
               ><span class="arrow" aria-hidden="true">→</span>
               <button data-node="policy">
                 <small>POLICY RETRIEVAL</small><strong>search_policy</strong>
-                <span>gent.Tool[I, string]</span></button
+                <span>gent.Tool[I]</span></button
               ><span class="arrow" aria-hidden="true">→</span>
               <button data-node="index">
                 <small>RANKING</small><strong>FusedIndex</strong> <span>search.SearchIndex</span>
@@ -2084,8 +2084,9 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "summary": "Converts a Gent request into a provider call and returns a stream.",
       "advice": "Use a provider adapter that supports native tool calls. ReAct uses managed" +
         " model calls.",
-      "signature": "type Model interface {\n\tGenerateContentStream(context.Context, ModelCall" +
-        "Request) (Stream, error)\n}",
+      "signature": "type Model interface {\n\tPrepareRequest(*ExecutionContext, *ModelCallRequ" +
+        "est, ToolChain) (*ModelCallRequest, error)\n\tGenerateContentStream(contex" +
+        "t.Context, *ModelCallRequest) (Stream, error)\n}",
       "line": 10
     },
     {
@@ -2096,24 +2097,24 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "summary": "Supplies chunks, the final response, and cancellation.",
       "advice": "An adapter must finish its producer before the final response completes.",
       "signature": "type Stream interface {\n\tChunks() \u003c-chan StreamChunk\n\tResponse() " +
-        "(*ContentResponse, error)\n\tClose()\n}",
-      "line": 130
+        "(*ModelCallResponse, error)\n\tClose()\n}",
+      "line": 135
     },
     {
       "name": "Tool",
       "path": "tool.go",
       "group": "Tools",
       "use": "Use PolicySearchTool",
-      "summary": "Defines typed input, schema, execution, and text output for one operation.",
-      "advice": "PolicySearchTool implements Tool[PolicySearchInput, string]. Its result is" +
-        " Markdown text.",
-      "signature": "type Tool[I, TextOutput any] interface {\n\tIndexableTool\n\tName() string" +
-        "\n\tDescription() string\n\tPolicy() string\n\tRecover(context.Context, *T" +
-        "oolRecoveryRequest) (*ToolRecoveryResponse, error)\n\tStrict() bool\n\tOut" +
-        "putSchema() map[string]any\n\tParameterSchema() map[string]any\n\tCall(ctx" +
-        " context.Context, input I) (*ToolResult[TextOutput], error)\n\tDeduplicate" +
-        "Summary(input I, output TextOutput) string\n}",
-      "line": 75
+      "summary": "Defines typed input, schema, execution responses, and recovery for one ope" +
+        "ration.",
+      "advice": "PolicySearchTool implements Tool[PolicySearchInput]. Its execution respons" +
+        "e has Markdown text.",
+      "signature": "type Tool[I any] interface {\n\tIndexableTool\n\tPolicy() string\n\tStrict" +
+        "() bool\n\tParameterSchema() map[string]any\n\tOutputSchema() map[string]a" +
+        "ny\n\tUnrecoverableErrorInstructions() string\n\tCall(context.Context, I) " +
+        "(*ToolExecutionResponse, error)\n\tRecover(context.Context, *ToolRecoveryR" +
+        "equest[I]) (*ToolRecoveryResponse, error)\n}",
+      "line": 9
     },
     {
       "name": "ToolChain",
@@ -2124,13 +2125,13 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
         "t a time.",
       "advice": "Use toolchain.New(). Register the policy tool before you share the runner.",
       "signature": "type ToolChain interface {\n\tRegisterTool(any) ToolChain\n\tNativeTools(*" +
-        "ExecutionContext) ([]ToolDefinition, error)\n\tPrepareCalls(*ExecutionCont" +
-        "ext, []ModelToolCall) (*ToolPlan, error)\n\tExecuteNext(*ExecutionContext," +
-        " *ToolPlan, TextFormat) (*ToolCallResult, error)\n\tGetToolSchema(string) " +
-        "*schema.Schema\n\tDeduplicateSummary(*ToolCallResult) string\n\tRecover(co" +
-        "ntext.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)\n\tReg" +
-        "isterCodecs(*CodecRegistry) error\n\tRecoveryConfig() any\n}",
-      "line": 74
+        "ExecutionContext) ([]*ToolDefinition, error)\n\tPrepareCalls(*ExecutionCon" +
+        "text, []*ModelToolCallRequest) (*ToolPlan, error)\n\tExecuteNext(*Executio" +
+        "nContext, *ToolPlan, TextFormat) (*ToolCallRecord, error)\n\tGetToolSchema" +
+        "(string) *schema.Schema\n\tRecover(context.Context, *ToolRecoveryRequest[E" +
+        "ncodedValue]) (*ToolRecoveryResponse, error)\n\tRegisterCodecs(*CodecRegis" +
+        "try) error\n\tRecoveryConfig() any\n}",
+      "line": 12
     },
     {
       "name": "SearchIndex",
@@ -2274,7 +2275,7 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
         "en needed.",
       "signature": "type ToolSearcher interface {\n\tId() string\n\tSearchGuidance() string\n" +
         "\tIndexAll(tools []IndexableTool) error\n\tSearch(ctx context.Context, que" +
-        "ry string) ([]string, error)\n}",
+        "ry string) (*ToolSearchResult, error)\n}",
       "line": 59
     },
     {
@@ -2289,8 +2290,8 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
       "line": 170
     }
   ],
-  "revision": "3d71810",
-  "digest": "e4b215bbd3f4f29f",
+  "revision": "ccb33b7",
+  "digest": "a58a4784f2bfca6b",
   "sources": [
     "agent.go",
     "agents/react/agent.go",
@@ -2314,11 +2315,13 @@ go run ./docs/quickstart/policy-search-lessons/example</pre
     "search/fuser.go",
     "search/normalize.go",
     "search/search.go",
+    "steering.go",
     "tool.go",
+    "tool_record.go",
     "tool_search.go",
     "toolchain.go",
+    "toolchain/execution.go",
     "toolchain/native.go",
-    "toolchain/output.go",
     "toolchain/registry.go"
   ],
   "example": "// This example builds the policy index once and gives each question its o" +
@@ -2894,10 +2897,10 @@ Loop action: LAContinue`,
         2,
         1,
         "VALIDATOR RESULT / ILLUSTRATIVE",
-        `ValidationResult{
+        `gent.OutputValidationResult{
     Accepted: false,
-    Feedback: []FormattedSection{
-        {Name: "error", Content: "Include the policy ID."},
+    Steering: []gent.ContentPart{
+        gent.TextPart("Include the policy ID."),
     },
 }
 
@@ -2914,23 +2917,25 @@ Loop action: LAContinue`,
       step(
         "MODEL → POLICY TOOL",
         "The query is empty",
-        "The query " +
-          "field is a string, so schema validation passes. The policy tool rejects the empty " +
-          "string. The registry records an error observation.",
+        "The query schema " +
+          "requires at least one character. The registry returns InvalidArguments before " +
+          "calling the policy tool. The model gets correction details and the complete schema.",
         1,
         1,
-        "TOOL CALL AND ERROR",
+        "INVALID ARGUMENTS / EXCERPT",
         `search_policy({"query":""})
 
-Tool error: query is required
+Correction: query must contain at least one character.
+The response also includes the complete expected input schema.
 Loop action: LAContinue`,
       ),
       step(
         "MODEL → REGISTRY",
         "Retry with useful search text",
         "The next " +
-          "model call uses the error to choose a query. Success resets the consecutive " +
-          "tool-error gauges. Errors still remain in history and total error counts.",
+          "model call uses the correction to choose a query. InvalidArguments has its own " +
+          "counter and does not change consecutive tool errors. An Executed response resets " +
+          "the consecutive tool-error gauges.",
         2,
         2,
         "RETRY",

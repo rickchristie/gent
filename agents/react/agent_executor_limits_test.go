@@ -20,7 +20,7 @@ type limitModel struct {
 
 func (*limitModel) ModelName() string { return "limit-model" }
 func (m *limitModel) GenerateContentStream(
-	_ context.Context, _ gent.ModelCallRequest,
+	_ context.Context, _ *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	m.calls++
 	name, args := "work", "{}"
@@ -33,7 +33,7 @@ func (m *limitModel) GenerateContentStream(
 	choice := &gent.ContentChoice{Completion: gent.ModelCompletion{
 		Status: gent.ModelStatusToolCalls,
 	},
-		ToolCalls: []gent.ModelToolCall{{ID: fmt.Sprint(m.calls),
+		ToolCalls: []*gent.ModelToolCallRequest{{ID: fmt.Sprint(m.calls),
 			Type: "function", FunctionCall: &gent.FunctionCall{Name: name, Arguments: args}}}}
 	if m.kind == "answer" {
 		choice = &gent.ContentChoice{
@@ -45,7 +45,7 @@ func (m *limitModel) GenerateContentStream(
 		choice = &gent.ContentChoice{Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 			CandidateContent: []gent.ContentPart{gent.TextContent{Text: `{}`}}}
 	}
-	return gent.NewCompletedStream(&gent.ContentResponse{Choices: []*gent.ContentChoice{choice},
+	return gent.NewCompletedStream(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice},
 		Info: &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5, TotalTokens: 15}}, nil), nil
 }
 
@@ -83,8 +83,8 @@ func TestAgent_NativeLimits(t *testing.T) {
 		{"consecutive tool errors", input{gent.SGToolCallsErrorConsecutive, "error", 1, true}},
 		{"consecutive named errors",
 			input{gent.SGToolCallsErrorConsecutiveFor + "work", "error", 1, true}},
-		{"argument parse errors", input{gent.SCToolchainParseErrorTotal, "parse", 1, false}},
-		{"consecutive argument errors", input{gent.SGToolchainParseErrorConsecutive, "parse", 1, true}},
+		{"argument parse errors", input{gent.SCToolCallsInvalidArgumentsTotal, "parse", 1, false}},
+		{"named argument errors", input{gent.SCToolCallsInvalidArgumentsFor + "work", "parse", 1, false}},
 		{"answer parse errors", input{gent.SCOutputLocalRejectedTotal, "answer", 1, false}},
 		{"consecutive answer errors", input{gent.SGOutputLocalRejectedConsecutive, "answer", 1, true}},
 		{"output rejection", input{gent.SCOutputRejectedTotal, "answer", 1, false}},
@@ -104,11 +104,11 @@ func TestAgent_NativeLimits(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/iteration %d", test.name, stop), func(t *testing.T) {
 				model := &limitModel{kind: test.input.kind}
 				chain := toolchain.New().RegisterTool(gent.DefineTool("work",
-					func(context.Context, map[string]any) (string, error) {
+					func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
 						if test.input.kind == "error" {
-							return "", errors.New("failed")
+							return capturedToolResponse("", errors.New("failed"))
 						}
-						return "done", nil
+						return capturedToolResponse("done", nil)
 					}).Description("Do work").ParameterSchema(nil).MustBuild())
 				if test.input.kind == "code" {
 					chain = toolchain.NewJsToolChainWrapper(chain)
@@ -172,27 +172,34 @@ func TestAgent_NativePrefixLimit(t *testing.T) {
 	cases := []testCase{
 		{"calls", input{false, gent.SCToolCallsFor}, expected{1, 3, 4}},
 		{"errors", input{true, gent.SCToolCallsErrorFor}, expected{1, 3, 4}},
+		{"invalid arguments", input{false, gent.SCToolCallsInvalidArgumentsFor}, expected{1, 3, 4}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			var responses []*gent.ContentResponse
+			var responses []*gent.ModelCallResponse
 			for i, name := range []string{"alpha", "beta", "beta", "beta"} {
+				args := "{}"
+				if test.input.key == gent.SCToolCallsInvalidArgumentsFor {
+					args = "{"
+				}
 				choice := &gent.ContentChoice{Completion: gent.ModelCompletion{
 					Status: gent.ModelStatusToolCalls,
 				},
-					ToolCalls: []gent.ModelToolCall{
-						nativeTestCall(fmt.Sprint(i), name, "{}"),
+					ToolCalls: []*gent.ModelToolCallRequest{
+						nativeTestCall(fmt.Sprint(i), name, args),
 					}}
 				responses = append(responses, nativeTestResponse(choice))
 			}
 			model := newMockModel(responses...)
 			agent := NewAgent(model)
 			for _, name := range []string{"alpha", "beta"} {
-				agent.RegisterTool(gent.DefineTool(name, func(context.Context, map[string]any) (string, error) {
+				agent.RegisterTool(gent.DefineTool(name, func(context.Context, map[string]any) (
+					*gent.ToolExecutionResponse, error,
+				) {
 					if test.input.failures {
-						return "", errors.New("failed")
+						return capturedToolResponse("", errors.New("failed"))
 					}
-					return "done", nil
+					return capturedToolResponse("done", nil)
 				}).Description("Do work").ParameterSchema(nil).MustBuild())
 			}
 			limit := gent.Limit{Type: gent.LimitKeyPrefix, Key: test.input.key, MaxValue: 2}
@@ -215,4 +222,9 @@ func TestAgent_NativePrefixLimit(t *testing.T) {
 			assert.Equal(t, []gent.StatKey{test.input.key + "beta"}, keys)
 		})
 	}
+}
+func (m *limitModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

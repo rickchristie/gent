@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type liveIndexable[I, O any] struct{ gent.Tool[I, O] }
+type liveIndexable[I, O any] struct{ gent.Tool[I] }
 
 func (*liveIndexable[I, O]) Domain() string             { return "records" }
 func (*liveIndexable[I, O]) Categories() []string       { return []string{"records"} }
@@ -30,49 +30,57 @@ type liveProgramCall struct {
 
 func liveProgramCalls(ctx *gent.ExecutionContext) ([][]liveProgramCall, error) {
 	var programs [][]liveProgramCall
-	for _, entry := range ctx.History().Entries {
-		for _, message := range entry.Messages {
-			if message.Role != gent.ChatMessageTypeTool {
-				continue
-			}
-			response, ok := message.Parts[0].(gent.ToolCallResponse)
-			if !ok || response.Name != "run_code" {
-				continue
-			}
-			value, _ := message.GetMetadata(gent.MMKToolChainResult)
-			result, ok := value.(*gent.ToolChainResult)
-			if !ok {
-				return nil, fmt.Errorf("run_code result %q has no typed call evidence", response.ToolCallID)
-			}
-			var calls []liveProgramCall
-			for _, inner := range result.Results {
-				if inner.Name != "" {
-					calls = append(calls, liveProgramCall{inner.Name, inner.Input, inner.Output, inner.Error})
-				}
-			}
-			// Ignore attempts with no inner calls. Counters also include failed and no-op scripts;
-			// saved groups prove that the required dependent calls ran inside the same program.
+	var calls []liveProgramCall
+	collecting := false
+	for _, event := range ctx.Events() {
+		if before, ok := event.(*gent.BeforeToolCallEvent); ok && before.ToolName == "run_code" {
+			collecting = true
+			calls = nil
+		}
+		after, ok := event.(*gent.AfterToolCallEvent)
+		if !ok || !collecting {
+			continue
+		}
+		record, ok := after.Output.(*gent.ToolCallRecord)
+		if !ok {
+			continue
+		}
+		if record.Name() == "run_code" {
+			collecting = false
 			if len(calls) > 0 {
 				programs = append(programs, calls)
+				calls = nil
+			}
+			continue
+		}
+		var input any
+		if record.Input() != nil {
+			var err error
+			input, err = ctx.Codecs().Decode(*record.Input())
+			if err != nil {
+				return nil, err
 			}
 		}
+		calls = append(calls, liveProgramCall{record.Name(), input,
+			gent.ContentTextData(record.Response().Parts()), after.Error})
 	}
 	return programs, ctx.RecordingError()
 }
 
 func liveToolChain(calls *[]string, withSearch bool) (*toolchain.JsToolChainWrapper, error) {
 	lookup := &liveIndexable[*responseInput, *responseOutput]{gent.DefineTool("lookup",
-		func(_ context.Context, input *responseInput) (*responseOutput, error) {
+		func(_ context.Context, input *responseInput) (*gent.ToolExecutionResponse, error) {
 			*calls = append(*calls, "lookup:"+input.ID)
-			return &responseOutput{NextID: "record-9"}, nil
-		}).Description("Find the next record ID").ParameterSchema(responseInputSchema()).MustBuild()}
+			return capturedToolResponse(&responseOutput{NextID: "record-9"}, nil)
+		}).Description("Find the next record ID").ParameterSchema(responseInputSchema()).
+		OutputSchemaFrom(responseOutput{}).MustBuild()}
 	read := &liveIndexable[*responseInput, string]{gent.DefineTool("read",
-		func(_ context.Context, input *responseInput) (string, error) {
+		func(_ context.Context, input *responseInput) (*gent.ToolExecutionResponse, error) {
 			*calls = append(*calls, "read:"+input.ID)
 			if input.ID != "record-9" {
-				return "", fmt.Errorf("use the ID returned by lookup")
+				return capturedToolResponse("", fmt.Errorf("use the ID returned by lookup"))
 			}
-			return "record-finished", nil
+			return capturedToolResponse("record-finished", nil)
 		}).Description("Read the record identified by lookup").ParameterSchema(responseInputSchema()).
 		MustBuild()}
 	if !withSearch {
@@ -83,7 +91,9 @@ func liveToolChain(calls *[]string, withSearch bool) (*toolchain.JsToolChainWrap
 		RegisterEngine(toolchain.NewRegexToolSearcher())
 	search.RegisterTool(lookup).RegisterTool(read)
 	search.RegisterTool(&liveIndexable[*responseInput, string]{gent.DefineTool("ping",
-		func(context.Context, *responseInput) (string, error) { return "ready", nil }).
+		func(context.Context, *responseInput) (*gent.ToolExecutionResponse, error) {
+			return capturedToolResponse("ready", nil)
+		}).
 		Description("Check service status").ParameterSchema(responseInputSchema()).MustBuild()})
 	search.Pin("ping")
 	if err := search.Initialize(); err != nil {
@@ -111,7 +121,7 @@ func TestNativeLive(t *testing.T) {
 	want := expected{
 		calls: []string{"lookup:start", "read:record-9"},
 		programs: [][]liveProgramCall{{
-			{"lookup", &responseInput{ID: "start"}, &responseOutput{NextID: "record-9"}, nil},
+			{"lookup", &responseInput{ID: "start"}, `{"next_id":"record-9"}`, nil},
 			{"read", &responseInput{ID: "record-9"}, "record-finished", nil},
 		}},
 	}
@@ -148,8 +158,10 @@ func TestNativeLive(t *testing.T) {
 				return
 			}
 			task := `Use one run_code call to call lookup with id "start", then call read with
-id from lookup's output.next_id. Check each error. Do not call lookup or read directly.
-Return only the read output as the final answer.`
+id from lookupReply.parts.find(part => part.kind === "data").data.next_id.
+Check each reply's kind and executionStatus. Use tool.call for both calls.
+Do not call lookup or read directly. The code is a script; do not use a top-level return.
+Return only the text from read as the final answer, without quotes or formatting.`
 			if test.input.search {
 				task = `First use tool_registry_search with regex query "lookup|read".
 Wait for that result before the next request. Then follow these instructions:
@@ -202,9 +214,11 @@ Wait for that result before the next request. Then follow these instructions:
 					}
 				}
 				if assert.GreaterOrEqual(t, len(catalogs), 3) {
-					assert.Equal(t, []string{"tool_registry_search", "ping", "run_code"}, catalogs[0])
-					assert.Equal(t, []string{"tool_registry_search", "lookup", "read", "ping", "run_code"},
-						catalogs[1])
+					// Shared search returns definitions in its result. Native exposure stays fixed.
+					for _, catalog := range catalogs {
+						assert.Equal(t, []string{"tool_registry_search", "execute_tool", "ping", "run_code"},
+							catalog)
+					}
 				}
 			}
 		})

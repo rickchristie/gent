@@ -54,8 +54,8 @@ type IndexableTool interface {
 //
 //   - Search returns ALL matching tool names ranked by relevance.
 //     SearchChain handles pagination over results.
-//   - Error messages from Search are surfaced to the LLM, so they
-//     should be descriptive (e.g., "invalid regex: ...").
+//   - Expected query failures use Status and authored Instructions.
+//   - Unexpected Go errors remain private and use safe execution steering.
 type ToolSearcher interface {
 	// Id returns the unique identifier for this engine.
 	// Used as the query_type value in search requests.
@@ -72,5 +72,43 @@ type ToolSearcher interface {
 	// Search finds tools matching the query, returning tool names
 	// ranked by relevance. Returns all matches (pagination is
 	// handled by the caller).
-	Search(ctx context.Context, query string) ([]string, error)
+	Search(ctx context.Context, query string) (*ToolSearchResult, error)
+}
+
+// ToolSearchResult contains ranked names and authored model guidance. Executed with no names
+// means no matches. InvalidArguments can explain query syntax that JSON Schema cannot check.
+// Names are meaningful only for Executed; raw backend errors never become model guidance.
+type ToolSearchResult struct {
+	Status       ToolStatus
+	Names        []string
+	Instructions string
+}
+
+// ToolSearchRequest selects a local engine and an optional page. Page zero selects page one.
+type ToolSearchRequest struct {
+	Query     string `json:"query"`
+	QueryType string `json:"query_type"`
+	Page      int    `json:"page,omitempty"`
+}
+
+// ToolExecuteRequest selects one shared execution target. Gent validates that target's schema.
+type ToolExecuteRequest struct {
+	Tool string         `json:"tool"`
+	Args map[string]any `json:"args"`
+}
+
+// SearchableToolChain supplies shared local discovery independently of its search engine.
+// The runtime catalog comes from current bindings, never from historical model definitions.
+type SearchableToolChain interface {
+	ToolChain
+	SearchDefinition(*ExecutionContext) (*ToolSearchDefinition, error)
+	Search(*ExecutionContext, *ToolSearchRequest) (*ToolSearchResult, error)
+}
+
+// ToolSearchDefinition is a consistent read-only view of discoverable definitions and pins.
+// LocalSearch describes the shared search function. Definitions do not register executable code.
+type ToolSearchDefinition struct {
+	Tools       []*ToolDefinition
+	PinnedNames []string
+	LocalSearch *ToolDefinition
 }

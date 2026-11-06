@@ -9,6 +9,10 @@ import (
 )
 
 func (m *Chat) messages(messages []*gent.ModelMessage) ([]any, error) {
+	messages, err := separateToolMedia(messages)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]any, 0, len(messages))
 	for _, message := range messages {
 		if saved := message.Continuation; saved != nil {
@@ -26,11 +30,14 @@ func (m *Chat) messages(messages []*gent.ModelMessage) ([]any, error) {
 		}
 		value := map[string]any{"role": role}
 		var content []any
-		var calls []gent.ModelToolCall
+		var calls []*gent.ModelToolCallRequest
 		var text strings.Builder
 		textOnly := true
 		for _, part := range message.Parts {
 			switch p := partValue(part).(type) {
+			case gent.DataContent:
+				text.WriteString(p.String())
+				content = append(content, map[string]any{"type": "text", "text": p.String()})
 			case gent.TextContent:
 				text.WriteString(p.Text)
 				content = append(content, map[string]any{"type": "text", "text": p.Text})
@@ -56,17 +63,17 @@ func (m *Chat) messages(messages []*gent.ModelMessage) ([]any, error) {
 					return nil, fmt.Errorf("unsupported %s media %q", m.provider, p.MIMEType)
 				}
 				textOnly = false
-			case gent.ModelToolCall:
+			case gent.ModelToolCallRequest:
 				if role != "assistant" {
 					return nil, errors.New("native calls require an assistant message")
 				}
-				calls = append(calls, p)
-			case gent.ToolCallResponse:
+				calls = append(calls, &p)
+			case *gent.ModelToolCallResponse:
 				if role != "tool" || len(message.Parts) != 1 {
 					return nil, errors.New("Chat requires one tool result per tool message")
 				}
-				value["tool_call_id"] = p.ToolCallID
-				text.WriteString(p.Content)
+				value["tool_call_id"] = p.ToolCallID()
+				text.WriteString(gent.ContentTextData(p.Parts()))
 			default:
 				return nil, fmt.Errorf("unsupported %s content %T", m.provider, part)
 			}

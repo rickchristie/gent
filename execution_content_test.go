@@ -27,11 +27,12 @@ type contentReply struct {
 
 type contentModel struct {
 	replies  []contentReply
-	requests []gent.ModelCallRequest
+	requests []*gent.ModelCallRequest
 	complete func()
 }
 
-func (model *contentModel) GenerateContentStream(_ context.Context, request gent.ModelCallRequest) (
+func (model *contentModel) GenerateContentStream(_ context.Context,
+	request *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	index := len(model.requests)
@@ -50,7 +51,7 @@ func (model *contentModel) GenerateContentStream(_ context.Context, request gent
 	if model.complete != nil {
 		model.complete()
 	}
-	stream.Complete(&gent.ContentResponse{Choices: []*gent.ContentChoice{reply.choice},
+	stream.Complete(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{reply.choice},
 		Info: &gent.GenerationInfo{InputTokens: 2, OutputTokens: 4, TotalTokens: 6}}, reply.err)
 	return stream, nil
 }
@@ -500,7 +501,7 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 					CandidateContent: []gent.ContentPart{
 						gent.TextContent{Text: "Looking up."},
 					},
-					ToolCalls: []gent.ModelToolCall{{ID: "lookup", Type: "function",
+					ToolCalls: []*gent.ModelToolCallRequest{{ID: "lookup", Type: "function",
 						FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: "{}"}}}},
 					deltas: []string{"Looking up."}},
 				{choice: &gent.ContentChoice{
@@ -522,9 +523,11 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 			toolCalls := 0
 			buildAgent := func(model gent.Model) *react.Agent[contentAnswer] {
 				return react.NewWithOutput(model, out).WithRecoveryVersion("content-v1").
-					RegisterTool(gent.DefineTool("lookup", func(context.Context, map[string]any) (string, error) {
+					RegisterTool(gent.DefineTool("lookup", func(context.Context, map[string]any) (
+						*gent.ToolExecutionResponse, error,
+					) {
 						toolCalls++
-						return "done", nil
+						return capturedToolResponse("done", nil)
 					}).Description("Read the status").ParameterSchema(nil).MustBuild())
 			}
 			agent := buildAgent(model)
@@ -649,3 +652,8 @@ func TestExecutionContent_AcceptSaveAndRestore(t *testing.T) {
 }
 
 func (contentLoop) Output() gent.Output[string] { return output.NewTextOutput() }
+func (m *contentModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
+}

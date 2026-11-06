@@ -32,7 +32,7 @@ type countedModel struct {
 	requests int
 }
 
-func (m *countedModel) GenerateContentStream(ctx context.Context, request gent.ModelCallRequest) (
+func (m *countedModel) GenerateContentStream(ctx context.Context, request *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	m.requests++
@@ -51,7 +51,7 @@ func TestRecoveryFromReopenedDatabase(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"uncertain read can retry", input{gent.PhaseToolReady},
+		{"uncertain read reports recovery to the model", input{gent.PhaseToolReady},
 			expected{1, 1, []gent.ContentPart{
 				gent.TextContent{Text: "Order order-1001 has shipped."}}}},
 		{"completed read is reused", input{gent.PhaseToolCompleted},
@@ -120,4 +120,9 @@ func TestRecoveryFromReopenedDatabase(t *testing.T) {
 			assert.Equal(t, 0, lastModel.requests)
 		})
 	}
+}
+func (m *countedModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

@@ -48,7 +48,7 @@ func TestProvidersNativeOutputRequest(t *testing.T) {
 			`{"contents":[{"role":"user","parts":[{"text":"Return JSON."}]}],
 "systemInstruction":{"parts":[{"text":"Keep my words."}]},"generationConfig":{
 "maxOutputTokens":64,"thinkingConfig":{"includeThoughts":true},
-"responseFormat":{"text":{"mimeType":"APPLICATION_JSON","schema":SCHEMA}}}}`}},
+"responseMimeType":"application/json","responseJsonSchema":SCHEMA}}`}},
 		{"DeepSeek", input{"deepseek"}, expected{"/v1/chat/completions", "Authorization",
 			"Bearer fixture-key", strings.ReplaceAll(chat, "FORMAT",
 				`"response_format":{"type":"json_object"}`)}},
@@ -106,6 +106,61 @@ func TestProvidersNativeOutputRequest(t *testing.T) {
 			assert.Equal(t, expectedBody, body)
 			assert.Equal(t, test.expected.path, path)
 			assert.Equal(t, test.expected.auth, auth)
+		})
+	}
+}
+
+func TestGeminiJSONModeRequest(t *testing.T) {
+	type input struct {
+		jsonMode bool
+		mimeType string
+	}
+	type expected struct {
+		config map[string]any
+		err    error
+	}
+	type testCase struct {
+		name     string
+		input    input
+		expected expected
+	}
+	plain := map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true}}
+	jsonConfig := map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true},
+		"responseMimeType": "application/json"}
+	cases := []testCase{
+		{"default text", input{}, expected{plain, nil}},
+		{"explicit text", input{mimeType: "text/plain"}, expected{plain, nil}},
+		{"JSON mode", input{jsonMode: true}, expected{jsonConfig, nil}},
+		{"JSON MIME type", input{mimeType: "application/json"}, expected{jsonConfig, nil}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			actual := expected{}
+			client := &http.Client{Transport: responseTransport(func(request *http.Request) (
+				*http.Response, error,
+			) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					return nil, err
+				}
+				actual.config = body["generationConfig"].(map[string]any)
+				return fixtureHTTP(providerResponse("gemini", 3), "application/json"), nil
+			})}
+			request := gent.NewModelCallRequest([]*gent.ModelMessage{
+				gent.TextParts(gent.ChatMessageTypeHuman, "Return the requested value."),
+			})
+			request.Options.JSONMode = test.input.jsonMode
+			request.Options.ResponseMIMEType = test.input.mimeType
+			stream, err := fixtureModel("gemini", client).GenerateContentStream(
+				context.Background(), request)
+			if !assert.NoError(t, err) {
+				return
+			}
+			defer stream.Close()
+			for range stream.Chunks() {
+			}
+			_, actual.err = stream.Response()
+			assert.Equal(t, test.expected, actual)
 		})
 	}
 }

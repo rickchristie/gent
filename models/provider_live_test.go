@@ -84,9 +84,9 @@ func checkLiveTools(t *testing.T, ctx context.Context, model gent.Model) {
 		ID string `json:"id"`
 	}
 	type expected struct {
-		calls  []input
-		value  string
-		result *gent.ExecutionResult
+		calls       []input
+		value, text string
+		termination gent.TerminationReason
 	}
 	// Only the real tool result contains this value. A guessed answer cannot pass the test.
 	secret := make([]byte, 12)
@@ -95,22 +95,32 @@ func checkLiveTools(t *testing.T, ctx context.Context, model gent.Model) {
 	}
 	record := fmt.Sprintf("record-%x", secret)
 	var calls []input
-	tool := gent.DefineTool("read_live_record", func(_ context.Context, value input) (string, error) {
+	tool := gent.DefineTool("read_live_record", func(_ context.Context, value input) (
+		*gent.ToolExecutionResponse, error,
+	) {
 		calls = append(calls, value)
-		return record, nil
+		return capturedToolResponse(record, nil)
 	}).Description("Read the record for the supplied id.").MustBuild()
 	agent := react.NewAgent(model).RegisterTool(tool).WithCallOptions(gent.WithMaxTokens(2048))
 	execCtx := liveExecutionContext(ctx, "native tools", "Use the tools to read records.",
-		`Call read_live_record exactly once with id "test". Then return only its complete output.`)
+		`Call read_live_record exactly once with id "test". Return only the record text it supplies,
+without quotes, JSON, or formatting.`)
 	value, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(execCtx)
 	if !assert.NoError(t, err) {
 		return
 	}
-	want := expected{[]input{{ID: "test"}}, record, &gent.ExecutionResult{
-		TerminationReason: gent.TerminationSuccess,
-		Output:            []gent.ContentPart{gent.TextContent{Text: record}},
-	}}
-	assert.Equal(t, want, expected{calls, value, result})
+	// Providers can split text into several content parts. Validate every part and the full text;
+	// a fixed part count would test transport chunk boundaries instead of the accepted output.
+	// The runner has closed execCtx, so this independent check needs its own context.
+	checkCtx := liveExecutionContext(ctx, "record output", "Read the record text.", "")
+	defer checkCtx.Release()
+	processed, err := output.NewTextOutput().Process(checkCtx, result.Output)
+	if !assert.NoError(t, err) || !assert.True(t, processed.Accepted) {
+		return
+	}
+	assert.Equal(t, result.Output, processed.Content)
+	want := expected{[]input{{ID: "test"}}, record, record, gent.TerminationSuccess}
+	assert.Equal(t, want, expected{calls, value, processed.Value, result.TerminationReason})
 }
 
 type liveOutputValue struct {

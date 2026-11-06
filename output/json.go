@@ -96,7 +96,13 @@ func (o *jsonOutput[T]) Configure(request *gent.ModelCallRequest) error {
 	if err := o.validator.check(); err != nil {
 		return err
 	}
-	request.Options.ResponseSchema = o.schema.Raw()
+	// Configure supplies an editable request. Its schema must be independent of the compiled
+	// contract shared by other calls, including callers that use an adapter directly.
+	owned, err := schema.Copy(o.schema.Raw())
+	if err != nil {
+		return err
+	}
+	request.Options.ResponseSchema = owned
 	request.Options.ResponseMIMEType = "application/json"
 	request.Options.ResponseModalities = []string{"text"}
 	return nil

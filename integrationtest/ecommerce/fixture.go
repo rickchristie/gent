@@ -368,22 +368,22 @@ func (f *EcommerceFixture) initializeData() {
 // Tool Methods
 // -------------------------------------------------------------------------
 
-func (f *EcommerceFixture) getCustomerInfoTool() gent.Tool[
-	getCustomerInfoInput, *Customer,
-] {
+func (f *EcommerceFixture) getCustomerInfoTool() gent.Tool[getCustomerInfoInput] {
 	return gent.DefineTool("get_customer_info", func(
 		ctx context.Context,
 		input getCustomerInfoInput,
-	) (*Customer, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		for _, c := range f.customers {
 			if c.Email == input.Email {
-				return c, nil
+				return capturedToolResponse(c, nil)
 			}
 		}
-		return nil, fmt.Errorf(
+		return capturedToolResponse(nil, fmt.Errorf(
 			"customer not found with email: %s",
 			input.Email,
-		)
+		))
 	}).Description("Retrieve customer information by email address").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"email": schema.String(
@@ -398,31 +398,31 @@ func (f *EcommerceFixture) getCustomerInfoTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) getOrdersTool() gent.Tool[
-	getOrdersInput, *OrderPage,
-] {
+func (f *EcommerceFixture) getOrdersTool() gent.Tool[getOrdersInput] {
 	return gent.DefineTool("get_orders", func(
 		ctx context.Context,
 		input getOrdersInput,
-	) (*OrderPage, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.CustomerID == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"customer_id is required",
-			)
+			))
 		}
 		if _, exists := f.customers[input.CustomerID]; !exists {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"customer not found: %s",
 				input.CustomerID,
-			)
+			))
 		}
 		page, exists := f.orderPages[input.Cursor]
 		if !exists {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"invalid cursor: %s", input.Cursor,
-			)
+			))
 		}
-		return page, nil
+		return capturedToolResponse(page, nil)
 	}).Description("Retrieve customer orders with cursor-based "+
 		"pagination. Pass an empty cursor for the "+
 		"first page. Use the next_cursor from the "+
@@ -444,26 +444,26 @@ func (f *EcommerceFixture) getOrdersTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) getOrderPaymentsTool() gent.Tool[
-	getOrderPaymentsInput, *OrderPaymentsResult,
-] {
+func (f *EcommerceFixture) getOrderPaymentsTool() gent.Tool[getOrderPaymentsInput] {
 	return gent.DefineTool("get_order_payments", func(
 		ctx context.Context,
 		input getOrderPaymentsInput,
-	) (*OrderPaymentsResult, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.OrderID == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"order_id is required",
-			)
+			))
 		}
 		result, exists := f.payments[input.OrderID]
 		if !exists {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"no payments found for order: %s",
 				input.OrderID,
-			)
+			))
 		}
-		return result, nil
+		return capturedToolResponse(result, nil)
 	}).Description("Retrieve all payment records for a specific order").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"order_id": schema.String("The order ID"),
@@ -477,26 +477,26 @@ func (f *EcommerceFixture) getOrderPaymentsTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) gatewayGetTxDetailTool() gent.Tool[
-	gatewayGetTxDetailInput, *GatewayTx,
-] {
+func (f *EcommerceFixture) gatewayGetTxDetailTool() gent.Tool[gatewayGetTxDetailInput] {
 	return gent.DefineTool("gateway_get_tx_detail", func(
 		ctx context.Context,
 		input gatewayGetTxDetailInput,
-	) (*GatewayTx, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.TxID == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"tx_id is required",
-			)
+			))
 		}
 		tx, exists := f.gatewayTxs[input.TxID]
 		if !exists {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"transaction not found: %s",
 				input.TxID,
-			)
+			))
 		}
-		return tx, nil
+		return capturedToolResponse(tx, nil)
 	}).Description("Get real-time transaction details from the "+
 		"payment gateway. Use this to verify the "+
 		"actual status of a payment transaction.").
@@ -514,29 +514,29 @@ func (f *EcommerceFixture) gatewayGetTxDetailTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) gatewayCancelTxTool() gent.Tool[
-	gatewayCancelTxInput, *GatewayCancelResult,
-] {
+func (f *EcommerceFixture) gatewayCancelTxTool() gent.Tool[gatewayCancelTxInput] {
 	return gent.DefineTool("gateway_cancel_tx", func(
 		ctx context.Context,
 		input gatewayCancelTxInput,
-	) (*GatewayCancelResult, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.TxID == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"tx_id is required",
-			)
+			))
 		}
 		if _, exists := f.gatewayTxs[input.TxID]; !exists {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"transaction not found: %s",
 				input.TxID,
-			)
+			))
 		}
-		return &GatewayCancelResult{
+		return capturedToolResponse(&GatewayCancelResult{
 			Success: false,
 			Reason: "Transaction has already " +
 				"settled and cannot be cancelled",
-		}, nil
+		}, nil)
 	}).Description("Attempt to cancel a payment gateway "+
 		"transaction. Only works for transactions "+
 		"that have not yet settled.").ParameterSchema(schema.Object(map[string]*schema.Property{
@@ -552,32 +552,32 @@ func (f *EcommerceFixture) gatewayCancelTxTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) processRefundTool() gent.Tool[
-	processRefundInput, *RefundResult,
-] {
+func (f *EcommerceFixture) processRefundTool() gent.Tool[processRefundInput] {
 	return gent.DefineTool("process_refund", func(
 		ctx context.Context,
 		input processRefundInput,
-	) (*RefundResult, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.PaymentID == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"payment_id is required",
-			)
+			))
 		}
 		if input.PaymentID == "PAY-2001" {
-			return &RefundResult{
+			return capturedToolResponse(&RefundResult{
 				Success: false,
 				Reason: "Refund rejected by bank: " +
 					"card ending in 4242 is no " +
 					"longer active. Please use " +
 					"an alternative resolution " +
 					"method.",
-			}, nil
+			}, nil)
 		}
-		return nil, fmt.Errorf(
+		return capturedToolResponse(nil, fmt.Errorf(
 			"payment not found: %s",
 			input.PaymentID,
-		)
+		))
 	}).Description("Attempt to process a refund for a payment. "+
 		"Refund goes back to the original payment "+
 		"method.").ParameterSchema(schema.Object(map[string]*schema.Property{
@@ -595,19 +595,19 @@ func (f *EcommerceFixture) processRefundTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) createCaseTool() gent.Tool[
-	createCaseInput, *CaseResult,
-] {
+func (f *EcommerceFixture) createCaseTool() gent.Tool[createCaseInput] {
 	return gent.DefineTool("create_case", func(
 		ctx context.Context,
 		input createCaseInput,
-	) (*CaseResult, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.OrderID == "" || input.Details == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"order_id and details are required",
-			)
+			))
 		}
-		return &CaseResult{
+		return capturedToolResponse(&CaseResult{
 			CaseID:  "CASE-3001",
 			OrderID: input.OrderID,
 			Status:  "open",
@@ -615,7 +615,7 @@ func (f *EcommerceFixture) createCaseTool() gent.Tool[
 				"successfully. A billing " +
 				"specialist will review " +
 				"within 24 hours.",
-		}, nil
+		}, nil)
 	}).Description("Create a support case for issues that "+
 		"cannot be resolved automatically").ParameterSchema(schema.Object(map[string]*schema.Property{
 		"order_id": schema.String(
@@ -636,24 +636,24 @@ func (f *EcommerceFixture) createCaseTool() gent.Tool[
 	).MustBuild()
 }
 
-func (f *EcommerceFixture) createCreditRequestTool() gent.Tool[
-	createCreditRequestInput, *CreditRequestResult,
-] {
+func (f *EcommerceFixture) createCreditRequestTool() gent.Tool[createCreditRequestInput] {
 	return gent.DefineTool("create_credit_request", func(
 		ctx context.Context,
 		input createCreditRequestInput,
-	) (*CreditRequestResult, error) {
+	) (*gent.ToolExecutionResponse,
+
+		error) {
 		if input.CaseID == "" {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"case_id is required",
-			)
+			))
 		}
 		if input.Amount <= 0 {
-			return nil, fmt.Errorf(
+			return capturedToolResponse(nil, fmt.Errorf(
 				"amount must be positive",
-			)
+			))
 		}
-		return &CreditRequestResult{
+		return capturedToolResponse(&CreditRequestResult{
 			RequestID: "CR-4001",
 			CaseID:    input.CaseID,
 			Amount:    input.Amount,
@@ -667,7 +667,7 @@ func (f *EcommerceFixture) createCreditRequestTool() gent.Tool[
 					"any future purchase.",
 				input.Amount,
 			),
-		}, nil
+		}, nil)
 	}).Description("Create a store credit request associated "+
 		"with a support case. Credit is applied "+
 		"immediately if approved.").ParameterSchema(schema.Object(map[string]*schema.Property{

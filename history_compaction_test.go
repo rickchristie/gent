@@ -15,12 +15,12 @@ import (
 type historySequenceModel struct {
 	choices  []*gent.ContentChoice
 	texts    []string
-	requests []gent.ModelCallRequest
+	requests []*gent.ModelCallRequest
 }
 
 func (m *historySequenceModel) GenerateContentStream(
 	_ context.Context,
-	request gent.ModelCallRequest,
+	request *gent.ModelCallRequest,
 ) (
 	gent.Stream, error,
 ) {
@@ -31,7 +31,7 @@ func (m *historySequenceModel) GenerateContentStream(
 		choice.CandidateContent = []gent.ContentPart{gent.TextContent{Text: m.texts[len(m.requests)]}}
 	}
 	m.requests = append(m.requests, request)
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{choice},
 		Info:    &gent.GenerationInfo{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
 	}, nil), nil
@@ -53,8 +53,10 @@ func TestHistoryCompaction_PreservesBothSummariesAndResumes(t *testing.T) {
 	}}
 	newAgent := func(model gent.Model) *react.Agent[string] {
 		return react.NewAgent(model).WithRecoveryVersion("summaries/v1").RegisterTool(
-			gent.DefineTool("policy", func(context.Context, recoveryInput) (string, error) {
-				return "Policy P10 permits refunds within 30 days.", nil
+			gent.DefineTool("policy", func(context.Context, recoveryInput) (
+				*gent.ToolExecutionResponse, error,
+			) {
+				return capturedToolResponse("Policy P10 permits refunds within 30 days.", nil)
 			}).Description("Read policy text").ParameterSchema(nil).MustBuild())
 	}
 	configure := func(ctx *gent.ExecutionContext, model gent.Model) {
@@ -122,4 +124,9 @@ Two policy lookups were completed.
 	assert.Len(t, freshModel.requests, 1)
 	assert.Equal(t, int64(2), fresh.Stats().GetCounter(gent.SCCompactions))
 	assert.Equal(t, 3, fresh.Iteration())
+}
+func (m *historySequenceModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

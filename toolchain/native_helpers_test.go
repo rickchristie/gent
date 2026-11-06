@@ -10,7 +10,7 @@ import (
 
 // testCalls turns compact test data into native call arguments. The production registry receives
 // only native calls, including in the execution tests that predate this API.
-func testCalls(content string) []gent.ModelToolCall {
+func testCalls(content string) []*gent.ModelToolCallRequest {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
@@ -30,7 +30,7 @@ func testCalls(content string) []gent.ModelToolCall {
 		}
 		calls = append(calls, single)
 	}
-	result := make([]gent.ModelToolCall, len(calls))
+	result := make([]*gent.ModelToolCallRequest, len(calls))
 	for i, call := range calls {
 		args := string(call.Args)
 		if args == "" || args == "null" {
@@ -43,7 +43,7 @@ func testCalls(content string) []gent.ModelToolCall {
 
 func executeTestCalls(chain gent.ToolChain, ctx *gent.ExecutionContext,
 	content string, format gent.TextFormat,
-) (*gent.ToolChainResult, error) {
+) ([]*gent.ToolCallRecord, error) {
 	if ctx == nil {
 		ctx = newExecCtx()
 	}
@@ -52,7 +52,7 @@ func executeTestCalls(chain gent.ToolChain, ctx *gent.ExecutionContext,
 
 func executeTestCode(chain *JsToolChainWrapper, ctx *gent.ExecutionContext,
 	code string, format gent.TextFormat,
-) (*gent.ToolChainResult, error) {
+) ([]*gent.ToolCallRecord, error) {
 	if ctx == nil {
 		ctx = newExecCtx()
 	}
@@ -60,16 +60,16 @@ func executeTestCode(chain *JsToolChainWrapper, ctx *gent.ExecutionContext,
 	if err != nil {
 		return nil, err
 	}
-	calls := []gent.ModelToolCall{nativeCall("run_code", string(args))}
+	calls := []*gent.ModelToolCallRequest{nativeCall("run_code", string(args))}
 	result, err := executeToolPlan(ctx, chain, calls, format)
 	if err != nil {
 		return nil, err
 	}
-	return result.Results[0].Output.(*gent.ToolChainResult), nil
+	return result, nil
 }
 
 func executeToolPlan(ctx *gent.ExecutionContext, chain gent.ToolChain,
-	calls []gent.ModelToolCall, format gent.TextFormat) (*gent.ToolChainResult, error) {
+	calls []*gent.ModelToolCallRequest, format gent.TextFormat) ([]*gent.ToolCallRecord, error) {
 	plan, err := chain.PrepareCalls(ctx, calls)
 	if err != nil {
 		return nil, err
@@ -79,5 +79,5 @@ func executeToolPlan(ctx *gent.ExecutionContext, chain gent.ToolChain,
 			return nil, fmt.Errorf("execute tool %d: %w", plan.NextCall, err)
 		}
 	}
-	return &gent.ToolChainResult{Results: plan.Results}, nil
+	return plan.Results, nil
 }

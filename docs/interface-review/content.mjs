@@ -146,18 +146,18 @@ describe(
 describe(
   'gent.Tool',
   'Tools & answers',
-  'Execute one operation with typed input and output.',
+  'Execute one operation with typed input and ordered response parts.',
   'Application business logic need not understand LLM formatting or reflection.',
   [
     'The chain validates the schema and converts arguments before Call receives typed input.',
     'The builder supplies schemas, search metadata, policy, strict mode, and output descriptions.',
-    'Recover returns a decision, optional steering, and the recovered output when completed.',
+    'Recover reports Completed, NotStarted, or Unresolved. The model decides the next action.',
     'Saved results and saved recovery decisions take precedence over another recovery check.',
-    'DeduplicateSummary abbreviates older observations; it does not suppress tool execution.',
+    'Execution and recovery errors produce safe model guidance; diagnostics remain private.',
     'Use ToolIdentityFromContext for an external service’s idempotency or reconciliation key.',
   ],
   ['gent.DefineTool'],
-  ['gent.ToolChain', 'gent.ToolRecoveryResponse', 'gent.ToolCallResult', 'gent.IndexableTool'],
+  ['gent.ToolChain', 'gent.ToolRecoveryResponse', 'gent.ToolCallRecord', 'gent.IndexableTool'],
   'Which tools have external side effects that need reconciliation?',
 );
 
@@ -173,8 +173,23 @@ describe(
     'RegisterCodecs and RecoveryConfig support fresh-worker continuation.',
   ],
   ['toolchain.Registry', 'toolchain.SearchChain', 'toolchain.JsToolChainWrapper'],
-  ['gent.Tool', 'gent.CheckpointState', 'gent.ToolRecoveryResponse', 'gent.ToolCallResult'],
+  ['gent.Tool', 'gent.CheckpointState', 'gent.ToolRecoveryResponse', 'gent.ToolCallRecord'],
   'Does the selected chain support the recovery guarantees the application expects?',
+);
+
+describe(
+  'gent.SearchableToolChain',
+  'Tools & answers',
+  'Search the current tool catalog without executing a business tool.',
+  'Model preparation can use the same explicit search boundary as a shared search function.',
+  [
+    'Search accepts the current query and returns names, status, and safe instructions.',
+    'Search results do not add native definitions in the shared local search mode.',
+    'The current catalog controls visibility; saved evidence retains the earlier model request.',
+  ],
+  ['toolchain.SearchChain'],
+  ['gent.ToolChain', 'gent.ToolSearcher'],
+  'Which tools must stay pinned while the rest are found through search?',
 );
 
 describe(
@@ -372,7 +387,7 @@ const hooks = [
   [
     'BeforeToolCall',
     'Before effective typed tool input is saved and execution begins.',
-    'May modify effective arguments; an authorized recovery retry reuses the saved input.',
+    'May modify effective arguments. Recovery inspects saved input without rerunning this hook.',
   ],
   [
     'AfterToolCall',
@@ -702,10 +717,10 @@ export const supporting = {
     'Remember ordered calls, the next cursor, and completed results.',
     'Logical identity comes from the planned position, not a hash of tool arguments.',
   ],
-  'gent.ToolCallResult': [
+  'gent.ToolCallRecord': [
     'Tools & answers',
-    'Preserve complete tool evidence and its captured abbreviation.',
-    'Raw/typed input, typed output, IDs, text, media, instructions, and errors remain available.',
+    'Preserve tool input, accepted outcomes, private diagnostics, and the prepared model reply.',
+    'Save the outcome and prepared parts together. Resume reuses both without another call.',
   ],
   'gent.ExecutionStats': [
     'Execution',
@@ -750,7 +765,7 @@ export const phases = [
     'tool_ready',
     'Accept effective tool input',
     'A plan position and its final typed input are saved before an external tool call.',
-    'After a crash the outcome may be uncertain. Reconcile it before retrying.',
+    'After a crash, recover the outcome and return the report to the model. Do not retry the call.',
     ['gent.ToolChain', 'gent.ToolRecoveryResponse', 'gent.ToolPlan'],
   ],
   [
@@ -758,7 +773,7 @@ export const phases = [
     'Keep the tool result',
     'The completed result and plan cursor can be reused in order.',
     'The next planned tool has its own logical ID, even if its name and arguments are identical.',
-    ['gent.ToolCallResult', 'gent.ToolChain'],
+    ['gent.ToolCallRecord', 'gent.ToolChain'],
   ],
   [
     'iteration_completed',
@@ -813,7 +828,7 @@ export const boundaries = [
     'Uncertain work stays explicit',
     'Logical call ID ≠ worker attempt ID',
     'Call identity survives takeover; the attempt changes. Tool-ready cannot prove a side effect.',
-    'Tool.Recover returns a completed result, permits a retry, or leaves the operation unresolved.',
+    'Tool.Recover reports Completed, NotStarted, or Unresolved. The model makes the next plan.',
     ['gent.ToolRecoveryResponse', 'gent.ToolChain', 'gent.ToolPlan'],
   ],
   [

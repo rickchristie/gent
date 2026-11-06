@@ -12,13 +12,13 @@ import (
 )
 
 type nativeRecoveryModel struct {
-	requests []gent.ModelCallRequest
+	requests []*gent.ModelCallRequest
 	answer   bool
 	code     bool
 }
 
 func (model *nativeRecoveryModel) GenerateContentStream(_ context.Context,
-	request gent.ModelCallRequest) (gent.Stream, error) {
+	request *gent.ModelCallRequest) (gent.Stream, error) {
 	model.requests = append(model.requests, request)
 	choice := &gent.ContentChoice{
 		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -28,17 +28,17 @@ func (model *nativeRecoveryModel) GenerateContentStream(_ context.Context,
 		choice.CandidateContent = []gent.ContentPart{gent.TextContent{Text: "Read the policy."}}
 		for _, id := range []string{"provider-a", "provider-b"} {
 			choice.Completion.Status = gent.ModelStatusToolCalls
-			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: id, Type: "function",
+			choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{ID: id, Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "policy", Arguments: `{"id":"P10"}`}})
 		}
 		if model.code {
 			choice.Completion.Status = gent.ModelStatusToolCalls
-			choice.ToolCalls = []gent.ModelToolCall{{ID: "provider-code", Type: "function",
+			choice.ToolCalls = []*gent.ModelToolCallRequest{{ID: "provider-code", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "run_code",
 					Arguments: `{"code":"tool.call({tool:'policy',args:{id:'P10'}});"}`}}}
 		}
 	}
-	return gent.NewCompletedStream(&gent.ContentResponse{Choices: []*gent.ContentChoice{choice},
+	return gent.NewCompletedStream(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice},
 		Info: &gent.GenerationInfo{InputTokens: 12, OutputTokens: 8, TotalTokens: 20}}, nil), nil
 }
 
@@ -46,10 +46,10 @@ func newNativeRecoveryAgent(
 	model *nativeRecoveryModel, calls *[]gent.ToolIdentity,
 ) *react.Agent[string] {
 	chain := toolchain.New().RegisterTool(gent.DefineTool("policy",
-		func(ctx context.Context, input recoveryInput) (string, error) {
+		func(ctx context.Context, input recoveryInput) (*gent.ToolExecutionResponse, error) {
 			identity, _ := gent.ToolIdentityFromContext(ctx)
 			*calls = append(*calls, identity)
-			return input.Id + ": exact original text", nil
+			return capturedToolResponse(input.Id+": exact original text", nil)
 		}).Description("Read the policy").ParameterSchema(nil).MustBuild())
 	if model.code {
 		chain = toolchain.NewJsToolChainWrapper(chain)
@@ -74,11 +74,11 @@ func TestNativeHistory_Recovery(t *testing.T) {
 	}
 	cases := []testCase{
 		{"initial", input{phase: gent.PhaseInitial}, expected{0, 2, 0, 2, nil}},
-		{"saved response", input{event: "model_call_finished"}, expected{1, 1, 0, 2, nil}},
-		{"decision", input{phase: gent.PhaseDecisionReady}, expected{1, 1, 0, 2, nil}},
+		{"saved response", input{event: "model_call_finished"}, expected{1, 1, 0, 0, nil}},
+		{"decision", input{phase: gent.PhaseDecisionReady}, expected{1, 1, 0, 0, nil}},
 		{"uncertain call", input{phase: gent.PhaseToolReady},
 			expected{1, 1, 0, 0, nil}},
-		{"first result", input{phase: gent.PhaseToolCompleted}, expected{1, 1, 1, 1, nil}},
+		{"first result", input{phase: gent.PhaseToolCompleted}, expected{1, 1, 1, 0, nil}},
 		{"saved iteration", input{phase: gent.PhaseIterationCompleted}, expected{1, 1, 2, 0, nil}},
 	}
 	for _, test := range cases {
@@ -114,7 +114,7 @@ func TestNativeHistory_Recovery(t *testing.T) {
 				assert.Equal(t, []gent.ContentPart{gent.TextContent{Text: "Policy P10 permits it."}},
 					result.Output)
 				assert.Equal(t, int64(40), restored.Stats().GetCounter(gent.SCTotalTokens))
-				expectedCalls := int64(2)
+				expectedCalls := int64(test.expected.beforeTools + test.expected.afterTools)
 				if test.name == "uncertain call" {
 					expectedCalls = 1
 				}
@@ -122,12 +122,14 @@ func TestNativeHistory_Recovery(t *testing.T) {
 				last := nextModel.requests[len(nextModel.requests)-1]
 				assert.Equal(t, &gent.ModelMessage{Role: gent.ChatMessageTypeAI,
 					Parts: []gent.ContentPart{gent.TextContent{Text: "Read the policy."},
-						gent.ModelToolCall{ID: "provider-a", Type: "function", FunctionCall: &gent.FunctionCall{
-							Name: "policy", Arguments: `{"id":"P10"}`,
-						}},
-						gent.ModelToolCall{ID: "provider-b", Type: "function", FunctionCall: &gent.FunctionCall{
-							Name: "policy", Arguments: `{"id":"P10"}`,
-						}}}},
+						&gent.ModelToolCallRequest{ID: "provider-a", Type: "function",
+							FunctionCall: &gent.FunctionCall{
+								Name: "policy", Arguments: `{"id":"P10"}`,
+							}},
+						&gent.ModelToolCallRequest{ID: "provider-b", Type: "function",
+							FunctionCall: &gent.FunctionCall{
+								Name: "policy", Arguments: `{"id":"P10"}`,
+							}}}},
 					last.Messages[1])
 			}
 			assert.Equal(t, test.expected, expected{len(model.requests), len(nextModel.requests),
@@ -183,4 +185,9 @@ func TestNativeHistory_JavaScriptRecoveryBoundary(t *testing.T) {
 			assert.Equal(t, test.expected.resumedModelCalls, len(nextModel.requests))
 		})
 	}
+}
+func (m *nativeRecoveryModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

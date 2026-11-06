@@ -9,7 +9,7 @@ import (
 
 func finishGuardedStream(ctx *gent.ExecutionContext, stream gent.Stream,
 	acc *gent.StreamAccumulator, guard *agentutil.RepetitionResult,
-) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
+) (*gent.ModelCallResponse, *agentutil.RepetitionResult, error) {
 	stream.Close()
 	response, err := stream.Response()
 	// Closing a live stream can report cancellation. Only that expected error is recoverable;

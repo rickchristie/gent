@@ -1,18 +1,20 @@
-// Package toolchain provides native tool definition, validation, and execution.
+// Package toolchain provides native tool definition, validation, execution, and recovery.
 //
-// Registry exposes all registered tools. SearchChain exposes search and pinned tools, then adds
-// discovered definitions on later requests. JsToolChainWrapper exposes the local JavaScript
-// runtime as run_code. Configure chains before sharing them between runs.
+// Registry advertises registered active tools. SharedLocalSearch advertises search, execute_tool,
+// and pinned tools; search returns current definitions without promoting them to native functions.
+// JsToolChainWrapper exposes the local JavaScript runtime as run_code. Configure chains before
+// sharing them between runs. Search visibility does not enforce business permissions.
 //
-// Native JSON arguments are checked against the tool's schema and converted to its Go input type.
-// Conversion supports time.Time strings in common ISO formats and time.Duration strings such as
-// "1h30m". Values for any or map[string]any inputs keep their JSON representation.
+// Native JSON arguments are checked against the selected tool schema and converted to its Go
+// input type. Before-call hooks can change that input; Gent validates the effective value again.
+// Conversion supports time.Time and time.Duration strings. Data values preserve exact integers.
 //
-// Every call uses a saved plan. Before-tool hooks run before effective typed input is saved;
-// result text, media, errors, and deduplication summaries are saved after execution. Recovery uses
-// saved evidence and optional application callbacks. Unknown outcomes do not cause blind replay.
-// An interrupted JavaScript program returns its partial results and script for a new model plan.
+// Every call has a saved plan. Gent saves effective input before an effect, then saves the accepted
+// outcome, prepared multipart reply, diagnostics, and statistics before dependent work. Tool Go
+// errors use safe model guidance. Recovery reports never repeat a business action automatically.
+// An interrupted JavaScript program returns saved and recovered evidence without restarting it.
 //
-// Custom chains can embed Registry to retain these execution controls and override NativeTools
-// to select definitions. Selection controls visibility; application code must check access rights.
+// Scripts receive the common ModelToolCallResponse view. Text, data, URLs, and instructions appear
+// automatically. Byte parts require same-script tool.forward and otherwise produce an omission
+// notice. Saved original parts remain complete. There is no tool-result deduplication.
 package toolchain

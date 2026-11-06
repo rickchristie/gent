@@ -46,14 +46,18 @@ func (m *Chat) RecoveryConfig() any {
 }
 
 func (m *Chat) GenerateContentStream(ctx context.Context,
-	request gent.ModelCallRequest,
+	request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	body, decision, err := m.requestBody(&request)
+	request, err := prepareMedia(ctx, m.config.HTTPClient, request, m.provider)
+	if err != nil {
+		return nil, err
+	}
+	body, decision, err := m.requestBody(request)
 	if err != nil {
 		return nil, err
 	}
 	if m.provider == "openrouter" {
-		decision, err = m.openRouterControls(ctx, body, &request)
+		decision, err = m.openRouterControls(ctx, body, request)
 		if err != nil {
 			return nil, err
 		}
@@ -65,11 +69,11 @@ func (m *Chat) GenerateContentStream(ctx context.Context,
 	return startProviderStream(ctx, m.config.HTTPClient, m.config.BaseURL+"/chat/completions",
 		headers, body, func(ctx context.Context, response *http.Response,
 			stream *gent.StreamWithDuration,
-		) (*gent.ContentResponse, error) {
+		) (*gent.ModelCallResponse, error) {
 			result, err := m.readResponse(ctx, response, stream, &request.Options)
 			recordSchema(result, decision)
 			return result, err
-		})
+		}, request.Options.SteeringMessages)
 }
 
 func (m *Chat) requestBody(request *gent.ModelCallRequest) (
@@ -142,7 +146,11 @@ func (m *Chat) requestBody(request *gent.ModelCallRequest) (
 				return nil, decision, errors.New("Chat requires function tool definitions")
 			}
 		}
-		body["tools"] = o.Tools
+		definitions, err := describedTools(o.Tools)
+		if err != nil {
+			return nil, decision, err
+		}
+		body["tools"] = definitions
 	}
 	if o.ToolChoice != nil {
 		body["tool_choice"] = o.ToolChoice

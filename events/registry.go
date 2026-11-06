@@ -96,6 +96,18 @@ func (r *Registry) MaxRecursion() int {
 	return r.maxRecursion
 }
 
+// HasBeforeModelCallSubscribers reports whether Dispatch can edit a model request. Gent uses
+// this capability to avoid copying message and media payloads when no request hook can run.
+// As with Subscribe, configure the registry before sharing it between executions.
+func (r *Registry) HasBeforeModelCallSubscribers() bool {
+	for _, subscriber := range r.subscribers {
+		if _, ok := subscriber.(gent.BeforeModelCallSubscriber); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // Dispatch sends an event to all matching subscribers.
 // This is called by ExecutionContext.publish() after recording the event and updating stats.
 func (r *Registry) Dispatch(execCtx *gent.ExecutionContext, event gent.Event) {

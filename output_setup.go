@@ -12,7 +12,7 @@ func PrepareOutput[T any](ctx *ExecutionContext, output Output[T]) error {
 		return err
 	}
 	request := NewModelCallRequest(nil)
-	if err := output.Configure(&request); err != nil {
+	if err := output.Configure(request); err != nil {
 		return err
 	}
 	controls, err := captureOutputControls(request.Options)

@@ -81,17 +81,17 @@ func TestNativeTakeoverStopsOldWorker(t *testing.T) {
 				chain := toolchain.New()
 				for _, name := range []string{"lookup", "book", "later"} {
 					chain.RegisterTool(gent.DefineTool(name,
-						func(ctx context.Context, _ *bookingInput) (string, error) {
+						func(ctx context.Context, _ *bookingInput) (*gent.ToolExecutionResponse, error) {
 							effects.Add(1)
 							if name == "lookup" {
 								close(started)
 								select {
 								case <-release:
 								case <-ctx.Done():
-									return "", ctx.Err()
+									return capturedToolResponse("", ctx.Err())
 								}
 							}
-							return name, nil
+							return capturedToolResponse(name, nil)
 						}).Description("Operation").ParameterSchema(nil).MustBuild())
 				}
 				var selected gent.ToolChain = chain

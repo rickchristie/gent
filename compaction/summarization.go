@@ -843,16 +843,19 @@ func extractText(entry *gent.HistoryEntry) string {
 				if value.Text != "" {
 					parts = append(parts, value.Text)
 				}
-			case gent.ModelToolCall:
+			case gent.ModelToolCallRequest:
 				text := fmt.Sprintf("Tool call %q (%s)", value.ID, value.Type)
 				if value.FunctionCall != nil {
 					text = fmt.Sprintf("Tool call %q: %s\nArguments: %s", value.ID,
 						value.FunctionCall.Name, value.FunctionCall.Arguments)
 				}
 				parts = append(parts, text)
-			case gent.ToolCallResponse:
-				parts = append(parts, fmt.Sprintf("Tool result %q: %s\n%s", value.ToolCallID,
-					value.Name, value.Content))
+			case *gent.ModelToolCallRequest:
+				parts = append(parts, fmt.Sprintf("Tool call %q: %s\nArguments: %s",
+					value.ID, value.FunctionCall.Name, value.FunctionCall.Arguments))
+			case *gent.ModelToolCallResponse:
+				parts = append(parts, fmt.Sprintf("Tool result %q: %s\n%s", value.ToolCallID(),
+					value.Name(), gent.ContentTextData(value.Parts())))
 			}
 		}
 	}

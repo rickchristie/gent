@@ -23,18 +23,18 @@ type guardedModel struct {
 
 const guardedText = "abcdabcdabcdabcd"
 
-func (m *guardedModel) GenerateContentStream(ctx context.Context, _ gent.ModelCallRequest) (
+func (m *guardedModel) GenerateContentStream(ctx context.Context, _ *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	m.calls++
 	if m.calls > 1 {
-		return gent.NewCompletedStream(&gent.ContentResponse{Choices: []*gent.ContentChoice{{
+		return gent.NewCompletedStream(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{{
 			Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 			CandidateContent: []gent.ContentPart{gent.TextContent{Text: "OK"}},
 		}}}, nil), nil
 	}
 	stream := gent.NewStreamWithDuration()
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{m.choice}}
+	response := &gent.ModelCallResponse{Choices: []*gent.ContentChoice{m.choice}}
 	if !m.streamed {
 		stream.Complete(response, m.completionErr)
 		return stream, nil
@@ -79,7 +79,7 @@ func TestRefusalBeforeResponseGuards(t *testing.T) {
 			choice := &gent.ContentChoice{Completion: gent.ModelCompletion{
 				Status: gent.ModelStatusRefused, Refusal: refusal}}
 			if test.input.tools {
-				choice.ToolCalls = []gent.ModelToolCall{nativeTestCall("call", "effect", guardedText)}
+				choice.ToolCalls = []*gent.ModelToolCallRequest{nativeTestCall("call", "effect", guardedText)}
 			} else {
 				choice.CandidateContent = []gent.ContentPart{gent.TextContent{Text: guardedText}}
 			}
@@ -96,9 +96,9 @@ func TestRefusalBeforeResponseGuards(t *testing.T) {
 			config.Enabled, config.BlockSize = test.input.repetition, 4
 			config.Action = agentutil.RepetitionTerminate
 			loop.WithRepetitionConfig(config).RegisterTool(gent.DefineTool("effect",
-				func(context.Context, map[string]any) (string, error) {
+				func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
 					toolCalls++
-					return "done", nil
+					return capturedToolResponse("done", nil)
 				}).Description("Perform an operation").ParameterSchema(nil).MustBuild())
 			if test.input.repetition {
 				loop.WithMaxResponseChars(0)
@@ -189,4 +189,9 @@ cleanup failed`, 1}},
 			assert.Equal(t, []*gent.HistoryEntry(nil), ctx.History().Entries)
 		})
 	}
+}
+func (m *guardedModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

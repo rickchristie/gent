@@ -17,7 +17,7 @@
         "type": "function",
         "function": {
           "name": "lookup",
-          "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
+          "description": "Read a record",
           "parameters": {
             "type": "object",
             "properties": {}
@@ -68,12 +68,12 @@
       {
         "role": "tool",
         "tool_call_id": "call-a",
-        "content": "<lookup>\nrecord\n</lookup>"
+        "content": "record"
       },
       {
         "role": "tool",
         "tool_call_id": "call-b",
-        "content": "<lookup>\nrecord\n</lookup>"
+        "content": "record"
       }
     ],
     "temperature": 0.5,
@@ -82,7 +82,7 @@
         "type": "function",
         "function": {
           "name": "lookup",
-          "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
+          "description": "Read a record",
           "parameters": {
             "type": "object",
             "properties": {}

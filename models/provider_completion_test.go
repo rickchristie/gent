@@ -112,9 +112,11 @@ func TestProvidersIncompleteRetriesWithoutValidationOrTools(t *testing.T) {
 				return &gent.OutputValidationResult{Accepted: true}, nil
 			})
 			agent := react.NewWithOutput(fixtureModel(test.input.provider, client), out).RegisterTool(
-				gent.DefineTool("lookup", func(context.Context, providerLookupInput) (string, error) {
+				gent.DefineTool("lookup", func(context.Context, providerLookupInput) (
+					*gent.ToolExecutionResponse, error,
+				) {
 					calls++
-					return "record-seven", nil
+					return capturedToolResponse("record-seven", nil)
 				}).Description("Read").MustBuild())
 			task := gent.NewTask(gent.TextContent{Text: "Read the record."})
 			ctx := gent.NewExecutionContext(context.Background(), "incomplete", gent.NewBasicLoopData(task))

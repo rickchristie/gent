@@ -15,7 +15,7 @@ import (
 type drainRequiredSummaryModel struct{}
 
 func (m *drainRequiredSummaryModel) GenerateContentStream(
-	_ context.Context, _ gent.ModelCallRequest,
+	_ context.Context, _ *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	stream := &drainRequiredSummaryStream{
 		chunks:       make(chan gent.StreamChunk),
@@ -57,9 +57,9 @@ func (s *drainRequiredSummaryStream) Chunks() <-chan gent.StreamChunk {
 	return s.chunks
 }
 
-func (s *drainRequiredSummaryStream) Response() (*gent.ContentResponse, error) {
+func (s *drainRequiredSummaryStream) Response() (*gent.ModelCallResponse, error) {
 	<-s.responseDone
-	return &gent.ContentResponse{
+	return &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -100,7 +100,7 @@ func TestSummarization_Compact(t *testing.T) {
 		scratchpad       []*gent.HistoryEntry
 		modelResponse    string
 		modelError       error
-		modelRawResponse *gent.ContentResponse
+		modelRawResponse *gent.ModelCallResponse
 	}
 
 	type expected struct {
@@ -409,7 +409,7 @@ Custom summarized` +
 				scratchpad: []*gent.HistoryEntry{
 					makeIter("data"),
 				},
-				modelRawResponse: &gent.ContentResponse{
+				modelRawResponse: &gent.ModelCallResponse{
 					Choices: []*gent.ContentChoice{},
 					Info: &gent.GenerationInfo{
 						InputTokens:  10,
@@ -886,4 +886,9 @@ func TestSummarization_DefaultTwoMessages(t *testing.T) {
 		"user message should not contain "+
 			"static instructions",
 	)
+}
+func (m *drainRequiredSummaryModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

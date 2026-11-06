@@ -31,7 +31,7 @@ func TestAgent_RepetitionDetection_Recovery(t *testing.T) {
 	validResponse := "Done."
 
 	model := newMockModel(
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -40,7 +40,7 @@ func TestAgent_RepetitionDetection_Recovery(t *testing.T) {
 			},
 			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 		},
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -93,7 +93,7 @@ func TestAgent_RepetitionDetection_TerminateImmediately(t *testing.T) {
 	loopBlock := strings.Repeat("x", cfg.BlockSize)
 	loopingResponse := strings.Repeat(loopBlock, 5)
 
-	model := newMockModel(&gent.ContentResponse{
+	model := newMockModel(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -130,7 +130,7 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 	// Call 2: valid tool call (gauge -> 0)
 
 	model := newMockModel(
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -139,11 +139,11 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 			},
 			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 500},
 		},
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
 				Status: gent.ModelStatusToolCalls,
 			},
-				ToolCalls: []gent.ModelToolCall{
+				ToolCalls: []*gent.ModelToolCallRequest{
 					nativeTestCall("work", "test_tool", "{}"),
 				}}},
 			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 50},
@@ -152,7 +152,9 @@ func TestAgent_RepetitionGauge_ResetsOnToolExecution(t *testing.T) {
 
 	tc := newMockToolChain()
 	tc.RegisterTool(gent.DefineTool("test_tool",
-		func(context.Context, map[string]any) (string, error) { return "tool result", nil }).
+		func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
+			return capturedToolResponse("tool result", nil)
+		}).
 		Description("Read a result").ParameterSchema(nil).MustBuild())
 
 	agent := NewAgent(model).WithRepetitionConfig(cfg).WithToolChain(tc)
@@ -200,7 +202,7 @@ func TestAgent_MaxResponseChars_TooLongButNotLooping(t *testing.T) {
 	validResponse := "Done."
 
 	model := newMockModel(
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -209,7 +211,7 @@ func TestAgent_MaxResponseChars_TooLongButNotLooping(t *testing.T) {
 			},
 			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 3000},
 		},
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -266,7 +268,7 @@ func TestAgent_MaxResponseChars_TooLongAndLooping(t *testing.T) {
 	validResponse := "Done."
 
 	model := newMockModel(
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -275,7 +277,7 @@ func TestAgent_MaxResponseChars_TooLongAndLooping(t *testing.T) {
 			},
 			Info: &gent.GenerationInfo{InputTokens: 100, OutputTokens: 200},
 		},
-		&gent.ContentResponse{
+		&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},

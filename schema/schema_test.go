@@ -13,8 +13,8 @@ func TestCompile(t *testing.T) {
 	}
 
 	type expected struct {
-		isNil   bool
-		hasErr  bool
+		isNil    bool
+		hasErr   bool
 		rawIsNil bool
 	}
 
@@ -456,10 +456,10 @@ func TestSchema_DescribeFields(t *testing.T) {
 			input: input{
 				schema: MustCompile(Object(
 					map[string]*Property{
-						"name":    String("User name"),
-						"age":     Integer("User age"),
-						"score":   Number("User score"),
-						"active":  Boolean("Is active"),
+						"name":   String("User name"),
+						"age":    Integer("User age"),
+						"score":  Number("User score"),
+						"active": Boolean("Is active"),
 					},
 				)),
 			},
@@ -539,7 +539,7 @@ func TestSchema_DescribeFields(t *testing.T) {
 						"type": "object",
 						"properties": map[string]any{
 							"address": map[string]any{
-								"type": "object",
+								"type":        "object",
 								"description": "Mailing address",
 								"properties": map[string]any{
 									"street": map[string]any{
@@ -660,17 +660,30 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool 'create_case'.\n" +
-					"Errors:\n" +
-					"  - missing property 'details'\n" +
-					"Expected fields:\n" +
-					"  - 'args.count' (integer):" +
-					" Optional count\n" +
-					"  - 'args.details' (required, string):" +
-					" Description of the issue\n" +
-					"  - 'args.order_id' (required, string):" +
-					" The order ID\n",
+				output: `Invalid arguments for tool "create_case".
+args.details: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "count": {
+      "description": "Optional count",
+      "type": "integer"
+    },
+    "details": {
+      "description": "Description of the issue",
+      "type": "string"
+    },
+    "order_id": {
+      "description": "The order ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "order_id",
+    "details"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -681,18 +694,31 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				data:     map[string]any{},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool 'create_case'.\n" +
-					"Errors:\n" +
-					"  - missing properties" +
-					" 'order_id', 'details'\n" +
-					"Expected fields:\n" +
-					"  - 'args.count' (integer):" +
-					" Optional count\n" +
-					"  - 'args.details' (required, string):" +
-					" Description of the issue\n" +
-					"  - 'args.order_id' (required, string):" +
-					" The order ID\n",
+				output: `Invalid arguments for tool "create_case".
+args.order_id: required field is missing.
+args.details: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "count": {
+      "description": "Optional count",
+      "type": "integer"
+    },
+    "details": {
+      "description": "Description of the issue",
+      "type": "string"
+    },
+    "order_id": {
+      "description": "The order ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "order_id",
+    "details"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -707,18 +733,30 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool 'create_case'.\n" +
-					"Errors:\n" +
-					"  - got string, want integer" +
-					" for 'args.count'\n" +
-					"Expected fields:\n" +
-					"  - 'args.count' (integer):" +
-					" Optional count\n" +
-					"  - 'args.details' (required, string):" +
-					" Description of the issue\n" +
-					"  - 'args.order_id' (required, string):" +
-					" The order ID\n",
+				output: `Invalid arguments for tool "create_case".
+args.count: expected integer.
+Expected input schema:
+{
+  "properties": {
+    "count": {
+      "description": "Optional count",
+      "type": "integer"
+    },
+    "details": {
+      "description": "Description of the issue",
+      "type": "string"
+    },
+    "order_id": {
+      "description": "The order ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "order_id",
+    "details"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -743,20 +781,30 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				data:     nil,
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool 'create_case'.\n" +
-					"Errors:\n" +
-					"  - args is null or missing," +
-					" expected object with" +
-					" required properties:" +
-					" order_id, details\n" +
-					"Expected fields:\n" +
-					"  - 'args.count' (integer):" +
-					" Optional count\n" +
-					"  - 'args.details' (required, string):" +
-					" Description of the issue\n" +
-					"  - 'args.order_id' (required, string):" +
-					" The order ID\n",
+				output: `Invalid arguments for tool "create_case".
+args: expected an object that satisfies the schema.
+Expected input schema:
+{
+  "properties": {
+    "count": {
+      "description": "Optional count",
+      "type": "integer"
+    },
+    "details": {
+      "description": "Description of the issue",
+      "type": "string"
+    },
+    "order_id": {
+      "description": "The order ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "order_id",
+    "details"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -776,14 +824,28 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				data:     map[string]any{},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool 'tag_item'.\n" +
-					"Errors:\n" +
-					"  - missing property 'tags'\n" +
-					"Expected fields:\n" +
-					"  - 'args.meta' (string): Metadata\n" +
-					"  - 'args.tags' (required," +
-					" array of string): Tag list\n",
+				output: `Invalid arguments for tool "tag_item".
+args.tags: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "meta": {
+      "description": "Metadata",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Tag list",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tags"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -823,17 +885,36 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'update_address'.\n" +
-					"Errors:\n" +
-					"  - missing property 'city'" +
-					" for 'args.address'\n" +
-					"Expected fields:\n" +
-					"  - 'args.address'" +
-					" (required, object)\n" +
-					"  - 'args.id'" +
-					" (required, string)\n",
+				output: `Invalid arguments for tool "update_address".
+args.address.city: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "address": {
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "street": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "street",
+        "city"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "address"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -879,18 +960,39 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'create_order'.\n" +
-					"Errors:\n" +
-					"  - missing property 'qty'" +
-					" for 'args.items[]'\n" +
-					"Expected fields:\n" +
-					"  - 'args.id'" +
-					" (required, string)\n" +
-					"  - 'args.items'" +
-					" (required," +
-					" array of object)\n",
+				output: `Invalid arguments for tool "create_order".
+args.items[0].qty: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "qty"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "items"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -936,17 +1038,39 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'update_stock'.\n" +
-					"Errors:\n" +
-					"  - missing property 'unit'" +
-					" for 'args.quantities.apples'\n" +
-					"Expected fields:\n" +
-					"  - 'args.id'" +
-					" (required, string)\n" +
-					"  - 'args.quantities'" +
-					" (required, object)\n",
+				output: `Invalid arguments for tool "update_stock".
+args.quantities.apples.unit: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "quantities": {
+      "additionalProperties": {
+        "properties": {
+          "amount": {
+            "type": "integer"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "unit"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "quantities"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -1001,17 +1125,48 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'update_geo'.\n" +
-					"Errors:\n" +
-					"  - missing property 'lng'" +
-					" for 'args.address.geo'\n" +
-					"Expected fields:\n" +
-					"  - 'args.address'" +
-					" (required, object)\n" +
-					"  - 'args.id'" +
-					" (required, string)\n",
+				output: `Invalid arguments for tool "update_geo".
+args.address.geo.lng: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "address": {
+      "properties": {
+        "geo": {
+          "properties": {
+            "lat": {
+              "type": "number"
+            },
+            "lng": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "lat",
+            "lng"
+          ],
+          "type": "object"
+        },
+        "street": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "street",
+        "geo"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "address"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -1076,17 +1231,54 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'create_shipment'.\n" +
-					"Errors:\n" +
-					"  - missing property 'qty'" +
-					" for 'args.orders[].items[]'\n" +
-					"Expected fields:\n" +
-					"  - 'args.id'" +
-					" (required, string)\n" +
-					"  - 'args.orders'" +
-					" (required, array of object)\n",
+				output: `Invalid arguments for tool "create_shipment".
+args.orders[0].items[0].qty: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "orders": {
+      "items": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "qty": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "qty"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "order_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "items"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "orders"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -1148,18 +1340,50 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'update_regions'.\n" +
-					"Errors:\n" +
-					"  - missing property 'code'" +
-					" for" +
-					" 'args.regions.us.zones.west'\n" +
-					"Expected fields:\n" +
-					"  - 'args.id'" +
-					" (required, string)\n" +
-					"  - 'args.regions'" +
-					" (required, object)\n",
+				output: `Invalid arguments for tool "update_regions".
+args.regions.us.zones.west.code: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "regions": {
+      "additionalProperties": {
+        "properties": {
+          "zones": {
+            "additionalProperties": {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "population": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "code",
+                "population"
+              ],
+              "type": "object"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "zones"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "regions"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -1225,19 +1449,54 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'update_products'.\n" +
-					"Errors:\n" +
-					"  - missing property 'unit'" +
-					" for" +
-					" 'args.items[].attributes" +
-					".weight'\n" +
-					"Expected fields:\n" +
-					"  - 'args.id'" +
-					" (required, string)\n" +
-					"  - 'args.items'" +
-					" (required, array of object)\n",
+				output: `Invalid arguments for tool "update_products".
+args.items[0].attributes.weight.unit: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": {
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "unit"
+              ],
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "items"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{
@@ -1299,19 +1558,50 @@ func TestSchema_FormatForLLM(t *testing.T) {
 				},
 			},
 			expected: expected{
-				output: "" +
-					"Invalid args for tool" +
-					" 'update_catalog'.\n" +
-					"Errors:\n" +
-					"  - missing property 'price'" +
-					" for" +
-					" 'args.categories.electronics" +
-					".products[]'\n" +
-					"Expected fields:\n" +
-					"  - 'args.categories'" +
-					" (required, object)\n" +
-					"  - 'args.id'" +
-					" (required, string)\n",
+				output: `Invalid arguments for tool "update_catalog".
+args.categories.electronics.products[0].price: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "categories": {
+      "additionalProperties": {
+        "properties": {
+          "products": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "price"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "products"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "categories"
+  ],
+  "type": "object"
+}`,
 			},
 		},
 		{

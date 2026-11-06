@@ -644,12 +644,25 @@ func TestPreValidate(t *testing.T) {
 				errors: []expectedError{
 					{
 						toolName: "search",
-						errorMessage: `Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						errorMessage: `Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -681,12 +694,25 @@ tool.call({
 				errors: []expectedError{
 					{
 						toolName: "search",
-						errorMessage: `Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						errorMessage: `Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -699,11 +725,21 @@ Example:
 					},
 					{
 						toolName: "get",
-						errorMessage: `Invalid args for tool 'get'.
-Errors:
-  - missing property 'id'
-Expected fields:
-  - 'args.id' (required, string): Item ID
+						errorMessage: `Invalid arguments for tool "get".
+args.id: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "description": "Item ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "get",
@@ -764,12 +800,25 @@ tool.call(opts);`,
 				errors: []expectedError{
 					{
 						toolName: "search",
-						errorMessage: `Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						errorMessage: `Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -793,12 +842,25 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "search",
-						errorMessage: `Invalid args for tool 'search'.
-Errors:
-  - args is null or missing, expected object with required properties: query
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						errorMessage: `Invalid arguments for tool "search".
+args: expected an object that satisfies the schema.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -872,12 +934,36 @@ tool.call({
 				errors: []expectedError{
 					{
 						toolName: "update_address",
-						errorMessage: `Invalid args for tool 'update_address'.
-Errors:
-  - missing property 'city' for 'args.address'
-Expected fields:
-  - 'args.address' (required, object)
-  - 'args.id' (required, string)
+						errorMessage: `Invalid arguments for tool "update_address".
+args.address.city: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "address": {
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "street": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "street",
+        "city"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "address"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "update_address",
@@ -910,12 +996,39 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "create_order",
-						errorMessage: `Invalid args for tool 'create_order'.
-Errors:
-  - missing property 'qty' for 'args.items[]'
-Expected fields:
-  - 'args.customer_id' (required, string)
-  - 'args.items' (required, array of object)
+						errorMessage: `Invalid arguments for tool "create_order".
+args.items[0].qty: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "qty"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "customer_id",
+    "items"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "create_order",
@@ -950,12 +1063,39 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "update_stock",
-						errorMessage: `Invalid args for tool 'update_stock'.
-Errors:
-  - missing property 'unit' for 'args.quantities.apples'
-Expected fields:
-  - 'args.id' (required, string)
-  - 'args.quantities' (required, object)
+						errorMessage: `Invalid arguments for tool "update_stock".
+args.quantities.apples.unit: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "quantities": {
+      "additionalProperties": {
+        "properties": {
+          "amount": {
+            "type": "integer"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "unit"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "quantities"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "update_stock",
@@ -994,12 +1134,48 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "update_geo",
-						errorMessage: `Invalid args for tool 'update_geo'.
-Errors:
-  - missing property 'lng' for 'args.address.geo'
-Expected fields:
-  - 'args.address' (required, object)
-  - 'args.id' (required, string)
+						errorMessage: `Invalid arguments for tool "update_geo".
+args.address.geo.lng: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "address": {
+      "properties": {
+        "geo": {
+          "properties": {
+            "lat": {
+              "type": "number"
+            },
+            "lng": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "lat",
+            "lng"
+          ],
+          "type": "object"
+        },
+        "street": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "street",
+        "geo"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "address"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "update_geo",
@@ -1041,12 +1217,54 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "create_shipment",
-						errorMessage: `Invalid args for tool 'create_shipment'.
-Errors:
-  - missing property 'qty' for 'args.orders[].items[]'
-Expected fields:
-  - 'args.id' (required, string)
-  - 'args.orders' (required, array of object)
+						errorMessage: `Invalid arguments for tool "create_shipment".
+args.orders[0].items[0].qty: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "orders": {
+      "items": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "qty": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "qty"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "order_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "items"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "orders"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "create_shipment",
@@ -1093,12 +1311,50 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "update_regions",
-						errorMessage: `Invalid args for tool 'update_regions'.
-Errors:
-  - missing property 'code' for 'args.regions.us.zones.west'
-Expected fields:
-  - 'args.id' (required, string)
-  - 'args.regions' (required, object)
+						errorMessage: `Invalid arguments for tool "update_regions".
+args.regions.us.zones.west.code: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "regions": {
+      "additionalProperties": {
+        "properties": {
+          "zones": {
+            "additionalProperties": {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "population": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "code",
+                "population"
+              ],
+              "type": "object"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "zones"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "regions"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "update_regions",
@@ -1145,12 +1401,54 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "update_products",
-						errorMessage: `Invalid args for tool 'update_products'.
-Errors:
-  - missing property 'unit' for 'args.items[].attributes.weight'
-Expected fields:
-  - 'args.id' (required, string)
-  - 'args.items' (required, array of object)
+						errorMessage: `Invalid arguments for tool "update_products".
+args.items[0].attributes.weight.unit: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": {
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "unit"
+              ],
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "items"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "update_products",
@@ -1195,12 +1493,50 @@ Example:
 				errors: []expectedError{
 					{
 						toolName: "update_catalog",
-						errorMessage: `Invalid args for tool 'update_catalog'.
-Errors:
-  - missing property 'price' for 'args.categories.electronics.products[]'
-Expected fields:
-  - 'args.categories' (required, object)
-  - 'args.id' (required, string)
+						errorMessage: `Invalid arguments for tool "update_catalog".
+args.categories.electronics.products[0].price: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "categories": {
+      "additionalProperties": {
+        "properties": {
+          "products": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "price"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "products"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "categories"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "update_catalog",
@@ -1282,12 +1618,25 @@ console.log("done");`,
 							Line:     2,
 							Column:   1,
 						},
-						ErrorMessage: `Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						ErrorMessage: `Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -1308,12 +1657,25 @@ Example:
     ^
 3 | console.log("done");
 
-Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -1344,12 +1706,25 @@ console.log("done");`,
 							Line:     2,
 							Column:   1,
 						},
-						ErrorMessage: `Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						ErrorMessage: `Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -1366,11 +1741,21 @@ Example:
 							Line:     5,
 							Column:   1,
 						},
-						ErrorMessage: `Invalid args for tool 'get'.
-Errors:
-  - missing property 'id'
-Expected fields:
-  - 'args.id' (required, string): Item ID
+						ErrorMessage: `Invalid arguments for tool "get".
+args.id: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "description": "Item ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "get",
@@ -1391,12 +1776,25 @@ Example:
 3 | var x = 1;
 4 | var y = 2;
 
-Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -1412,11 +1810,21 @@ Example:
     ^
 6 | console.log("done");
 
-Invalid args for tool 'get'.
-Errors:
-  - missing property 'id'
-Expected fields:
-  - 'args.id' (required, string): Item ID
+Invalid arguments for tool "get".
+args.id: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "id": {
+      "description": "Item ID",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "get",
@@ -1440,12 +1848,25 @@ Fix ALL errors above before re-submitting your code.
 							Line:     1,
 							Column:   1,
 						},
-						ErrorMessage: `Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+						ErrorMessage: `Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",
@@ -1465,12 +1886,25 @@ Example:
 1 | tool.call({ tool: "search", args: {} });
     ^
 
-Invalid args for tool 'search'.
-Errors:
-  - missing property 'query'
-Expected fields:
-  - 'args.limit' (integer): Max results
-  - 'args.query' (required, string): Search query
+Invalid arguments for tool "search".
+args.query: required field is missing.
+Expected input schema:
+{
+  "properties": {
+    "limit": {
+      "description": "Max results",
+      "type": "integer"
+    },
+    "query": {
+      "description": "Search query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
 Example:
   tool.call({
     tool: "search",

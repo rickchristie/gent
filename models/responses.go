@@ -50,9 +50,13 @@ func (m *Responses) RecoveryConfig() any {
 }
 
 func (m *Responses) GenerateContentStream(base context.Context,
-	request gent.ModelCallRequest,
+	request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	body, err := m.requestBody(&request)
+	request, err := prepareMedia(base, m.config.HTTPClient, request, m.config.Provider)
+	if err != nil {
+		return nil, err
+	}
+	body, err := m.requestBody(request)
 	if err != nil {
 		return nil, err
 	}
@@ -63,14 +67,14 @@ func (m *Responses) GenerateContentStream(base context.Context,
 	return startProviderStream(base, m.config.HTTPClient,
 		strings.TrimRight(m.config.BaseURL, "/")+"/responses", headers, body,
 		func(ctx context.Context, response *http.Response, stream *gent.StreamWithDuration) (
-			*gent.ContentResponse, error,
+			*gent.ModelCallResponse, error,
 		) {
 			result, err := m.readResponse(ctx, response, stream, &request.Options)
 			if hasSchema {
 				recordSchema(result, decision)
 			}
 			return result, err
-		})
+		}, request.Options.SteeringMessages)
 }
 
 func (m *Responses) requestBody(request *gent.ModelCallRequest) (map[string]any, error) {
@@ -111,8 +115,11 @@ func (m *Responses) requestBody(request *gent.ModelCallRequest) (map[string]any,
 			return nil, errors.New("Responses requires function tool definitions")
 		}
 		f := tool.Function
-		tools = append(tools, map[string]any{"type": "function", "name": f.Name,
-			"description": f.Description, "parameters": f.Parameters, "strict": f.Strict})
+		definition, err := m.toolDefinition(f, request.Messages)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, definition)
 	}
 	body["tools"] = tools
 	value := o.ToolChoice
@@ -136,6 +143,55 @@ func (m *Responses) requestBody(request *gent.ModelCallRequest) (map[string]any,
 		return nil, err
 	}
 	return body, nil
+}
+
+func (m *Responses) toolDefinition(function *gent.FunctionDefinition,
+	messages []*gent.ModelMessage,
+) (map[string]any, error) {
+	definition := map[string]any{"type": "function", "name": function.Name,
+		"description": function.Description, "parameters": function.Parameters,
+		"strict": function.Strict}
+	if m.config.Provider == "openai" && function.OutputSchema != nil &&
+		responsesOutputSchemaCompatible(messages, function.Name) {
+		definition["output_schema"] = function.OutputSchema
+		return definition, nil
+	}
+	description, err := toolDescription(function)
+	if err != nil {
+		return nil, err
+	}
+	definition["description"] = description
+	return definition, nil
+}
+
+// OpenAI's output_schema describes JSON encoded in a string, not a content array or JSON followed
+// by steering text. Before the first reply, the schema describes the author's promised data.
+// Keep multipart replies intact and use description text if any included reply needs that format.
+// These checks concern encoding only; they do not validate domain data against the schema.
+func responsesOutputSchemaCompatible(messages []*gent.ModelMessage, name string) bool {
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			reply, ok := part.(*gent.ModelToolCallResponse)
+			if !ok || reply.Name() != name {
+				continue
+			}
+			parts := reply.Parts()
+			if len(parts) != 1 {
+				return false
+			}
+			switch value := partValue(parts[0]).(type) {
+			case gent.DataContent:
+				// DataPart already captured a valid JSON value. Do not encode it again here.
+			case gent.TextContent:
+				if !json.Valid([]byte(value.Text)) {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func applyResponsesMetadata(body, metadata map[string]any) error {
@@ -204,6 +260,13 @@ func applyResponsesMetadata(body, metadata map[string]any) error {
 }
 
 func (m *Responses) inputItems(messages []*gent.ModelMessage) ([]any, error) {
+	if m.config.Provider != "openai" {
+		var err error
+		messages, err = separateToolMedia(messages)
+		if err != nil {
+			return nil, err
+		}
+	}
 	items := make([]any, 0, len(messages))
 	for _, message := range messages {
 		if saved := message.Continuation; saved != nil {
@@ -231,6 +294,8 @@ func (m *Responses) inputItems(messages []*gent.ModelMessage) ([]any, error) {
 		}
 		for _, part := range message.Parts {
 			switch p := partValue(part).(type) {
+			case gent.DataContent:
+				content = append(content, map[string]any{"type": "input_text", "text": p.String()})
 			case gent.TextContent:
 				content = append(content, map[string]any{"type": "input_text", "text": p.Text})
 			case gent.ImageURLContent:
@@ -249,14 +314,18 @@ func (m *Responses) inputItems(messages []*gent.ModelMessage) ([]any, error) {
 					return nil, fmt.Errorf("unsupported Responses media %q", p.MIMEType)
 				}
 				content = append(content, map[string]any{"type": "input_image", "image_url": p.String()})
-			case gent.ModelToolCall:
+			case gent.ModelToolCallRequest:
 				flush()
 				items = append(items, map[string]any{"type": "function_call", "call_id": p.ID,
 					"name": p.FunctionCall.Name, "arguments": p.FunctionCall.Arguments})
-			case gent.ToolCallResponse:
+			case *gent.ModelToolCallResponse:
 				flush()
+				output, err := m.toolOutput(p.Parts())
+				if err != nil {
+					return nil, err
+				}
 				items = append(items, map[string]any{"type": "function_call_output",
-					"call_id": p.ToolCallID, "output": p.Content})
+					"call_id": p.ToolCallID(), "output": output})
 			default:
 				return nil, fmt.Errorf("unsupported Responses content %T", part)
 			}
@@ -294,7 +363,7 @@ func (e *responseError) Error() string { return fmt.Sprintf("Responses %s: %s", 
 
 func (m *Responses) readResponse(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	if !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		var envelope responseEnvelope
 		if err := decodeProviderJSON(response.Body, &envelope); err != nil {
@@ -306,7 +375,7 @@ func (m *Responses) readResponse(ctx context.Context, response *http.Response,
 		}
 		return previewProviderResponse(ctx, stream, options, result)
 	}
-	var result *gent.ContentResponse
+	var result *gent.ModelCallResponse
 	// An output item's phase applies to all its text deltas, including interleaved items.
 	itemTypes := make(map[int]string)
 	size := 0
@@ -366,7 +435,7 @@ func (m *Responses) readResponse(ctx context.Context, response *http.Response,
 	return result, nil
 }
 
-func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ContentResponse, error) {
+func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ModelCallResponse, error) {
 	if response.Error != nil {
 		return nil, response.Error
 	}
@@ -441,7 +510,8 @@ func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ContentRe
 				}
 				return nil, errors.New("Responses function call requires call_id and name")
 			}
-			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: item.CallID, Type: "function",
+			choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{
+				ID: item.CallID, Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: item.Name, Arguments: item.Arguments}})
 		case "message":
 			kind := responseMetaType(item.Phase)
@@ -530,7 +600,7 @@ func (m *Responses) convertResponse(response *responseEnvelope) (*gent.ContentRe
 		return nil, err
 	}
 	usage := response.Usage
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
+	return &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
 		InputTokens: usage.Input, OutputTokens: usage.Output, TotalTokens: usage.Total,
 		CachedInputTokens: usage.InputDetails.Cached, ReasoningTokens: usage.OutputDetails.Reasoning,
 	}}, nil
@@ -598,4 +668,28 @@ func (m *Responses) outputControls(body map[string]any, options *gent.CallOption
 		}
 	}
 	return nil
+}
+
+// Responses accepts text, images, and files in function_call_output. Keep ordered native
+// content for media replies and a plain string for text-only replies.
+func (m *Responses) toolOutput(parts []gent.ContentPart) (any, error) {
+	textOnly := true
+	for _, part := range parts {
+		switch partValue(part).(type) {
+		case gent.TextContent, gent.DataContent:
+		default:
+			textOnly = false
+		}
+	}
+	if textOnly {
+		return gent.ContentTextData(parts), nil
+	}
+	items, err := m.inputItems([]*gent.ModelMessage{{Role: gent.ChatMessageTypeHuman, Parts: parts}})
+	if err != nil {
+		return nil, err
+	}
+	if len(items) != 1 {
+		return nil, errors.New("invalid function output content")
+	}
+	return items[0].(map[string]any)["content"], nil
 }

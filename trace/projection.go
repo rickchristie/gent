@@ -218,7 +218,7 @@ func (s *Sequencer) applyEvent(event *Event) {
 	}
 }
 
-func modelUsage(response *gent.ContentResponse, inputTokens int, outputTokens int) *ModelUsage {
+func modelUsage(response *gent.ModelCallResponse, inputTokens int, outputTokens int) *ModelUsage {
 	usage := &ModelUsage{InputTokens: inputTokens, OutputTokens: outputTokens}
 	if response != nil && response.Info != nil {
 		usage.InputTokens = response.Info.InputTokens

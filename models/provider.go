@@ -40,11 +40,11 @@ func providerConfig(config *Config, defaultURL string) Config {
 const maxProviderBytes = 64 << 20
 
 type providerReader func(context.Context, *http.Response, *gent.StreamWithDuration) (
-	*gent.ContentResponse, error,
+	*gent.ModelCallResponse, error,
 )
 
 func startProviderStream(base context.Context, client *http.Client, url string,
-	headers http.Header, body any, read providerReader,
+	headers http.Header, body any, read providerReader, steering ...gent.SteeringMessages,
 ) (gent.Stream, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -65,14 +65,38 @@ func startProviderStream(base context.Context, client *http.Client, url string,
 	}
 	go func() {
 		defer cancel()
-		response, err := client.Do(request)
-		if err != nil {
-			stream.Complete(nil, err)
-			return
-		}
-		var result *gent.ContentResponse
-		if err = checkHTTPResponse(response); err == nil {
-			result, err = read(ctx, response, stream)
+		var response *http.Response
+		var result *gent.ModelCallResponse
+		for attempt := 0; attempt < 2; attempt++ {
+			response, err = client.Do(request)
+			if err != nil {
+				stream.Complete(nil, err)
+				return
+			}
+			err = checkHTTPResponse(response)
+			if err == nil {
+				result, err = read(ctx, response, stream)
+				break
+			}
+			if attempt != 0 || len(steering) == 0 {
+				break
+			}
+			corrected, retry, prepareErr := replaceFailedImageURL(ctx, data, err, steering[0])
+			if prepareErr != nil {
+				err = errors.Join(err, prepareErr)
+				break
+			}
+			if !retry {
+				break
+			}
+			if closeErr := response.Body.Close(); closeErr != nil {
+				stream.Complete(nil, closeErr)
+				return
+			}
+			request = request.Clone(ctx)
+			request.Body = io.NopCloser(bytes.NewReader(corrected))
+			request.ContentLength = int64(len(corrected))
+			request.GetBody = nil
 		}
 		closeErr := response.Body.Close()
 		if result != nil {
@@ -91,7 +115,21 @@ func checkHTTPResponse(response *http.Response) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("model HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+	failure := &modelHTTPError{status: response.StatusCode, body: strings.TrimSpace(string(data))}
+	var envelope struct {
+		Error struct {
+			Code    string
+			Type    string
+			Message string
+		}
+	}
+	if json.Unmarshal(data, &envelope) == nil {
+		failure.code, failure.message = envelope.Error.Code, envelope.Error.Message
+		if failure.code == "" {
+			failure.code = envelope.Error.Type
+		}
+	}
+	return failure
 }
 
 func decodeProviderJSON(reader io.Reader, value any) error {
@@ -184,8 +222,8 @@ func sendProviderText(ctx context.Context, stream *gent.StreamWithDuration,
 // A server can return one JSON body even when streaming was requested. Deliver the same
 // provisional metadata and callbacks in that case; only the agent can accept output.
 func previewProviderResponse(ctx context.Context, stream *gent.StreamWithDuration,
-	options *gent.CallOptions, response *gent.ContentResponse,
-) (*gent.ContentResponse, error) {
+	options *gent.CallOptions, response *gent.ModelCallResponse,
+) (*gent.ModelCallResponse, error) {
 	for _, choice := range response.Choices {
 		for _, meta := range choice.MetaContent {
 			text := gent.ContentText(meta.Content)
@@ -210,16 +248,18 @@ func previewProviderResponse(ctx context.Context, stream *gent.StreamWithDuratio
 
 func partValue(part gent.ContentPart) gent.ContentPart {
 	switch p := part.(type) {
+	case *gent.DataContent:
+		return *p
 	case *gent.TextContent:
 		return *p
 	case *gent.BinaryContent:
 		return *p
 	case *gent.ImageURLContent:
 		return *p
-	case *gent.ModelToolCall:
+	case *gent.ModelToolCallRequest:
 		return *p
-	case *gent.ToolCallResponse:
-		return *p
+	case *gent.ModelToolCallResponse:
+		return p
 	case *gent.CachedContent:
 		return *p
 	default:

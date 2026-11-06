@@ -24,7 +24,7 @@
     "tools": [
       {
         "name": "lookup",
-        "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
+        "description": "Read a record",
         "input_schema": {
           "type": "object",
           "properties": {}
@@ -82,7 +82,12 @@
           {
             "type": "tool_result",
             "tool_use_id": "call-a",
-            "content": "<lookup>\nrecord\n</lookup>"
+            "content": [
+              {
+                "type": "text",
+                "text": "record"
+              }
+            ]
           }
         ]
       },
@@ -92,7 +97,12 @@
           {
             "type": "tool_result",
             "tool_use_id": "call-b",
-            "content": "<lookup>\nrecord\n</lookup>"
+            "content": [
+              {
+                "type": "text",
+                "text": "record"
+              }
+            ]
           }
         ]
       }
@@ -103,7 +113,7 @@
     "tools": [
       {
         "name": "lookup",
-        "description": "Read a record\n\nReturns: {\"type\":\"string\"}",
+        "description": "Read a record",
         "input_schema": {
           "type": "object",
           "properties": {}

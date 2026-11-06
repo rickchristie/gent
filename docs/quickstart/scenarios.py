@@ -258,13 +258,13 @@ RECOVERY = {
         step("tools", "Handle uncertain tools", "Do not blindly repeat an external write.",
              "A process can stop after a tool changes an external system but before its result "
              "is saved. A tool-ready checkpoint alone cannot prove whether the tool completed.",
-             "Set Recovery(recoverOrder) on the tool builder in agent.go. This allows retry for "
-             "lookup_order because it is a read. Return unresolved for an unknown write outcome.",
-             "server/agent.go", "// The order lookup reads", None, [
+             "Set Recovery(recoverOrder) on the tool builder in agent.go. This reports an unavailable "
+             "lookup result. The model decides whether a fresh read is needed.",
+             "server/agent.go", "// The lookup has no durable receipt.", None, [
                  ("ToolRecoveryCompleted", "Return the complete saved result when an external "
                   "receipt proves the operation finished."),
-                 ("ToolRecoveryRetryAllowed", "Use this only when retry is safe, such as this "
-                  "read-only tool or an operation protected by a stable idempotency key."),
+                 ("ToolRecoveryNotStarted", "Use this only when evidence proves that the action did not "
+                  "start. Gent leaves the decision to request it to the model."),
                  ("ToolRecoveryUnresolved", "Keep the unknown outcome visible to the model. "
                   "Gent does not promise exactly-once external side effects."),
                  ("ToolIdentityFromContext", "Pass its stable ToolCallId to your external "

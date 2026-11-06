@@ -82,6 +82,7 @@ export const lessons = [
     contracts: [
       'gent.IndexableTool',
       'gent.ToolSearcher',
+      'gent.SearchableToolChain',
       'search.SearchIndex',
       'search.Embedder',
       'search.TokenCounter',
@@ -321,16 +322,29 @@ export function recoverWorker(state, action, options) {
   if (action === 'restore' || action === 'unresolved') {
     return {
       ...restored,
-      status: 'unknown outcome; model receives recovery guidance',
+      status: 'unresolved; model receives recovery guidance',
     };
   }
   if (action === 'completed') {
     if (state.effects === 0) return { ...restored, status: 'no external receipt to return' };
     return { ...restored, status: 'reconciled with receipt' };
   }
-  if (action === 'retry') {
+  if (action === 'not-started') {
+    return {
+      ...restored,
+      status: state.effects === 0
+        ? 'not started; model decides next action'
+        : 'an effect exists; NotStarted is invalid',
+    };
+  }
+  if (action === 'new-call') {
     const effects = options.idempotent && state.effects > 0 ? state.effects : state.effects + 1;
-    return { ...restored, effects, status: 'retry explicitly allowed' };
+    return {
+      ...restored,
+      call: 'refund-42/call-8',
+      effects,
+      status: 'model requested a new call',
+    };
   }
   throw new Error(`Unknown recovery action: ${action}`);
 }

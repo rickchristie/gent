@@ -21,8 +21,8 @@ OUTPUT = HERE / "dist/gent-quick-start.html"
 
 SCENARIOS = [{
     "id": "basic", "name": "Simple agent", "tag": "01 / START HERE",
-    "summary": "One Go file. A tool, an agent, and an answer.",
-    "goal": "a program that looks up order-1001 and answers with its status.",
+    "summary": "A shipment tool, an agent, and an answer.",
+    "goal": "a program that creates a shipment for an approved order and returns its label.",
     "project": "example", "steps": STEPS,
 }, *EXTRA_SCENARIOS]
 
@@ -59,23 +59,18 @@ def project_data(name):
         if path.is_file() and path.suffix in {
             ".go", ".mod", ".sum", ".json", ".ts", ".tsx", ".html", ".css", ".md"}:
             files[str(relative)] = path.read_text()
-    if name == "example":
-        download = files["main.go"].encode()
-        filename, mime = "main.go", "text/plain;charset=utf-8"
-        choices = ["main.go"]
-    else:
-        archive = io.BytesIO()
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            for path, content in files.items():
-                info = zipfile.ZipInfo(f"{name}/{path}", (2026, 10, 26, 0, 0, 0))
-                info.compress_type = zipfile.ZIP_DEFLATED
-                bundle.writestr(info, content)
-        download = archive.getvalue()
-        filename, mime = f"gent-{name}-quick-start.zip", "application/zip"
-        choices = [path for path in files if not path.endswith(
-            ("_test.go", ".test.ts", "go.sum", "package-lock.json", "trace-fixture.json"))]
-        first = "main.go" if name == "server" else "src/main.tsx"
-        choices = [first, *[path for path in choices if path != first]]
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for path, content in files.items():
+            info = zipfile.ZipInfo(f"{name}/{path}", (2026, 10, 26, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            bundle.writestr(info, content)
+    download = archive.getvalue()
+    filename, mime = f"gent-{name}-quick-start.zip", "application/zip"
+    choices = [path for path in files if not path.endswith(
+        ("_test.go", ".test.ts", "go.sum", "package-lock.json", "trace-fixture.json"))]
+    first = "src/main.tsx" if name == "client" else "main.go"
+    choices = [first, *[path for path in choices if path != first]]
     return dict(files=files, choices=choices, downloadName=filename, mime=mime,
                 download=base64.b64encode(download).decode())
 
@@ -93,7 +88,7 @@ def basic_extra(step):
 </div>"""
     if step["id"] == "run":
         return """<div class="setup-box">
-<h2>Run after you save main.go</h2>
+<h2>Run after you save main.go and fixture.go</h2>
 <p>Set both values. This command makes live model API requests.</p>
 <div class="code-head"><span>Terminal · inside gent-demo</span>
 <button data-copy="run-commands">Copy commands</button></div>
@@ -102,8 +97,8 @@ export OPENAI_API_KEY='your-api-key'
 export GENT_MODEL='your-model-name'
 CGO_ENABLED=0 go run .</pre>
 <p class="small">This build needs no native libraries. Example answer:</p>
-<blockquote>Order order-1001 has shipped.</blockquote>
-<p>The words can vary. The order record is fixed demo data.</p>
+<blockquote>Shipment shipment-1001 was created for order-1001.</blockquote>
+<p>The words can vary. The shipment service and PDF label use fixed demo data.</p>
 </div>"""
     return ""
 

@@ -61,7 +61,7 @@ func simulateModelCall(
 	model string,
 	inputTokens, outputTokens int,
 ) error {
-	request := gent.ModelCallRequest{}
+	request := &gent.ModelCallRequest{}
 
 	// Publish BeforeModelCall first (like real model calls do)
 	execCtx.PublishBeforeModelCall(model, request)
@@ -76,7 +76,7 @@ func simulateModelCall(
 	}
 
 	// Simulate successful model response
-	response := &gent.ContentResponse{
+	response := &gent.ModelCallResponse{
 		Info: &gent.GenerationInfo{
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,

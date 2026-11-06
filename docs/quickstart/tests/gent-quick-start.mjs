@@ -267,7 +267,7 @@ go get github.com/rickchristie/gent`,
       await readFile(await download.path()),
       Buffer.from(data.projects[project].download, "base64"),
     );
-    if (project !== "example") {
+    {
       execFileSync("python3", [
         "-c",
         `

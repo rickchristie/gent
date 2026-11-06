@@ -15,7 +15,7 @@ func (c *SearchChain) SupportsParallelCalls() bool { return true }
 
 func executeParallelToolPlans(ctx *gent.ExecutionContext, chain gent.ToolChain,
 	plans []*gent.ToolPlan, format gent.TextFormat,
-) (*gent.ToolChainResult, error) {
+) ([]*gent.ToolCallRecord, error) {
 	// Each worker owns its plan. The VM and result collector remain on the caller goroutine.
 	// Wait on every exit path so tools cannot change the run after the program has returned.
 	var workers sync.WaitGroup
@@ -51,9 +51,9 @@ func executeParallelToolPlans(ctx *gent.ExecutionContext, chain gent.ToolChain,
 	if err := errors.Join(errorsByPlan...); err != nil {
 		return nil, err
 	}
-	result := &gent.ToolChainResult{Results: make([]*gent.ToolCallResult, 0, len(plans))}
+	result := make([]*gent.ToolCallRecord, 0, len(plans))
 	for _, plan := range plans {
-		result.Results = append(result.Results, plan.Results...)
+		result = append(result, plan.Results...)
 	}
 	return result, nil
 }

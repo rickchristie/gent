@@ -32,7 +32,7 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 
 func cloneContentPart(part ContentPart) ContentPart {
 	switch part := part.(type) {
-	case TextContent, ImageURLContent, ToolCallResponse:
+	case TextContent, ImageURLContent:
 		return part
 	case *TextContent:
 		copy := *part
@@ -40,9 +40,14 @@ func cloneContentPart(part ContentPart) ContentPart {
 	case *ImageURLContent:
 		copy := *part
 		return &copy
-	case *ToolCallResponse:
+	case *ModelToolCallResponse:
 		copy := *part
+		copy.data.Parts = CloneContentParts(part.Parts())
 		return &copy
+	case DataContent:
+		return DataContent{value: copyToolSchemaValue(part.value)}
+	case *DataContent:
+		return &DataContent{value: copyToolSchemaValue(part.value)}
 	case BinaryContent:
 		part.Data = cloneBytes(part.Data)
 		return part
@@ -50,14 +55,14 @@ func cloneContentPart(part ContentPart) ContentPart {
 		copy := *part
 		copy.Data = cloneBytes(part.Data)
 		return &copy
-	case ModelToolCall:
+	case ModelToolCallRequest:
 		if part.FunctionCall != nil {
 			copy := *part.FunctionCall
 			part.FunctionCall = &copy
 		}
 		return part
-	case *ModelToolCall:
-		copy := cloneContentPart(*part).(ModelToolCall)
+	case *ModelToolCallRequest:
+		copy := cloneContentPart(*part).(ModelToolCallRequest)
 		return &copy
 	case CachedContent:
 		part.ContentPart = cloneContentPart(part.ContentPart)
@@ -79,4 +84,24 @@ func cloneBytes(value []byte) []byte {
 		return nil
 	}
 	return append(make([]byte, 0, len(value)), value...)
+}
+
+// Mutable request hooks need an independent data tree while history keeps the captured value.
+func copyToolSchemaValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(value))
+		for key, item := range value {
+			result[key] = copyToolSchemaValue(item)
+		}
+		return result
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = copyToolSchemaValue(item)
+		}
+		return result
+	default:
+		return value
+	}
 }

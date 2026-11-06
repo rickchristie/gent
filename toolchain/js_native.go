@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -22,14 +23,19 @@ func (w *JsToolChainWrapper) RecoveryConfig() any {
 // still includes the available tool schemas in its description so code can use exact arguments.
 func (w *JsToolChainWrapper) NativeTools(
 	ctx *gent.ExecutionContext,
-) ([]gent.ToolDefinition, error) {
+) ([]*gent.ToolDefinition, error) {
 	chain := w.wrapped
 	tools, err := chain.NativeTools(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var catalog strings.Builder
-	for _, tool := range tools {
+	for i, tool := range tools {
+		owned := *tool
+		function := *tool.Function
+		owned.Function = &function
+		tool = &owned
+		tools[i] = tool
 		if tool.Function.Name == nativeCodeTool {
 			return nil, fmt.Errorf("tool name %q is reserved for JavaScript execution", nativeCodeTool)
 		}
@@ -51,13 +57,20 @@ func (w *JsToolChainWrapper) NativeTools(
 	}
 	description := "Run JavaScript on the application server.\n" +
 		"Use tool.call or tool.parallelCall for registered tools.\n\n" + guidance
+	if ctx.PTCIntegerMode() == gent.PTCIntegerBigInt {
+		description += "\nCaptured integers use bigint. Floats use number. " +
+			"Use bigint operands for integer arithmetic. " +
+			"tool.call and console.log accept bigint. Native JSON.stringify rejects bigint."
+	} else {
+		description += "\nCaptured integers use number. Large integers can lose precision in JavaScript."
+	}
 	if w.directCallDisabled {
 		description += "\n\nAvailable tools inside code:\n" + catalog.String()
 		tools = nil
 	} else {
 		description += "\n\nThe other function definitions also describe the tools available in code."
 	}
-	tools = append(tools, gent.ToolDefinition{Type: "function", Function: &gent.FunctionDefinition{
+	tools = append(tools, &gent.ToolDefinition{Type: "function", Function: &gent.FunctionDefinition{
 		Name: nativeCodeTool, Description: description,
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"code": map[string]any{"type": "string"},
@@ -68,6 +81,9 @@ func (w *JsToolChainWrapper) NativeTools(
 
 // RegisterCodecs also covers tool outputs saved inside a program result.
 func (w *JsToolChainWrapper) RegisterCodecs(registry *gent.CodecRegistry) error {
+	if err := registry.RegisterValueType(reflect.TypeOf(codeInput{})); err != nil {
+		return err
+	}
 	if err := registry.RegisterValueType(reflect.TypeOf(programState{})); err != nil {
 		return err
 	}
@@ -78,42 +94,41 @@ func (w *JsToolChainWrapper) RegisterCodecs(registry *gent.CodecRegistry) error 
 }
 
 func (w *JsToolChainWrapper) PrepareCalls(
-	ctx *gent.ExecutionContext, calls []gent.ModelToolCall,
+	ctx *gent.ExecutionContext, calls []*gent.ModelToolCallRequest,
 ) (*gent.ToolPlan, error) {
-	return prepareNativeCalls(ctx, w, calls, func(call *parsedCall) error {
-		return w.checkNativeCall(call.Name, call.Args)
-	})
+	if err := w.RegisterCodecs(ctx.Codecs()); err != nil {
+		return nil, err
+	}
+	return w.wrapped.PrepareCalls(ctx, calls)
 }
 
-func (w *JsToolChainWrapper) checkNativeCall(name string, args map[string]any) error {
-	if name != nativeCodeTool {
-		if w.directCallDisabled {
-			return fmt.Errorf("call %q through %s", name, nativeCodeTool)
-		}
-		return nil
-	}
-	if _, ok := args["code"].(string); !ok || len(args) != 1 {
-		return fmt.Errorf("%s requires one string argument named code", nativeCodeTool)
-	}
-	return nil
+type codeInput struct {
+	Code string `json:"code"`
 }
 
-func (w *JsToolChainWrapper) ExecuteNext(
-	ctx *gent.ExecutionContext, plan *gent.ToolPlan, format gent.TextFormat,
-) (*gent.ToolCallResult, error) {
+func (w *JsToolChainWrapper) ExecuteNext(ctx *gent.ExecutionContext,
+	plan *gent.ToolPlan, format gent.TextFormat,
+) (*gent.ToolCallRecord, error) {
 	if err := checkToolPlan(ctx, plan); err != nil {
 		return nil, err
 	}
 	call := plan.Calls[plan.NextCall]
-	if err := w.checkNativeCall(call.Name, call.Args); err != nil {
-		return nil, err
+	if call.Name != nativeCodeTool && !w.directCallDisabled {
+		return w.wrapped.ExecuteNext(ctx, plan, format)
 	}
-	if call.Name != nativeCodeTool {
-		chain := w.wrapped
-		return chain.ExecuteNext(ctx, plan, format)
-	}
-	if plan.Abandoned {
-		return completePlannedTool(ctx, plan, skippedTool(plan))
+	if plan.AttemptId != ctx.AttemptId() {
+		// Accepted outer evidence takes priority over an older program checkpoint. Rebuilding
+		// the reply would lose console output and the script's explicit byte selections.
+		record, found, err := ctx.SavedToolCallRecord(call.Id)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			if err := clearProgram(ctx); err != nil {
+				return nil, err
+			}
+			return completePlannedTool(ctx, plan, record)
+		}
 	}
 	program, found, err := loadProgram(ctx)
 	if err != nil {
@@ -122,34 +137,50 @@ func (w *JsToolChainWrapper) ExecuteNext(
 	if found {
 		return w.recoverProgram(ctx, plan, program, format)
 	}
-	program = &programState{AttemptId: ctx.AttemptId(), CallId: call.Id,
-		Script: call.Args["code"].(string)}
-	if err := ctx.SetCheckpointState("gent:program", program); err != nil {
-		return nil, err
+	unbind := ctx.BindToolCall(plan)
+	defer unbind()
+	recoveredRecord, recovered, err := ctx.RecoverTool(plan, w.Recover, w.GetToolSchema(call.Name))
+	if err != nil || recovered {
+		if err != nil {
+			return nil, err
+		}
+		return completePlannedTool(ctx, plan, recoveredRecord)
 	}
 	if err := ctx.SetToolPlan(plan); err != nil {
 		return nil, err
 	}
-	if err := ctx.CommitCheckpoint(gent.PhaseDecisionReady); err != nil {
-		return nil, err
+	local := New()
+	if call.Name != nativeCodeTool {
+		blocked := gent.DefineTool(call.Name, func(_ context.Context, _ map[string]any) (
+			*gent.ToolExecutionResponse, error,
+		) {
+			return &gent.ToolExecutionResponse{Status: gent.ToolBlocked,
+				Instructions: "Call this tool through run_code."}, nil
+		}).ParameterSchema(map[string]any{"type": "object"}).MustBuild()
+		local.RegisterTool(blocked)
+	} else {
+		local.RegisterTool(gent.DefineTool(nativeCodeTool, func(_ context.Context, input codeInput) (
+			*gent.ToolExecutionResponse, error,
+		) {
+			program := &programState{AttemptId: ctx.AttemptId(), CallId: call.Id, Script: input.Code}
+			if err := ctx.SetCheckpointState("gent:program", program); err != nil {
+				return nil, err
+			}
+			if err := ctx.CommitCheckpoint(gent.PhaseDecisionReady); err != nil {
+				return nil, err
+			}
+			return w.executeCode(ctx, input.Code, format)
+		}).MustBuild())
 	}
-	output, err := w.executeSingleCode(ctx, call.Args["code"].(string), format)
-	if recordErr := ctx.RecordingError(); recordErr != nil {
-		return nil, recordErr
-	}
+	args, parseErr := decodeArguments(call.RawArguments)
+	record, err := local.executeCall(ctx, &parsedCall{Id: call.Id, Name: call.Name,
+		ModelCallID: call.ModelCallID, ModelName: call.ModelName, RawArguments: call.RawArguments,
+		Args: args, parseError: parseErr})
 	if err != nil {
 		return nil, err
 	}
-	if ctx.IsWorkerInterrupted() {
-		return nil, ctx.Context().Err()
-	}
-	result := &gent.ToolCallResult{Name: call.Name, Args: call.Args,
-		ToolCallId: call.Id, AttemptId: ctx.AttemptId(), Output: output,
-		Text: collectText(output), Media: collectMedia(output), SummaryCaptured: true}
-	// Save the outer result and clear the marker in the same checkpoint. Inner calls use the
-	// existing tool bridge, validation, limits, and per-tool evidence. They keep their own IDs.
 	ctx.ClearCheckpointState("gent:program", "gent:program_calls")
-	return completePlannedTool(ctx, plan, result)
+	return completePlannedTool(ctx, plan, record)
 }
 
 var _ gent.ToolChain = (*JsToolChainWrapper)(nil)

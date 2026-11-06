@@ -117,7 +117,7 @@ func TestBM25_IndexAll_Reindex(t *testing.T) {
 		context.Background(), "alpha",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"tool_alpha"}, results)
+	assert.Equal(t, []string{"tool_alpha"}, results.Names)
 
 	secondTools := []gent.IndexableTool{
 		&mockIndexableTool{
@@ -139,14 +139,14 @@ func TestBM25_IndexAll_Reindex(t *testing.T) {
 		context.Background(), "alpha",
 	)
 	require.NoError(t, err)
-	assert.Empty(t, results)
+	assert.Empty(t, results.Names)
 
 	// New tool should be found
 	results, err = engine.Search(
 		context.Background(), "beta",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"tool_beta"}, results)
+	assert.Equal(t, []string{"tool_beta"}, results.Names)
 }
 
 func TestBM25_Search(t *testing.T) {
@@ -282,12 +282,12 @@ func TestBM25_Search(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.expected.isEmpty {
-				assert.Empty(t, results)
+				assert.Empty(t, results.Names)
 				return
 			}
 
 			for _, name := range tt.expected.containsNames {
-				assert.Contains(t, results, name)
+				assert.Contains(t, results.Names, name)
 			}
 		})
 	}
@@ -299,5 +299,5 @@ func TestBM25_Search_BeforeIndexAll(t *testing.T) {
 	engine := NewBleveToolSearcher()
 	results, err := engine.Search(context.Background(), "test")
 	assert.NoError(t, err)
-	assert.Empty(t, results)
+	assert.Empty(t, results.Names)
 }

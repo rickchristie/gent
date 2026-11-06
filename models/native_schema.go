@@ -299,7 +299,7 @@ func schemaReference(root map[string]any, reference string) map[string]any {
 	return object
 }
 
-func recordSchema(result *gent.ContentResponse, decision schemaEnforcement) {
+func recordSchema(result *gent.ModelCallResponse, decision schemaEnforcement) {
 	if result == nil {
 		return
 	}

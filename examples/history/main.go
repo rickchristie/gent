@@ -87,7 +87,7 @@ type demoModel struct{ answer bool }
 
 func (m *demoModel) GenerateContentStream(
 	context.Context,
-	gent.ModelCallRequest,
+	*gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	choice := &gent.ContentChoice{
 		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -96,30 +96,35 @@ func (m *demoModel) GenerateContentStream(
 	if !m.answer {
 		choice.CandidateContent = nil
 		choice.Completion.Status = gent.ModelStatusToolCalls
-		choice.ToolCalls = []gent.ModelToolCall{{ID: "read-policy", Type: "function",
+		choice.ToolCalls = []*gent.ModelToolCallRequest{{ID: "read-policy", Type: "function",
 			FunctionCall: &gent.FunctionCall{Name: "read_policy", Arguments: `{"id":"P10"}`}}}
 	}
 	m.answer = true
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{choice},
 		Info:    &gent.GenerationInfo{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
 	}, nil), nil
 }
 
 func newAgent(answer bool, calls *int) *react.Agent[string] {
-	// This tool is a pure read, so an explicit retry is safe. Writing tools must consult
-	// durable receipts and reconcile effects, or let the model receive unknown-outcome guidance.
+	// Recovery returns control to the model. It can request current data if the old read is absent.
 	return react.NewAgent(&demoModel{answer: answer}).WithRecoveryVersion("history-example/v1").
 		RegisterTool(gent.DefineTool("read_policy",
-			func(ctx context.Context, input policyInput) (string, error) {
+			func(ctx context.Context, input policyInput) (*gent.ToolExecutionResponse,
+
+				error) {
 				if _, ok := gent.ToolIdentityFromContext(ctx); !ok {
-					return "", errors.New("missing tool identity")
+					return capturedToolResponse("", errors.New("missing tool identity"))
 				}
 				*calls++
-				return input.Id + ": refunds are permitted within 30 days", nil
+				return capturedToolResponse(input.Id+": refunds are permitted within 30 days", nil)
 			}).Description("Read policy evidence").ParameterSchema(nil).
-			Recovery(func(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
-				return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+			Recovery(func(context.Context, *gent.ToolRecoveryRequest[policyInput]) (
+				*gent.ToolRecoveryResponse, error,
+			) {
+				return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+					Instructions: "The earlier read was not saved. Request current policy data if needed.",
+				}, nil
 			}).MustBuild())
 }
 
@@ -205,4 +210,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+func (m *demoModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

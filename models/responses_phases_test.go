@@ -67,9 +67,9 @@ func TestResponsesAgentMessagePhases(t *testing.T) {
 			})
 			calls := 0
 			agent := react.NewAgent(model).RegisterTool(gent.DefineTool("lookup",
-				func(context.Context, map[string]any) (string, error) {
+				func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
 					calls++
-					return "record", nil
+					return capturedToolResponse("record", nil)
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "phases",
 				gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read the record."})))

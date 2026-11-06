@@ -80,11 +80,11 @@ func TestCheckpointTypedImageWaitsForSaveAndRestores(t *testing.T) {
 			}
 			defer live.Close()
 			var modelCalls, processed, validated atomic.Int64
-			model := checkpointModel(func(context.Context, gent.ModelCallRequest) (gent.Stream, error) {
+			model := checkpointModel(func(context.Context, *gent.ModelCallRequest) (gent.Stream, error) {
 				modelCalls.Add(1)
 				stream := gent.NewStreamWithDuration()
 				stream.SendMeta(&gent.MetaContent{Type: gent.MetaContentIntermediary, Content: wantContent})
-				stream.Complete(&gent.ContentResponse{Choices: []*gent.ContentChoice{{
+				stream.Complete(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 					CandidateContent: wantContent,
 				}}}, nil)

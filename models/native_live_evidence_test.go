@@ -15,7 +15,7 @@ import (
 
 type liveEvidenceModel struct{ choices []*gent.ContentChoice }
 
-func (m *liveEvidenceModel) GenerateContentStream(context.Context, gent.ModelCallRequest) (
+func (m *liveEvidenceModel) GenerateContentStream(context.Context, *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	if len(m.choices) == 0 {
@@ -23,7 +23,7 @@ func (m *liveEvidenceModel) GenerateContentStream(context.Context, gent.ModelCal
 	}
 	choice := m.choices[0]
 	m.choices = m.choices[1:]
-	response := &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}}
+	response := &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}}
 	return gent.NewCompletedStream(response, nil), nil
 }
 
@@ -48,14 +48,15 @@ func TestNativeLiveProgramEvidence(t *testing.T) {
 	}
 	const program = `(function() {
 const first = tool.call({tool:"lookup",args:{id:"start"}});
-if (first.error) throw new Error(first.error);
-const second = tool.call({tool:"read",args:{id:first.output.next_id}});
-if (second.error) throw new Error(second.error);
+if (first.kind !== "execution") throw new Error("lookup unavailable");
+const data = first.parts.find(part => part.kind === "data").data;
+const second = tool.call({tool:"read",args:{id:data.next_id}});
+if (second.kind !== "execution") throw new Error("read unavailable");
 })();`
 	calls := []string{"lookup:start", "read:record-9"}
 	output := []gent.ContentPart{gent.TextContent{Text: "record-finished"}}
 	lookup := liveProgramCall{"lookup", &responseInput{ID: "start"},
-		&responseOutput{NextID: "record-9"}, nil}
+		`{"next_id":"record-9"}`, nil}
 	read := liveProgramCall{"read", &responseInput{ID: "record-9"}, "record-finished", nil}
 	programs := [][]liveProgramCall{{lookup, read}}
 	cases := []testCase{
@@ -86,7 +87,7 @@ if (second.error) throw new Error(second.error);
 				model.choices = append(model.choices, &gent.ContentChoice{Completion: gent.ModelCompletion{
 					Status: gent.ModelStatusToolCalls,
 				},
-					ToolCalls: []gent.ModelToolCall{{ID: fmt.Sprintf("call-%d", len(model.choices)),
+					ToolCalls: []*gent.ModelToolCallRequest{{ID: fmt.Sprintf("call-%d", len(model.choices)),
 						Type: "function", FunctionCall: &gent.FunctionCall{Name: name, Arguments: string(data)}}},
 				})
 			}
@@ -125,4 +126,9 @@ if (second.error) throw new Error(second.error);
 			assert.Equal(t, test.expected, actual)
 		})
 	}
+}
+func (m *liveEvidenceModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

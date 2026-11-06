@@ -90,6 +90,14 @@ func (r *CodecRegistry) resolveType(name string, depth int) (reflect.Type, error
 }
 
 func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, error) {
+	return r.decodeExpected(value, depth, nil)
+}
+
+// A declared anonymous struct has no stable Go name. Use the current field type to decode its
+// saved fields. DeclaredType is checked by the containing struct before this path is reached.
+func (r *CodecRegistry) decodeExpected(value EncodedValue, depth int,
+	expected reflect.Type,
+) (reflect.Value, error) {
 	if depth > 100 {
 		return reflect.Value{}, errors.New("gent: value nesting exceeds 100")
 	}
@@ -97,6 +105,9 @@ func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, er
 		return reflect.Value{}, errors.New("gent: invalid encoded JSON")
 	}
 	registration, registered := r.lookupId(value.Type)
+	if expected != nil && expected.Kind() == reflect.Struct && expected.Name() == "" {
+		registration, registered = r.lookupType(expected)
+	}
 	wantVersion := 1
 	if registered {
 		wantVersion = registration.version
@@ -149,7 +160,7 @@ func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, er
 		}
 		return reflect.ValueOf(saved), nil
 	case "pointer", "slice", "array", "map":
-		return r.decodeContainer(value, depth)
+		return r.decodeContainer(value, depth, expected)
 	}
 	if !registered {
 		return reflect.Value{}, fmt.Errorf("gent: unknown codec %q", value.Type)
@@ -176,7 +187,7 @@ func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, er
 		if err := json.Unmarshal(value.Data, &container); err != nil {
 			return reflect.Value{}, err
 		}
-		decoded, err := r.decode(container, depth+1)
+		decoded, err := r.decodeExpected(container, depth+1, result.Type())
 		if err != nil {
 			return reflect.Value{}, err
 		}
@@ -196,23 +207,17 @@ func (r *CodecRegistry) decode(value EncodedValue, depth int) (reflect.Value, er
 	for name, field := range fields {
 		target := result.FieldByName(name)
 		if !target.IsValid() || !target.CanSet() {
-			return reflect.Value{}, fmt.Errorf("gent: unknown field %s.%s", value.Type, name)
+			continue
 		}
-		decoded, err := r.decode(field, depth+1)
+		if field.DeclaredType != r.declaredFieldType(target.Type()) {
+			return reflect.Value{}, fmt.Errorf("gent: changed declared type for %s.%s", value.Type, name)
+		}
+		decoded, err := r.decodeExpected(field, depth+1, target.Type())
 		if err != nil {
 			return reflect.Value{}, fmt.Errorf("%s.%s: %w", value.Type, name, err)
 		}
 		if err := setDecoded(target, decoded); err != nil {
 			return reflect.Value{}, err
-		}
-	}
-	for i := 0; i < result.NumField(); i++ {
-		field := result.Type().Field(i)
-		if field.Type.Kind() == reflect.Func && field.Tag.Get("json") == "-" {
-			continue
-		}
-		if _, ok := fields[field.Name]; !ok {
-			return reflect.Value{}, fmt.Errorf("gent: missing field %s.%s", value.Type, field.Name)
 		}
 	}
 	return result, nil
@@ -235,14 +240,23 @@ func setDecoded(target, value reflect.Value) error {
 	return nil
 }
 
-func (r *CodecRegistry) decodeContainer(value EncodedValue, depth int) (reflect.Value, error) {
+func (r *CodecRegistry) decodeContainer(value EncodedValue, depth int,
+	expected reflect.Type,
+) (reflect.Value, error) {
 	var c encodedContainer
 	if err := json.Unmarshal(value.Data, &c); err != nil {
 		return reflect.Value{}, err
 	}
-	element, err := r.resolveType(c.Element, depth+1)
-	if err != nil {
-		return reflect.Value{}, err
+	var element reflect.Type
+	if expected != nil && (expected.Kind() == reflect.Pointer || expected.Kind() == reflect.Slice ||
+		expected.Kind() == reflect.Array || expected.Kind() == reflect.Map) {
+		element = expected.Elem()
+	} else {
+		var err error
+		element, err = r.resolveType(c.Element, depth+1)
+		if err != nil {
+			return reflect.Value{}, err
+		}
 	}
 	if c.Nil && (len(c.Values) != 0 || len(c.Items) != 0) {
 		return reflect.Value{}, errors.New("gent: nil container has content")
@@ -257,15 +271,21 @@ func (r *CodecRegistry) decodeContainer(value EncodedValue, depth int) (reflect.
 			return reflect.Value{}, errors.New("gent: invalid pointer encoding")
 		}
 		result = reflect.New(element)
-		v, err := r.decode(c.Values[0], depth+1)
+		v, err := r.decodeExpected(c.Values[0], depth+1, element)
 		if err != nil {
 			return reflect.Value{}, err
 		}
 		return result, setDecoded(result.Elem(), v)
 	case "map":
-		key, err := r.resolveType(c.Key, depth+1)
-		if err != nil {
-			return reflect.Value{}, err
+		var key reflect.Type
+		if expected != nil && expected.Kind() == reflect.Map {
+			key = expected.Key()
+		} else {
+			var err error
+			key, err = r.resolveType(c.Key, depth+1)
+			if err != nil {
+				return reflect.Value{}, err
+			}
 		}
 		if !key.Comparable() {
 			return reflect.Value{}, errors.New("gent: map key is not comparable")
@@ -276,11 +296,11 @@ func (r *CodecRegistry) decodeContainer(value EncodedValue, depth int) (reflect.
 		}
 		result = reflect.MakeMapWithSize(typ, len(c.Items))
 		for _, item := range c.Items {
-			k, err := r.decode(item.Key, depth+1)
+			k, err := r.decodeExpected(item.Key, depth+1, key)
 			if err != nil {
 				return reflect.Value{}, err
 			}
-			v, err := r.decode(item.Value, depth+1)
+			v, err := r.decodeExpected(item.Value, depth+1, element)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -309,7 +329,7 @@ func (r *CodecRegistry) decodeContainer(value EncodedValue, depth int) (reflect.
 		result = reflect.MakeSlice(reflect.SliceOf(element), len(c.Values), len(c.Values))
 	}
 	for i, item := range c.Values {
-		v, err := r.decode(item, depth+1)
+		v, err := r.decodeExpected(item, depth+1, element)
 		if err != nil {
 			return reflect.Value{}, err
 		}
@@ -318,4 +338,29 @@ func (r *CodecRegistry) decodeContainer(value EncodedValue, depth int) (reflect.
 		}
 	}
 	return result, nil
+}
+
+// Named types retain identity while their exported fields can evolve. Container declarations
+// remain exact. In particular, replacing string with any must not pass by assignability alone.
+func (r *CodecRegistry) declaredFieldType(t reflect.Type) string {
+	if registration, ok := r.lookupType(t); ok && t.Name() != "" {
+		return registration.id
+	}
+	if t.Name() != "" {
+		return t.PkgPath() + "/" + t.Name()
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		return "struct"
+	case reflect.Pointer:
+		return "*" + r.declaredFieldType(t.Elem())
+	case reflect.Slice:
+		return "[]" + r.declaredFieldType(t.Elem())
+	case reflect.Array:
+		return fmt.Sprintf("[%d]%s", t.Len(), r.declaredFieldType(t.Elem()))
+	case reflect.Map:
+		return "map[" + r.declaredFieldType(t.Key()) + "]" + r.declaredFieldType(t.Elem())
+	default:
+		return t.String()
+	}
 }

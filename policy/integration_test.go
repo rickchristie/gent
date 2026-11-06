@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rickchristie/gent"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,7 +91,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"cancellation-refund", "delay-compensation", "24-hour-cancellation"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("keyword cancel refund", func(t *testing.T) {
@@ -99,7 +100,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"cancellation-refund", "delay-compensation", "24-hour-cancellation"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("semantic leave early", func(t *testing.T) {
@@ -110,7 +111,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"flight-change-rebooking", "pet-travel", "24-hour-cancellation"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("baggage query", func(t *testing.T) {
@@ -121,7 +122,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"baggage-allowance", "apis-travel-documentation", "flight-change-rebooking"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("child flying alone", func(t *testing.T) {
@@ -132,7 +133,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"unaccompanied-minor", "involuntary-rebooking", "pet-travel"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("pet travel", func(t *testing.T) {
@@ -143,7 +144,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"pet-travel", "baggage-allowance", "eu261-passenger-rights"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("overbooked flight", func(t *testing.T) {
@@ -154,7 +155,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"involuntary-rebooking", "eu261-passenger-rights", "flight-change-rebooking"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("just booked want to cancel", func(t *testing.T) {
@@ -170,7 +171,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"24-hour-cancellation", "cancellation-refund"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("broad frequent flyer changing flights", func(t *testing.T) {
@@ -181,7 +182,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"frequent-flyer-benefits", "flight-change-rebooking", "same-day-change"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	// --- BM25-critical queries (BM25 should strongly contribute) ---
@@ -193,7 +194,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"eu261-passenger-rights", "unaccompanied-minor", "24-hour-cancellation"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("acronym APIS", func(t *testing.T) {
@@ -203,7 +204,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"apis-travel-documentation", "unaccompanied-minor", "eu261-passenger-rights"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("short query WiFi", func(t *testing.T) {
@@ -213,7 +214,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"wifi-inflight-services", "baggage-allowance", "delay-compensation"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("short query ESTA", func(t *testing.T) {
@@ -223,7 +224,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"apis-travel-documentation", "baggage-allowance", "eu261-passenger-rights"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("numeric age discrimination", func(t *testing.T) {
@@ -235,7 +236,7 @@ func TestPolicySearch_Quality_Airline(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"unaccompanied-minor", "frequent-flyer-benefits", "pet-travel"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 }
 
@@ -266,7 +267,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"standard-return", "electronics-return-15day", "exchange"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("price match Amazon", func(t *testing.T) {
@@ -277,7 +278,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"price-match", "exchange", "damaged-defective"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("damaged in shipping", func(t *testing.T) {
@@ -288,7 +289,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"damaged-defective", "shipping-delivery", "exchange"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("gift card expiration", func(t *testing.T) {
@@ -299,7 +300,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"gift-card", "store-credit", "refund-processing"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("loyalty points", func(t *testing.T) {
@@ -311,7 +312,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 			Query: "how do I earn and redeem loyalty points",
 		})
 		require.NoError(t, err)
-		assert.Equal(t, expectedOutput(policies, "loyalty-program"), result.Text)
+		assert.Equal(t, expectedOutput(policies, "loyalty-program"), gent.ContentTextData(result.Parts))
 	})
 
 	// --- BM25-critical queries ---
@@ -323,7 +324,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"rma-returns-authorization", "standard-return", "store-credit"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("identifier 1099-K", func(t *testing.T) {
@@ -333,7 +334,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"tax-reporting-1099k", "standard-return", "store-credit"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("numeric 15 day electronics", func(t *testing.T) {
@@ -345,7 +346,7 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"electronics-return-15day", "standard-return", "rma-returns-authorization"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 
 	t.Run("semantic confusion return laptop", func(t *testing.T) {
@@ -358,6 +359,6 @@ func TestPolicySearch_Quality_Ecommerce(t *testing.T) {
 		assert.Equal(t,
 			expectedOutput(policies,
 				"standard-return", "electronics-return-15day", "rma-returns-authorization"),
-			result.Text)
+			gent.ContentTextData(result.Parts))
 	})
 }

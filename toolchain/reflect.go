@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/internal/jsonfields"
 )
 
 // ToolMeta holds metadata about a registered tool extracted via reflection.
@@ -20,7 +22,7 @@ type ToolMeta struct {
 	strict       bool
 	schema       map[string]any
 	outputSchema map[string]any
-	tool         any          // The actual tool (Tool[I, O])
+	tool         any          // The actual tool (Tool[I])
 	inputType    reflect.Type // The input type I
 }
 
@@ -63,7 +65,7 @@ func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 		return nil, errors.New("tool does not have Call method")
 	}
 
-	// Get the input type from Call method signature: Call(ctx, input I) (*ToolResult[O], error)
+	// Call receives context and typed input, then returns a response and an error.
 	callType := callMethod.Type()
 	if callType.NumIn() != 2 {
 		return nil, fmt.Errorf(
@@ -73,14 +75,10 @@ func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 	}
 	inputType := callType.In(1) // ctx is 0, input is 1
 
-	// Get the actual struct type (dereference if pointer)
-	structType := inputType
-	if structType.Kind() == reflect.Ptr {
-		structType = structType.Elem()
-	}
-
-	// Pre-process args to convert intermediary types to Go types based on target struct
-	convertedArgs := convertArgsForType(args, structType)
+	// Preserve the supplied argument tree while preparing Go-specific temporal values. Containers
+	// use the same conversion at every depth, including a map used as the top-level input.
+	var fields jsonfields.Resolver
+	convertedArgs := convertValueToType(args, inputType, &fields)
 
 	// Create new instance of input type and unmarshal args into it
 	var inputVal reflect.Value
@@ -97,7 +95,9 @@ func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal args: %w", err)
 	}
-	if err := json.Unmarshal(argsJSON, inputVal.Interface()); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(argsJSON))
+	decoder.UseNumber()
+	if err := decoder.Decode(inputVal.Interface()); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal args into input type: %w", err)
 	}
 
@@ -108,210 +108,52 @@ func TransformArgsReflect(tool any, args map[string]any) (any, error) {
 	return inputVal.Elem().Interface(), nil
 }
 
-// ToolCallOutput holds the result of calling a tool via reflection.
-// This is an internal type used by toolchain implementations to collect
-// tool outputs before formatting.
-type ToolCallOutput struct {
-	Name         string             // Tool name
-	Text         any                // Raw typed text output (will be formatted as JSON/YAML)
-	Media        []gent.ContentPart // Media content (images, audio, etc.)
-	Instructions string             // Optional follow-up instructions for the LLM
-}
-
-// CallToolWithTypedInputReflect calls a generic Tool[I, TextOutput] with already-typed input.
-//
-// The typedInput must be the correct type for the tool's input type I.
-// Use TransformArgsReflect to convert map[string]any to the typed input first.
-//
-// Returns a ToolCallOutput containing the tool name, text output, and any media.
-func CallToolWithTypedInputReflect(
-	ctx context.Context,
-	tool any,
-	typedInput any,
-) (*ToolCallOutput, error) {
+// CallToolWithTypedInputReflect invokes the registered typed method and preserves both returns.
+// It does not normalize errors or discard an invalid response/error pair; the record path does.
+func CallToolWithTypedInputReflect(ctx context.Context, tool any, input any) (
+	*gent.ToolExecutionResponse, error,
+) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	toolVal := reflect.ValueOf(tool)
-	if !toolVal.IsValid() {
-		return nil, errors.New("invalid tool value")
+	method := reflect.ValueOf(tool).MethodByName("Call")
+	value := reflect.ValueOf(input)
+	if !value.IsValid() || !value.Type().AssignableTo(method.Type().In(1)) {
+		return nil, fmt.Errorf("effective input %T does not match %s", input, method.Type().In(1))
 	}
-
-	// Get the Call method
-	callMethod := toolVal.MethodByName("Call")
-	if !callMethod.IsValid() {
-		return nil, errors.New("tool does not have Call method")
+	values := method.Call([]reflect.Value{reflect.ValueOf(ctx), value})
+	var response *gent.ToolExecutionResponse
+	var err error
+	if !values[0].IsNil() {
+		response = values[0].Interface().(*gent.ToolExecutionResponse)
 	}
-
-	// Get Name method for result
-	nameMethod := toolVal.MethodByName("Name")
-	if !nameMethod.IsValid() {
-		return nil, errors.New("tool does not have Name method")
+	if !values[1].IsNil() {
+		err = values[1].Interface().(error)
 	}
-	nameResult := nameMethod.Call(nil)
-	toolName := nameResult[0].String()
-
-	// Call the method
-	results := callMethod.Call([]reflect.Value{
-		reflect.ValueOf(ctx),
-		reflect.ValueOf(typedInput),
-	})
-
-	// Handle results: (*ToolResult[TextOutput], error)
-	resultVal := results[0]
-	errVal := results[1]
-
-	// Check error
-	if !errVal.IsNil() {
-		return nil, errVal.Interface().(error)
-	}
-
-	// Extract from *ToolResult[TextOutput]
-	if resultVal.IsNil() {
-		return nil, errors.New("nil result from tool")
-	}
-
-	resultStruct := resultVal.Elem()
-	textField := resultStruct.FieldByName("Text")
-	mediaField := resultStruct.FieldByName("Media")
-	instructionsField := resultStruct.FieldByName("Instructions")
-
-	var media []gent.ContentPart
-	if mediaField.IsValid() && !mediaField.IsNil() {
-		media = mediaField.Interface().([]gent.ContentPart)
-	}
-
-	var instructions string
-	if instructionsField.IsValid() {
-		instructions = instructionsField.String()
-	}
-
-	return &ToolCallOutput{
-		Name:         toolName,
-		Text:         textField.Interface(),
-		Media:        media,
-		Instructions: instructions,
-	}, nil
+	return response, err
 }
 
-// CallToolReflect calls a generic Tool[I, TextOutput] using reflection.
-//
-// It converts args (map[string]any) to the tool's input type. The conversion handles
-// type coercion from JSON Schema intermediary types to Go types:
-//   - string -> time.Time: Parses using common date/time formats (RFC3339, date-only, etc.)
-//   - string -> time.Duration: Parses using time.ParseDuration (e.g., "1h30m", "2h45m30s")
-//   - If target field is `any`, the intermediary value is used as-is
-//
-// This is a convenience function that combines TransformArgsReflect and
-// CallToolWithTypedInputReflect.
-func CallToolReflect(
-	ctx context.Context,
-	tool any,
-	args map[string]any,
-) (*ToolCallOutput, error) {
-	typedInput, err := TransformArgsReflect(tool, args)
+// CallToolReflect converts arguments and invokes Call. Chains validate the schema before use.
+func CallToolReflect(ctx context.Context, tool any, args map[string]any) (
+	*gent.ToolExecutionResponse, error,
+) {
+	input, err := TransformArgsReflect(tool, args)
 	if err != nil {
 		return nil, err
 	}
-	return CallToolWithTypedInputReflect(ctx, tool, typedInput)
-}
-
-// convertArgsForType converts intermediary arg values to match the expected Go types
-// in the target struct. This handles conversions that Go's json package doesn't support:
-//   - string -> time.Time (various formats)
-//   - string -> time.Duration
-func convertArgsForType(args map[string]any, structType reflect.Type) map[string]any {
-	if args == nil || structType.Kind() != reflect.Struct {
-		return args
-	}
-
-	result := make(map[string]any, len(args))
-	for key, value := range args {
-		result[key] = convertValueForField(value, structType, key)
-	}
-	return result
-}
-
-// convertValueForField converts a single value based on the target field's type.
-func convertValueForField(value any, structType reflect.Type, fieldName string) any {
-	// Find the field in the struct (check both exact name and json tag)
-	field, found := findFieldByName(structType, fieldName)
-	if !found {
-		return value // Unknown field, return as-is
-	}
-
-	return convertValueToType(value, field.Type)
-}
-
-// findFieldByName finds a struct field by name or json tag.
-func findFieldByName(structType reflect.Type, name string) (reflect.StructField, bool) {
-	for i := range structType.NumField() {
-		field := structType.Field(i)
-
-		// Check json tag first
-		jsonTag := field.Tag.Get("json")
-		if jsonTag != "" {
-			// Handle "fieldname,omitempty" style tags
-			tagName := jsonTag
-			if comma := findComma(jsonTag); comma >= 0 {
-				tagName = jsonTag[:comma]
-			}
-			if tagName == name {
-				return field, true
-			}
-		}
-
-		// Check field name (case-insensitive for JSON compatibility)
-		if equalFold(field.Name, name) {
-			return field, true
-		}
-	}
-	return reflect.StructField{}, false
-}
-
-// findComma returns the index of the first comma in s, or -1 if not found.
-func findComma(s string) int {
-	for i := range len(s) {
-		if s[i] == ',' {
-			return i
-		}
-	}
-	return -1
-}
-
-// equalFold reports whether s and t are equal under case-folding.
-func equalFold(s, t string) bool {
-	if len(s) != len(t) {
-		return false
-	}
-	for i := range len(s) {
-		c1, c2 := s[i], t[i]
-		if c1 != c2 {
-			// Convert to lowercase
-			if c1 >= 'A' && c1 <= 'Z' {
-				c1 += 'a' - 'A'
-			}
-			if c2 >= 'A' && c2 <= 'Z' {
-				c2 += 'a' - 'A'
-			}
-			if c1 != c2 {
-				return false
-			}
-		}
-	}
-	return true
+	return CallToolWithTypedInputReflect(ctx, tool, input)
 }
 
 // convertValueToType converts a value to match the target type.
-func convertValueToType(value any, targetType reflect.Type) any {
+func convertValueToType(value any, targetType reflect.Type, fields *jsonfields.Resolver) any {
 	if value == nil {
 		return nil
 	}
 
 	// Handle pointer types - get the underlying type
 	elemType := targetType
-	if targetType.Kind() == reflect.Ptr {
-		elemType = targetType.Elem()
+	for elemType.Kind() == reflect.Ptr {
+		elemType = elemType.Elem()
 	}
 
 	// Check for time.Time
@@ -339,20 +181,42 @@ func convertValueToType(value any, targetType reflect.Type) any {
 		return value
 	}
 
+	// The custom decoder owns its wire representation. Do not convert apparent temporal fields
+	// or elements inside it; those wire positions need not match the underlying Go type.
+	if jsonfields.CustomDecoder(targetType) {
+		return value
+	}
+
 	// Handle nested structs
 	if elemType.Kind() == reflect.Struct {
 		if m, ok := value.(map[string]any); ok {
-			return convertArgsForType(m, elemType)
+			result := make(map[string]any, len(m))
+			for name, item := range m {
+				result[name] = item
+				if field, found := fields.DecodeField(elemType, name); found {
+					result[name] = convertValueToType(item, field.Type, fields)
+				}
+			}
+			return result
 		}
 	}
 
-	// Handle slices
-	if elemType.Kind() == reflect.Slice {
+	if elemType.Kind() == reflect.Map {
+		if values, ok := value.(map[string]any); ok {
+			result := make(map[string]any, len(values))
+			for key, item := range values {
+				result[key] = convertValueToType(item, elemType.Elem(), fields)
+			}
+			return result
+		}
+	}
+
+	if elemType.Kind() == reflect.Slice || elemType.Kind() == reflect.Array {
 		if arr, ok := value.([]any); ok {
 			elemElemType := elemType.Elem()
 			result := make([]any, len(arr))
 			for i, item := range arr {
-				result[i] = convertValueToType(item, elemElemType)
+				result[i] = convertValueToType(item, elemElemType, fields)
 			}
 			return result
 		}
@@ -391,39 +255,65 @@ type toolDefinition interface {
 	Strict() bool
 	ParameterSchema() map[string]any
 	OutputSchema() map[string]any
-	Recover(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error)
+	UnrecoverableErrorInstructions() string
 }
 
-// GetToolMeta extracts metadata from a generic Tool[I, O] using reflection.
+// GetToolMeta validates the complete Tool[I] contract before dispatch. Reflection is limited to
+// binding I; normal response handling uses the explicit shared response types.
 func GetToolMeta(tool any) (*ToolMeta, error) {
 	definition, ok := tool.(toolDefinition)
 	if !ok {
 		return nil, errors.New("tool must implement the full gent.Tool interface")
 	}
-	call := reflect.ValueOf(tool).MethodByName("Call")
+	value := reflect.ValueOf(tool)
+	call := value.MethodByName("Call")
 	if !call.IsValid() {
-		return nil, errors.New("tool does not have Call method")
+		return nil, errors.New("tool has no Call method")
 	}
 	t := call.Type()
 	if t.IsVariadic() || t.NumIn() != 2 || t.In(0) != reflect.TypeFor[context.Context]() ||
-		t.NumOut() != 2 ||
-		t.Out(1) != reflect.TypeFor[error]() || t.Out(0).Kind() != reflect.Pointer ||
-		t.Out(0).Elem().Kind() != reflect.Struct {
-		return nil, errors.New("Call method has unexpected signature")
+		t.NumOut() != 2 || t.Out(0) != reflect.TypeFor[*gent.ToolExecutionResponse]() ||
+		t.Out(1) != reflect.TypeFor[error]() {
+		return nil, errors.New("Call must return (*gent.ToolExecutionResponse, error)")
 	}
-	result := t.Out(0).Elem()
-	if result.PkgPath() != reflect.TypeFor[gent.ToolResult[any]]().PkgPath() ||
-		!strings.HasPrefix(result.Name(), "ToolResult[") {
-		return nil, errors.New("Call must return *gent.ToolResult[O]")
+	recovery := value.MethodByName("Recover")
+	if !recovery.IsValid() {
+		return nil, errors.New("tool has no typed Recover method")
 	}
-	text, _ := result.FieldByName("Text")
-	summary := reflect.ValueOf(tool).MethodByName("DeduplicateSummary")
-	if !summary.IsValid() || summary.Type() != reflect.FuncOf(
-		[]reflect.Type{t.In(1), text.Type}, []reflect.Type{reflect.TypeFor[string]()}, false,
-	) {
-		return nil, errors.New("tool must implement DeduplicateSummary(I, O) string")
+	rt := recovery.Type()
+	if rt.IsVariadic() || rt.NumIn() != 2 || rt.In(0) != reflect.TypeFor[context.Context]() ||
+		rt.NumOut() != 2 || rt.Out(0) != reflect.TypeFor[*gent.ToolRecoveryResponse]() ||
+		rt.Out(1) != reflect.TypeFor[error]() || rt.In(1).Kind() != reflect.Pointer ||
+		!strings.HasPrefix(rt.In(1).Elem().Name(), "ToolRecoveryRequest[") ||
+		rt.In(1).Elem().PkgPath() != reflect.TypeFor[gent.ToolRecoveryResponse]().PkgPath() {
+		return nil, errors.New("Recover must accept *gent.ToolRecoveryRequest[I]")
+	}
+	input, ok := rt.In(1).MethodByName("Input")
+	if !ok || input.Type.Out(0) != t.In(1) {
+		return nil, errors.New("Recover input must match Call input")
 	}
 	return &ToolMeta{name: definition.Name(), description: definition.Description(),
 		policy: definition.Policy(), strict: definition.Strict(), schema: definition.ParameterSchema(),
 		outputSchema: definition.OutputSchema(), tool: tool, inputType: t.In(1)}, nil
+}
+
+func recoverToolReflect(ctx context.Context, tool any,
+	request *gent.ToolRecoveryRequest[gent.EncodedValue],
+) (
+	*gent.ToolRecoveryResponse, error,
+) {
+	method := reflect.ValueOf(tool).MethodByName("Recover")
+	input, err := gent.BindToolRecoveryInput(ctx, method.Type().In(1), request)
+	if err != nil {
+		return nil, err
+	}
+	values := method.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(input)})
+	var response *gent.ToolRecoveryResponse
+	if !values[0].IsNil() {
+		response = values[0].Interface().(*gent.ToolRecoveryResponse)
+	}
+	if !values[1].IsNil() {
+		err = values[1].Interface().(error)
+	}
+	return response, err
 }

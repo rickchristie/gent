@@ -34,13 +34,15 @@ func TestRecoveryRejectsChangedHandlerVersion(t *testing.T) {
 			toolCalls := 0
 			build := func(model *guidanceModel, version string) *react.Agent[string] {
 				tool := &recoverySearchTool{gent.DefineTool("book",
-					func(context.Context, *bookingInput) (string, error) {
+					func(context.Context, *bookingInput) (*gent.ToolExecutionResponse, error) {
 						toolCalls++
-						return "booked", nil
+						return capturedToolResponse("booked", nil)
 					}).Description("Book a flight").ParameterSchema(nil).
-					Recovery(func(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
-						return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved,
-							SteeringMessage: "Check the booking service."}, nil
+					Recovery(func(context.Context, *gent.ToolRecoveryRequest[*bookingInput]) (
+						*gent.ToolRecoveryResponse, error,
+					) {
+						return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+							Instructions: "Check the booking service."}, nil
 					}).MustBuild()}
 				var chain gent.ToolChain = toolchain.New().RegisterTool(tool)
 				if test.input.search {
@@ -71,7 +73,7 @@ func TestRecoveryRejectsChangedHandlerVersion(t *testing.T) {
 			if !assert.ErrorIs(t, err, context.Canceled) {
 				return
 			}
-			assert.Equal(t, []gent.ModelCallRequest(nil), model.requests)
+			assert.Equal(t, []*gent.ModelCallRequest(nil), model.requests)
 			freshModel := &guidanceModel{finish: true}
 			freshAgent := build(freshModel, "guidance/v2")
 			bindings := recoveryBindings(t, freshAgent)

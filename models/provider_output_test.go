@@ -133,9 +133,11 @@ func TestProvidersTypedOutputCorrection(t *testing.T) {
 			})
 			var calls []providerLookupInput
 			agent := react.NewWithOutput(fixtureModel(test.input.provider, client), out).RegisterTool(
-				gent.DefineTool("lookup", func(_ context.Context, input providerLookupInput) (string, error) {
+				gent.DefineTool("lookup", func(_ context.Context, input providerLookupInput) (
+					*gent.ToolExecutionResponse, error,
+				) {
 					calls = append(calls, input)
-					return "record-seven", nil
+					return capturedToolResponse("record-seven", nil)
 				}).Description("Read the record").MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), test.name,
 				gent.NewBasicLoopData(&gent.Task{Messages: []*gent.ModelMessage{

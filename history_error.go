@@ -39,7 +39,6 @@ var savedErrorSentinels = map[string]error{
 	"invalid_tool_args":       ErrInvalidToolArgs,
 	"repetition":              ErrRepetitionDetected,
 	"response_size":           ErrMaxResponseSize,
-	"uncertain_tool":          ErrUncertainTool,
 	"unsupported_recovery":    ErrUnsupportedRecovery,
 	"incompatible_checkpoint": ErrIncompatibleCheckpoint,
 	"event_gap":               ErrEventGap,

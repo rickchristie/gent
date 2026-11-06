@@ -90,7 +90,11 @@ func (ctx *ExecutionContext) recordEvent(event Event) error {
 	if err := ctx.RecordingError(); err != nil {
 		return err
 	}
-	value, err := ctx.run.codecs.Encode(event)
+	stored, err := ctx.snapshotToolEvent(event)
+	if err != nil {
+		return ctx.stopRecording(err)
+	}
+	value, err := ctx.run.codecs.Encode(stored)
 	if err != nil {
 		return ctx.stopRecording(fmt.Errorf("gent: record %T: %w", event, err))
 	}
@@ -133,6 +137,31 @@ func (ctx *ExecutionContext) recordEvent(event Event) error {
 		return ctx.stopRecording(err)
 	}
 	return ctx.flushPendingLimit()
+}
+
+// Live hooks keep their typed input. Saved event arguments are opaque snapshots, so reading
+// completed history never needs an old tool registration or input type on the next worker.
+func (ctx *ExecutionContext) snapshotToolEvent(event Event) (Event, error) {
+	snapshot := func(value any) (*EncodedValue, error) {
+		if encoded, ok := value.(*EncodedValue); ok {
+			return encoded, nil
+		}
+		return ctx.SnapshotDiagnostic(value)
+	}
+	switch event := event.(type) {
+	case *BeforeToolCallEvent:
+		copy := *event
+		value, err := snapshot(event.Args)
+		copy.Args = value
+		return &copy, err
+	case *AfterToolCallEvent:
+		copy := *event
+		value, err := snapshot(event.Args)
+		copy.Args = value
+		return &copy, err
+	default:
+		return event, nil
+	}
 }
 
 func (ctx *ExecutionContext) recordChunk(chunk *StreamChunk) error {

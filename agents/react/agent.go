@@ -145,7 +145,7 @@ func (r *Agent[T]) next(execCtx *gent.ExecutionContext) (*gent.AgentLoopResult, 
 
 func (r *Agent[T]) handleResponseTooLong(
 	execCtx *gent.ExecutionContext,
-	response *gent.ContentResponse,
+	response *gent.ModelCallResponse,
 ) (*gent.AgentLoopResult, error) {
 	responseContent := ""
 	if response != nil && len(response.Choices) > 0 {
@@ -182,7 +182,7 @@ func (r *Agent[T]) handleResponseTooLong(
 // For RepetitionTerminate, it returns a fatal error.
 func (r *Agent[T]) handleRepetition(
 	execCtx *gent.ExecutionContext,
-	response *gent.ContentResponse, rep *agentutil.RepetitionResult,
+	response *gent.ModelCallResponse, rep *agentutil.RepetitionResult,
 ) (*gent.AgentLoopResult, error) {
 	// Update stats.
 	execCtx.Stats().IncrCounter(gent.SCRepetitionLoopTotal, 1)
@@ -271,14 +271,8 @@ func (r *Agent[T]) buildIteration(response, observation string) *gent.HistoryEnt
 func (r *Agent[T]) callModel(
 	execCtx *gent.ExecutionContext, streamId string,
 	streamTopicId string, messages []*gent.ModelMessage,
-) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
+) (*gent.ModelCallResponse, *agentutil.RepetitionResult, error) {
 	opts := r.effectiveCallOptions()
-	tools, err := r.toolChain.NativeTools(execCtx)
-	if err != nil {
-		return nil, nil, err
-	}
-	// The registry owns the catalog for this model request.
-	opts = append(opts, gent.WithTools(tools))
 	r.warnRestrictiveSampling(execCtx, opts)
 	return r.callModelStreaming(execCtx, streamId, streamTopicId, messages, opts)
 }
@@ -366,15 +360,15 @@ func (r *Agent[T]) callModelStreaming(
 	execCtx *gent.ExecutionContext,
 	streamId string, streamTopicId string,
 	messages []*gent.ModelMessage, opts []gent.CallOption,
-) (*gent.ContentResponse, *agentutil.RepetitionResult, error) {
+) (*gent.ModelCallResponse, *agentutil.RepetitionResult, error) {
 	request := gent.NewModelCallRequest(messages, opts...)
-	if err := r.output.Configure(&request); err != nil {
+	if err := r.output.Configure(request); err != nil {
 		return nil, nil, err
 	}
 	stream, err := execCtx.GenerateContentStream(
 		r.model,
 		gent.ModelCall{StreamId: streamId, StreamTopicId: streamTopicId},
-		request,
+		request, r.toolChain,
 	)
 	if err != nil {
 		return nil, nil, err

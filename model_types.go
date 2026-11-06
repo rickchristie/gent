@@ -60,21 +60,13 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"`
 }
 
-type ModelToolCall struct {
+type ModelToolCallRequest struct {
 	ID           string        `json:"id"`
 	Type         string        `json:"type"`
 	FunctionCall *FunctionCall `json:"function,omitempty"`
 }
 
-func (ModelToolCall) isContentPart() {}
-
-type ToolCallResponse struct {
-	ToolCallID string `json:"tool_call_id"`
-	Name       string `json:"name"`
-	Content    string `json:"content"`
-}
-
-func (ToolCallResponse) isContentPart() {}
+func (ModelToolCallRequest) isContentPart() {}
 
 type ToolDefinition struct {
 	Type     string              `json:"type"`
@@ -82,10 +74,11 @@ type ToolDefinition struct {
 }
 
 type FunctionDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Parameters  any    `json:"parameters,omitempty"`
-	Strict      bool   `json:"strict,omitempty"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Parameters   any            `json:"parameters,omitempty"`
+	OutputSchema map[string]any `json:"output_schema,omitempty"`
+	Strict       bool           `json:"strict,omitempty"`
 }
 
 type ToolChoice struct {
@@ -114,7 +107,12 @@ func TextParts(role ChatMessageType, texts ...string) *ModelMessage {
 	}
 	return message
 }
-func ImageURLPart(url string) ImageURLContent { return ImageURLContent{URL: url} }
+
+// ImageURLPart retains a remote reference. The caller owns URL expiry and content changes,
+// including changes between requests or after recovery. Use BytesPart to preserve content.
+// Adapters send the URL when supported, otherwise load the image for that request. A load
+// failure becomes safe steering text; Gent does not repeat the source tool.
+func ImageURLPart(url string) ContentPart { return ImageURLContent{URL: url} }
 func BinaryPart(mime string, data []byte) BinaryContent {
 	return BinaryContent{MIMEType: mime, Data: data}
 }
@@ -123,6 +121,7 @@ func BinaryPart(mime string, data []byte) BinaryContent {
 // produce an adapter error; silently dropping a setting can change execution behavior.
 // Temperature and TopP are optional. A pointer preserves an explicit zero.
 type CallOptions struct {
+	SteeringMessages       SteeringMessages
 	Model                  string
 	CandidateCount         int
 	MaxTokens              int
@@ -138,7 +137,7 @@ type CallOptions struct {
 	FrequencyPenalty       float64
 	PresencePenalty        float64
 	JSONMode               bool
-	Tools                  []ToolDefinition
+	Tools                  []*ToolDefinition
 	ToolChoice             any
 	Metadata               map[string]any
 	ResponseMIMEType       string
@@ -166,7 +165,7 @@ func WithTemperature(n float64) CallOption {
 func WithTopP(n float64) CallOption {
 	return func(o *CallOptions) { o.TopP = &n }
 }
-func WithTools(tools []ToolDefinition) CallOption {
+func WithTools(tools []*ToolDefinition) CallOption {
 	return func(o *CallOptions) { o.Tools = tools }
 }
 func WithOptions(options *CallOptions) CallOption {

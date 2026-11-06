@@ -32,9 +32,9 @@ type reviewModel struct {
 }
 
 func (m reviewModel) GenerateContentStream(
-	context.Context, gent.ModelCallRequest,
+	context.Context, *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -381,12 +381,12 @@ func TestReliabilityDrainedStreamReleasesMetadata(t *testing.T) {
 		// Source is not part of the final response. It must leave memory with its queue item.
 		assert.True(t, stream.Send(gent.StreamChunk{Source: strings.Repeat("x", 1<<20)}))
 	}
-	stream.Complete(&gent.ContentResponse{}, nil)
+	stream.Complete(&gent.ModelCallResponse{}, nil)
 	for range stream.Chunks() {
 	}
 	response, err := stream.Response()
 	assert.NoError(t, err)
-	assert.Equal(t, &gent.ContentResponse{}, response)
+	assert.Equal(t, &gent.ModelCallResponse{}, response)
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	runtime.KeepAlive(stream)
@@ -482,3 +482,8 @@ func BenchmarkReliabilityEmitChunk(b *testing.B) {
 }
 
 func (reviewLoop) Output() gent.Output[string] { return output.NewTextOutput() }
+func (m reviewModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
+}

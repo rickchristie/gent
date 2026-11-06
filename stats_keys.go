@@ -280,3 +280,11 @@ var protectedKeys = map[StatKey]bool{
 func isProtectedKey(key StatKey) bool {
 	return protectedKeys[key]
 }
+
+// Input rejection is expected control flow, separate from unexpected operation failures.
+const (
+	SCToolCallsInvalidArgumentsTotal StatKey = "gent:tool_calls_invalid_arguments_total"
+	SCToolCallsInvalidArgumentsFor   StatKey = "gent:tool_calls_invalid_arguments:"
+	SCToolRecoveryErrorTotal         StatKey = "gent:tool_recovery_error_total"
+	SCToolRecoveryErrorFor           StatKey = "gent:tool_recovery_error:"
+)

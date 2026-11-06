@@ -12,31 +12,32 @@ type requestOwnershipHook struct{ change func(*ModelCallRequest) }
 func (h *requestOwnershipHook) MaxRecursion() int { return 10 }
 func (h *requestOwnershipHook) Dispatch(_ *ExecutionContext, event Event) {
 	if before, ok := event.(*BeforeModelCallEvent); ok {
-		h.change(&before.Request)
+		h.change(before.Request)
 	}
 }
 
-type requestOwnershipModel struct{ request ModelCallRequest }
+type requestOwnershipModel struct{ request *ModelCallRequest }
 
-func (m *requestOwnershipModel) GenerateContentStream(_ context.Context, request ModelCallRequest) (
+func (m *requestOwnershipModel) GenerateContentStream(_ context.Context,
+	request *ModelCallRequest) (
 	Stream, error,
 ) {
 	m.request = request
-	return NewCompletedStream(&ContentResponse{}, nil), nil
+	return NewCompletedStream(&ModelCallResponse{}, nil), nil
 }
 
 func TestManagedRequestHooksOwnNestedValues(t *testing.T) {
 	type expected struct {
 		messages []*ModelMessage
 		options  CallOptions
-		response *ContentResponse
+		response *ModelCallResponse
 		err      error
 	}
-	makeRequest := func(text, tool, mode string) ModelCallRequest {
+	makeRequest := func(text, tool, mode string) *ModelCallRequest {
 		return NewModelCallRequest([]*ModelMessage{TextParts(ChatMessageTypeHuman, text)},
 			WithOptions(&CallOptions{
 				StopWords: []string{text},
-				Tools: []ToolDefinition{{Type: "function", Function: &FunctionDefinition{
+				Tools: []*ToolDefinition{{Type: "function", Function: &FunctionDefinition{
 					Name: tool, Parameters: map[string]any{"required": []string{text}},
 				}}},
 				ToolChoice: &ToolChoice{Type: "function", Function: &FunctionReference{Name: tool}},
@@ -48,7 +49,8 @@ func TestManagedRequestHooksOwnNestedValues(t *testing.T) {
 	}
 	request := makeRequest("original", "lookup", "high")
 	changed := makeRequest("changed", "read", "low")
-	want := expected{changed.Messages, changed.Options, &ContentResponse{}, nil}
+	changed.Options.SteeringMessages = DefaultSteeringMessages()
+	want := expected{changed.Messages, changed.Options, &ModelCallResponse{}, nil}
 	ctx := NewExecutionContext(context.Background(), "fixture", nil)
 	ctx.SetEventPublisher(&requestOwnershipHook{change: func(request *ModelCallRequest) {
 		request.Messages[0].Parts[0] = TextContent{Text: "changed"}
@@ -109,7 +111,7 @@ func TestRequestHooksRetainOutputControls(t *testing.T) {
 			request.Options.ResponseModalities = []string{"text"}
 			model := &requestOwnershipModel{}
 			stream, err := ctx.GenerateContentStream(model, ModelCall{}, request)
-			actual := expected{called: model.request.Messages != nil}
+			actual := expected{called: model.request != nil}
 			if err != nil {
 				actual.err = err.Error()
 			}
@@ -121,4 +123,44 @@ func TestRequestHooksRetainOutputControls(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRequestHookEditsToolMediaWithoutChangingSavedReply(t *testing.T) {
+	makeRecord := func(text string, first byte) *ToolCallRecord {
+		data, err := DataPart(map[string]any{"order": map[string]any{"id": text}})
+		assert.NoError(t, err)
+		parts := []ContentPart{data, PDFPart([]byte{first, 2, 3}), TextPart("Check the date.")}
+		record, err := NewToolCallRecordBuilder("execution-1", "attempt-1", "receipt").
+			Execution(&ToolExecutionResponse{Status: ToolExecuted, Parts: parts}).
+			ModelReply("provider-1", "receipt", parts...).Build()
+		assert.NoError(t, err)
+		return record
+	}
+	original := makeRecord("O1", 1)
+	want := makeRecord("O2", 9)
+	ctx := NewExecutionContext(context.Background(), "tool-media", nil)
+	defer ctx.Release()
+	ctx.SetEventPublisher(&requestOwnershipHook{change: func(request *ModelCallRequest) {
+		// The hook owns an editable request view. It can change nested content independently.
+		reply := request.Messages[0].Parts[0].(*ModelToolCallResponse)
+		reply.Parts()[0].(DataContent).Value().(map[string]any)["order"].(map[string]any)["id"] = "O2"
+		reply.Parts()[1].(BinaryContent).Data[0] = 9
+	}})
+	model := &requestOwnershipModel{}
+	request := NewModelCallRequest([]*ModelMessage{original.ModelMessage()})
+	stream, err := ctx.GenerateContentStream(model, ModelCall{}, request)
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer stream.Close()
+	_, err = stream.Response()
+	assert.NoError(t, err)
+	assert.Equal(t, []*ModelMessage{want.ModelMessage()}, model.request.Messages)
+	assert.Equal(t, makeRecord("O1", 1), original)
+	assert.Equal(t, []*ModelMessage{original.ModelMessage()}, request.Messages)
+}
+func (m *requestOwnershipModel) PrepareRequest(ctx *ExecutionContext,
+	request *ModelCallRequest, chain ToolChain,
+) (*ModelCallRequest, error) {
+	return PrepareModelRequest(ctx, request, chain)
 }

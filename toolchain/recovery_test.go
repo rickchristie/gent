@@ -2,82 +2,108 @@ package toolchain
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestToolRecoveryRouting(t *testing.T) {
-	type input struct{ name string }
-	type expected struct {
-		response *gent.ToolRecoveryResponse
-		err      string
+func TestRestoreKeepsErrorGaugesWithoutCountingAgain(t *testing.T) {
+	worker, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := gent.NewExecutionContext(worker, "errors", gent.NewBasicLoopData(nil))
+	defer ctx.Release()
+	calls := 0
+	chain := New().RegisterTool(gent.DefineTool("act", func(context.Context, struct{}) (
+		*gent.ToolExecutionResponse, error,
+	) {
+		calls++
+		if calls == 4 {
+			cancel()
+			return nil, context.Canceled
+		}
+		if calls < 4 {
+			return nil, errors.New("private operation error")
+		}
+		return &gent.ToolExecutionResponse{Status: gent.ToolBlocked,
+			Instructions: "Request approval."}, nil
+	}).Recovery(func(context.Context, *gent.ToolRecoveryRequest[struct{}]) (
+		*gent.ToolRecoveryResponse, error,
+	) {
+		return nil, errors.New("private recovery error")
+	}).MustBuild())
+	var requests []*gent.ModelToolCallRequest
+	for range 4 {
+		requests = append(requests, nativeCall("act", "{}"))
 	}
-	type testCase struct {
-		name     string
-		input    input
-		expected expected
+	plan, err := chain.PrepareCalls(ctx, requests)
+	assert.NoError(t, err)
+	for range 3 {
+		_, err := chain.ExecuteNext(ctx, plan, testFormat())
+		assert.NoError(t, err)
 	}
-	cases := []testCase{
-		{"first tool", input{"book"}, expected{&gent.ToolRecoveryResponse{
-			Result: gent.ToolRecoveryUnresolved, SteeringMessage: "Check the booking service."}, ""}},
-		{"second tool", input{"refund"}, expected{&gent.ToolRecoveryResponse{
-			Result: gent.ToolRecoveryUnresolved, SteeringMessage: "Check the payment service."}, ""}},
-		{"default recovery", input{"lookup"}, expected{&gent.ToolRecoveryResponse{
-			Result: gent.ToolRecoveryUnresolved}, ""}},
-		{"unknown tool", input{"missing"}, expected{nil, `cannot recover unknown tool "missing"`}},
+	_, err = chain.ExecuteNext(ctx, plan, testFormat())
+	assert.ErrorIs(t, err, context.Canceled)
+	saved, err := ctx.Export()
+	assert.NoError(t, err)
+	codecs := gent.NewCodecRegistry()
+	assert.NoError(t, chain.RegisterCodecs(codecs))
+	fresh, err := gent.RestoreExecutionContext(context.Background(), saved,
+		gent.RestoreBindings{Codecs: codecs})
+	if !assert.NoError(t, err) {
+		return
 	}
-	type chainCase struct {
-		name string
-		new  func() gent.ToolChain
+	defer fresh.Release()
+	plan, _, err = fresh.SavedToolPlan()
+	assert.NoError(t, err)
+	_, err = chain.ExecuteNext(fresh, plan, testFormat())
+	assert.NoError(t, err)
+	assert.Equal(t, 4, calls)
+	assert.Equal(t, int64(3), fresh.Stats().GetCounter(gent.SCToolCallsErrorTotal))
+	assert.Equal(t, int64(1), fresh.Stats().GetCounter(gent.SCToolRecoveryErrorTotal))
+	assert.Equal(t, float64(3), fresh.Stats().GetGauge(gent.SGToolCallsErrorConsecutive))
+	assert.Equal(t, float64(3), fresh.Stats().GetGauge(gent.SGToolCallsErrorConsecutiveFor+"act"))
+	record := executeNativeTestCall(t, chain, fresh, nativeCall("act", "{}"))
+	assert.Equal(t, gent.ToolBlocked, record.Execution().Status)
+	assert.Equal(t, float64(0), fresh.Stats().GetGauge(gent.SGToolCallsErrorConsecutive))
+	assert.Equal(t, float64(0), fresh.Stats().GetGauge(gent.SGToolCallsErrorConsecutiveFor+"act"))
+	assert.Equal(t, int64(3), fresh.Stats().GetCounter(gent.SCToolCallsErrorTotal))
+}
+
+func TestDefaultRecoveryReportsSafeError(t *testing.T) {
+	base, cancel := context.WithCancel(context.Background())
+	ctx := gent.NewExecutionContext(base, "recover", gent.NewBasicLoopData(nil))
+	defer ctx.Release()
+	defer cancel()
+	tool := gent.DefineTool("act", func(context.Context, struct{}) (
+		*gent.ToolExecutionResponse, error,
+	) {
+		cancel()
+		return nil, context.Canceled
+	}).MustBuild()
+	chain := New().RegisterTool(tool)
+	plan, err := chain.PrepareCalls(ctx, []*gent.ModelToolCallRequest{nativeCall("act", "{}")})
+	assert.NoError(t, err)
+	_, err = chain.ExecuteNext(ctx, plan, testFormat())
+	assert.ErrorIs(t, err, context.Canceled)
+	saved, err := ctx.Export()
+	assert.NoError(t, err)
+	codecs := gent.NewCodecRegistry()
+	assert.NoError(t, chain.RegisterCodecs(codecs))
+	fresh, err := gent.RestoreExecutionContext(context.Background(), saved,
+		gent.RestoreBindings{Codecs: codecs})
+	if !assert.NoError(t, err) {
+		return
 	}
-	chains := []chainCase{
-		{"Registry", func() gent.ToolChain { return New() }},
-		{"SearchChain", func() gent.ToolChain {
-			return NewSearch(SearchHintSimpleList).RegisterEngine(NewRegexToolSearcher())
-		}},
-	}
-	for _, chainTest := range chains {
-		t.Run(chainTest.name, func(t *testing.T) {
-			chain := chainTest.new()
-			messages := map[string]string{
-				"book": "Check the booking service.", "refund": "Check the payment service.",
-			}
-			for _, name := range []string{"book", "refund", "lookup"} {
-				builder := gent.DefineTool(name, func(context.Context, struct{}) (string, error) {
-					return "saved", nil
-				}).Description("Read saved data").Domain("records")
-				if message := messages[name]; message != "" {
-					builder.Recovery(func(_ context.Context, request *gent.ToolRecoveryRequest) (
-						*gent.ToolRecoveryResponse, error,
-					) {
-						assert.Equal(t, name, request.Name)
-						return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved,
-							SteeringMessage: message}, nil
-					})
-				}
-				chain.RegisterTool(builder.MustBuild())
-			}
-			wrapper := NewJsToolChainWrapper(chain)
-			for _, test := range cases {
-				t.Run(test.name, func(t *testing.T) {
-					for _, target := range []gent.ToolChain{chain, wrapper} {
-						response, err := target.Recover(context.Background(),
-							&gent.ToolRecoveryRequest{Name: test.input.name})
-						errText := ""
-						if err != nil {
-							errText = err.Error()
-						}
-						assert.Equal(t, test.expected, expected{response, errText})
-					}
-				})
-			}
-			response, err := wrapper.Recover(context.Background(),
-				&gent.ToolRecoveryRequest{Name: "run_code"})
-			assert.NoError(t, err)
-			assert.Equal(t, &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved,
-				SteeringMessage: "Review the partial results and make a new plan."}, response)
-		})
-	}
+	defer fresh.Release()
+	plan, _, err = fresh.SavedToolPlan()
+	assert.NoError(t, err)
+	record, err := chain.ExecuteNext(fresh, plan, testFormat())
+	assert.NoError(t, err)
+	assert.Equal(t, gent.ToolResponseRecoveryError, record.Kind())
+	assert.Equal(t, gent.DefaultSteeringMessages().RecoveryError, recordText(record))
+	diagnostic, err := codecs.Decode(*record.Error())
+	assert.NoError(t, err)
+	assert.EqualError(t, diagnostic.(error), `tool "act" has no recovery handler`)
 }

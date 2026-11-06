@@ -28,9 +28,13 @@ func (m *Anthropic) RecoveryConfig() any {
 }
 
 func (m *Anthropic) GenerateContentStream(ctx context.Context,
-	request gent.ModelCallRequest,
+	request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	body, decision, err := m.requestBody(&request)
+	request, err := prepareMedia(ctx, m.config.HTTPClient, request, "anthropic")
+	if err != nil {
+		return nil, err
+	}
+	body, decision, err := m.requestBody(request)
 	if err != nil {
 		return nil, err
 	}
@@ -39,11 +43,11 @@ func (m *Anthropic) GenerateContentStream(ctx context.Context,
 	return startProviderStream(ctx, m.config.HTTPClient, m.config.BaseURL+"/messages",
 		headers, body, func(ctx context.Context, response *http.Response,
 			stream *gent.StreamWithDuration,
-		) (*gent.ContentResponse, error) {
+		) (*gent.ModelCallResponse, error) {
 			result, err := readAnthropic(ctx, response, stream, &request.Options)
 			recordSchema(result, decision)
 			return result, err
-		})
+		}, request.Options.SteeringMessages)
 }
 
 func (m *Anthropic) requestBody(request *gent.ModelCallRequest) (
@@ -96,11 +100,15 @@ func (m *Anthropic) requestBody(request *gent.ModelCallRequest) (
 			return nil, decision, errors.New("Anthropic requires function tool definitions")
 		}
 		f := tool.Function
+		description, err := toolDescription(f)
+		if err != nil {
+			return nil, decision, err
+		}
 		parameters := f.Parameters
 		if parameters == nil {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		definition := map[string]any{"name": f.Name, "description": f.Description,
+		definition := map[string]any{"name": f.Name, "description": description,
 			"input_schema": parameters}
 		if f.Strict {
 			strictCount++
@@ -300,6 +308,8 @@ func anthropicPart(part gent.ContentPart) (map[string]any, error) {
 		}
 		block["cache_control"] = control
 		return block, nil
+	case gent.DataContent:
+		return map[string]any{"type": "text", "text": p.String()}, nil
 	case gent.TextContent:
 		return map[string]any{"type": "text", "text": p.Text}, nil
 	case gent.ImageURLContent:
@@ -320,7 +330,7 @@ func anthropicPart(part gent.ContentPart) (map[string]any, error) {
 		return map[string]any{"type": kind, "source": map[string]any{
 			"type": "base64", "media_type": p.MIMEType,
 			"data": base64.StdEncoding.EncodeToString(p.Data)}}, nil
-	case gent.ModelToolCall:
+	case gent.ModelToolCallRequest:
 		var input map[string]any
 		decoder := json.NewDecoder(strings.NewReader(p.FunctionCall.Arguments))
 		decoder.UseNumber()
@@ -329,9 +339,20 @@ func anthropicPart(part gent.ContentPart) (map[string]any, error) {
 		}
 		return map[string]any{"type": "tool_use", "id": p.ID,
 			"name": p.FunctionCall.Name, "input": input}, nil
-	case gent.ToolCallResponse:
-		return map[string]any{"type": "tool_result", "tool_use_id": p.ToolCallID,
-			"content": p.Content}, nil
+	case *gent.ModelToolCallResponse:
+		content := make([]any, 0, len(p.Parts()))
+		for _, part := range p.Parts() {
+			block, err := anthropicPart(partValue(part))
+			if err != nil {
+				return nil, err
+			}
+			content = append(content, block)
+		}
+		reply := map[string]any{"type": "tool_result", "tool_use_id": p.ToolCallID(), "content": content}
+		if toolResponseIsError(p) {
+			reply["is_error"] = true
+		}
+		return reply, nil
 	default:
 		return nil, fmt.Errorf("unsupported Anthropic content %T", part)
 	}
@@ -353,7 +374,7 @@ type anthropicUsage struct {
 
 func readAnthropic(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	var envelope anthropicEnvelope
 	if !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		if err := decodeProviderJSON(response.Body, &envelope); err != nil {
@@ -372,7 +393,7 @@ func readAnthropic(ctx context.Context, response *http.Response,
 	return convertAnthropic(&envelope)
 }
 
-func convertAnthropic(response *anthropicEnvelope) (*gent.ContentResponse, error) {
+func convertAnthropic(response *anthropicEnvelope) (*gent.ModelCallResponse, error) {
 	choice := &gent.ContentChoice{Continuation: &gent.ProviderContinuation{
 		Provider: "anthropic", Items: response.Content},
 		Completion: gent.ModelCompletion{ProviderReason: response.StopReason}}
@@ -425,7 +446,7 @@ func convertAnthropic(response *anthropicEnvelope) (*gent.ContentResponse, error
 				}
 				return nil, errors.New("Anthropic tool use requires id and name")
 			}
-			choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: block.ID,
+			choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{ID: block.ID,
 				Type: "function", FunctionCall: &gent.FunctionCall{
 					Name: block.Name, Arguments: string(block.Input)}})
 		case "redacted_thinking", "server_tool_use", "web_search_tool_result", "web_fetch_tool_result":
@@ -443,7 +464,7 @@ func convertAnthropic(response *anthropicEnvelope) (*gent.ContentResponse, error
 	}
 	u := response.Usage
 	input := u.Input + u.CacheRead + u.CacheWrite
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
+	return &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
 		InputTokens: input, OutputTokens: u.Output, TotalTokens: input + u.Output,
 		CachedInputTokens: u.CacheRead,
 		RawGenerationInfo: map[string]any{"cache_creation_input_tokens": u.CacheWrite},

@@ -95,8 +95,8 @@ func TestFusedToolSearcher_ExactNameRanksFirst(t *testing.T) {
 
 	results, err := searcher.Search(context.Background(), "get_billing_ledger")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(results), 1)
-	assert.Equal(t, "get_billing_ledger", results[0],
+	require.GreaterOrEqual(t, len(results.Names), 1)
+	assert.Equal(t, "get_billing_ledger", results.Names[0],
 		"exact tool name should rank first via BM25 boost")
 }
 
@@ -108,8 +108,8 @@ func TestFusedToolSearcher_SemanticQueryFindsRelevantTool(t *testing.T) {
 	// but strong semantic similarity.
 	results, err := searcher.Search(context.Background(), "customer wants to leave early")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(results), 1)
-	topResults := results[:min(3, len(results))]
+	require.GreaterOrEqual(t, len(results.Names), 1)
+	topResults := results.Names[:min(3, len(results.Names))]
 	assert.Contains(t, topResults, "early_termination",
 		"semantic search should find early_termination in top 3, got: %v", topResults)
 }
@@ -121,8 +121,8 @@ func TestFusedToolSearcher_NaturalLanguageQuery(t *testing.T) {
 	results, err := searcher.Search(context.Background(),
 		"look up customer invoice and payment history")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(results), 1)
-	topResults := results[:min(3, len(results))]
+	require.GreaterOrEqual(t, len(results.Names), 1)
+	topResults := results.Names[:min(3, len(results.Names))]
 	assert.Contains(t, topResults, "get_billing_ledger",
 		"billing tool should be in top 3 for payment query, got: %v", topResults)
 }
@@ -143,12 +143,12 @@ func TestFusedToolSearcher_ReindexReplacesAll(t *testing.T) {
 
 	results, err := searcher.Search(context.Background(), "billing payment")
 	require.NoError(t, err)
-	for _, r := range results {
+	for _, r := range results.Names {
 		assert.NotEqual(t, "get_billing_ledger", r, "old tools should be gone after re-index")
 	}
 
 	results, err = searcher.Search(context.Background(), "new fresh tool")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(results), 1)
-	assert.Equal(t, "new_tool", results[0])
+	require.GreaterOrEqual(t, len(results.Names), 1)
+	assert.Equal(t, "new_tool", results.Names[0])
 }

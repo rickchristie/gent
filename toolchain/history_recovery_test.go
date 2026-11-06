@@ -2,20 +2,28 @@ package toolchain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/rickchristie/gent"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSearchChainPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
+type checkpointInput struct {
+	ID string `json:"id"`
+}
+
+func TestRecoveryObservesUnfinishedBatchWithoutRetry(t *testing.T) {
 	type input struct {
-		mode    SearchType
-		content string
+		status  gent.ToolRecoveryStatus
+		failure bool
+		missing bool
 	}
 	type expected struct {
-		remainingSearches int
-		seen              map[string]bool
+		kind       gent.ToolResponseKind
+		status     gent.ToolRecoveryStatus
+		recoveries int
 	}
 	type testCase struct {
 		name     string
@@ -23,63 +31,79 @@ func TestSearchChainPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"paging and repeated full definitions", input{Search, `[
-  {"tool":"tool_registry_search", "args":{"query":"policy", "query_type":"mock", "page":1}},
-  {"tool":"tool_registry_search", "args":{"query":"policy", "query_type":"mock", "page":2}},
-  {"tool":"tool_registry_search", "args":{"query":"policy", "query_type":"mock", "page":1}}
-]`}, expected{2, map[string]bool{"policy_a": true, "policy_b": true}}},
-		{"brief discovery and schema lookup", input{SearchGet, `[
-  {"tool":"tool_registry_search", "args":{"query":"policy", "query_type":"mock"}},
-  {"tool":"get_tool_schema", "args":{"tool_name":"policy_a"}},
-  {"tool":"tool_registry_search", "args":{"query":"policy", "query_type":"mock"}}
-]`}, expected{1, map[string]bool{"policy_a": true}}},
+		{"unresolved", input{status: gent.ToolRecoveryUnresolved}, expected{
+			gent.ToolResponseRecovery, gent.ToolRecoveryUnresolved, 1}},
+		{"not started", input{status: gent.ToolRecoveryNotStarted}, expected{
+			gent.ToolResponseRecovery, gent.ToolRecoveryNotStarted, 1}},
+		{"completed", input{status: gent.ToolRecoveryCompleted}, expected{
+			gent.ToolResponseRecovery, gent.ToolRecoveryCompleted, 1}},
+		{"failed check", input{failure: true}, expected{gent.ToolResponseRecoveryError, "", 1}},
+		{"missing handler", input{missing: true}, expected{gent.ToolResponseRecoveryError, "", 0}},
 	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			newChain := func(searches *int) *SearchChain {
-				chain := NewSearch(SearchHintSimpleList).WithSearchType(tt.input.mode)
-				chain.WithPageSize(1).RegisterEngine(&mockToolSearcher{
-					id: "mock", guidance: "Find policies",
-					searchFn: func(context.Context, string) ([]string, error) {
-						*searches++
-						return []string{"policy_a", "policy_b"}, nil
-					},
-				})
-				for _, name := range []string{"policy_a", "policy_b"} {
-					chain.RegisterTool(newIndexableTool(name, "Return the saved policy", "Policy",
-						nil, nil, func(context.Context, map[string]any) (string, error) {
-							return "P10 permits the refund.", nil
-						}))
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			base, cancel := context.WithCancel(context.Background())
+			ctx := gent.NewExecutionContext(base, "recovery", gent.NewBasicLoopData(nil))
+			defer ctx.Release()
+			defer cancel()
+			calls := 0
+			chain := New().RegisterTool(gent.DefineTool("book", func(_ context.Context,
+				input checkpointInput) (
+				*gent.ToolExecutionResponse, error,
+			) {
+				calls++
+				if input.ID == "4" {
+					cancel()
+					return nil, context.Canceled
 				}
-				if !assert.NoError(t, chain.Initialize()) {
-					t.FailNow()
-				}
-				return chain
+				return capturedToolResponse("booking "+input.ID, nil)
+			}).MustBuild())
+			var requests []*gent.ModelToolCallRequest
+			for i := 1; i <= 5; i++ {
+				request := nativeCall("book", fmt.Sprintf(`{"id":"%d"}`, i))
+				request.ID = fmt.Sprintf("provider-%d", i)
+				requests = append(requests, request)
 			}
-			searches := 0
-			chain := newChain(&searches)
-			ctx := newExecCtx()
-			plan, err := chain.PrepareCalls(ctx, testCalls(tt.input.content))
-			if !assert.NoError(t, err) {
-				return
+			plan, err := chain.PrepareCalls(ctx, requests)
+			assert.NoError(t, err)
+			for range 3 {
+				_, err := chain.ExecuteNext(ctx, plan, testFormat())
+				assert.NoError(t, err)
 			}
-			first, err := chain.ExecuteNext(ctx, plan, searchTestFormat())
+			_, err = chain.ExecuteNext(ctx, plan, testFormat())
+			assert.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, 4, calls)
+			saved, err := ctx.Export()
 			assert.NoError(t, err)
-			assert.Equal(t, 1, searches)
-			bundle, err := ctx.Export()
-			assert.NoError(t, err)
-			bytes, err := ctx.Codecs().Marshal(bundle)
-			assert.NoError(t, err)
-			var saved gent.RunView
-			assert.NoError(t, ctx.Codecs().Unmarshal(bytes, &saved))
-			for plan.NextCall < len(plan.Calls) {
-				_, err := chain.ExecuteNext(ctx, plan, searchTestFormat())
-				if !assert.NoError(t, err) {
-					return
-				}
+			freshChain := New()
+			recoveries := 0
+			if !test.input.missing {
+				freshChain.RegisterTool(gent.DefineTool("book", func(context.Context, checkpointInput) (
+					*gent.ToolExecutionResponse, error,
+				) {
+					calls++
+					return nil, errors.New("must not run")
+				}).Recovery(
+					func(_ context.Context, request *gent.ToolRecoveryRequest[checkpointInput]) (
+						*gent.ToolRecoveryResponse, error,
+					) {
+						recoveries++
+						assert.Equal(t, checkpointInput{ID: "4"}, request.Input())
+						assert.Equal(t, plan.Calls[3].Id, request.Identity().ToolCallId)
+						if test.input.failure {
+							return nil, errors.New("private recovery backend failure")
+						}
+						report := &gent.ToolRecoveryResponse{Status: test.input.status,
+							Parts:        []gent.ContentPart{gent.TextPart("Checked external receipt.")},
+							Instructions: "Review availability now."}
+						if test.input.status == gent.ToolRecoveryCompleted {
+							report.Execution = &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+								Parts:        []gent.ContentPart{gent.TextPart("original booking 4")},
+								Instructions: "Original guidance."}
+						}
+						return report, nil
+					}).MustBuild())
 			}
-			freshSearches := 0
-			freshChain := newChain(&freshSearches)
 			codecs := gent.NewCodecRegistry()
 			assert.NoError(t, freshChain.RegisterCodecs(codecs))
 			fresh, err := gent.RestoreExecutionContext(context.Background(), saved,
@@ -87,31 +111,59 @@ func TestSearchChainPlanContinuesWithSavedResultsAndSeenTools(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			resumed, ok, err := fresh.SavedToolPlan()
+			defer fresh.Release()
+			resumed, found, err := fresh.SavedToolPlan()
 			assert.NoError(t, err)
-			if !assert.True(t, ok) {
-				return
-			}
-			assert.Equal(t, []*gent.ToolCallResult{first}, resumed.Results)
+			assert.True(t, found)
+			original := append([]*gent.ToolCallRecord(nil), resumed.Results...)
 			for resumed.NextCall < len(resumed.Calls) {
-				_, err := freshChain.ExecuteNext(fresh, resumed, searchTestFormat())
-				if !assert.NoError(t, err) {
+				_, err := freshChain.ExecuteNext(fresh, resumed, testFormat())
+				assert.NoError(t, err)
+				if err != nil {
 					return
 				}
 			}
-			assert.Equal(t, tt.expected.remainingSearches, freshSearches)
-			for i, result := range plan.Results {
-				want := *result
-				if i > 0 {
-					want.AttemptId = fresh.AttemptId()
-				}
-				assert.Equal(t, &want, resumed.Results[i])
+			assert.Equal(t, 4, calls, "recovery never calls the original tool")
+			fourth := resumed.Results[3]
+			status, _ := fourth.Response().RecoveryStatus()
+			assert.Equal(t, test.expected, expected{fourth.Kind(), status, recoveries})
+			assert.Equal(t, original, resumed.Results[:3])
+			assert.Equal(t, gent.ToolRecoveryNotStarted, resumed.Results[4].Recovery().Status)
+			assert.Equal(t, int64(4), fresh.Stats().GetCounter(gent.SCToolCalls))
+			expectedErrors := int64(0)
+			if test.expected.kind == gent.ToolResponseRecoveryError {
+				expectedErrors = 1
 			}
-			seen, ok, err := fresh.CheckpointState("gent:search_seen")
+			assert.Equal(t, expectedErrors, fresh.Stats().GetCounter(gent.SCToolRecoveryErrorTotal))
+			exported, err := fresh.Export()
 			assert.NoError(t, err)
-			assert.True(t, ok)
-			assert.Equal(t, tt.expected.seen, seen)
-			assert.Equal(t, ctx.Stats().Counters(), fresh.Stats().Counters())
+			assert.NoError(t, gent.ValidateBundle(exported, codecs))
 		})
 	}
+}
+
+func TestCompletedToolRecordsNeedNoOldBindings(t *testing.T) {
+	ctx := newExecCtx()
+	defer ctx.Release()
+	chain := New().RegisterTool(gent.DefineTool("old", func(_ context.Context, input checkpointInput) (
+		*gent.ToolExecutionResponse, error,
+	) {
+		parts, err := gent.NewParts().Data(input).PDF([]byte("%PDF-original")).Build()
+		return &gent.ToolExecutionResponse{Status: gent.ToolExecuted, Parts: parts,
+			Instructions: "Retain the original evidence."}, err
+	}).MustBuild())
+	result := executeNativeTestCall(t, chain, ctx, nativeCall("old", `{"id":"saved"}`))
+	saved, err := ctx.Export()
+	assert.NoError(t, err)
+	// A fresh registry has no registration for checkpointInput or the removed tool.
+	fresh, err := gent.RestoreExecutionContext(context.Background(), saved,
+		gent.RestoreBindings{Codecs: gent.NewCodecRegistry()})
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer fresh.Release()
+	plan, found, err := fresh.SavedToolPlan()
+	assert.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, []*gent.ToolCallRecord{result}, plan.Results)
 }

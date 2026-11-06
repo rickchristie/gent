@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -29,32 +28,34 @@ func newAgent(model gent.Model) *react.Agent[string] {
 		WithCallOptions(gent.WithMaxTokens(1024))
 }
 
-func lookupOrder(ctx context.Context, input OrderInput) (string, error) {
+func lookupOrder(ctx context.Context, input OrderInput) (*gent.ToolExecutionResponse, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return nil, err
 	}
 	if input.OrderID != "order-1001" {
-		return "", fmt.Errorf("order not found: %s", input.OrderID)
+		return &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+			Instructions: "The order was not found. Check the order ID with the user."}, nil
 	}
-	return "Order order-1001 has shipped.", nil
+	return &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+		Parts: []gent.ContentPart{gent.TextPart("Order order-1001 has shipped.")}}, nil
 }
 
 // The demo provider makes the complete example usable without credentials or API calls.
 type DemoModel struct{ Delay time.Duration }
 
 func (m *DemoModel) GenerateContentStream(
-	parent context.Context, request gent.ModelCallRequest,
+	parent context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	for _, message := range request.Messages {
 		if message.Role == gent.ChatMessageTypeTool {
 			return m.answer(parent)
 		}
 	}
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{{Completion: gent.ModelCompletion{
 			Status: gent.ModelStatusToolCalls,
 		},
-			ToolCalls: []gent.ModelToolCall{{
+			ToolCalls: []*gent.ModelToolCallRequest{{
 				ID: "order-read", Type: "function", FunctionCall: &gent.FunctionCall{
 					Name: "lookup_order", Arguments: `{"order_id":"order-1001"}`,
 				},
@@ -92,7 +93,7 @@ func (m *DemoModel) answer(parent context.Context) (gent.Stream, error) {
 				return
 			}
 		}
-		stream.Complete(&gent.ContentResponse{Choices: []*gent.ContentChoice{{
+		stream.Complete(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{{
 			Completion: gent.ModelCompletion{
 				Status: gent.ModelStatusAnswer,
 			},
@@ -104,7 +105,15 @@ func (m *DemoModel) answer(parent context.Context) (gent.Stream, error) {
 	return stream, nil
 }
 
-// The order lookup reads current state and has no external side effects.
-func recoverOrder(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
-	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+// The lookup has no durable receipt. Let the model decide whether it needs a fresh read.
+func recoverOrder(context.Context, *gent.ToolRecoveryRequest[OrderInput]) (
+	*gent.ToolRecoveryResponse, error,
+) {
+	return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+		Instructions: "The earlier lookup result is not available. Request a new lookup if needed."}, nil
+}
+func (m *DemoModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

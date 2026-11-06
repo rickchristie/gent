@@ -1,7 +1,9 @@
 package jsruntime
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/grafana/sobek/ast"
@@ -348,6 +350,11 @@ func extractLiteralValue(
 	case *ast.StringLiteral:
 		return string(e.Value), true
 	case *ast.NumberLiteral:
+		// JSON Schema accepts json.Number. A bigint AST value is not a schema value, and
+		// converting it to float64 would change the very argument we are checking.
+		if integer, ok := e.Value.(*big.Int); ok {
+			return json.Number(integer.String()), true
+		}
 		return e.Value, true
 	case *ast.BooleanLiteral:
 		return e.Value, true
@@ -380,6 +387,8 @@ func extractLiteralValue(
 				return nil, false
 			}
 			switch v := val.(type) {
+			case json.Number:
+				return json.Number("-" + string(v)), true
 			case int64:
 				return -v, true
 			case float64:

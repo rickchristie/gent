@@ -2,7 +2,6 @@ package toolchain
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"sort"
 	"sync"
@@ -17,8 +16,7 @@ import (
 // regex matches across all texts. Tools are ranked by total
 // match count descending.
 //
-// Invalid regex patterns return a descriptive error that is
-// surfaced to the LLM so it can fix the query.
+// Invalid patterns return InvalidArguments with safe authored correction guidance.
 type RegexToolSearcher struct {
 	mu             sync.RWMutex
 	tools          []regexToolEntry
@@ -90,7 +88,7 @@ func (e *RegexToolSearcher) IndexAll(
 func (e *RegexToolSearcher) Search(
 	ctx context.Context,
 	query string,
-) ([]string, error) {
+) (*gent.ToolSearchResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -99,9 +97,10 @@ func (e *RegexToolSearcher) Search(
 	e.mu.RUnlock()
 	re, err := regexp.Compile("(?i)" + query)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"invalid regex pattern %q: %w", query, err,
-		)
+		return &gent.ToolSearchResult{Status: gent.ToolInvalidArguments,
+			Instructions: "The regular expression is invalid. " +
+				"Check grouping, escapes, and character ranges.",
+		}, nil
 	}
 
 	type scored struct {
@@ -135,7 +134,7 @@ func (e *RegexToolSearcher) Search(
 	for i, r := range results {
 		names[i] = r.name
 	}
-	return names, nil
+	return &gent.ToolSearchResult{Status: gent.ToolExecuted, Names: names}, nil
 }
 
 // Compile-time check that RegexToolSearcher implements

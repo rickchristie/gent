@@ -67,9 +67,10 @@ The writer's owner number is checked in the same database transaction as the sta
 prevents an old owner from accepting new batches. The API allows only one active worker per run.
 bbolt also locks its file to one process; this is not a shared database for multiple servers.
 
-The sample tool only reads data, so its recovery policy allows retry. For external writes, use
-receipts or a stable `ToolCallId` as an idempotency key. A tool-ready checkpoint does not prove
-whether an external operation completed. Do not turn every unknown outcome into a retry.
+The sample tool only reads data. Its recovery handler reports that the old lookup result is
+unavailable. The model decides whether to make a fresh call. For writes, inspect an external
+receipt and return Completed, NotStarted, or Unresolved. No report authorizes automatic execution.
+A saved checkpoint alone cannot establish whether an external operation completed.
 
 ## Scope
 

@@ -130,13 +130,13 @@ func TestExecutionContext_TraceMetadata_ModelAndToolCorrelation(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), "main", nil)
 	execCtx.IncrementIteration()
 	beforeModel := execCtx.PublishBeforeModelCall(
-		"gpt", ModelCallRequest{},
+		"gpt", &ModelCallRequest{},
 		WithModelStream("stream", "topic"),
 		WithModelProvider("openai"),
 	)
 	afterModel := execCtx.PublishAfterModelCallForIteration(
 		beforeModel.Iteration,
-		"gpt", ModelCallRequest{}, nil, time.Millisecond, nil,
+		"gpt", &ModelCallRequest{}, nil, time.Millisecond, nil,
 		WithModelCallId(beforeModel.ModelCallId),
 		WithModelStream(beforeModel.StreamId, beforeModel.StreamTopicId),
 		WithModelCallSource(beforeModel.Source),

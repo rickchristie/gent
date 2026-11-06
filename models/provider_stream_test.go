@@ -71,7 +71,7 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 {"role":"assistant","content":[{"type":"thinking","thinking":"Read the record.",
 "signature":"sealed"},{"type":"tool_use","id":"call-7","name":"lookup","input":{"id":7}}]},
 {"role":"user","content":[{"type":"tool_result","tool_use_id":"call-7",
-"content":"record-seven"}]}]`, 0, "call-7"}
+"content":[{"type":"text","text":"record-seven"}]}]}]`, 0, "call-7"}
 		case "gemini":
 			want = expected{"part:0", "part:0", "STOP", `[
 {"role":"user","parts":[{"text":"Read."}]},
@@ -79,7 +79,7 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 {"text":"the record.","thought":true},{"functionCall":{"id":"call-7","name":"lookup",
 "args":{"id":7}},"thoughtSignature":"sealed"}]},
 {"role":"user","parts":[{"functionResponse":{"id":"call-7","name":"lookup",
-"response":{"result":"record-seven"}}}]}]`, 3, "call-7"}
+"response":{"result":["record-seven"]}}}]}]`, 3, "call-7"}
 		case "ollama":
 			want = expected{"thinking", "content", "stop", `[
 {"role":"user","content":"Read."},
@@ -146,13 +146,12 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 			assert.Empty(t, text)
 			assert.Equal(t, gent.ModelStatusToolCalls, choice.Completion.Status)
 			assert.Nil(t, choice.CandidateContent)
-			assert.Equal(t, []gent.ModelToolCall{{ID: test.expected.callID, Type: "function",
+			assert.Equal(t, []*gent.ModelToolCallRequest{{ID: test.expected.callID, Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: `{"id":7}`}}},
 				choice.ToolCalls)
 			messages = append(messages, &gent.ModelMessage{Role: gent.ChatMessageTypeAI,
 				Continuation: choice.Continuation}, &gent.ModelMessage{Role: gent.ChatMessageTypeTool,
-				Parts: []gent.ContentPart{gent.ToolCallResponse{ToolCallID: "call-7", Name: "lookup",
-					Content: "record-seven"}}})
+				Parts: []gent.ContentPart{preparedTestReply("call-7", "lookup", "record-seven")}})
 			stream, err = model.GenerateContentStream(context.Background(),
 				gent.NewModelCallRequest(messages, options...))
 			if !assert.NoError(t, err) {

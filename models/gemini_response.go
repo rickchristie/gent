@@ -39,7 +39,7 @@ type geminiEnvelope struct {
 func (m *Gemini) readResponse(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions, request map[string]any,
 	prior *geminiContinuation,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	var envelope geminiEnvelope
 	if !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		if err := decodeProviderJSON(response.Body, &envelope); err != nil {
@@ -109,7 +109,7 @@ func (m *Gemini) readResponse(ctx context.Context, response *http.Response,
 
 func (m *Gemini) convertResponse(ctx context.Context, response *geminiEnvelope,
 	options *gent.CallOptions, request map[string]any, prior *geminiContinuation,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	if response.Error != nil {
 		return nil, errors.New(response.Error.Message)
 	}
@@ -234,7 +234,7 @@ func (m *Gemini) convertPart(ctx context.Context, choice *gent.ContentChoice,
 			}
 			return errors.New("Gemini function call has no name")
 		}
-		choice.ToolCalls = append(choice.ToolCalls, gent.ModelToolCall{ID: part.Call.ID,
+		choice.ToolCalls = append(choice.ToolCalls, &gent.ModelToolCallRequest{ID: part.Call.ID,
 			Type: "function", FunctionCall: &gent.FunctionCall{
 				Name: part.Call.Name, Arguments: string(part.Call.Args)}})
 		return nil
@@ -259,9 +259,9 @@ func (m *Gemini) convertPart(ctx context.Context, choice *gent.ContentChoice,
 	return nil
 }
 
-func geminiResult(choice *gent.ContentChoice, response *geminiEnvelope) *gent.ContentResponse {
+func geminiResult(choice *gent.ContentChoice, response *geminiEnvelope) *gent.ModelCallResponse {
 	usage := response.Usage
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
+	return &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
 		InputTokens: usage.Input + usage.Tools, OutputTokens: usage.Output + usage.Reasoning,
 		TotalTokens: usage.Total, CachedInputTokens: usage.Cached, ReasoningTokens: usage.Reasoning,
 	}}

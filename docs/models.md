@@ -2,8 +2,8 @@
 
 Gent owns all model requests, stream decoding, completion mapping, and continuation data. Select an
 adapter for the serving API, not only the model weights. A model served by vLLM or SGLang uses that
-runtime's adapter. Unsupported input content and options return errors. Gent does not convert an
-unsupported file into text or silently remove an attachment.
+runtime's adapter. Unsupported native controls return errors. Unsupported media produces configured
+steering. Gent does not transcode files or silently discard attachments.
 
 ```go
 openai := models.NewOpenAI(openAIKey, modelName)
@@ -28,7 +28,7 @@ provider is rejected. Credentials and clients are supplied again on restore, not
 | `NewOpenAI` | `/v1/responses` | `text.format` with strict JSON schema | Native image tool |
 | `NewXAI` | `/v1/responses` | `text.format` with strict JSON schema | Native image tool, JPEG |
 | `NewAnthropic` | `/v1/messages` | `output_config.format` | Unsupported |
-| `NewGemini` | `:streamGenerateContent` | `generationConfig.responseFormat.text` | Image parts |
+| `NewGemini` | `:streamGenerateContent` | `responseMimeType` + `responseJsonSchema` | Image parts |
 | `NewDeepSeek` | `/v1/chat/completions` | JSON object mode; full schema stays local | Unsupported |
 | `NewVLLM` | `/v1/chat/completions` | JSON schema response format | Unsupported |
 | `NewSGLang` | `/v1/chat/completions` | JSON schema response format | Unsupported |
@@ -41,6 +41,10 @@ backend, account, or API version can impose further limits. A server error is re
 status and response body; it is not treated as a validation rejection. The adapters do not infer
 capability from an “OpenAI-compatible” label. They do not retry server failures with weaker
 settings.
+
+Gemini puts the JSON controls in `generationConfig`. Live checks found that Gemini 2.5 Flash
+accepted `responseFormat.text` without enforcing JSON output. The adapter uses `responseMimeType`
+and `responseJsonSchema` so JSON output and correction work with that model.
 
 Schema support differs across APIs. Gent checks supported keywords and structure before it sends a
 native answer schema. If an exact mapping is unavailable, it omits native schema enforcement and
@@ -79,6 +83,46 @@ fallback rather than silently changing the route. Catalog errors stop the reques
 shared across concurrent requests, cached for one minute, and bounded to 64 model entries.
 See [OpenRouter structured output](https://openrouter.ai/docs/guides/features/structured-outputs).
 
+## Tool-result delivery
+
+The common exchange is ModelCallRequest → ModelCallResponse. The latter preserves choices,
+completion, candidate content, native call requests, and usage; it is not an accepted final answer.
+Stream.Response returns that common response. A model requests tools through ModelToolCallRequest;
+Gent prepares ModelToolCallResponse with safe ordered Parts and native status metadata.
+
+| Adapter | Native tool response | Correlation | Media placement |
+| --- | --- | --- | --- |
+| OpenAI Responses | `function_call_output` item in `input` | `call_id` | Native output content array |
+| xAI Responses | `function_call_output` item in `input` | `call_id` | Following user message |
+| Anthropic Messages | `tool_result` block in user content | `tool_use_id` | Native content blocks |
+| Gemini GenerateContent | `functionResponse` in user parts | Name and native `id` when present | Gemini 3: supported native parts; otherwise following user parts |
+| Chat endpoints | Message with role `tool` | `tool_call_id` | Following user message when supported |
+| Ollama | Message with role `tool` | `tool_name` | Following user images |
+
+Gent completes a batch's tool replies before inserting following user media. Source labels keep
+media associated with its original call. Tool authors and loop authors use the common tool-role
+message; adapters own this plumbing. Data remains structured until the native protocol requires
+JSON text. Wrapper Kind and statuses are not printed. Anthropic uses metadata for `is_error` on
+call errors, recovery errors, and invalid input; Blocked is not treated as a business failure.
+
+Optional tool OutputSchema describes domain data only. OpenAI Responses uses output_schema before
+the first reply and when each included reply for that tool has one data part or one valid JSON text
+part. Replies with additional guidance, multiple parts, or media keep the complete schema in the
+description because the native field describes a JSON string output. No content is removed to fit
+that field. Gemini uses responseJsonSchema for a domain object when the response shape supports it.
+Other mappings include descriptive schema text. A Responses-compatible endpoint does not establish
+support for OpenAI's field. This is distinct from Output[T]'s answer validation; no local result
+validation is added.
+
+ImageURLPart keeps the caller's remote reference. Gent downloads only for endpoint compatibility,
+with a 30-second load timeout and a 32 MiB limit. The content MIME type comes from the downloaded
+bytes. A load failure or unsupported media type yields configurable safe text. Managed calls save
+the original part, replacement, and reason as private `gent:media_prepared` evidence.
+For recognized provider HTTP image-load rejections, Gent replaces the identified URL and submits
+one corrected request. It does not retry after partial streamed output or hide unrelated server
+errors. Providers do not always report remote-fetch failures distinctly; ambiguous failures retain
+their normal request error. URL lifetime and mutable content remain the caller's responsibility.
+
 ## Input and prompt mapping
 
 All adapters accept the standard leading system message and user text. Anthropic combines leading
@@ -88,8 +132,8 @@ Other adapters retain the native role sequence.
 
 | Input | OpenAI | xAI | Anthropic | Gemini | Chat runtimes / DeepSeek | Ollama | OpenRouter |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Image bytes | Yes | Yes | Yes | Yes | Yes | Yes | Model-dependent |
-| Image URL | Yes | Yes | Yes | Use typed bytes | Yes | Unsupported | Model-dependent |
+| Image bytes | Yes | Yes | Yes | Yes | Runtimes: yes; DeepSeek: no | Yes | Model-dependent |
+| Image URL | URL | URL | URL | Download to bytes | Runtimes: URL; DeepSeek: no | Download | Model-dependent |
 | PDF bytes | Yes | Unsupported | Yes | Yes | Unsupported | Unsupported | Model-dependent |
 | Audio/video bytes | No | No | No | Supported MIME types | No | No | No |
 

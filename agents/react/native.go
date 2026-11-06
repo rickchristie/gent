@@ -21,42 +21,9 @@ func (r *Agent[T]) buildMessages(ctx *gent.ExecutionContext) ([]*gent.ModelMessa
 	if err != nil {
 		return nil, err
 	}
-	history, _ := agentutil.ScratchpadToMessages(records, ctx.Iteration(), r.toolChain, r.format)
-	messages = append(messages, nativeHistoryMessages(history)...)
+	history, _ := agentutil.ScratchpadToMessages(records, ctx.Iteration())
+	messages = append(messages, history...)
 	return messages, ctx.RecordingError()
-}
-
-// The current provider adapters accept one ToolCallResponse per tool message. Keep media in
-// history with its result for deduplication, then send it after the complete tool response group.
-func nativeHistoryMessages(history []*gent.ModelMessage) []*gent.ModelMessage {
-	var messages []*gent.ModelMessage
-	var media []gent.ContentPart
-	flushMedia := func() {
-		if len(media) > 0 {
-			messages = append(messages, &gent.ModelMessage{
-				Role: gent.ChatMessageTypeHuman, Parts: media,
-			})
-			media = nil
-		}
-	}
-	for _, message := range history {
-		if message.Role != gent.ChatMessageTypeTool {
-			flushMedia()
-			messages = append(messages, message)
-			continue
-		}
-		if len(message.Parts) > 1 {
-			if call, ok := message.Parts[0].(gent.ToolCallResponse); ok {
-				media = append(media, gent.TextContent{Text: fmt.Sprintf(
-					"Media from %s (call %s):", call.Name, call.ToolCallID)})
-				media = append(media, message.Parts[1:]...)
-				message.Parts = message.Parts[:1]
-			}
-		}
-		messages = append(messages, message)
-	}
-	flushMedia()
-	return messages
 }
 
 func (r *Agent[T]) nextNative(
@@ -129,7 +96,7 @@ func (r *Agent[T]) nextNativeTools(
 	if ctx.Context().Err() != nil {
 		return nil, ctx.Context().Err()
 	}
-	if errors.Is(err, gent.ErrUncertainTool) || errors.Is(err, gent.ErrUnsupportedRecovery) {
+	if errors.Is(err, gent.ErrUnsupportedRecovery) {
 		return nil, err
 	}
 	if err != nil {
@@ -147,7 +114,7 @@ func (r *Agent[T]) nextNativeTools(
 	return &gent.AgentLoopResult{Action: gent.LAContinue}, nil
 }
 
-func normalizeCallIDs(ctx *gent.ExecutionContext, calls []gent.ModelToolCall) error {
+func normalizeCallIDs(ctx *gent.ExecutionContext, calls []*gent.ModelToolCallRequest) error {
 	seen := map[string]bool{}
 	for i := range calls {
 		if calls[i].ID == "" {
@@ -165,25 +132,18 @@ func normalizeCallIDs(ctx *gent.ExecutionContext, calls []gent.ModelToolCall) er
 }
 
 func nativeToolEntry(
-	choice *gent.ContentChoice, result *gent.ToolChainResult,
+	choice *gent.ContentChoice, result []*gent.ToolCallRecord,
 ) *gent.HistoryEntry {
 	ai := &gent.MessageContent{Role: gent.ChatMessageTypeAI, Continuation: choice.Continuation}
-	ai.Parts = gent.CloneContentParts(choice.CandidateContent)
+	ai.Parts = choice.CandidateContent
 	for _, call := range choice.ToolCalls {
 		ai.Parts = append(ai.Parts, call)
 	}
 	entry := &gent.HistoryEntry{Messages: []*gent.MessageContent{ai}}
-	for i, call := range choice.ToolCalls {
-		output := result.Results[i]
+	for _, record := range result {
 		message := &gent.MessageContent{Role: gent.ChatMessageTypeTool,
-			Parts: []gent.ContentPart{gent.ToolCallResponse{ToolCallID: call.ID,
-				Name: call.FunctionCall.Name, Content: output.Text}}}
-		message.Parts = append(message.Parts, output.Media...)
-		metadata := &gent.ToolChainResult{Results: []*gent.ToolCallResult{output}}
-		if nested, ok := output.Output.(*gent.ToolChainResult); ok {
-			metadata = nested
-		}
-		message.SetMetadata(gent.MMKToolChainResult, metadata)
+			Parts: []gent.ContentPart{record.Response()}}
+		message.SetMetadata(gent.MMKToolCallRecords, []*gent.ToolCallRecord{record})
 		entry.Messages = append(entry.Messages, message)
 	}
 	return entry
@@ -232,14 +192,14 @@ func (r *Agent[T]) answerEntry(
 	choice *gent.ContentChoice, feedback []gent.ContentPart,
 ) *gent.HistoryEntry {
 	message := &gent.MessageContent{Role: gent.ChatMessageTypeAI,
-		Parts: gent.CloneContentParts(choice.CandidateContent), Continuation: choice.Continuation}
+		Parts: choice.CandidateContent, Continuation: choice.Continuation}
 	for _, call := range choice.ToolCalls {
 		message.Parts = append(message.Parts, call)
 	}
 	entry := &gent.HistoryEntry{Messages: []*gent.MessageContent{message}}
 	if len(feedback) > 0 {
 		steering := &gent.MessageContent{Role: gent.ChatMessageTypeHuman,
-			Parts: gent.CloneContentParts(feedback)}
+			Parts: feedback}
 		steering.SetMetadata("gent:output_steering", true)
 		entry.Messages = append(entry.Messages, steering)
 	}

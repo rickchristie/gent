@@ -17,14 +17,14 @@ import (
 // ----------------------------------------------------------------------------
 
 type mockModel struct {
-	responses        []*gent.ContentResponse
+	responses        []*gent.ModelCallResponse
 	errors           []error
 	callCount        int
 	capturedOptions  [][]gent.CallOption
 	capturedMessages [][]*gent.ModelMessage
 }
 
-func newMockModel(responses ...*gent.ContentResponse) *mockModel {
+func newMockModel(responses ...*gent.ModelCallResponse) *mockModel {
 	return &mockModel{responses: responses}
 }
 
@@ -33,7 +33,7 @@ func (m *mockModel) WithErrors(errs ...error) *mockModel {
 	return m
 }
 
-func (m *mockModel) response(request *gent.ModelCallRequest) (*gent.ContentResponse, error) {
+func (m *mockModel) response(request *gent.ModelCallRequest) (*gent.ModelCallResponse, error) {
 	m.capturedMessages = append(m.capturedMessages, request.Messages)
 	options := []gent.CallOption{gent.WithOptions(&request.Options)}
 	m.capturedOptions = append(m.capturedOptions, options)
@@ -48,7 +48,7 @@ func (m *mockModel) response(request *gent.ModelCallRequest) (*gent.ContentRespo
 		return m.responses[idx], nil
 	}
 
-	return &gent.ContentResponse{
+	return &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -59,9 +59,9 @@ func (m *mockModel) response(request *gent.ModelCallRequest) (*gent.ContentRespo
 }
 
 func (m *mockModel) GenerateContentStream(
-	_ context.Context, request gent.ModelCallRequest,
+	_ context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	resp, err := m.response(&request)
+	resp, err := m.response(request)
 	if err != nil {
 		return gent.NewCompletedStream(nil, err), nil
 	}
@@ -192,7 +192,7 @@ func TestAgent_WithCallOptions(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := newMockModel(
-				&gent.ContentResponse{
+				&gent.ModelCallResponse{
 					Choices: []*gent.ContentChoice{
 						{
 							Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -301,7 +301,7 @@ func TestAgent_SamplingParams_ForbiddenModel(
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			inner := newMockModel(
-				&gent.ContentResponse{
+				&gent.ModelCallResponse{
 					Choices: []*gent.ContentChoice{
 						{
 							Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -467,7 +467,7 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 			var model gent.Model
 			if tc.input.modelName != "" {
 				inner := newMockModel(
-					&gent.ContentResponse{
+					&gent.ModelCallResponse{
 						Choices: []*gent.ContentChoice{
 							{
 								Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -482,7 +482,7 @@ func TestAgent_SamplingWarnings(t *testing.T) {
 				}
 			} else {
 				model = newMockModel(
-					&gent.ContentResponse{
+					&gent.ModelCallResponse{
 						Choices: []*gent.ContentChoice{
 							{
 								Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -550,4 +550,9 @@ func samplingValue(value *float64) float64 {
 		return 0
 	}
 	return *value
+}
+func (m *mockModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

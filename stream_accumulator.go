@@ -45,9 +45,9 @@ func (a *StreamAccumulator) Error() error {
 }
 
 // Response builds a provisional provider response. It cannot establish execution success.
-func (a *StreamAccumulator) Response() *ContentResponse {
+func (a *StreamAccumulator) Response() *ModelCallResponse {
 	metadata := a.MetaContent()
-	return &ContentResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
+	return &ModelCallResponse{Choices: []*ContentChoice{{Completion: ModelCompletion{
 		Status: ModelStatusAnswer,
 	},
 		CandidateContent: MetaParts(metadata, MetaContentIntermediary), MetaContent: metadata,
@@ -55,7 +55,7 @@ func (a *StreamAccumulator) Response() *ContentResponse {
 }
 
 // ResponseWithInfo is used when local size or repetition checks stop a provider early.
-func (a *StreamAccumulator) ResponseWithInfo(response *ContentResponse) *ContentResponse {
+func (a *StreamAccumulator) ResponseWithInfo(response *ModelCallResponse) *ModelCallResponse {
 	result := a.Response()
 	if response != nil {
 		result.Info = response.Info

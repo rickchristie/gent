@@ -64,7 +64,7 @@ func (loop *imageHistoryLoop) Next(ctx *gent.ExecutionContext) (*gent.AgentLoopR
 	if err != nil {
 		return nil, err
 	}
-	messages, _ := agents.ScratchpadToMessages(history, ctx.Iteration(), nil, nil)
+	messages, _ := agents.ScratchpadToMessages(history, ctx.Iteration())
 	loop.messages = append(task.Messages, messages...)
 	return gent.AcceptOutput(ctx, &gent.OutputResult[string]{Accepted: true, Value: "done",
 		Content: []gent.ContentPart{gent.TextContent{Text: "done"}}}, nil)
@@ -102,11 +102,11 @@ func TestCustomCompactionRetainsImagesAndOriginalTask(t *testing.T) {
 				{Messages: []*gent.MessageContent{{Role: gent.ChatMessageTypeHuman,
 					Parts: []gent.ContentPart{gent.TextContent{Text: "Temporary note."}}}}},
 				{Messages: []*gent.MessageContent{
-					{Role: gent.ChatMessageTypeAI, Parts: []gent.ContentPart{gent.ModelToolCall{
+					{Role: gent.ChatMessageTypeAI, Parts: []gent.ContentPart{gent.ModelToolCallRequest{
 						ID: "c1", Type: "function", FunctionCall: &gent.FunctionCall{
 							Name: "draw", Arguments: `{}`}}}},
-					{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{gent.ToolCallResponse{
-						ToolCallID: "c1", Name: "draw", Content: "Created image."}}}, image(3)}},
+					{Role: gent.ChatMessageTypeTool, Parts: []gent.ContentPart{preparedTestReply("c1",
+						"draw", "Created image.")}}, image(3)}},
 			}
 			loop := &imageHistoryLoop{records: records}
 			ctx := gent.NewExecutionContext(context.Background(), "images", gent.NewBasicLoopData(task))

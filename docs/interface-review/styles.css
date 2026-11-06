@@ -809,11 +809,13 @@ textarea {
 .capability {
   border-top: 1px solid var(--line);
   padding: 25px 0;
+  min-width: 0;
 }
 .capability h3 {
   font-family: GuideMono, monospace;
   font-size: 18px;
   margin-bottom: 12px;
+  overflow-wrap: anywhere;
 }
 .capability p {
   font-size: 14px;

@@ -3,15 +3,20 @@ package gent
 import (
 	"context"
 	"errors"
-	"fmt"
+	"reflect"
+
+	"github.com/rickchristie/gent/schema"
 )
 
 var ErrToolPlanComplete = errors.New("gent: tool plan is complete")
 
 type PlannedToolCall struct {
-	Id   string
-	Name string
-	Args map[string]any
+	ModelCallID  string
+	ModelName    string
+	RawArguments string
+	Id           string
+	Name         string
+	Args         map[string]any
 }
 
 type SavedToolCall struct {
@@ -20,22 +25,18 @@ type SavedToolCall struct {
 	Args      map[string]any
 	Input     EncodedValue
 	AttemptId string
-	// Recovery is saved before its decision is used. A new attempt gets a new ReadyCall.
-	Recovery *ToolRecoveryResponse
 }
 
 type ToolPlan struct {
 	// CheckpointKey separates an inner program plan from its outer native call.
 	CheckpointKey string
-	Abandoned     bool
+	AttemptId     string
 	Version       int
 	Calls         []PlannedToolCall
 	NextCall      int
 	ReadyCall     *SavedToolCall
-	Results       []*ToolCallResult
+	Results       []*ToolCallRecord
 	State         EncodedValue
-	// RecoverySteering survives an authorized retry until its result is saved.
-	RecoverySteering string
 }
 
 func (ctx *ExecutionContext) NewToolCallId() string { return ctx.nextToolCallId() }
@@ -126,20 +127,6 @@ func (ctx *ExecutionContext) selectedToolCallId() string {
 	return plan.Calls[plan.NextCall].Id
 }
 
-func (ctx *ExecutionContext) isRetryingTool(event Event) bool {
-	before, ok := event.(*BeforeToolCallEvent)
-	if !ok {
-		return false
-	}
-	plan := ctx.toolPlanFor(before.ToolCallId)
-	return plan != nil && plan.ReadyCall != nil && plan.ReadyCall.AttemptId != ctx.AttemptId()
-}
-
-func (ctx *ExecutionContext) retryToolInput(id string) (any, error) {
-	value := cloneWire(ctx.toolPlanFor(id).ReadyCall.Input)
-	return ctx.Codecs().Decode(value)
-}
-
 func (ctx *ExecutionContext) saveToolReady(event *BeforeToolCallEvent) error {
 	plan := ctx.toolPlanFor(event.ToolCallId)
 	if plan == nil {
@@ -163,98 +150,126 @@ func (ctx *ExecutionContext) ToolContext(id string) context.Context {
 		ContextId: ctx.ContextId(), ToolCallId: id, AttemptId: ctx.AttemptId()})
 }
 
-// RecoverTool first reuses accepted evidence, then calls the registered tool's recovery method.
-// The decision is saved before another attempt or result publication can start.
-func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan, recover ToolRecoveryFunc) (
-	*ToolCallResult, bool, error,
+// RecoverTool reuses accepted evidence or reports on an interrupted plan. It never executes
+// a pending call. Even a call that never reached dispatch returns control to the model.
+func (ctx *ExecutionContext) RecoverTool(plan *ToolPlan, recover ToolRecoveryFunc[EncodedValue],
+	expectedSchema *schema.Schema,
+) (
+	*ToolCallRecord, bool, error,
 ) {
-	if plan.ReadyCall == nil || plan.ReadyCall.AttemptId == ctx.AttemptId() {
+	if plan.AttemptId == ctx.AttemptId() {
 		return nil, false, nil
 	}
-	ready := plan.ReadyCall
-	bundle, err := ctx.Export()
+	call := plan.Calls[plan.NextCall]
+	if result, found, err := ctx.SavedToolCallRecord(call.Id); err != nil || found {
+		return result, found, err
+	}
+	attempt := plan.AttemptId
+	response := &ToolRecoveryResponse{Status: ToolRecoveryNotStarted}
+	var diagnostic error
+	var input *EncodedValue
+	if ready := plan.ReadyCall; ready != nil {
+		attempt, input = ready.AttemptId, &ready.Input
+		request := NewToolRecoveryRequest(ToolIdentity{RunId: ctx.RunId(), ContextId: ctx.ContextId(),
+			ToolCallId: ready.Id, AttemptId: ready.AttemptId}, ready.Name, ready.Args, ready.Input)
+		recoveryContext := context.WithValue(ctx.Context(), recoveryCodecsKey{}, ctx.Codecs())
+		response, diagnostic = recover(recoveryContext, request)
+	}
+	if ctx.Context().Err() != nil {
+		return nil, false, ctx.Context().Err()
+	}
+	returned, err := ctx.SnapshotDiagnostic(response)
 	if err != nil {
 		return nil, false, err
 	}
-	for i := len(bundle.Activity) - 1; i >= 0; i-- {
-		event := bundle.Activity[i]
-		if event.ToolCallId != ready.Id || event.Type != "tool_call_finished" {
-			continue
-		}
-		value, err := ctx.DecodeEvent(event)
-		if err != nil {
-			return nil, false, err
-		}
-		if completed, ok := value.(*AfterToolCallEvent); ok {
-			if result, ok := completed.Output.(*ToolCallResult); ok {
-				return result, true, nil
+	if diagnostic == nil {
+		diagnostic = ValidateToolRecovery(response)
+		if diagnostic == nil && response.Execution != nil {
+			accepted := *response
+			execution := *response.Execution
+			if execution.Status != ToolExecuted {
+				execution.Parts = nil
 			}
+			if execution.Status == ToolInvalidArguments {
+				execution.Instructions = expectedSchema.Correction(call.Name, execution.Instructions)
+			}
+			accepted.Execution = &execution
+			response = &accepted
 		}
 	}
-	if ready.Recovery == nil {
-		if err := ctx.saveToolRecovery(plan, recover); err != nil {
-			return nil, false, err
-		}
-	} else if err := validateToolRecovery(ready.Recovery); err != nil {
-		return nil, false, err
-	}
-	response := ready.Recovery
-	if response.Result == ToolRecoveryRetryAllowed {
-		return nil, false, nil
-	}
-	input, err := ctx.Codecs().Decode(ready.Input)
+	savedError, err := ctx.SnapshotDiagnostic(diagnostic)
 	if err != nil {
 		return nil, false, err
 	}
-	result := response.Output
-	if response.Result == ToolRecoveryUnresolved {
-		result = &ToolCallResult{Outcome: "unknown", Error: ErrUncertainTool,
-			Text: fmt.Sprintf("Tool %s (call %s):\n%s",
-				ready.Name, ready.Id, defaultRecoveryMessage),
-			SummaryCaptured: true}
+	builder := NewToolCallRecordBuilder(call.Id, attempt, call.Name).
+		Arguments(call.RawArguments, call.Args).Input(input).ReturnedRecovery(returned).Error(savedError)
+	var parts []ContentPart
+	if diagnostic != nil {
+		builder.RecoveryError()
+		parts = []ContentPart{TextPart(ctx.SteeringMessages().RecoveryError)}
 	} else {
-		owned, err := ctx.Codecs().Clone(result)
-		if err != nil {
-			return nil, false, err
-		}
-		result = owned.(*ToolCallResult)
+		builder.Recovery(response)
+		parts = PrepareRecoveryParts(response, ctx.SteeringMessages())
 	}
-	result.ToolCallId, result.AttemptId = ready.Id, ready.AttemptId
-	args, err := ctx.Codecs().Clone(ready.Args)
+	result, err := builder.ModelReply(call.ModelCallID, call.ModelName, parts...).Build()
 	if err != nil {
 		return nil, false, err
 	}
-	result.Name, result.Args, result.Input = ready.Name, args.(map[string]any), input
-	result.SummaryCaptured = true
-	ctx.PublishAfterToolCall(ready.Name, input, result, 0, result.Error,
-		WithToolCallId(ready.Id), WithToolCallAttempt(ready.AttemptId))
+	ctx.PublishAfterToolCall(call.Name, input, result, 0, diagnostic,
+		WithToolCallId(call.Id), WithToolCallAttempt(attempt))
 	return result, true, ctx.RecordingError()
 }
 
-func (ctx *ExecutionContext) saveToolRecovery(plan *ToolPlan, recover ToolRecoveryFunc) error {
-	ready := plan.ReadyCall
-	args, err := ctx.Codecs().Clone(ready.Args)
+// SavedToolCallRecord reads the last accepted record for a logical tool-call ID. A progress save
+// can contain this record before the control checkpoint advances. Check it before recovery so
+// the prepared reply, diagnostics, and accounting remain unchanged. Pending events are excluded.
+// Reading a record does not publish events or update counters. The returned record is read-only.
+func (ctx *ExecutionContext) SavedToolCallRecord(id string) (*ToolCallRecord, bool, error) {
+	var saved *RecordedEvent
+	ctx.run.mu.RLock()
+	for i := len(ctx.run.view.Activity) - 1; i >= 0; i-- {
+		event := ctx.run.view.Activity[i]
+		if event.ToolCallId == id && event.Type == "tool_call_finished" {
+			saved = event
+			break
+		}
+	}
+	ctx.run.mu.RUnlock()
+	if saved == nil {
+		return nil, false, nil
+	}
+	// Accepted event payloads are immutable. Decode only the selected record, not the whole run.
+	value, err := ctx.DecodeEvent(saved)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
-	response, err := recover(ctx.Context(), &ToolRecoveryRequest{
-		RunId: ctx.RunId(), ContextId: ctx.ContextId(), ToolCallId: ready.Id,
-		AttemptId: ready.AttemptId, Name: ready.Name, Args: args.(map[string]any),
-		Input: cloneWire(ready.Input)})
+	completed, ok := value.(*AfterToolCallEvent)
+	if !ok {
+		return nil, false, errors.New("gent: saved tool event has an invalid payload")
+	}
+	result, ok := completed.Output.(*ToolCallRecord)
+	if !ok || result == nil {
+		return nil, false, errors.New("gent: saved tool event has no call record")
+	}
+	return result, true, nil
+}
+
+// SnapshotDiagnostic captures optional private evidence. Encoded snapshots are retained without
+// decoding their old Go types. Ordinary errors use the registered error codec.
+func (ctx *ExecutionContext) SnapshotDiagnostic(value any) (*EncodedValue, error) {
+	if value == nil {
+		return nil, nil
+	}
+	v := reflect.ValueOf(value)
+	if v.Kind() == reflect.Pointer && v.IsNil() {
+		return nil, nil
+	}
+	encoded, err := ctx.Codecs().Encode(value)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := validateToolRecovery(response); err != nil {
-		return err
+	if encoded.Type == "nil" {
+		return nil, nil
 	}
-	owned, err := ctx.Codecs().Clone(response)
-	if err != nil {
-		return err
-	}
-	ready.Recovery = owned.(*ToolRecoveryResponse)
-	plan.RecoverySteering = joinSteering(plan.RecoverySteering, ready.Recovery.SteeringMessage)
-	if err := ctx.SetToolPlan(plan); err != nil {
-		return ctx.stopRecording(err)
-	}
-	return ctx.CommitCheckpoint(PhaseToolReady)
+	return &encoded, nil
 }

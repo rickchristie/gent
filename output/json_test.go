@@ -144,10 +144,10 @@ func TestSchemaOutputExplicitNullAndOwnedRequests(t *testing.T) {
 	}
 	raw["anyOf"] = []any{map[string]any{"type": "integer"}}
 	first := gent.NewModelCallRequest(nil)
-	assert.NoError(t, out.Configure(&first))
+	assert.NoError(t, out.Configure(first))
 	first.Options.ResponseSchema["anyOf"] = []any{map[string]any{"type": "boolean"}}
 	second := gent.NewModelCallRequest(nil)
-	assert.NoError(t, out.Configure(&second))
+	assert.NoError(t, out.Configure(second))
 	assert.Equal(t, map[string]any{"anyOf": []any{
 		map[string]any{"type": "string", "description": "Optional label"},
 		map[string]any{"type": "null"},

@@ -192,7 +192,7 @@ func (t *PolicySearchTool) WithIndexableSyntheticQueries(sq []string) *PolicySea
 	return t
 }
 
-// --- gent.Tool[PolicySearchInput, string] implementation ---
+// --- gent.Tool[PolicySearchInput] implementation ---
 
 func (t *PolicySearchTool) Name() string        { return t.name }
 func (t *PolicySearchTool) Description() string { return t.description }
@@ -201,26 +201,32 @@ func (t *PolicySearchTool) Policy() string      { return "" }
 func (t *PolicySearchTool) Strict() bool                 { return false }
 func (t *PolicySearchTool) OutputSchema() map[string]any { return map[string]any{"type": "string"} }
 
-// Recovery can repeat this read because it does not change the policy store.
-func (t *PolicySearchTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+// Recover returns control to the model because the earlier read was not saved.
+func (t *PolicySearchTool) Recover(context.Context, *gent.ToolRecoveryRequest[PolicySearchInput]) (
 	*gent.ToolRecoveryResponse, error,
 ) {
-	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+	return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+		Instructions: "The earlier policy read was not saved. Request current policy data if needed.",
+	}, nil
 }
+
+func (t *PolicySearchTool) UnrecoverableErrorInstructions() string { return "" }
 
 func (t *PolicySearchTool) ParameterSchema() map[string]any {
 	return schema.Object(map[string]*schema.Property{
 		"query": schema.String(
 			"Natural language description of what policy you need. " +
-				"Examples: 'cancellation refund rules', 'baggage allowance by class'"),
+				"Examples: 'cancellation refund rules', 'baggage allowance by class'",
+		).MinLength(1),
 	}, "query")
 }
 
 func (t *PolicySearchTool) Call(
 	ctx context.Context, input PolicySearchInput,
-) (*gent.ToolResult[string], error) {
+) (*gent.ToolExecutionResponse, error) {
 	if input.Query == "" {
-		return nil, fmt.Errorf("query is required")
+		return &gent.ToolExecutionResponse{Status: gent.ToolInvalidArguments,
+			Instructions: "query must contain at least one character."}, nil
 	}
 
 	results, err := t.index.Search(ctx, input.Query, t.topK)
@@ -229,9 +235,10 @@ func (t *PolicySearchTool) Call(
 	}
 
 	if len(results) == 0 {
-		return &gent.ToolResult[string]{
-			Text: "No policies found matching your query. " +
-				"Try different keywords or a broader search.",
+		return &gent.ToolExecutionResponse{
+			Status: gent.ToolExecuted,
+			Parts: []gent.ContentPart{gent.TextPart("No policies found matching your query. " +
+				"Try different keywords or a broader search.")},
 		}, nil
 	}
 
@@ -255,7 +262,9 @@ func (t *PolicySearchTool) Call(
 		}
 	}
 
-	return &gent.ToolResult[string]{Text: sb.String()}, nil
+	return &gent.ToolExecutionResponse{
+		Status: gent.ToolExecuted, Parts: []gent.ContentPart{gent.TextPart(sb.String())},
+	}, nil
 }
 
 // PolicySuggestion is a suggested policy from [PolicySearchTool.SuggestPolicies].
@@ -330,16 +339,6 @@ func (t *PolicySearchTool) SuggestPolicies(
 	return suggestions, nil
 }
 
-// DeduplicateSummary returns an abbreviated observation for deduplicated calls.
-func (t *PolicySearchTool) DeduplicateSummary(
-	input PolicySearchInput, output string,
-) string {
-	return fmt.Sprintf(
-		`Searched policies for: %q. Full results available below.`,
-		input.Query,
-	)
-}
-
 // --- gent.IndexableTool implementation (for SearchChain compatibility) ---
 
 func (t *PolicySearchTool) Domain() string             { return "Policy & Guidance" }
@@ -361,7 +360,7 @@ func (t *GetPolicyTool) WithDescription(desc string) *GetPolicyTool {
 	return t
 }
 
-// --- gent.Tool[GetPolicyInput, string] implementation ---
+// --- gent.Tool[GetPolicyInput] implementation ---
 
 func (t *GetPolicyTool) Name() string        { return t.name }
 func (t *GetPolicyTool) Description() string { return t.description }
@@ -370,44 +369,44 @@ func (t *GetPolicyTool) Policy() string      { return "" }
 func (t *GetPolicyTool) Strict() bool                 { return false }
 func (t *GetPolicyTool) OutputSchema() map[string]any { return map[string]any{"type": "string"} }
 
-// Recovery can repeat this read because it does not change the policy store.
-func (t *GetPolicyTool) Recover(context.Context, *gent.ToolRecoveryRequest) (
+// Recover returns control to the model because the earlier read was not saved.
+func (t *GetPolicyTool) Recover(context.Context, *gent.ToolRecoveryRequest[GetPolicyInput]) (
 	*gent.ToolRecoveryResponse, error,
 ) {
-	return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed}, nil
+	return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+		Instructions: "The earlier policy read was not saved. Request current policy data if needed.",
+	}, nil
 }
+
+func (t *GetPolicyTool) UnrecoverableErrorInstructions() string { return "" }
 
 func (t *GetPolicyTool) ParameterSchema() map[string]any {
 	return schema.Object(map[string]*schema.Property{
 		"policy_id": schema.String(
 			"The exact policy ID to retrieve " +
-				"(e.g., 'cancellation-refund', 'baggage-allowance')"),
+				"(e.g., 'cancellation-refund', 'baggage-allowance')",
+		).MinLength(1),
 	}, "policy_id")
 }
 
 func (t *GetPolicyTool) Call(
 	ctx context.Context, input GetPolicyInput,
-) (*gent.ToolResult[string], error) {
+) (*gent.ToolExecutionResponse, error) {
 	if input.PolicyID == "" {
-		return nil, fmt.Errorf("policy_id is required")
+		return &gent.ToolExecutionResponse{Status: gent.ToolInvalidArguments,
+			Instructions: "policy_id must contain at least one character."}, nil
 	}
 	p, ok := t.policies[input.PolicyID]
 	if !ok {
-		return nil, fmt.Errorf("policy not found: %s", input.PolicyID)
+		return &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+			Instructions: fmt.Sprintf(
+				"Policy %q was not found. Search for an available policy.", input.PolicyID),
+		}, nil
 	}
-	return &gent.ToolResult[string]{
-		Text: fmt.Sprintf("# %s\n\n%s", p.Id, p.FullContent),
+	return &gent.ToolExecutionResponse{
+		Status: gent.ToolExecuted,
+		Parts:  []gent.ContentPart{gent.TextPart(fmt.Sprintf("# %s\n\n%s", p.Id, p.FullContent))},
 	}, nil
-}
-
-// DeduplicateSummary returns an abbreviated observation for deduplicated calls.
-func (t *GetPolicyTool) DeduplicateSummary(
-	input GetPolicyInput, output string,
-) string {
-	return fmt.Sprintf(
-		`Retrieved policy: %q. Full content available below.`,
-		input.PolicyID,
-	)
 }
 
 // --- gent.IndexableTool implementation ---
@@ -418,7 +417,7 @@ func (t *GetPolicyTool) Keywords() []string         { return t.keywords }
 func (t *GetPolicyTool) SyntheticQueries() []string { return t.syntheticQueries }
 
 // Compile-time checks.
-var _ gent.Tool[PolicySearchInput, string] = (*PolicySearchTool)(nil)
+var _ gent.Tool[PolicySearchInput] = (*PolicySearchTool)(nil)
 var _ gent.IndexableTool = (*PolicySearchTool)(nil)
-var _ gent.Tool[GetPolicyInput, string] = (*GetPolicyTool)(nil)
+var _ gent.Tool[GetPolicyInput] = (*GetPolicyTool)(nil)
 var _ gent.IndexableTool = (*GetPolicyTool)(nil)

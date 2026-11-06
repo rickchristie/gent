@@ -158,7 +158,7 @@ func TestHistoryReplay_CursorsAndLostCompletion(t *testing.T) {
 
 type interruptedProvider struct{ started chan struct{} }
 
-func (m *interruptedProvider) GenerateContentStream(ctx context.Context, _ gent.ModelCallRequest) (
+func (m *interruptedProvider) GenerateContentStream(ctx context.Context, _ *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	stream := gent.NewStreamWithDuration()
@@ -171,7 +171,7 @@ func (m *interruptedProvider) GenerateContentStream(ctx context.Context, _ gent.
 		})
 		close(m.started)
 		<-ctx.Done()
-		stream.Complete(&gent.ContentResponse{
+		stream.Complete(&gent.ModelCallResponse{
 			Choices: []*gent.ContentChoice{
 				{
 					Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -186,11 +186,11 @@ func (m *interruptedProvider) GenerateContentStream(ctx context.Context, _ gent.
 
 type completedProvider struct{ calls int }
 
-func (m *completedProvider) GenerateContentStream(context.Context, gent.ModelCallRequest) (
+func (m *completedProvider) GenerateContentStream(context.Context, *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	m.calls++
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -273,4 +273,14 @@ func TestHistoryReplay_ModelAttemptsAndKnownUsage(t *testing.T) {
 	}
 	assert.Equal(t, 40, snapshot.Stats.TotalTokens)
 	assert.True(t, errors.Is(ctx.Context().Err(), context.Canceled))
+}
+func (m *interruptedProvider) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
+}
+func (m *completedProvider) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

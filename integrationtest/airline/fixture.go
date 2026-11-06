@@ -444,24 +444,26 @@ func (f *AirlineFixture) initializeData() {
 // -----------------------------------------------------------------------------
 
 // GetCustomerInfoTool returns a tool that retrieves customer information.
-func (f *AirlineFixture) GetCustomerInfoTool() gent.Tool[GetCustomerInfoInput, *Customer] {
+func (f *AirlineFixture) GetCustomerInfoTool() gent.Tool[GetCustomerInfoInput] {
 	return gent.DefineTool("get_customer_info",
-		func(ctx context.Context, input GetCustomerInfoInput) (*Customer, error) {
+		func(ctx context.Context, input GetCustomerInfoInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			if input.CustomerID != "" {
 				if customer, exists := f.customers[input.CustomerID]; exists {
-					return customer, nil
+					return capturedToolResponse(customer, nil)
 				}
-				return nil, fmt.Errorf("customer not found with ID: %s", input.CustomerID)
+				return capturedToolResponse(nil, fmt.Errorf("customer not found with ID: %s", input.CustomerID))
 			}
 			if input.Email != "" {
 				for _, customer := range f.customers {
 					if customer.Email == input.Email {
-						return customer, nil
+						return capturedToolResponse(customer, nil)
 					}
 				}
-				return nil, fmt.Errorf("customer not found with email: %s", input.Email)
+				return capturedToolResponse(nil, fmt.Errorf("customer not found with email: %s", input.Email))
 			}
-			return nil, fmt.Errorf("must provide either customer_id or email")
+			return capturedToolResponse(nil, fmt.Errorf("must provide either customer_id or email"))
 		}).Description("Retrieve customer information by customer ID or email address").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"customer_id": schema.String("The customer's unique ID (e.g., C001)"),
@@ -477,16 +479,18 @@ func (f *AirlineFixture) GetCustomerInfoTool() gent.Tool[GetCustomerInfoInput, *
 }
 
 // GetBookingInfoTool returns a tool that retrieves booking details.
-func (f *AirlineFixture) GetBookingInfoTool() gent.Tool[GetBookingInfoInput, *Booking] {
+func (f *AirlineFixture) GetBookingInfoTool() gent.Tool[GetBookingInfoInput] {
 	return gent.DefineTool("get_booking_info",
-		func(ctx context.Context, input GetBookingInfoInput) (*Booking, error) {
+		func(ctx context.Context, input GetBookingInfoInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			if input.BookingID == "" {
-				return nil, fmt.Errorf("booking_id is required")
+				return capturedToolResponse(nil, fmt.Errorf("booking_id is required"))
 			}
 			if booking, exists := f.bookings[input.BookingID]; exists {
-				return booking, nil
+				return capturedToolResponse(booking, nil)
 			}
-			return nil, fmt.Errorf("booking not found: %s", input.BookingID)
+			return capturedToolResponse(nil, fmt.Errorf("booking not found: %s", input.BookingID))
 		}).Description("Retrieve booking details by booking ID").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"booking_id": schema.String("The booking reference ID (e.g., BK001)"),
@@ -501,16 +505,18 @@ func (f *AirlineFixture) GetBookingInfoTool() gent.Tool[GetBookingInfoInput, *Bo
 }
 
 // GetFlightInfoTool returns a tool that retrieves flight information.
-func (f *AirlineFixture) GetFlightInfoTool() gent.Tool[GetFlightInfoInput, *Flight] {
+func (f *AirlineFixture) GetFlightInfoTool() gent.Tool[GetFlightInfoInput] {
 	return gent.DefineTool("get_flight_info",
-		func(ctx context.Context, input GetFlightInfoInput) (*Flight, error) {
+		func(ctx context.Context, input GetFlightInfoInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			if input.FlightNumber == "" {
-				return nil, fmt.Errorf("flight_number is required")
+				return capturedToolResponse(nil, fmt.Errorf("flight_number is required"))
 			}
 			if flight, exists := f.flights[input.FlightNumber]; exists {
-				return flight, nil
+				return capturedToolResponse(flight, nil)
 			}
-			return nil, fmt.Errorf("flight not found: %s", input.FlightNumber)
+			return capturedToolResponse(nil, fmt.Errorf("flight not found: %s", input.FlightNumber))
 		}).Description("Retrieve flight information by flight number").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"flight_number": schema.String("The flight number (e.g., AA100)"),
@@ -526,15 +532,17 @@ func (f *AirlineFixture) GetFlightInfoTool() gent.Tool[GetFlightInfoInput, *Flig
 }
 
 // GetFlightSeatsInfoTool returns a tool that retrieves seat availability for a flight.
-func (f *AirlineFixture) GetFlightSeatsInfoTool() gent.Tool[GetFlightSeatsInfoInput, []Seat] {
+func (f *AirlineFixture) GetFlightSeatsInfoTool() gent.Tool[GetFlightSeatsInfoInput] {
 	return gent.DefineTool("get_flight_seats_info",
-		func(ctx context.Context, input GetFlightSeatsInfoInput) ([]Seat, error) {
+		func(ctx context.Context, input GetFlightSeatsInfoInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			if input.FlightNumber == "" {
-				return nil, fmt.Errorf("flight_number is required")
+				return capturedToolResponse(nil, fmt.Errorf("flight_number is required"))
 			}
 			seats, exists := f.seats[input.FlightNumber]
 			if !exists {
-				return nil, fmt.Errorf("no seat data for flight: %s", input.FlightNumber)
+				return capturedToolResponse(nil, fmt.Errorf("no seat data for flight: %s", input.FlightNumber))
 			}
 
 			var filtered []Seat
@@ -547,7 +555,7 @@ func (f *AirlineFixture) GetFlightSeatsInfoTool() gent.Tool[GetFlightSeatsInfoIn
 				}
 				filtered = append(filtered, seat)
 			}
-			return filtered, nil
+			return capturedToolResponse(filtered, nil)
 		}).Description("Retrieve seat availability and details for a specific flight").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"flight_number":  schema.String("The flight number (e.g., AA100)"),
@@ -564,18 +572,18 @@ func (f *AirlineFixture) GetFlightSeatsInfoTool() gent.Tool[GetFlightSeatsInfoIn
 }
 
 // SearchFlightScheduleTool returns a tool that searches for available flights.
-func (f *AirlineFixture) SearchFlightScheduleTool() gent.Tool[
-	SearchFlightScheduleInput, []*Flight,
-] {
+func (f *AirlineFixture) SearchFlightScheduleTool() gent.Tool[SearchFlightScheduleInput] {
 	return gent.DefineTool("search_flight_schedule",
-		func(ctx context.Context, input SearchFlightScheduleInput) ([]*Flight, error) {
+		func(ctx context.Context, input SearchFlightScheduleInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			if input.Origin == "" || input.Destination == "" || input.Date == "" {
-				return nil, fmt.Errorf("origin, destination, and date are required")
+				return capturedToolResponse(nil, fmt.Errorf("origin, destination, and date are required"))
 			}
 
 			date, err := time.Parse("2006-01-02", input.Date)
 			if err != nil {
-				return nil, fmt.Errorf("invalid date format, use YYYY-MM-DD: %v", err)
+				return capturedToolResponse(nil, fmt.Errorf("invalid date format, use YYYY-MM-DD: %v", err))
 			}
 
 			var results []*Flight
@@ -589,10 +597,10 @@ func (f *AirlineFixture) SearchFlightScheduleTool() gent.Tool[
 				}
 			}
 			if len(results) == 0 {
-				return nil, fmt.Errorf("no flights found from %s to %s on %s",
-					input.Origin, input.Destination, input.Date)
+				return capturedToolResponse(nil, fmt.Errorf("no flights found from %s to %s on %s",
+					input.Origin, input.Destination, input.Date))
 			}
-			return results, nil
+			return capturedToolResponse(results, nil)
 		}).Description("Search for available flights between two airports on a specific date").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"origin":      schema.String("Origin airport code (e.g., JFK)"),
@@ -610,22 +618,24 @@ func (f *AirlineFixture) SearchFlightScheduleTool() gent.Tool[
 }
 
 // RescheduleBookingTool returns a tool that reschedules a booking to a new flight.
-func (f *AirlineFixture) RescheduleBookingTool() gent.Tool[RescheduleBookingInput,
-	*RescheduleBookingResult] {
+func (f *AirlineFixture) RescheduleBookingTool() gent.Tool[RescheduleBookingInput] {
 	return gent.DefineTool("reschedule_booking",
-		func(ctx context.Context, input RescheduleBookingInput) (*RescheduleBookingResult, error) {
+		func(ctx context.Context, input RescheduleBookingInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			booking, exists := f.bookings[input.BookingID]
 			if !exists {
-				return nil, fmt.Errorf("booking not found: %s", input.BookingID)
+				return capturedToolResponse(nil, fmt.Errorf("booking not found: %s", input.BookingID))
 			}
 
 			newFlight, exists := f.flights[input.NewFlightNumber]
 			if !exists {
-				return nil, fmt.Errorf("flight not found: %s", input.NewFlightNumber)
+				return capturedToolResponse(nil, fmt.Errorf("flight not found: %s", input.NewFlightNumber))
 			}
 
 			if newFlight.AvailableSeats <= 0 {
-				return nil, fmt.Errorf("no available seats on flight %s", input.NewFlightNumber)
+				return capturedToolResponse(nil, fmt.Errorf(
+					"no available seats on flight %s", input.NewFlightNumber))
 			}
 
 			// Calculate fees based on class and frequent flyer status
@@ -690,7 +700,7 @@ func (f *AirlineFixture) RescheduleBookingTool() gent.Tool[RescheduleBookingInpu
 				)
 			}
 
-			return &RescheduleBookingResult{
+			return capturedToolResponse(&RescheduleBookingResult{
 				Success:        true,
 				OldFlightNum:   oldFlightNum,
 				NewFlightNum:   input.NewFlightNumber,
@@ -700,7 +710,7 @@ func (f *AirlineFixture) RescheduleBookingTool() gent.Tool[RescheduleBookingInpu
 				FareCredit:     fareCredit,
 				TotalCharge:    changeFee + fareDiff,
 				Message:        msg,
-			}, nil
+			}, nil)
 		}).Description("Reschedule an existing booking to a different flight").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"booking_id":        schema.String("The booking ID to reschedule"),
@@ -718,16 +728,18 @@ func (f *AirlineFixture) RescheduleBookingTool() gent.Tool[RescheduleBookingInpu
 }
 
 // CancelBookingTool returns a tool that cancels a booking.
-func (f *AirlineFixture) CancelBookingTool() gent.Tool[CancelBookingInput, *CancelBookingResult] {
+func (f *AirlineFixture) CancelBookingTool() gent.Tool[CancelBookingInput] {
 	return gent.DefineTool("cancel_booking",
-		func(ctx context.Context, input CancelBookingInput) (*CancelBookingResult, error) {
+		func(ctx context.Context, input CancelBookingInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			booking, exists := f.bookings[input.BookingID]
 			if !exists {
-				return nil, fmt.Errorf("booking not found: %s", input.BookingID)
+				return capturedToolResponse(nil, fmt.Errorf("booking not found: %s", input.BookingID))
 			}
 
 			if booking.Status == "cancelled" {
-				return nil, fmt.Errorf("booking %s is already cancelled", input.BookingID)
+				return capturedToolResponse(nil, fmt.Errorf("booking %s is already cancelled", input.BookingID))
 			}
 
 			// Calculate refund (simplified)
@@ -738,14 +750,14 @@ func (f *AirlineFixture) CancelBookingTool() gent.Tool[CancelBookingInput, *Canc
 
 			booking.Status = "cancelled"
 
-			return &CancelBookingResult{
+			return capturedToolResponse(&CancelBookingResult{
 				Success:      true,
 				BookingID:    input.BookingID,
 				RefundAmount: refundAmount,
 				RefundType:   "credit",
 				Message: fmt.Sprintf("Booking %s cancelled. Travel credit of $%.2f issued.",
 					input.BookingID, refundAmount),
-			}, nil
+			}, nil)
 		}).Description("Cancel an existing booking and process refund").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"booking_id": schema.String("The booking ID to cancel"),
@@ -761,17 +773,19 @@ func (f *AirlineFixture) CancelBookingTool() gent.Tool[CancelBookingInput, *Canc
 }
 
 // SendNotificationTool returns a tool that sends notifications to customers.
-func (f *AirlineFixture) SendNotificationTool() gent.Tool[SendNotificationInput,
-	*SendNotificationResult] {
+func (f *AirlineFixture) SendNotificationTool() gent.Tool[SendNotificationInput] {
 	return gent.DefineTool("send_notification",
-		func(ctx context.Context, input SendNotificationInput) (*SendNotificationResult, error) {
+		func(ctx context.Context, input SendNotificationInput) (*gent.ToolExecutionResponse,
+
+			error) {
 			customer, exists := f.customers[input.CustomerID]
 			if !exists {
-				return nil, fmt.Errorf("customer not found: %s", input.CustomerID)
+				return capturedToolResponse(nil, fmt.Errorf("customer not found: %s", input.CustomerID))
 			}
 
 			if input.Method != "email" && input.Method != "sms" {
-				return nil, fmt.Errorf("invalid method: %s (must be email or sms)", input.Method)
+				return capturedToolResponse(nil, fmt.Errorf(
+					"invalid method: %s (must be email or sms)", input.Method))
 			}
 
 			destination := customer.Email
@@ -779,12 +793,12 @@ func (f *AirlineFixture) SendNotificationTool() gent.Tool[SendNotificationInput,
 				destination = customer.Phone
 			}
 
-			return &SendNotificationResult{
+			return capturedToolResponse(&SendNotificationResult{
 				Success: true,
 				Method:  input.Method,
 				Message: fmt.Sprintf("Notification sent via %s to %s: %s",
 					input.Method, destination, input.Message),
-			}, nil
+			}, nil)
 		}).Description("Send email or SMS notification to customer about booking changes").
 		ParameterSchema(schema.Object(map[string]*schema.Property{
 			"customer_id": schema.String("Customer ID to notify"),

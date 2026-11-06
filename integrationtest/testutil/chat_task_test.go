@@ -12,12 +12,12 @@ import (
 type chatTaskModel struct{ messages [][]*gent.ModelMessage }
 
 func (model *chatTaskModel) GenerateContentStream(
-	_ context.Context, request gent.ModelCallRequest,
+	_ context.Context, request *gent.ModelCallRequest,
 ) (
 	gent.Stream, error,
 ) {
 	model.messages = append(model.messages, request.Messages)
-	return gent.NewCompletedStream(&gent.ContentResponse{Choices: []*gent.ContentChoice{{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{Choices: []*gent.ContentChoice{{
 		Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 		CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Done."}},
 	}}, Info: &gent.GenerationInfo{}}, nil), nil
@@ -73,4 +73,10 @@ Use supplied facts.`
 			assert.Equal(t, test.expected.history, chat.History)
 		})
 	}
+}
+func (
+	m *chatTaskModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

@@ -24,7 +24,7 @@ func TestRegexToolSearcherConcurrentIndexAndSearch(t *testing.T) {
 				assert.NoError(t, engine.IndexAll(tools))
 				names, err := engine.Search(context.Background(), "lookup")
 				assert.NoError(t, err)
-				assert.Equal(t, []string{"lookup"}, names)
+				assert.Equal(t, []string{"lookup"}, names.Names)
 			}
 		}()
 	}

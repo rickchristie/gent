@@ -36,9 +36,9 @@ type reviewModel struct {
 }
 
 func (m reviewModel) GenerateContentStream(
-	context.Context, gent.ModelCallRequest,
+	context.Context, *gent.ModelCallRequest,
 ) (gent.Stream, error) {
-	return gent.NewCompletedStream(&gent.ContentResponse{
+	return gent.NewCompletedStream(&gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -411,3 +411,8 @@ func BenchmarkReviewEmitChunk(b *testing.B) {
 }
 
 func (reviewLoop) Output() gent.Output[string] { return output.NewTextOutput() }
+func (m reviewModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
+}

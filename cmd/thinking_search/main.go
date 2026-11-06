@@ -56,7 +56,7 @@ func main() {
 			if err != nil {
 				continue
 			}
-			for rank, name := range toolNames {
+			for rank, name := range toolNames.Names {
 				score := 1.0 / float64(rank+1)
 				if score > toolBest[name] {
 					toolBest[name] = score

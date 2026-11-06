@@ -76,9 +76,9 @@ func TestNativeHTTP_ToolRoundTrip(t *testing.T) {
 			agent := react.NewAgent(client).
 				WithCallOptions(gent.WithTemperature(0.5), gent.WithTopP(1), gent.WithMaxTokens(100)).
 				RegisterTool(gent.DefineTool("lookup",
-					func(_ context.Context, args map[string]any) (string, error) {
+					func(_ context.Context, args map[string]any) (*gent.ToolExecutionResponse, error) {
 						got = append(got, args)
-						return "record", nil
+						return capturedToolResponse("record", nil)
 					}).Description("Read a record").ParameterSchema(nil).MustBuild())
 			ctx := gent.NewExecutionContext(context.Background(), "http", gent.NewBasicLoopData(
 				&gent.Task{
@@ -104,7 +104,7 @@ func TestNativeHTTP_ToolRoundTrip(t *testing.T) {
 					gent.TextContent{Text: "Done."},
 				})),
 			}, final)
-			assert.Equal(t, []map[string]any{{"id": float64(1)}, {"id": float64(2)}}, got)
+			assert.Equal(t, []map[string]any{{"id": json.Number("1")}, {"id": json.Number("2")}}, got)
 			lock.Lock()
 			defer lock.Unlock()
 			data, err := os.ReadFile(filepath.Join("testdata",

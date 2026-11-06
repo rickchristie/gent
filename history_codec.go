@@ -13,9 +13,10 @@ import (
 // EncodedValue preserves concrete types across process boundaries. Ordinary JSON decoding of
 // interface fields loses content-part implementations, numeric types, and typed tool metadata.
 type EncodedValue struct {
-	Type    string          `json:"type"`
-	Version int             `json:"version"`
-	Data    json.RawMessage `json:"data,omitempty"`
+	Type         string          `json:"type"`
+	DeclaredType string          `json:"declaredType,omitempty"`
+	Version      int             `json:"version"`
+	Data         json.RawMessage `json:"data,omitempty"`
 }
 
 // ValueCodec supplies a versioned representation for an application-owned value.
@@ -56,13 +57,13 @@ func NewCodecRegistry(options ...CodecOption) *CodecRegistry {
 		MessageContentMetadataKey(
 			"",
 		), TextContent{}, ImageURLContent{}, BinaryContent{},
-		ModelToolCall{}, FunctionCall{}, ToolCallResponse{}, CachedContent{},
-		CacheControl{}, ToolChainResult{}, ToolCallResult{},
-		ToolRecoveryResponse{}, ToolRecoveryResult(""),
+		ModelToolCallRequest{}, FunctionCall{}, CachedContent{},
+		CacheControl{},
+		ToolRecoveryResponse{}, ToolRecoveryStatus(""),
 		HistoryEntry{}, MessageContent{},
 		Task{},
 		ProviderContinuation{},
-		ContentResponse{},
+		ModelCallResponse{},
 		ContentChoice{},
 		ModelCompletion{},
 		ModelRefusal{},
@@ -87,6 +88,7 @@ func NewCodecRegistry(options ...CodecOption) *CodecRegistry {
 		typ := reflect.TypeOf(value)
 		r.add(registeredValue{id: typ.PkgPath() + "/" + typ.Name(), version: 1, typ: typ})
 	}
+	registerToolStateCodecs(r)
 	return r
 }
 
@@ -290,9 +292,9 @@ func (r *CodecRegistry) encode(
 			return EncodedValue{}, fmt.Errorf("codec %s returned invalid JSON", registration.id)
 		}
 		return EncodedValue{
-			registration.id,
-			registration.version,
-			append(json.RawMessage(nil), data...),
+			Type:    registration.id,
+			Version: registration.version,
+			Data:    append(json.RawMessage(nil), data...),
 		}, nil
 	}
 	if v.Kind() == reflect.Pointer || v.Kind() == reflect.Map || v.Kind() == reflect.Slice {
@@ -347,6 +349,7 @@ func (r *CodecRegistry) encode(
 			if err != nil {
 				return EncodedValue{}, fmt.Errorf("%s.%s: %w", v.Type(), field.Name, err)
 			}
+			value.DeclaredType = r.declaredFieldType(field.Type)
 			fields[field.Name] = value
 		}
 		value, err := encoded(registration.id, fields)

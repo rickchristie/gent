@@ -14,7 +14,7 @@ import (
 
 type iterationFrame struct {
 	Iteration      int
-	Response       *gent.ContentResponse
+	Response       *gent.ModelCallResponse
 	Repetition     *agentutil.RepetitionResult
 	ToolPlanActive bool
 }
@@ -146,8 +146,8 @@ func (r *Agent[T]) executeToolPlan(
 	prepare func() (*gent.ToolPlan, error),
 	execute func(
 		*gent.ExecutionContext, *gent.ToolPlan, gent.TextFormat,
-	) (*gent.ToolCallResult, error),
-) (*gent.ToolChainResult, error) {
+	) (*gent.ToolCallRecord, error),
+) ([]*gent.ToolCallRecord, error) {
 	var plan *gent.ToolPlan
 	var err error
 	if frame.ToolPlanActive {
@@ -177,5 +177,5 @@ func (r *Agent[T]) executeToolPlan(
 			return nil, err
 		}
 	}
-	return &gent.ToolChainResult{Results: plan.Results}, nil
+	return plan.Results, nil
 }

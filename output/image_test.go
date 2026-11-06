@@ -135,7 +135,7 @@ func TestImageOutputOwnershipAndConcurrentUse(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			request := gent.NewModelCallRequest(nil)
-			assert.NoError(t, out.Configure(&request))
+			assert.NoError(t, out.Configure(request))
 			assert.Equal(t, []string{"image/png"}, request.Options.ImageMIMETypes)
 			request.Options.ImageMIMETypes[0] = "image/jpeg"
 			result, err := out.Process(ctx, []gent.ContentPart{value})

@@ -29,56 +29,98 @@ Provider support also does not imply identical schemas, reasoning fields, or rep
 
 ## Tool definitions
 
-Use the builder for function tools. A bound method can keep service dependencies on its receiver.
-Use a full `gent.Tool[I, O]` implementation when the tool itself needs fields or a custom `Call`
-result with media and instructions.
+Use `gent.Tool[I]` or `gent.DefineTool`. The handler returns `*ToolExecutionResponse` and an
+`error`. Gent owns input validation, typed conversion, saved state, and provider message mapping.
+A bound method can keep service dependencies on its receiver.
 
 ```go
 tool, err := gent.DefineTool("lookup_order", service.LookupOrder).
     Description("Get the current order status.").
     Parameters(schema.Field("order_id").Description("The order ID.").MinLength(1)).
+    OutputSchemaFrom(Order{}).
     Policy("Use the order ID supplied by the user.").
     Domain("Orders").Categories("lookup").Keywords("order", "status").
     SyntheticQueries("Where is my order?").
+    UnrecoverableErrorInstructions("The lookup response is unavailable. Decide how to continue.").
     Recovery(service.RecoverOrder).
     Build()
-if err != nil {
-    return err
-}
-chain.RegisterTool(tool)
 ```
 
-`DefineTool` infers generic input and output types from the handler. `Build` returns a tool and an
-error; `MustBuild` panics on invalid fixed configuration. Configure before registration. Built
-schemas and metadata are copied, including values returned by getters. Builder changes cannot
-change an existing tool. The handler and recovery function must protect any shared mutable state.
+`Build` checks fixed configuration. `MustBuild` panics on a setup error. Configure before sharing
+between runs. Retained maps, slices, and byte buffers transfer ownership; getters return read-only
+views. Call and recovery handlers must protect their own shared mutable state.
 
-The builder uses `json` names and Go types. All input fields are required by default, including
-fields with `omitempty`. Add `.Optional()` to a field to permit absence. Pointer fields permit
-null, but remain required unless marked optional. Slices and maps can also be null. No default
-values are inserted. Struct schemas reject unknown properties. A dotted field path such as
-`address.city` selects a nested object field. Fields support descriptions, enums, formats, numeric
-bounds, string lengths and patterns, and array lengths. Formats are checked by local validation.
-Enums accept named Go constants and check their JSON values against the field schema. Schema
-copies use `json.Number` to keep numeric constraints exact, including large integers.
+Input inference uses Go types and `json` field names. All fields are required by default, including
+`omitempty` fields. Use `.Optional()` to permit absence. Pointer fields permit null but remain
+required. No defaults are inserted. Struct schemas reject unknown properties. Dotted paths such as
+`address.city` select nested fields. Field builders support descriptions, enums, formats, bounds,
+string patterns, and array lengths. Local validation checks formats.
 
-`ParameterSchema(raw)` replaces input inference with a full JSON Schema and cannot be mixed with
-field settings. Use it for recursive types, embedded fields, JSON `string` tags, or custom JSON
-encodings. Map and interface inputs also need an explicit parameter schema. Nil omits schema
-constraints; use an inferred `struct{}` input for a tool that must receive no arguments.
-`OutputSchema(raw)` replaces output inference; nil omits the output description. Output
-schemas describe the text result; Gent does not validate returned results against them.
+`ParameterSchema(raw)` supplies a complete schema instead of inference. It cannot be mixed with
+`Parameters`. Use it for maps, interfaces, embedded fields, custom JSON, or recursive types.
+Nil permits any JSON object; use `struct{}` for a tool with no arguments. `Strict(true)` asks the
+provider to enforce supported input constraints. Gent still checks the actual arguments and the
+effective input after mutable hooks before invoking the tool. Invalid input produces safe correction
+text with field paths and the complete expected schema.
 
-`Strict(true)` passes the strict flag to the provider. Provider support and accepted schema keywords
-can differ. Gent validates arguments against the supplied schema before it converts them or calls
-the tool. The builder compiles both schemas to catch invalid definitions during setup. The registry
-keeps a compiled input validator for calls; no schema inference or compilation occurs per call.
+`OutputSchema(raw)` and `OutputSchemaFrom(example)` set the same optional domain-data schema. The
+last setter wins. Inference uses the example's type, not its field values. This schema describes
+output to the model; it does not cause local result validation. The author is responsible for
+matching returned data to the declaration. Adapters use a native declaration when applicable and
+otherwise include the schema in description text. It does not describe framework status fields.
 
-Search metadata, policy, recovery, strict mode, output schema, and deduplication are all methods
-on `gent.Tool`. Empty search metadata and policy are valid. `DeduplicateSummary(handler)` is off by
-default. Use it only when the same arguments have the same result; a current-status lookup usually
-needs fresh output. Search pinning, pagination, JavaScript timeouts, and whether to print output
-schemas remain chain settings.
+### Execution responses and content
+
+| Return | Content sent to the model |
+| --- | --- |
+| `ToolExecuted`, nil error | Ordered Parts, then Instructions. Domain data defines success. |
+| `ToolBlocked`, nil error | Configured blocked sentence, then Instructions. Parts are omitted. |
+| `ToolInvalidArguments`, nil error | Correction details, complete input schema, and Instructions. |
+| Nil response, non-nil error | Safe authored guidance. Raw error stays in private diagnostics. |
+| Non-nil response and error | The response is rejected. Both returns are saved for diagnostics. |
+
+Returning both values is a contract violation, not a partial-result feature. Nil/nil and invalid
+response contracts use the safe error path. A tool error ends the operation, not the agent run.
+Cancellation, persistence failures, and configured limits keep their separate run-level behavior.
+An error cannot prove that an external action had no effects.
+
+Use `Instructions` for required model guidance. For Blocked, include approval references there;
+parts from a blocked response do not reach the model. Gent includes accepted instructions once,
+even when JavaScript uses only one data field. Error guidance uses the tool's
+`UnrecoverableErrorInstructions`, then execution `SteeringMessages.ToolError`, then Gent's default.
+
+```go
+parts, err := gent.NewParts().Data(order).PDF(labelPDF).Build()
+if err != nil {
+    return nil, err
+}
+return &gent.ToolExecutionResponse{
+    Status: gent.ToolExecuted,
+    Parts: parts,
+    Instructions: "Check the label before shipment.",
+}, nil
+```
+
+`DataPart(any)` captures portable structured data, including exact integer meaning and JSON names.
+It does not require authors to serialize structs or restore their original output Go type.
+Custom JSON encoders own their encoded shape and numeric tokens. Gent does not infer field or
+element types inside that representation. Tool input validation also respects this boundary:
+it validates the custom representation against the explicit schema, including after input hooks.
+`TextPart` keeps exact text. `BytesPart`, `ImagePart`, `PNGPart`, `JPEGPart`, `GIFPart`, `WebPPart`,
+`PDFPart`, `AudioPart`, and `VideoPart` make media explicit. `ImagePart` detects its image format;
+the named helpers do not convert or validate file contents. The builder reports construction errors
+from `Build` and returns no partial list. Provider compatibility is checked later.
+
+`ImageURLPart` stores a remote reference. The adapter sends the URL when supported, or downloads
+bytes when required. The caller owns URL lifetime and content changes, including signed URL expiry.
+Use a byte part when saved state must preserve the original content. A compatibility download is
+not a promise to snapshot a URL forever. An observed load failure produces safe text with the URL.
+Unsupported media produces safe text with its MIME type. Original parts and replacement reasons
+remain in private evidence. Configure fallback wording with per-execution `SteeringMessages`.
+
+The same parts work in initial `Task` messages, execution replies, and recovery evidence. Gent's
+codec saves byte content and captured data. Applications store the resulting `SaveBatch`; they do
+not supply a media codec. There is no tool-result deduplication. Compaction remains independent.
 
 ## Models and saved provider state
 
@@ -98,7 +140,7 @@ Grok's [stateless history guidance][grok-history] also requires replaying these 
 
 `models.NewResponses` accepts an endpoint and optional HTTP client. Its provider name identifies
 compatible continuation data. Replay through a different provider returns an error. Unsupported
-content and options also return errors; the adapter must not silently discard required data.
+native controls return errors. Media delivery uses the explicit steering fallback described above.
 Temperature and top-p use optional pointers, so zero differs from omission.
 Each managed call copies its request before mutable hooks run. A hook can change sampling values,
 tool definitions, and messages without changing settings used by another run.
@@ -111,8 +153,7 @@ same field from `thinking_config`. The final choice exposes provider-visible sum
 
 Gent owns the Anthropic, Gemini, DeepSeek, local runtime, and OpenRouter adapters as well.
 Each preserves its native continuation fields, including signed thinking or reasoning fields.
-See [provider protocols and supported features](models.md). Unsupported inputs and native controls
-return errors. A schema that cannot use native enforcement still receives complete local validation.
+See [provider protocols and supported features](models.md). Unsupported native controls return errors; unsupported media uses safe steering. A schema that cannot use native enforcement still receives complete local validation.
 
 ## Reasoning, commentary, and answers
 
@@ -225,8 +266,8 @@ registration, and compatibility configuration. All built-in chains implement the
 
 Preparation decodes native JSON arguments and saves distinct logical call IDs. Execution validates
 schemas, converts typed inputs, runs before-tool hooks, saves effective input before an effect, and
-saves results before the next step. Events, limits, summaries, instructions, and media use this
-path.
+saves the accepted outcome and prepared reply before the next step. Events, limits, instructions,
+and media use this path.
 Provider call IDs pair API messages. Gent call IDs identify operations across worker attempts.
 
 Custom chains can embed the registry and override selection:
@@ -234,10 +275,10 @@ Custom chains can embed the registry and override selection:
 ```go
 type SelectedTools struct {
     *toolchain.Registry
-    Select func(*gent.ExecutionContext, []gent.ToolDefinition) ([]gent.ToolDefinition, error)
+    Select func(*gent.ExecutionContext, []*gent.ToolDefinition) ([]*gent.ToolDefinition, error)
 }
 
-func (c *SelectedTools) NativeTools(ctx *gent.ExecutionContext) ([]gent.ToolDefinition, error) {
+func (c *SelectedTools) NativeTools(ctx *gent.ExecutionContext) ([]*gent.ToolDefinition, error) {
     tools, err := c.Registry.NativeTools(ctx)
     if err != nil {
         return nil, err
@@ -265,14 +306,23 @@ if err := chain.Initialize(); err != nil {
 agent := react.NewAgent(model).WithToolChain(chain)
 ```
 
-The first request contains search tools and pinned tools. In `Search` mode, a successful search
-records the full definitions it returned as `DiscoveredTools`. The next request includes those
-definitions. `SearchGet` returns brief search results and exposes a separate `get_tool_schema` call;
-only a successful schema lookup adds that definition.
+`SharedLocalSearch` exposes search, `execute_tool`, and pinned tools. A search returns complete
+current definitions as content. It does not promote each result to a top-level provider function.
+Use `execute_tool` with `{"tool":"lookup_order","args":{"order_id":"O1"}}`. The selected target uses
+the same validation, hooks, records, and recovery as a direct call. The outer schema alone is not
+enough; correction guidance includes the complete selected tool schema.
 
-Discovery comes from active history, including results inside JavaScript. Saved runs retain it.
-Expiry and compaction can remove discovery from the active context, after which the model can search
-again. Runs do not share mutable discovery state. Search controls context size, not access rights.
+Search engines return `ToolSearchResult{Status, Names, Instructions}`. Empty names with Executed
+means no matches. InvalidArguments supplies query correction guidance; Blocked supplies a condition
+that prevents searching. A backend Go error stays private and produces safe model guidance.
+Search traces retain query inputs, engine calls, rankings, and returned definitions for diagnostics.
+
+The active process supplies the current catalog after resume. Recorded definitions remain historical
+evidence. Catalog changes do not reject continuation. `RegisterDeprecatedTool` retains execution
+and recovery bindings but excludes the tool from search and pinned definitions. A missing new-call
+binding produces configured unavailable-tool guidance. A missing unfinished recovery binding uses
+recovery-error guidance. An unsaved local catalog search may run again; business calls do not.
+Search and visibility are not access controls. Tools must enforce their own business permissions.
 
 ## Programmatic tool calling
 
@@ -281,101 +331,96 @@ chain := toolchain.NewJsToolChainWrapper(toolchain.New().RegisterTool(lookupOrde
 agent := react.NewAgent(model).WithToolChain(chain)
 ```
 
-The native `run_code` tool accepts `{ "code": "..." }`. Its description teaches `tool.call`,
-`tool.parallelCall`, error checks, and return values. Direct mode exposes the business definitions
-beside `run_code`. `WithDirectCallDisabled()` exposes only `run_code` and includes the currently
-available function definitions in its description. Input schemas and output schemas tell the model
-which fields to pass and which returned fields to read.
+`run_code` accepts `{"code":"..."}`. Scripts use `tool.call` and `tool.parallelCall`; each returns
+Gent's common model reply view. `parallelCall` returns an array in request order. The fields are
+`toolCallId`, `name`, `kind`, `parts`, and applicable `executionStatus` and `recoveryStatus`.
+Absent status fields are omitted. Safe errors are ordinary text parts, with the error kind in
+metadata. Rejected returns and raw Go errors never enter the script.
 
 ```javascript
-(function() {
-  const order = tool.call({tool: "lookup_order", args: {order_id: "ORD-123"}});
-  if (order.error) return;
-  tool.call({tool: "read_shipment", args: {shipment_id: order.output.shipment_id}});
-})();
+const reply = tool.call({tool: "lookup_order", args: {order_id: "O1"}});
+if (reply.kind === "execution" && reply.executionStatus === "executed") {
+    const data = reply.parts.find(part => part.kind === "data");
+    // Check the tool's domain status before using its data.
+    if (data && data.data.status === "ready") {
+        tool.call({tool: "read_shipment", args: {shipment_id: data.data.shipment_id}});
+    }
+    tool.forward(reply.parts.filter(part => part.kind === "bytes"));
+}
 ```
 
-The runtime runs on the application's server. It does not use a provider-hosted code service.
-Inner calls use the same native preparation and execution path. Search inside a program updates
-later tool definitions. Each program increments code statistics; its inner calls increment tool
-statistics. `run_code` does not add an extra business-tool count.
+Text, data, URLs, and required instructions appear automatically in the outer reply. Do not log them.
+Byte parts are read-only `Uint8Array` views with `mimeType`; their automatic output is an omission
+notice. `tool.forward(parts)` selects original byte parts in the same script, replacing their notices.
+It does not start a model call. There are no handles or references for a later script. The model
+can request a fresh tool call if it later needs bytes. The application must explain when that is
+appropriate, especially for tools with external effects. Direct tool calls include bytes normally.
 
-`tool.call` waits for one call. With `Registry` and `SearchChain`, `tool.parallelCall` starts one
-goroutine per call and waits for all calls. Results and the tool log keep the input order, even when
-calls finish in a different order. A tool error is returned in that call's `error` field; other
-calls can finish. Use parallel calls only for independent work. Tools, search engines, hooks,
-summary callbacks, and custom text formats used here must be safe for concurrent use. Tools must
-check their Go context so cancellation can stop them. The wrapper waits for started calls before
-it returns, including after cancellation or a checkpoint failure. The JavaScript VM stays on one
-goroutine.
+`console.log` is for values computed by the script. Captured integers use JavaScript number by
+default, including its precision limit. Set `gent.WithPTCIntegerMode(gent.PTCIntegerBigInt)` on the
+execution context to use bigint for all captured integers. Floats stay number and byte elements
+stay Uint8Array numbers. Gent preserves bigint in tool arguments and logs; native JSON.stringify
+still rejects bigint. Saved data and automatic output use the original exact parts in either mode.
+Steering and integer mode are saved per execution. Concurrent runs can share one wrapper.
 
-Each concurrent call has its own saved plan, logical ID, effective input, and result. Parallel
-searches keep separate lists of returned schemas so each search result is complete. A worker
-restart keeps completed results, reports uncertain calls, and marks calls that did not start.
-It does not restart the script. Custom chains must implement `gent.ParallelToolChain` and return
-true from `SupportsParallelCalls` to accept batches with more than one call. The wrapper returns
-an error before tool effects if this support is absent or disabled. The wrapper calls `ExecuteNext`
-on the supplied chain, so an override on a type that embeds `Registry` or `SearchChain` still runs.
-An override that requires sequential use must return false from `SupportsParallelCalls`.
+Direct mode advertises the business functions beside `run_code`. `WithDirectCallDisabled` puts
+their definitions in the code tool description and blocks direct business calls. Each script uses
+an isolated VM. Parallel calls use independent saved plans and wait for all started workers, including
+after cancellation or persistence failure. Use them only for independent work. Tools, hooks,
+search engines, and custom formats must support concurrent calls. The VM remains on one goroutine.
+A panic interrupts the worker context, waits for siblings, then propagates the first panic.
 
-If a parallel call panics, the wrapper interrupts the worker context and waits for the other calls
-to stop. It then propagates the first panic to the caller. A panic during a sibling's cleanup does
-not replace that value. The last accepted checkpoint remains available for recovery.
+Custom chains must implement `gent.ParallelToolChain` and return true from `SupportsParallelCalls`
+for parallel batches. Calls go through the supplied chain's `ExecuteNext`, including overrides on
+an embedded registry. An interrupted script is not restarted. Accepted outer replies, including
+byte selections, are reused unchanged after resume. A progress save can accept the outer record
+before the control checkpoint closes the program. Resume checks that record first, clears the old
+program state, and preserves the saved reply and counters. It does not recover completed inner calls.
 
 ## Tool recovery
 
-Each tool implements `Recover(context.Context, *gent.ToolRecoveryRequest)` and returns
-`(*gent.ToolRecoveryResponse, error)`. The builder accepts that function through `.Recovery(...)`.
-Without a handler, it returns `ToolRecoveryUnresolved`. Recovery runs only for an interrupted
-operation with no saved result. Ordinary continuation and known results do not invoke it.
+Each tool implements `Recover(context.Context, *gent.ToolRecoveryRequest[I])`. The typed request
+contains the original identity, arguments, and saved effective input. Before-call hooks and current
+input-schema validation do not run again on this input. Recovery must be safe to repeat because a
+worker can stop before its report is saved. It must inspect the action, not perform it again.
 
-```go
-builder.Recovery(func(ctx context.Context, request *gent.ToolRecoveryRequest) (
-    *gent.ToolRecoveryResponse, error,
-) {
-    return &gent.ToolRecoveryResponse{
-        Result: gent.ToolRecoveryUnresolved,
-        SteeringMessage: "Check the booking service with the saved call ID before booking again.",
-    }, nil
-})
-```
-
-`ToolRecoveryResponse` contains the decision, optional `SteeringMessage`, and optional `Output`:
-
-| Result | Output | Action |
+| Recovery status | Execution | Meaning sent to the model |
 | --- | --- | --- |
-| `ToolRecoveryCompleted` | Required `*gent.ToolCallResult` | Reuse the recovered result. |
-| `ToolRecoveryRetryAllowed` | Must be nil | Retry with the saved effective input. |
-| `ToolRecoveryUnresolved` | Must be nil | Report an unknown outcome without repeating the call. |
+| `ToolRecoveryCompleted` | Required `*ToolExecutionResponse` | Recovered original response; it may be stale. |
+| `ToolRecoveryNotStarted` | Nil | Evidence establishes that the action did not start. |
+| `ToolRecoveryUnresolved` | Nil | The original outcome cannot be confirmed. |
 
-A recovery error stops the run and leaves the checkpoint available for another recovery attempt.
-Invalid decisions and missing completed outputs also fail. Gent supplies the original name, call
-ID, attempt ID, arguments, and effective input on a recovered result. The tool supplies its output,
-formatted text, media, and any instructions. A steering message never authorizes a retry.
+Every report can include evidence Parts and Instructions. Completed also includes the recovered
+execution's content and instructions. No status causes automatic execution. The model decides
+whether a fresh call is needed after reviewing all saved and recovered results. A call that never
+reached its ready boundary receives NotStarted without executing it. A ready call uses its handler.
 
-Gent saves each decision before it uses it. The decision and message survive a lost save
-acknowledgement. A retry gets a new attempt ID, but keeps its logical call ID and effective input;
-its mutation hook does not run again. Steering accompanies the resulting observation, including
-when a retry fails. Checks must be safe to repeat if the process stops before the decision is saved.
-There is no global recovery handler or separate static recovery message setting.
+A missing handler, a failed typed-input reconstruction, a Go error, or an invalid report produces
+separate recovery-error guidance. It does not claim that the original action failed. Completed
+records and known call errors are reused without invoking recovery or requiring their old Go types.
+Gent saves accepted outcomes, prepared replies, diagnostics, and statistics together. Resume uses
+the saved wording and does not count old errors or successes again.
 
-An unresolved operation produces an `unknown` result with standard facts and any steering. Later
-unstarted calls in that batch receive `not_started` results. The model can make a new plan. A known
-tool error remains distinct from an unknown outcome.
+Fresh Executed and Blocked responses reset consecutive tool-error gauges. InvalidArguments has
+separate counters and leaves those gauges unchanged. Recovery errors have separate total and
+per-tool counters; other recovery reports do not reset call-error gauges. Limits can still end a
+run. The model receives content, not serialized framework wrapper fields; adapters can use the
+metadata for native fields such as Anthropic's `is_error`.
 
-An interrupted program never restarts its script or restores a JavaScript stack. Gent recovers
-inner calls with each tool's handler, including a safe retry when permitted. It returns saved and
-recovered partial results through the original `run_code` call ID. Operations that were not started
-remain unstarted. Accepted results take precedence over handlers and are not repeated.
+`ToolCallRecord` keeps Gent identity, target, arguments, effective input, typed outcome, original
+returns, diagnostics, and `Response()`. The response is `*ModelToolCallResponse` with prepared Parts,
+provider call ID, model-requested function name, and status metadata. Shared execution can have a
+target name different from the model-requested function. `record.ModelMessage()` makes the tool-role
+message. All adapters consume that common message through `ModelCallRequest.Messages`.
 
-Set ReAct's `WithRecoveryVersion` for your application behavior and change it when a handler or its
-configuration changes. Function behavior cannot be captured in a configuration hash. Tool schemas,
-strict flags, and descriptions remain part of the automatic compatibility checks.
+Set ReAct's `WithRecoveryVersion` for application behavior that cannot be checked structurally.
+Catalog definitions are excluded from the compatibility hash. The application owns business meaning
+and any upgrade rules for old input. Default decoding permits added and removed struct fields;
+changed declared field types fail reconstruction. See [history and recovery](history.md).
 
-The application recorder must check its worker lease in each atomic save. A rejected save stops an
-old worker before it can start another call. An already running external effect can still finish.
-Gent supplies evidence and hooks; the application owns duplicate-effect policy and reconciliation.
-See [history and recovery](history.md) for storage and compatibility rules.
+The recorder must check its worker lease in each atomic save. A rejected save stops an old worker
+before it can start another call; an external action already in progress can still complete.
+Gent supplies evidence, not an exactly-once guarantee about external systems.
 
 ## Tests
 
@@ -385,10 +430,14 @@ Recovery cases include interruption before an effect, an effect with a lost resu
 completion, lost recovery acknowledgments, and worker takeover.
 
 `TestNativeLive` runs actual OpenAI and Grok calls. Each provider has a code-only case and a search
-then JavaScript case. These assert actual dependent tool inputs, code execution, and changing
-native definitions. Saved inner results must show both business calls inside the same `run_code`
+then JavaScript case. These assert actual dependent tool inputs, code execution, and shared
+search definitions. Saved inner results must show both business calls inside the same `run_code`
 result. An initial script error without business effects can be corrected within the iteration
 limit. A no-op program followed by direct business calls does not pass this check.
 Set `GENT_TEST_OPENAI_KEY` / `GENT_TEST_XAI_KEY` or `OPENAI_API_KEY` /
 `XAI_API_KEY`. Optional `GENT_TEST_OPENAI_MODEL` / `GENT_TEST_XAI_MODEL` select models. Cases skip
 when credentials are absent. A fixture pass is not a live-provider pass.
+
+Diagnostic JSON includes private record fields and readable prepared parts. Do not send a serialized
+ToolCallRecord to the model. Use its Response through a tool-role message. Use CodecRegistry for
+saved state; diagnostic JSON is for trace display and does not retain every Go numeric type.

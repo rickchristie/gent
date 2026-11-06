@@ -110,7 +110,7 @@ func TestTextOutputConfigurationAndCancellation(t *testing.T) {
 	expected := original
 	expected.Options.ResponseMIMEType = "text/plain"
 	expected.Options.ResponseModalities = []string{"text"}
-	assert.NoError(t, out.Configure(&request))
+	assert.NoError(t, out.Configure(request))
 	assert.Equal(t, expected, request)
 	ctx := execution(t)
 	ctx.CancelRun(context.Canceled)

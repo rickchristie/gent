@@ -33,6 +33,14 @@ func TestCodecRegistryRoundTrip(t *testing.T) {
 	assert.NoError(t, registry.RegisterType("test/value", 2, customValue{}))
 	assert.NoError(t, registry.RegisterType("test/map", 1, namedMap{}))
 	assert.NoError(t, registry.RegisterType("test/slice", 1, namedSlice{}))
+	originalInput, err := registry.Encode(customValue{Id: 12})
+	assert.NoError(t, err)
+	execution := &ToolExecutionResponse{Status: ToolExecuted,
+		Parts: []ContentPart{TextPart("original")}}
+	record, err := NewToolCallRecordBuilder("call", "attempt", "policy").
+		Arguments(`{"id":"P-10"}`, map[string]any{"id": "P-10"}).Input(&originalInput).
+		Execution(execution).ModelReply("provider-call", "policy", execution.Parts...).Build()
+	assert.NoError(t, err)
 	values := []any{
 		nil, []string(nil), []string{}, map[string]any(nil), map[string]any{},
 		map[string]any{"id": uint64(1<<63 + 7), "count": int32(12), "decimal": json.Number("1.20")},
@@ -51,18 +59,14 @@ func TestCodecRegistryRoundTrip(t *testing.T) {
 		NewTask(TextContent{Text: "original task"}, TextContent{Text: "media"}),
 		&HistoryEntry{Origin: RecordOriginal, ExpireAfterIteration: 5,
 			Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
-				Parts: []ContentPart{TextContent{Text: "policy P-10: exact original text"}},
-				Metadata: map[MessageContentMetadataKey]any{MMKToolChainResult: &ToolChainResult{
-					Results: []*ToolCallResult{{Name: "policy", Args: map[string]any{"id": "P-10"},
-						Input: customValue{
-							Id: 12,
-						}, Output: "exact original text", Text: "rendered"}}}}}},
+				Parts:    []ContentPart{TextContent{Text: "policy P-10: exact original text"}},
+				Metadata: map[MessageContentMetadataKey]any{MMKToolCallRecords: []*ToolCallRecord{record}}}},
 			Metadata: map[RecordMetadataKey]any{
 				RecordMetadataKey("custom"): []any{int64(100), true},
 			}},
 		time.Date(2026, 9, 11, 5, 0, 0, 12, time.UTC), time.Duration(42 * time.Minute),
 		CallOptions{Model: "fixture", Temperature: func() *float64 { v := 0.4; return &v }(),
-			Tools: []ToolDefinition{{Type: "function", Function: &FunctionDefinition{
+			Tools: []*ToolDefinition{{Type: "function", Function: &FunctionDefinition{
 				Name: "lookup", Parameters: map[string]any{"type": "object"}}}}},
 	}
 	var cases []testCase

@@ -3,9 +3,9 @@ package toolchain
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/rickchristie/gent"
+	"github.com/rickchristie/gent/toolchain/jsruntime"
 )
 
 // A program is a sequence of native batches. Save each batch before it can start an effect.
@@ -14,7 +14,7 @@ type programState struct {
 	AttemptId string
 	CallId    string
 	Script    string
-	Completed []*gent.ToolCallResult
+	Completed []*gent.ToolCallRecord
 }
 
 // Save keys instead of shared plan pointers. Each worker can then save its own cursor and
@@ -36,8 +36,8 @@ func loadProgram(ctx *gent.ExecutionContext) (*programState, bool, error) {
 }
 
 func (w *JsToolChainWrapper) executeProgramCalls(ctx *gent.ExecutionContext,
-	calls []gent.ModelToolCall, format gent.TextFormat,
-) (*gent.ToolChainResult, error) {
+	calls []*gent.ModelToolCallRequest, format gent.TextFormat,
+) ([]*gent.ToolCallRecord, error) {
 	if err := ctx.RecordingError(); err != nil {
 		return nil, err
 	}
@@ -77,16 +77,16 @@ func (w *JsToolChainWrapper) executeProgramCalls(ctx *gent.ExecutionContext,
 	if err := ctx.SetCheckpointState("gent:program", program); err != nil {
 		return nil, err
 	}
-	ctx.ClearCheckpointState("gent:program_calls", "gent:program_calls:search_seen")
+	ctx.ClearCheckpointState("gent:program_calls")
 	if err := ctx.CommitCheckpoint(gent.PhaseToolCompleted); err != nil {
 		return nil, err
 	}
-	return &gent.ToolChainResult{Results: plan.Results}, nil
+	return plan.Results, nil
 }
 
 func (w *JsToolChainWrapper) executeParallelProgramCalls(ctx *gent.ExecutionContext,
-	program *programState, calls []gent.ModelToolCall, format gent.TextFormat,
-) (*gent.ToolChainResult, error) {
+	program *programState, calls []*gent.ModelToolCallRequest, format gent.TextFormat,
+) ([]*gent.ToolCallRecord, error) {
 	chain, ok := w.wrapped.(gent.ParallelToolChain)
 	if !ok || !chain.SupportsParallelCalls() {
 		return nil, errors.New("tool.parallelCall requires a ParallelToolChain")
@@ -94,7 +94,7 @@ func (w *JsToolChainWrapper) executeParallelProgramCalls(ctx *gent.ExecutionCont
 	batch := &parallelProgramCalls{}
 	plans := make([]*gent.ToolPlan, 0, len(calls))
 	for _, call := range calls {
-		plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{call})
+		plan, err := chain.PrepareCalls(ctx, []*gent.ModelToolCallRequest{call})
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +122,7 @@ func (w *JsToolChainWrapper) executeParallelProgramCalls(ctx *gent.ExecutionCont
 	if err != nil {
 		return nil, err
 	}
-	program.Completed = append(program.Completed, result.Results...)
+	program.Completed = append(program.Completed, result...)
 	if err := ctx.SetCheckpointState("gent:program", program); err != nil {
 		return nil, err
 	}
@@ -135,19 +135,33 @@ func (w *JsToolChainWrapper) executeParallelProgramCalls(ctx *gent.ExecutionCont
 
 func clearParallelProgramCalls(ctx *gent.ExecutionContext, batch *parallelProgramCalls) {
 	for _, key := range batch.Keys {
-		ctx.ClearCheckpointState(key, key+":search_seen")
+		ctx.ClearCheckpointState(key)
 	}
 	ctx.ClearCheckpointState("gent:program_calls")
 }
 
+// An accepted outer reply closes the program even when its last control checkpoint is older.
+// Remove saved inner plans without recovering their already accepted effects again.
+func clearProgram(ctx *gent.ExecutionContext) error {
+	value, _, err := ctx.CheckpointState("gent:program_calls")
+	if err != nil {
+		return err
+	}
+	if batch, ok := value.(*parallelProgramCalls); ok {
+		clearParallelProgramCalls(ctx, batch)
+	}
+	ctx.ClearCheckpointState("gent:program", "gent:program_calls")
+	return nil
+}
+
 func (w *JsToolChainWrapper) recoverProgram(ctx *gent.ExecutionContext,
 	outer *gent.ToolPlan, program *programState, format gent.TextFormat,
-) (*gent.ToolCallResult, error) {
+) (*gent.ToolCallRecord, error) {
 	call := outer.Calls[outer.NextCall]
 	if program.CallId != call.Id {
 		return nil, errors.New("JavaScript recovery call does not match")
 	}
-	results := append([]*gent.ToolCallResult(nil), program.Completed...)
+	results := append([]*gent.ToolCallRecord(nil), program.Completed...)
 	value, found, err := ctx.CheckpointState("gent:program_calls")
 	if err != nil {
 		return nil, err
@@ -182,39 +196,43 @@ func (w *JsToolChainWrapper) recoverProgram(ctx *gent.ExecutionContext,
 			results = append(results, partial...)
 		}
 	}
-	var text strings.Builder
-	fmt.Fprintf(&text, `JavaScript execution was interrupted. The script will not be restarted.
+	report := &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryUnresolved,
+		Parts: jsruntime.ProgramParts(results, ctx.SteeringMessages(), nil),
+		Instructions: fmt.Sprintf(`JavaScript execution was interrupted. The script was not restarted.
 Script:
-%s`, program.Script)
-	for _, result := range results {
-		fmt.Fprintf(&text, "\n\n%s", result.Text)
+%s
+Review the results and make a new plan.`, program.Script)}
+	snapshot, err := ctx.SnapshotDiagnostic(report)
+	if err != nil {
+		return nil, err
 	}
-	text.WriteString("\n\nReview these results and make a new plan.")
-	result := &gent.ToolCallResult{Name: call.Name, ToolCallId: call.Id,
-		AttemptId: program.AttemptId, Args: call.Args, Outcome: "unknown",
-		Output: &gent.ToolChainResult{Results: results}, Error: gent.ErrUncertainTool,
-		Media: collectMedia(&gent.ToolChainResult{Results: results}),
-		Text:  text.String(), SummaryCaptured: true}
+	result, err := gent.NewToolCallRecordBuilder(call.Id, ctx.AttemptId(), call.Name).
+		Arguments(call.RawArguments, call.Args).Recovery(report).ReturnedRecovery(snapshot).
+		ModelReply(call.ModelCallID, call.ModelName,
+			gent.PrepareRecoveryParts(report, ctx.SteeringMessages())...).Build()
+	if err != nil {
+		return nil, err
+	}
+	ctx.PublishAfterToolCall(call.Name, nil, result, 0, nil,
+		gent.WithToolCallId(call.Id), gent.WithToolCallAttempt(program.AttemptId))
+	if err := ctx.RecordingError(); err != nil {
+		return nil, err
+	}
 	if parallel != nil {
 		clearParallelProgramCalls(ctx, parallel)
 	}
-	ctx.ClearCheckpointState("gent:program", "gent:program_calls", "gent:program_calls:search_seen")
+	ctx.ClearCheckpointState("gent:program", "gent:program_calls")
 	return completePlannedTool(ctx, outer, result)
 }
 
-// A permitted inner retry can run on its own. The outer script is never restarted.
+// Recovery observes each unfinished inner call. No script or business call is replayed.
 func (w *JsToolChainWrapper) recoverProgramCalls(ctx *gent.ExecutionContext,
 	plan *gent.ToolPlan, format gent.TextFormat,
-) ([]*gent.ToolCallResult, error) {
-	if plan.ReadyCall != nil {
+) ([]*gent.ToolCallRecord, error) {
+	for plan.NextCall < len(plan.Calls) {
 		if _, err := w.wrapped.ExecuteNext(ctx, plan, format); err != nil {
 			return nil, err
 		}
 	}
-	results := append([]*gent.ToolCallResult(nil), plan.Results...)
-	for plan.NextCall < len(plan.Calls) {
-		results = append(results, skippedTool(plan))
-		plan.NextCall++
-	}
-	return results, nil
+	return plan.Results, nil
 }

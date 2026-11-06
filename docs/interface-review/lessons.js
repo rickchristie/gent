@@ -59,7 +59,7 @@ const quiz = {
     correct: 1,
     explain:
       'A process can fail after sending a refund but before saving its result. Tool.Recover ' +
-      'can supply a completed result or allow retry. Unresolved calls give the model recovery guidance.',
+      'reports Completed, NotStarted, or Unresolved. The model decides whether to request another call.',
   },
   search: {
     question: 'Who decides which ranked tools are shown on the next results page?',
@@ -440,7 +440,7 @@ function renderRestart() {
   const resolved = [
     'saved result reused',
     'reconciled with receipt',
-    'retry explicitly allowed',
+    'model requested a new call',
   ].includes(state.status);
   const descriptions = {
     interrupted:
@@ -451,8 +451,8 @@ function renderRestart() {
     'missing value codec':
       'The saved typed value cannot be reconstructed. Register its ValueCodec ' +
       'before continuing; a JSON-shaped lookalike is not the same type.',
-    'unknown outcome; model receives recovery guidance':
-      'The checkpoint proves intent, not outcome. Gent saves an unknown-outcome result with ' +
+    'unresolved; model receives recovery guidance':
+      'The checkpoint proves intent, not outcome. Gent saves an Unresolved recovery report with ' +
       'recovery guidance. The model can check the refund service before making a new plan.',
     'saved result reused':
       'The durable result already proves completion. Gent reuses it without ' +
@@ -463,17 +463,23 @@ function renderRestart() {
     'reconciled with receipt':
       'Tool.Recover returned completed with the full receipt. The result ' +
       'is accepted and the tool is not executed again.',
-    'retry explicitly allowed': options.idempotent
-      ? 'Tool.Recover allowed retry. The external service deduplicates the stable logical ' +
-        'call ID. The new execution attempt does not create another refund.'
-      : 'Tool.Recover explicitly allowed retry, but the service does not deduplicate. A previous ' +
-        'refund can be sent twice. Gent does not promise exactly-once external effects.',
+    'not started; model decides next action':
+      'The recovery check proves that the action did not start. Gent reports NotStarted. ' +
+      'The model must decide whether the action is still needed.',
+    'an effect exists; NotStarted is invalid':
+      'This scenario already has an external effect. Recovery must inspect it and return ' +
+      'Completed or Unresolved; it cannot report NotStarted.',
+    'model requested a new call': options.idempotent
+      ? 'The model requests a fresh call. The service uses the refund business key to prevent ' +
+        'another refund. The fresh call has a new Gent call ID.'
+      : 'The model requests a fresh call, but the service does not check for an earlier refund. ' +
+        'A previous refund can be sent twice. Gent does not promise exactly-once external effects.',
   };
   updateExperiment(`
     <div class="experiment-layout">
       <aside class="experiment-controls">
         <p class="control-kicker">CRASH BETWEEN INTENT AND EVIDENCE</p>
-        <p class="try-this">Restore after the refund. Retry with service deduplication off.</p>
+        <p class="try-this">Restore after the refund. Request a new call with service deduplication off.</p>
         <label for="crash-point">Worker A crashes…</label>
         <select id="crash-point">${[
           ['before-effect', 'Before sending the refund'],
@@ -483,7 +489,7 @@ function renderRestart() {
           .map(([value, label]) => option(value, label, state.point))
           .join('')}</select>
         <label class="check-control"><input id="idempotent-service" type="checkbox"
-          ${options.idempotent ? 'checked' : ''}> Service deduplicates logical call ID</label>
+          ${options.idempotent ? 'checked' : ''}> Service deduplicates the refund business key</label>
         <details class="compatibility-controls"><summary>Change restore compatibility</summary>
           <label for="recovery-version">Application behavior version</label>
           <select id="recovery-version">${option('v1', 'v1 — matches saved run', options.version)}
@@ -526,10 +532,11 @@ function renderRestart() {
             <small>${state.effects > 1 ? 'Duplicate effect' : 'Visible to the experimenter'}</small>
           </div>
         </div>
-        <div class="recovery-actions"><span class="eyebrow">YOU ARE THE TOOL RECOVERY ADAPTER</span>
+        <div class="recovery-actions"><span class="eyebrow">RECOVERY REPORT AND NEXT MODEL DECISION</span>
           <div>${[
             ['completed', 'Return completed + receipt'],
-            ['retry', 'Explicitly allow retry'],
+            ['not-started', 'Return NotStarted'],
+            ['new-call', 'Model requests a new call'],
             ['unresolved', 'Leave unresolved'],
           ]
             .map(

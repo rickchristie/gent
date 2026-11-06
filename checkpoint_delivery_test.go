@@ -62,10 +62,10 @@ func (s *checkpointStore) kinds() [][]string {
 	return result
 }
 
-type checkpointModel func(context.Context, gent.ModelCallRequest) (gent.Stream, error)
+type checkpointModel func(context.Context, *gent.ModelCallRequest) (gent.Stream, error)
 
 func (m checkpointModel) GenerateContentStream(
-	ctx context.Context, request gent.ModelCallRequest,
+	ctx context.Context, request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	return m(ctx, request)
 }
@@ -131,9 +131,9 @@ func TestCheckpointModelChunksGrouped(t *testing.T) {
 					close(finish)
 				}
 			}()
-			response := &gent.ContentResponse{Info: &gent.GenerationInfo{
+			response := &gent.ModelCallResponse{Info: &gent.GenerationInfo{
 				InputTokens: 2, OutputTokens: 3, TotalTokens: 5}}
-			model := checkpointModel(func(worker context.Context, _ gent.ModelCallRequest) (
+			model := checkpointModel(func(worker context.Context, _ *gent.ModelCallRequest) (
 				gent.Stream, error,
 			) {
 				stream, err := gent.NewBoundedStreamWithDuration(worker, 1, nil)
@@ -295,9 +295,9 @@ func TestCheckpointModelRequestWaitsForSave(t *testing.T) {
 				gent.WithRunId("request"), gent.WithRecorder(store))
 			defer ctx.Release()
 			var calls atomic.Int32
-			model := checkpointModel(func(context.Context, gent.ModelCallRequest) (gent.Stream, error) {
+			model := checkpointModel(func(context.Context, *gent.ModelCallRequest) (gent.Stream, error) {
 				calls.Add(1)
-				return gent.NewCompletedStream(&gent.ContentResponse{}, nil), nil
+				return gent.NewCompletedStream(&gent.ModelCallResponse{}, nil), nil
 			})
 			done := make(chan error, 1)
 			go func() {
@@ -415,7 +415,7 @@ func TestCheckpointRecoveryUsesSavedModelEvidence(t *testing.T) {
 				gent.WithCheckpointPolicy(gent.CheckpointPolicy{MaxEvents: 2}))
 			defer ctx.Release()
 			assert.NoError(t, ctx.CommitCheckpoint(gent.PhaseInitial))
-			response := &gent.ContentResponse{
+			response := &gent.ModelCallResponse{
 				Choices: []*gent.ContentChoice{{
 					Completion: gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 					CandidateContent: []gent.ContentPart{
@@ -425,7 +425,7 @@ func TestCheckpointRecoveryUsesSavedModelEvidence(t *testing.T) {
 				}},
 				Info: &gent.GenerationInfo{InputTokens: 2, OutputTokens: 3, TotalTokens: 5},
 			}
-			model := checkpointModel(func(worker context.Context, _ gent.ModelCallRequest) (
+			model := checkpointModel(func(worker context.Context, _ *gent.ModelCallRequest) (
 				gent.Stream, error,
 			) {
 				stream, err := gent.NewBoundedStreamWithDuration(worker, 1, nil)
@@ -476,7 +476,7 @@ func TestCheckpointRecoveryUsesSavedModelEvidence(t *testing.T) {
 			}
 			defer fresh.Release()
 			var calls atomic.Int32
-			retry := checkpointModel(func(context.Context, gent.ModelCallRequest) (gent.Stream, error) {
+			retry := checkpointModel(func(context.Context, *gent.ModelCallRequest) (gent.Stream, error) {
 				calls.Add(1)
 				return gent.NewCompletedStream(response, nil), nil
 			})
@@ -773,9 +773,9 @@ func TestCheckpointSaveTimeout(t *testing.T) {
 	ctx := gent.NewExecutionContext(context.Background(), "test", nil, gent.WithRecorder(save),
 		gent.WithCheckpointPolicy(gent.CheckpointPolicy{SaveTimeout: 10 * time.Millisecond}))
 	defer ctx.Release()
-	model := checkpointModel(func(context.Context, gent.ModelCallRequest) (gent.Stream, error) {
+	model := checkpointModel(func(context.Context, *gent.ModelCallRequest) (gent.Stream, error) {
 		calls.Add(1)
-		return gent.NewCompletedStream(&gent.ContentResponse{}, nil), nil
+		return gent.NewCompletedStream(&gent.ModelCallResponse{}, nil), nil
 	})
 	stream, err := ctx.GenerateContentStream(model, gent.ModelCall{}, gent.NewModelCallRequest(nil))
 	assert.Nil(t, stream)
@@ -894,4 +894,9 @@ func TestCheckpointChunkErrorsAreOwned(t *testing.T) {
 	view, err := ctx.Export()
 	assert.NoError(t, err)
 	assert.Equal(t, []gent.StreamChunk{two}, contentChunks(t, view.Activity, ctx.Codecs()))
+}
+func (m checkpointModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

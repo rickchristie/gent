@@ -544,7 +544,7 @@ func (l *modelCallingLoop) Next(
 	l.calls++
 
 	// Publish model call event to set per-iteration gauges
-	resp := &gent.ContentResponse{
+	resp := &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -557,7 +557,7 @@ func (l *modelCallingLoop) Next(
 		},
 	}
 	execCtx.PublishAfterModelCall(
-		"test-model", gent.ModelCallRequest{}, resp, 0, nil,
+		"test-model", &gent.ModelCallRequest{}, resp, 0, nil,
 	)
 
 	// Add iteration to scratchpad

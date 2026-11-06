@@ -41,7 +41,7 @@ type chatUsage struct {
 
 func (m *Chat) readResponse(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	if !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		var envelope chatEnvelope
 		if err := decodeProviderJSON(response.Body, &envelope); err != nil {
@@ -225,10 +225,10 @@ func (state *chatAccumulator) finish() (json.RawMessage, error) {
 			indices = append(indices, index)
 		}
 		sort.Ints(indices)
-		calls := make([]gent.ModelToolCall, 0, len(indices))
+		calls := make([]*gent.ModelToolCallRequest, 0, len(indices))
 		for _, index := range indices {
 			call := state.calls[index]
-			calls = append(calls, gent.ModelToolCall{ID: call.ID, Type: call.Type,
+			calls = append(calls, &gent.ModelToolCallRequest{ID: call.ID, Type: call.Type,
 				FunctionCall: &gent.FunctionCall{Name: call.Name.String(),
 					Arguments: call.Arguments.String()}})
 		}
@@ -249,13 +249,13 @@ func (state *chatAccumulator) finish() (json.RawMessage, error) {
 
 func (m *Chat) convertResponse(ctx context.Context, raw json.RawMessage, reason string,
 	usage chatUsage,
-) (*gent.ContentResponse, error) {
+) (*gent.ModelCallResponse, error) {
 	var message struct {
-		Content   string               `json:"content"`
-		Reasoning string               `json:"reasoning_content"`
-		Thought   string               `json:"reasoning"`
-		Refusal   *string              `json:"refusal"`
-		Calls     []gent.ModelToolCall `json:"tool_calls"`
+		Content   string                       `json:"content"`
+		Reasoning string                       `json:"reasoning_content"`
+		Thought   string                       `json:"reasoning"`
+		Refusal   *string                      `json:"refusal"`
+		Calls     []*gent.ModelToolCallRequest `json:"tool_calls"`
 		Images    []struct {
 			Type string `json:"type"`
 			URL  struct {
@@ -288,7 +288,7 @@ func (m *Chat) convertResponse(ctx context.Context, raw json.RawMessage, reason 
 			Content: []gent.ContentPart{gent.TextContent{Text: *message.Refusal}}}
 	}
 	for _, call := range message.Calls {
-		if call.ID == "" || call.Type != "function" || call.FunctionCall == nil ||
+		if call == nil || call.ID == "" || call.Type != "function" || call.FunctionCall == nil ||
 			call.FunctionCall.Name == "" {
 			if choice.Completion.Status == gent.ModelStatusIncomplete {
 				continue
@@ -340,7 +340,7 @@ func (m *Chat) convertResponse(ctx context.Context, raw json.RawMessage, reason 
 	if usage.Total == 0 {
 		usage.Total = usage.Input + usage.Output
 	}
-	return &gent.ContentResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
+	return &gent.ModelCallResponse{Choices: []*gent.ContentChoice{choice}, Info: &gent.GenerationInfo{
 		InputTokens: usage.Input, OutputTokens: usage.Output, TotalTokens: usage.Total,
 		CachedInputTokens: cached, ReasoningTokens: usage.OutputDetail.Reasoning,
 	}}, nil

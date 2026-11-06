@@ -23,11 +23,11 @@ func (h *samplingHook) Dispatch(_ *gent.ExecutionContext, event gent.Event) {
 // The reply exposes the values received by the adapter without shared test state.
 type samplingEchoModel struct{}
 
-func (*samplingEchoModel) GenerateContentStream(_ context.Context, request gent.ModelCallRequest) (
+func (*samplingEchoModel) GenerateContentStream(_ context.Context, request *gent.ModelCallRequest) (
 	gent.Stream, error,
 ) {
 	content := fmt.Sprintf("%.1f %.1f", *request.Options.Temperature, *request.Options.TopP)
-	response := &gent.ContentResponse{
+	response := &gent.ModelCallResponse{
 		Choices: []*gent.ContentChoice{
 			{
 				Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
@@ -142,4 +142,9 @@ func TestAgentSamplingHooksConcurrent(t *testing.T) {
 		}}
 		assert.Equal(t, want, actual)
 	}
+}
+func (m *samplingEchoModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
+) (*gent.ModelCallRequest, error) {
+	return gent.PrepareModelRequest(ctx, request, chain)
 }

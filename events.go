@@ -203,6 +203,8 @@ type AfterIterationEvent struct {
 // Subscribers can modify Request.Messages for ephemeral context injection.
 // Appended messages are sent to the model but are not persisted in conversation history.
 type BeforeModelCallEvent struct {
+	// ToolSearches is private search evidence, never a model message.
+	ToolSearches []*ToolSearchTrace
 	BaseEvent
 
 	// Model is the model identifier being called.
@@ -213,7 +215,7 @@ type BeforeModelCallEvent struct {
 
 	// Request contains the messages and captured call options to be sent to the model.
 	// Subscribers can modify Request.Messages for ephemeral context injection.
-	Request ModelCallRequest
+	Request *ModelCallRequest
 
 	// ModelCallId identifies this model call across before, stream, and after events.
 	ModelCallId string
@@ -237,10 +239,10 @@ type AfterModelCallEvent struct {
 	Provider string
 
 	// Request contains the messages and call options that were sent after subscriber changes.
-	Request ModelCallRequest
+	Request *ModelCallRequest
 
 	// Response is the full response from the model.
-	Response *ContentResponse
+	Response *ModelCallResponse
 
 	// InputTokens is the number of input/prompt tokens used.
 	InputTokens int

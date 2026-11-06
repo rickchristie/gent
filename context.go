@@ -13,6 +13,8 @@ import (
 
 // EventPublisher is an interface for dispatching events to subscribers.
 // This is implemented by events.Registry and set on ExecutionContext by the Executor.
+// A custom publisher can also implement HasBeforeModelCallSubscribers() bool to report whether
+// it can change model requests. Without that capability, Gent supplies an independent hook view.
 type EventPublisher interface {
 	// Dispatch sends an event to all matching subscribers.
 	Dispatch(execCtx *ExecutionContext, event Event)
@@ -33,10 +35,13 @@ type EventPublisher interface {
 //
 // # Usage in Tools
 //
-//	func (t *MyTool) Call(ctx context.Context, input Input) (*ToolResult[Output], error) {
+//	func (t *MyTool) Call(ctx context.Context, input Input) (*ToolExecutionResponse, error) {
 //	    // Use standard context for external calls (inherits cancellation)
 //	    result, err := externalAPI.Call(ctx, input)
-//	    return &ToolResult[Output]{Text: result}, err
+//	    if err != nil { return nil, err }
+//	    parts, err := NewParts().Data(result).Build()
+//	    if err != nil { return nil, err }
+//	    return &ToolExecutionResponse{Status: ToolExecuted, Parts: parts}, nil
 //	}
 //
 // # Usage in Custom Loop
@@ -60,6 +65,9 @@ type EventPublisher interface {
 // is safe for concurrent use, and custom LoopData implementations must provide their own
 // synchronization if they are accessed concurrently.
 type ExecutionContext struct {
+	toolSearches       []*ToolSearchTrace
+	steeringMessages   SteeringMessages
+	ptcIntegerMode     PTCIntegerMode
 	finalContentSource *ContentSource
 
 	mu                 sync.RWMutex
@@ -650,7 +658,7 @@ func (ctx *ExecutionContext) publishWithEventIteration(event Event, iteration *i
 	ctx.updateStatsForEvent(event)
 
 	// Dispatch to subscribers
-	if publisher != nil && !ctx.isRetryingTool(event) {
+	if publisher != nil {
 		observed := event
 		switch event.(type) {
 		case *BeforeModelCallEvent, *BeforeToolCallEvent:
@@ -883,23 +891,10 @@ func (ctx *ExecutionContext) updateStatsForEvent(event Event) {
 		}
 
 	case *AfterToolCallEvent:
-		if e.Error != nil {
-			ctx.stats.incrCounterDirect(
-				SCToolCallsErrorTotal, 1,
-			)
-			ctx.stats.incrGaugeInternal(
-				SGToolCallsErrorConsecutive, 1,
-			)
-			if e.ToolName != "" {
-				ctx.stats.incrCounterDirect(
-					SCToolCallsErrorFor+StatKey(e.ToolName),
-					1,
-				)
-				ctx.stats.incrGaugeInternal(
-					SGToolCallsErrorConsecutiveFor+StatKey(e.ToolName),
-					1,
-				)
-			}
+		if record, ok := e.Output.(*ToolCallRecord); ok {
+			ctx.updateToolRecordStats(record)
+		} else if e.Error != nil {
+			ctx.addToolError(e.ToolName)
 		}
 
 	case *ParseErrorEvent:
@@ -1127,7 +1122,7 @@ func (ctx *ExecutionContext) PublishAfterIteration(
 // Returns the event so callers can use the (potentially modified) Request field.
 func (ctx *ExecutionContext) PublishBeforeModelCall(
 	model string,
-	request ModelCallRequest,
+	request *ModelCallRequest,
 	opts ...ModelCallEventOption,
 ) *BeforeModelCallEvent {
 	options := applyModelCallEventOptions(opts)
@@ -1135,6 +1130,7 @@ func (ctx *ExecutionContext) PublishBeforeModelCall(
 		options.modelCallId = ctx.nextModelCallId()
 	}
 	event := &BeforeModelCallEvent{
+		ToolSearches: ctx.takeToolSearches(),
 		BaseEvent: BaseEvent{
 			EventName: EventNameModelCallBefore,
 			Source:    options.source,
@@ -1154,8 +1150,8 @@ func (ctx *ExecutionContext) PublishBeforeModelCall(
 // Stats updated: InputTokens, OutputTokens (and per-model variants).
 func (ctx *ExecutionContext) PublishAfterModelCall(
 	model string,
-	request ModelCallRequest,
-	response *ContentResponse,
+	request *ModelCallRequest,
+	response *ModelCallResponse,
 	duration time.Duration,
 	err error,
 	opts ...ModelCallEventOption,
@@ -1172,8 +1168,8 @@ func (ctx *ExecutionContext) PublishAfterModelCall(
 func (ctx *ExecutionContext) PublishAfterModelCallForIteration(
 	iteration int,
 	model string,
-	request ModelCallRequest,
-	response *ContentResponse,
+	request *ModelCallRequest,
+	response *ModelCallResponse,
 	duration time.Duration,
 	err error,
 	opts ...ModelCallEventOption,
@@ -1186,8 +1182,8 @@ func (ctx *ExecutionContext) PublishAfterModelCallForIteration(
 
 func newAfterModelCallEvent(
 	model string,
-	request ModelCallRequest,
-	response *ContentResponse,
+	request *ModelCallRequest,
+	response *ModelCallResponse,
 	duration time.Duration,
 	err error,
 	options modelCallEventOptions,
@@ -1238,14 +1234,6 @@ func (ctx *ExecutionContext) PublishBeforeToolCall(
 		Args:       args,
 		ToolCallId: options.toolCallId,
 	}
-	if ctx.isRetryingTool(event) {
-		input, err := ctx.retryToolInput(event.ToolCallId)
-		if err != nil {
-			ctx.stopRecording(err)
-			return event
-		}
-		event.Args = input
-	}
 	ctx.publish(event)
 	if err := ctx.saveToolReady(event); err != nil {
 		ctx.stopRecording(err)
@@ -1264,7 +1252,6 @@ func (ctx *ExecutionContext) PublishAfterToolCall(
 	opts ...ToolCallEventOption,
 ) *AfterToolCallEvent {
 	options := applyToolCallEventOptions(opts)
-	ctx.addRecoverySteering(options.toolCallId, output)
 	event := &AfterToolCallEvent{
 		BaseEvent: BaseEvent{
 			EventName: EventNameToolCallAfter,
@@ -1408,6 +1395,7 @@ func (ctx *ExecutionContext) SpawnChild(name string, data LoopData) *ExecutionCo
 	childGoCtx, childCancel := context.WithCancelCause(ctx.goCtx)
 
 	child := &ExecutionContext{
+		steeringMessages: ctx.steeringMessages, ptcIntegerMode: ctx.ptcIntegerMode,
 		run:             ctx.run,
 		state:           map[string]EncodedValue{},
 		phase:           PhaseInitial,

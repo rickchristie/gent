@@ -42,7 +42,7 @@ func TestProvidersRejectUnsupportedInputAndOutput(t *testing.T) {
 		cases = append(cases, testCase{provider + "/file", input{provider: provider,
 			parts: []gent.ContentPart{gent.TextContent{Text: "Read the archive."},
 				&gent.BinaryContent{MIMEType: "application/zip", Data: []byte{1, 2, 3}}}},
-			expected{fmt.Sprintf("unsupported %s media %q", name, "application/zip"), 0}})
+			expected{"", 1}})
 		outputErr := fmt.Sprintf("%s does not support output modality %q", provider, "audio")
 		switch provider {
 		case "openai", "xai", "gemini":
@@ -73,8 +73,16 @@ func TestProvidersRejectUnsupportedInputAndOutput(t *testing.T) {
 			}
 			stream, err := fixtureModel(test.input.provider, client).GenerateContentStream(
 				context.Background(), request)
-			assert.Nil(t, stream)
-			assert.EqualError(t, err, test.expected.err)
+			if test.expected.err != "" {
+				assert.Nil(t, stream)
+				assert.EqualError(t, err, test.expected.err)
+			} else if assert.NoError(t, err) {
+				for range stream.Chunks() {
+				}
+				_, err = stream.Response()
+				assert.NoError(t, err)
+				stream.Close()
+			}
 			assert.Equal(t, test.expected.requests, requests)
 		})
 	}
@@ -110,6 +118,15 @@ func TestProvidersMapOwnedImageInput(t *testing.T) {
 		case "gemini":
 			want = expected{"contents", `[{"role":"user","parts":[{"text":"Before."},
 {"inlineData":{"mimeType":"image/png","data":"AQID"}},{"text":"After."}]}]`}
+		case "deepseek":
+			content := "Before.This model cannot receive this media type. " +
+				"Decide how to continue. MIME type: image/png.After."
+			encoded, err := json.Marshal([]map[string]any{
+				{"role": "system", "content": "Keep my instruction."},
+				{"role": "user", "content": content},
+			})
+			assert.NoError(t, err)
+			want = expected{"messages", string(encoded)}
 		case "ollama":
 			// Ollama has one text string and an ordered image array. The adapter retains both.
 			want = expected{"messages", `[{"role":"system","content":"Keep my instruction."},

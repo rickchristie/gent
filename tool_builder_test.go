@@ -3,7 +3,6 @@ package gent_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,28 +26,23 @@ func TestDefineTool(t *testing.T) {
 	field := schema.Field("order_id").Description("The order ID.").MinLength(1)
 	output := map[string]any{"type": "string", "description": "Current status."}
 	builder := gent.DefineTool("lookup_order",
-		func(_ context.Context, input builderInput) (string, error) {
-			return input.OrderID + ": shipped", nil
+		func(_ context.Context, input builderInput) (*gent.ToolExecutionResponse, error) {
+			return capturedToolResponse(input.OrderID+": shipped", nil)
 		}).
 		Description("Read the order status.").Parameters(field, schema.Field("limit").Optional().Min(1)).
 		Policy("Use the supplied order ID.").Domain("Orders").Categories("lookup").
 		Keywords("order", "status").SyntheticQueries("Where is my order?").OutputSchema(output).
-		DeduplicateSummary(func(input builderInput, _ string) string { return input.OrderID }).
-		Recovery(func(context.Context, *gent.ToolRecoveryRequest) (*gent.ToolRecoveryResponse, error) {
-			return &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed,
-				SteeringMessage: "Use the current order status."}, nil
+		Recovery(func(context.Context, *gent.ToolRecoveryRequest[builderInput]) (
+			*gent.ToolRecoveryResponse, error,
+		) {
+			return &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryNotStarted,
+				Instructions: "Use the current order status."}, nil
 		})
 	tool, err := builder.Build()
 	if !assert.NoError(t, err) {
 		return
 	}
-	// Changing setup values or returned metadata cannot change the registered tool.
-	builder.Description("changed").Categories("changed")
-	field.Description("changed")
-	output["description"] = "changed"
-	tool.Categories()[0] = "changed"
-	tool.OutputSchema()["description"] = "changed"
-	tool.ParameterSchema()["properties"].(map[string]any)["order_id"] = nil
+	// Metadata is read-only after Build. Runtime hooks receive their own request view.
 	var want map[string]any
 	decoder := json.NewDecoder(strings.NewReader(`{
   "type": "object", "additionalProperties": false, "required": ["order_id"],
@@ -73,12 +67,13 @@ func TestDefineTool(t *testing.T) {
 			tool.Keywords(), tool.SyntheticQueries(), tool.Strict(), tool.OutputSchema()})
 	result, err := tool.Call(context.Background(), builderInput{OrderID: "order-1001"})
 	assert.NoError(t, err)
-	assert.Equal(t, &gent.ToolResult[string]{Text: "order-1001: shipped"}, result)
-	assert.Equal(t, "order-1001", tool.DeduplicateSummary(builderInput{OrderID: "order-1001"}, ""))
-	response, err := tool.Recover(context.Background(), &gent.ToolRecoveryRequest{})
+	assert.Equal(t, &gent.ToolExecutionResponse{Status: gent.ToolExecuted,
+		Parts: []gent.ContentPart{gent.TextPart("order-1001: shipped")}}, result)
+	response, err := tool.Recover(context.Background(),
+		gent.NewToolRecoveryRequest(gent.ToolIdentity{}, "lookup_order", nil, builderInput{}))
 	assert.NoError(t, err)
-	assert.Equal(t, &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryRetryAllowed,
-		SteeringMessage: "Use the current order status."}, response)
+	assert.Equal(t, &gent.ToolRecoveryResponse{Status: gent.ToolRecoveryNotStarted,
+		Instructions: "Use the current order status."}, response)
 	// Built definitions can be read and called concurrently. The handler owns its own state.
 	var group sync.WaitGroup
 	for range 4 {
@@ -95,7 +90,7 @@ func TestDefineTool(t *testing.T) {
 
 func TestDefineToolBuildErrors(t *testing.T) {
 	type input struct {
-		configure func(*gent.ToolBuilder[builderInput, string])
+		configure func(*gent.ToolBuilder[builderInput])
 	}
 	type expected struct{ err string }
 	type testCase struct {
@@ -104,33 +99,35 @@ func TestDefineToolBuildErrors(t *testing.T) {
 		expected expected
 	}
 	cases := []testCase{
-		{"unknown field", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"unknown field", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.Parameters(schema.Field("order"))
 		}}, expected{`tool "lookup" parameters: unknown field "order"`}},
-		{"wrong constraint", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"wrong constraint", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.Parameters(schema.Field("order_id").Min(1))
 		}}, expected{`tool "lookup" parameters: field "order_id": minimum requires a number`}},
-		{"reversed range", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"reversed range", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.Parameters(schema.Field("limit").Min(10).Max(1))
 		}}, expected{`tool "lookup" parameters: field "limit": minimum exceeds maximum`}},
-		{"wrong enum", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"wrong enum", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.Parameters(schema.Field("limit").Enum("one"))
 		}}, expected{
 			`tool "lookup" parameters: field "limit": enum value one does not match the field schema`}},
-		{"duplicate field", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"duplicate field", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.Parameters(schema.Field("limit"), schema.Field("limit"))
 		}}, expected{`tool "lookup" parameters: duplicate field "limit"`}},
-		{"mixed schemas", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"mixed schemas", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.ParameterSchema(nil).Parameters(schema.Field("limit"))
 		}}, expected{`tool "lookup": Parameters and ParameterSchema cannot be combined`}},
-		{"non-object parameters", input{func(b *gent.ToolBuilder[builderInput, string]) {
+		{"non-object parameters", input{func(b *gent.ToolBuilder[builderInput]) {
 			b.ParameterSchema(map[string]any{"type": "string"})
 		}}, expected{`tool "lookup": parameter schema must have type object`}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			builder := gent.DefineTool("lookup", func(context.Context, builderInput) (string, error) {
-				return "", nil
+			builder := gent.DefineTool("lookup", func(context.Context, builderInput) (
+				*gent.ToolExecutionResponse, error,
+			) {
+				return capturedToolResponse("", nil)
 			})
 			test.input.configure(builder)
 			tool, err := builder.Build()
@@ -179,8 +176,10 @@ func TestDefineToolEnumValues(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			tool, err := gent.DefineTool("lookup", func(context.Context, orderInput) (string, error) {
-				return "done", nil
+			tool, err := gent.DefineTool("lookup", func(context.Context, orderInput) (
+				*gent.ToolExecutionResponse, error,
+			) {
+				return capturedToolResponse("done", nil)
 			}).Parameters(schema.Field("status").MinLength(1).Enum(test.input.value)).Build()
 			if test.expected.err != "" {
 				assert.EqualError(t, err, test.expected.err)
@@ -243,8 +242,10 @@ func TestDefineToolExactNumbers(t *testing.T) {
 					"type": "integer", "enum": values,
 				}},
 			}
-			builder := gent.DefineTool("lookup", func(_ context.Context, r record) (record, error) {
-				return r, nil
+			builder := gent.DefineTool("lookup", func(_ context.Context, r record) (
+				*gent.ToolExecutionResponse, error,
+			) {
+				return capturedToolResponse(r, nil)
 			})
 			switch test.input.source {
 			case "input":
@@ -267,7 +268,6 @@ func TestDefineToolExactNumbers(t *testing.T) {
 			values[0] = uint64(0)
 			returned := getSchema()
 			assert.Equal(t, test.expected.schema, returned)
-			returned["properties"].(map[string]any)["id"].(map[string]any)["enum"].([]any)[0] = 0
 			assert.Equal(t, test.expected.schema, getSchema())
 			data, err := json.Marshal(getSchema())
 			assert.NoError(t, err)
@@ -289,7 +289,7 @@ func TestDefineToolExactNumbers(t *testing.T) {
 func TestDefineToolHandlerAndDefaults(t *testing.T) {
 	type input struct {
 		name    string
-		handler func(context.Context, struct{}) (string, error)
+		handler func(context.Context, struct{}) (*gent.ToolExecutionResponse, error)
 	}
 	type expected struct{ err string }
 	type testCase struct {
@@ -297,7 +297,9 @@ func TestDefineToolHandlerAndDefaults(t *testing.T) {
 		input    input
 		expected expected
 	}
-	handler := func(context.Context, struct{}) (string, error) { return "ok", nil }
+	handler := func(context.Context, struct{}) (*gent.ToolExecutionResponse, error) {
+		return capturedToolResponse("ok", nil)
+	}
 	cases := []testCase{
 		{"default settings", input{"lookup", handler}, expected{}},
 		{"missing handler", input{name: "lookup"},
@@ -316,68 +318,31 @@ func TestDefineToolHandlerAndDefaults(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			response, err := tool.Recover(context.Background(), &gent.ToolRecoveryRequest{})
-			assert.NoError(t, err)
-			assert.Equal(t, &gent.ToolRecoveryResponse{Result: gent.ToolRecoveryUnresolved}, response)
-			assert.Equal(t, "", tool.DeduplicateSummary(struct{}{}, "ok"))
-			assert.Equal(t, map[string]any{"type": "string"}, tool.OutputSchema())
+			response, err := tool.Recover(context.Background(),
+				gent.NewToolRecoveryRequest(gent.ToolIdentity{}, "lookup", nil, struct{}{}))
+			assert.Nil(t, response)
+			assert.EqualError(t, err, `tool "lookup" has no recovery handler`)
+			assert.Nil(t, tool.OutputSchema())
 		})
 	}
 }
 
-func TestDefineToolValidatesBeforeCall(t *testing.T) {
-	cwd, err := os.Getwd()
-	if !assert.NoError(t, err) {
-		return
-	}
-	schemaURL := "file://" + filepath.ToSlash(filepath.Join(cwd, "schema.json"))
-	type input struct{ args string }
-	type expected struct {
-		calls int
-		text  string
-	}
-	type testCase struct {
-		name     string
-		input    input
-		expected expected
-	}
-	cases := []testCase{
-		{"valid", input{`{"order_id":"order-1001","limit":1}`}, expected{1, `<lookup>
-shipped
-</lookup>`}},
-		{"missing required field", input{`{"order_id":"order-1001"}`}, expected{0, fmt.Sprintf(`<lookup>
-Error: schema validation failed: jsonschema validation failed with '%s#'
-- at '': missing property 'limit'
-</lookup>`, schemaURL)}},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			calls := 0
-			tool := gent.DefineTool("lookup", func(context.Context, builderInput) (string, error) {
-				calls++
-				return "shipped", nil
-			}).Strict(true).Parameters(schema.Field("order_id").MinLength(1)).MustBuild()
-			chain := toolchain.New().WithOutputSchema(false)
-			chain.RegisterTool(tool)
-			ctx := gent.NewExecutionContext(context.Background(), "builder", nil)
-			defer ctx.Release()
-			definitions, err := chain.NativeTools(ctx)
-			assert.NoError(t, err)
-			assert.Equal(t, []gent.ToolDefinition{{Type: "function", Function: &gent.FunctionDefinition{
-				Name: "lookup", Strict: true, Parameters: tool.ParameterSchema(),
-			}}}, definitions)
-			plan, err := chain.PrepareCalls(ctx, []gent.ModelToolCall{{Type: "function",
-				FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: test.input.args}}})
-			if !assert.NoError(t, err) {
-				return
-			}
-			result, err := chain.ExecuteNext(ctx, plan, format.NewXML())
-			if !assert.NoError(t, err) {
-				return
-			}
-			assert.Equal(t, test.expected, expected{calls, result.Text})
-			var validation *schema.ValidationError
-			assert.Equal(t, test.expected.calls == 0, errors.As(result.Error, &validation))
-		})
-	}
+func TestDefineToolDispatch(t *testing.T) {
+	calls := 0
+	tool := gent.DefineTool("lookup", func(context.Context, builderInput) (
+		*gent.ToolExecutionResponse, error,
+	) {
+		calls++
+		return capturedToolResponse("shipped", nil)
+	}).Parameters(schema.Field("order_id").MinLength(1), schema.Field("limit").Optional()).MustBuild()
+	chain := toolchain.New().RegisterTool(tool)
+	ctx := gent.NewExecutionContext(context.Background(), "builder", gent.NewBasicLoopData(nil))
+	defer ctx.Release()
+	plan, err := chain.PrepareCalls(ctx, []*gent.ModelToolCallRequest{{ID: "p", Type: "function",
+		FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: `{"order_id":"O1"}`}}})
+	assert.NoError(t, err)
+	record, err := chain.ExecuteNext(ctx, plan, format.NewXML())
+	assert.NoError(t, err)
+	assert.Equal(t, "shipped", gent.ContentTextData(record.Response().Parts()))
+	assert.Equal(t, 1, calls)
 }

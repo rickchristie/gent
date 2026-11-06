@@ -37,6 +37,8 @@
 - A `Tool.Call` or `Tool.Recover` error ends that operation, not the agent run. Send safe steering
   to the model. Keep raw errors and rejected returns in private diagnostic records.
 - Cancellation, storage failures, and run limits retain their separate run-level contracts.
+- Do not clone for defensive safety. Use ownership transfer and read-only getters. Copy only when
+  a feature needs independent mutable values or a stable saved snapshot. Document that reason.
 </gent_design_principles>
 
 <critical_constraints>
@@ -89,7 +91,7 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Supported: OpenAI, Anthropic, Gemini, xAI, DeepSeek, vLLM, Ollama, OpenRouter, llama.cpp, SGLang
 - OpenAI uses Responses. Each adapter owns its native request and response mapping
 - Use native API controls when the endpoint can enforce the declared contract
-- Unsupported input types return an error; adapters do not convert input files
+- Unsupported media uses configured steering; adapters do not transcode input files
 - Preserve native completion, refusal, tool IDs, and opaque continuation items
 - Managed calls freeze and number live chunks before delivery; grouped saves persist them later
 - Request and response saves block dependent model, tool, and output processing
@@ -102,12 +104,12 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Implementations: Registry, SearchChain, JsToolChainWrapper in `toolchain/`
 - NativeTools selects definitions; PrepareCalls saves a plan; ExecuteNext executes one step
 - Validates JSON arguments, converts typed input, runs hooks, and saves results
-- Search derives discovered definitions from active run history; pinned tools stay visible
+- SharedLocalSearch advertises search, shared execution, and pins; catalogs can change on resume
 - PTC exposes run_code and saves inner calls separately from the outer plan
-- Tool.Recover supplies each tool's recovery decision, optional steering, and recovered output
+- Tool.Recover supplies Completed, NotStarted, or Unresolved evidence; the model decides next actions
 - Interrupted PTC returns partial evidence and guidance without restarting the script
 - SIDE EFFECT: BeforeToolCallEvent increments tool-call counters; AfterToolCallEvent tracks errors
-- SIDE EFFECT: Success resets consecutive error gauges
+- SIDE EFFECT: Fresh Executed/Blocked reset call-error gauges; invalid input and recovery do not
 
 ### Output[T]
 - Interface: `output.go`; implementations: `output/`
@@ -210,6 +212,15 @@ goal is to make it easy to write and experiment with custom agent loops.
 - Example: `go test ./... -count=1 -timeout 300s`
 - Portable suite: `CGO_ENABLED=0 go test ./... -count=1 -timeout 300s`
 - Race suite: `go test -race ./... -count=1 -timeout 300s`
+
+**Release Verification**
+- Before releasing a version, run all required tests, including live tests for configured providers.
+- Load the configured API keys so live tests make real provider calls and use tokens or credits.
+  Fixture tests and skipped live tests do not verify provider behavior.
+- Investigate each failure and fix its root cause. Do not weaken assertions or skip failing tests
+  to obtain a pass. Run the affected checks again, then complete the required full suites.
+- Release only after all checks in the agreed release scope pass. Report missing configuration or
+  unavailable providers before treating the release gate as complete.
 
 **Testing Stats & Limits**
 - Whenever we create new stats (`*ExecutionStats`), we need to create tests on:

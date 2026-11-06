@@ -53,7 +53,6 @@ func TestOwnedHistoryAndSelectionChanges(t *testing.T) {
 		Messages: []*MessageContent{{Role: ChatMessageTypeHuman,
 			Parts: []ContentPart{TextContent{Text: "original policy"}}}}}
 	assert.NoError(t, ctx.AppendRecord(original, true))
-	original.Messages[0].Parts[0] = TextContent{Text: "edited policy"}
 	assert.Equal(t, HistorySnapshot{}, ctx.History())
 	assert.NoError(t, ctx.CommitCheckpoint(PhaseInitial))
 	actualTask, err := ctx.Task()

@@ -63,15 +63,15 @@ func TestMessageContent_Metadata(t *testing.T) {
 					key   MessageContentMetadataKey
 					value any
 				}{
-					{key: MMKToolChainResult, value: "test_value"},
+					{key: MMKToolCallRecords, value: "test_value"},
 				},
-				getKey: MMKToolChainResult,
+				getKey: MMKToolCallRecords,
 			},
 			expected: expected{
 				getValue: "test_value",
 				getOk:    true,
 				metadata: map[MessageContentMetadataKey]any{
-					MMKToolChainResult: "test_value",
+					MMKToolCallRecords: "test_value",
 				},
 			},
 		},
@@ -79,16 +79,16 @@ func TestMessageContent_Metadata(t *testing.T) {
 			name: "GetMetadata returns value when present",
 			input: input{
 				initialMetadata: map[MessageContentMetadataKey]any{
-					MMKToolChainResult: "stored",
+					MMKToolCallRecords: "stored",
 				},
 				setOps: nil,
-				getKey: MMKToolChainResult,
+				getKey: MMKToolCallRecords,
 			},
 			expected: expected{
 				getValue: "stored",
 				getOk:    true,
 				metadata: map[MessageContentMetadataKey]any{
-					MMKToolChainResult: "stored",
+					MMKToolCallRecords: "stored",
 				},
 			},
 		},
@@ -99,7 +99,7 @@ func TestMessageContent_Metadata(t *testing.T) {
 					"other_key": "other_value",
 				},
 				setOps: nil,
-				getKey: MMKToolChainResult,
+				getKey: MMKToolCallRecords,
 			},
 			expected: expected{
 				getValue: nil,
@@ -114,7 +114,7 @@ func TestMessageContent_Metadata(t *testing.T) {
 			input: input{
 				initialMetadata: nil,
 				setOps:          nil,
-				getKey:          MMKToolChainResult,
+				getKey:          MMKToolCallRecords,
 			},
 			expected: expected{
 				getValue: nil,
@@ -130,7 +130,7 @@ func TestMessageContent_Metadata(t *testing.T) {
 					key   MessageContentMetadataKey
 					value any
 				}{
-					{key: MMKToolChainResult, value: "tcr_value"},
+					{key: MMKToolCallRecords, value: "tcr_value"},
 					{key: "custom:key", value: 42},
 					{key: "custom:another", value: true},
 				},
@@ -140,7 +140,7 @@ func TestMessageContent_Metadata(t *testing.T) {
 				getValue: 42,
 				getOk:    true,
 				metadata: map[MessageContentMetadataKey]any{
-					MMKToolChainResult: "tcr_value",
+					MMKToolCallRecords: "tcr_value",
 					"custom:key":       42,
 					"custom:another":   true,
 				},

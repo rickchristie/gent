@@ -69,7 +69,7 @@ func TestNativeRefusalSaveRestoreAndFailures(t *testing.T) {
 				Refusal: tt.input.refusal}, CandidateContent: []gent.ContentPart{
 				gent.TextContent{Text: "Provisional fragment."}}}
 			if tt.input.calls {
-				choice.ToolCalls = []gent.ModelToolCall{{ID: "call", Type: "function",
+				choice.ToolCalls = []*gent.ModelToolCallRequest{{ID: "call", Type: "function",
 					FunctionCall: &gent.FunctionCall{Name: "effect", Arguments: "{}"}}}
 			}
 			model := &contentModel{replies: []contentReply{{choice: choice,
@@ -84,9 +84,11 @@ func TestNativeRefusalSaveRestoreAndFailures(t *testing.T) {
 			toolCalls := 0
 			build := func(model gent.Model) *react.Agent[string] {
 				return react.NewWithOutput(model, out).WithRecoveryVersion("refusal-v1").
-					RegisterTool(gent.DefineTool("effect", func(context.Context, map[string]any) (string, error) {
+					RegisterTool(gent.DefineTool("effect", func(context.Context, map[string]any) (
+						*gent.ToolExecutionResponse, error,
+					) {
 						toolCalls++
-						return "done", nil
+						return capturedToolResponse("done", nil)
 					}).Description("Perform an operation").ParameterSchema(nil).MustBuild())
 			}
 			store := &refusalRecorder{failure: tt.input.saveError}

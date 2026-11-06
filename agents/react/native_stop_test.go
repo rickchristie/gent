@@ -54,14 +54,14 @@ func TestNativeAgent_CompletionStates(t *testing.T) {
 				choice.Completion.Refusal = &gent.ModelRefusal{Code: "blocked"}
 			}
 			if test.input.tools {
-				choice.ToolCalls = []gent.ModelToolCall{nativeTestCall("call-a", "lookup", "{}")}
+				choice.ToolCalls = []*gent.ModelToolCallRequest{nativeTestCall("call-a", "lookup", "{}")}
 			}
 			model := newMockModel(nativeTestResponse(choice))
 			calls := 0
 			agent := NewAgent(model).RegisterTool(gent.DefineTool("lookup",
-				func(context.Context, map[string]any) (string, error) {
+				func(context.Context, map[string]any) (*gent.ToolExecutionResponse, error) {
 					calls++
-					return "record", nil
+					return capturedToolResponse("record", nil)
 				}).Description("Read").ParameterSchema(nil).MustBuild())
 			ctx := newTestExecCtx(gent.NewBasicLoopData(gent.NewTask(gent.TextContent{Text: "Read."})))
 			result, err := agent.Next(ctx)

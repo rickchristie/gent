@@ -38,6 +38,8 @@ type Checkpoint struct {
 }
 
 type ContextCheckpoint struct {
+	SteeringMessages   SteeringMessages                `json:"steeringMessages"`
+	PTCIntegerMode     PTCIntegerMode                  `json:"ptcIntegerMode"`
 	ContextId          string                          `json:"contextId"`
 	ParentContextId    string                          `json:"parentContextId,omitempty"`
 	Name               string                          `json:"name"`
@@ -96,43 +98,7 @@ type RestoreBindings struct {
 var (
 	ErrIncompatibleCheckpoint = errors.New("gent: incompatible checkpoint")
 	ErrUnsupportedRecovery    = errors.New("gent: unsupported recovery phase")
-	ErrUncertainTool          = errors.New("gent: tool outcome is uncertain")
 )
-
-// ToolRecoveryResult is a tool's decision about an interrupted operation.
-type ToolRecoveryResult string
-
-const (
-	ToolRecoveryCompleted    ToolRecoveryResult = "completed"
-	ToolRecoveryRetryAllowed ToolRecoveryResult = "retry_allowed"
-	ToolRecoveryUnresolved   ToolRecoveryResult = "unresolved"
-)
-
-// ToolRecoveryRequest contains the original call identity and saved effective input.
-// AttemptId identifies the interrupted attempt; ToolCallId is stable across attempts.
-type ToolRecoveryRequest struct {
-	RunId      string
-	ContextId  string
-	ToolCallId string
-	AttemptId  string
-	Name       string
-	Args       map[string]any
-	Input      EncodedValue
-}
-
-// ToolRecoveryResponse keeps the decision and its explanation together. Output is required
-// only for Completed and must be nil otherwise. Gent supplies the saved call identity and input.
-// SteeringMessage is saved with the decision and added to the resulting tool observation.
-// For RetryAllowed it accompanies the retry's result. It never authorizes a retry on its own.
-type ToolRecoveryResponse struct {
-	Result          ToolRecoveryResult
-	SteeringMessage string
-	Output          *ToolCallResult
-}
-
-// ToolRecoveryFunc is the handler accepted by ToolBuilder.Recovery.
-// Handlers must be safe to repeat if a process stops before the decision is saved.
-type ToolRecoveryFunc func(context.Context, *ToolRecoveryRequest) (*ToolRecoveryResponse, error)
 
 type toolIdentityKey struct{}
 

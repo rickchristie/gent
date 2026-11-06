@@ -52,12 +52,12 @@ try {
   await page.evaluate(() => document.fonts.ready);
   await check('offline guide initializes with complete source inventory', async () => {
     assert.equal(await page.title(), 'Gent — An interactive explainer');
-    assert.equal(expectedInterfaces.length, 47);
-    assert.equal(await text('#interface-count'), '47named interfaces');
+    assert.equal(expectedInterfaces.length, 48);
+    assert.equal(await text('#interface-count'), '48named interfaces');
     assert.equal(
       await text('#scope-detail'),
       `${expectedInterfaces.filter((item) => item.change !== 'same').length} new or changed ` +
-        'declarations · 24 supporting types · 7 structural capabilities',
+        'declarations · 24 supporting types · 8 structural capabilities',
     );
     assert.equal(await page.locator('.map-group').count(), 7);
     assert.equal(await page.evaluate(() => document.fonts.check('16px GuideSans')), true);
@@ -101,7 +101,7 @@ try {
     await page.fill('#search', 'NoSuchGentContract');
     assert.equal(await text('#result-count'), '0 matching contracts');
     await page.click('#clear-filters');
-    assert.equal(await page.locator('.contract-row').count(), 47);
+    assert.equal(await page.locator('.contract-row').count(), 48);
     await page.selectOption('#group', 'Search');
     assert.deepEqual(
       (
@@ -260,12 +260,13 @@ ${reviewText}
     }
     assert.deepEqual((await page.locator('.capability h3').allTextContents()).sort(), [
       'ConfigureExecution',
-      'DeduplicateSummary',
       'Destroy',
       'EventBase',
+      'HasBeforeModelCallSubscribers',
       'ModelName',
       'Provider',
       'Unwrap',
+      'bindSaved',
     ]);
     await page.selectOption('#save-outcome', 'lost');
     await page.screenshot({

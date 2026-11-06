@@ -117,7 +117,7 @@ The order is paid.
 				Status:         gent.ModelStatusToolCalls,
 				ProviderReason: "tool_calls",
 			},
-			ToolCalls: []gent.ModelToolCall{{ID: "call-1", Type: "function",
+			ToolCalls: []*gent.ModelToolCallRequest{{ID: "call-1", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: `{}`}}},
 		}}, expected{err: "summarization model returned tool_calls instead of a completed summary"}},
 		{"continuation with text", input{&gent.ContentChoice{
@@ -142,7 +142,7 @@ The order is paid.
 		{"answer with tool calls", input{&gent.ContentChoice{
 			Completion:       gent.ModelCompletion{Status: gent.ModelStatusAnswer},
 			CandidateContent: []gent.ContentPart{gent.TextContent{Text: "Check payment first."}},
-			ToolCalls: []gent.ModelToolCall{{ID: "call-1", Type: "function",
+			ToolCalls: []*gent.ModelToolCallRequest{{ID: "call-1", Type: "function",
 				FunctionCall: &gent.FunctionCall{Name: "lookup", Arguments: `{}`}}},
 		}}, expected{err: "summarization model completion: gent: answer completion contains tool calls"}},
 		{"answer with refusal data", input{&gent.ContentChoice{
@@ -175,7 +175,7 @@ The order is paid.
 			if !assert.NoError(t, err) {
 				return
 			}
-			model := tt.NewMockModel().AddRawResponse(&gent.ContentResponse{
+			model := tt.NewMockModel().AddRawResponse(&gent.ModelCallResponse{
 				Choices: []*gent.ContentChoice{test.input.choice},
 			})
 			strategy := compaction.NewSummarization(model, format.NewXML())
