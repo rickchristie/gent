@@ -131,9 +131,13 @@ func (w *JsToolChainWrapper) executeCode(ctx *gent.ExecutionContext, code string
 	return &gent.ToolExecutionResponse{Status: gent.ToolExecuted, Parts: parts}, nil
 }
 
+// Keep the direct return explicit. A Promise chain can execute a tool before it fails, so a
+// model retry can repeat a side effect.
 func defaultCodeGuidance() string {
 	return `Use tool.call({tool: "name", args: {...}}) to call one tool.
-Tools are not global JavaScript functions. Calls are synchronous; do not use await.
+Tools are not global JavaScript functions. Calls are synchronous and return reply objects directly.
+Assign the reply to a variable, check it, then make the next call.
+Do not use async, await, .then, or Promise.all with tool calls.
 Use tool.parallelCall([{tool: "name", args: {...}}, ...]) for independent calls.
 Replies use toolCallId, name, kind, parts, and applicable executionStatus/recoveryStatus.
 kind is "execution", "recovery", "call_error", or "recovery_error".
