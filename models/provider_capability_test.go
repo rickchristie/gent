@@ -34,7 +34,7 @@ func TestProvidersRejectUnsupportedInputAndOutput(t *testing.T) {
 			name = "Responses"
 		case "anthropic":
 			name = "Anthropic"
-		case "gemini":
+		case "gemini", "vertexai":
 			name = "Gemini"
 		case "ollama":
 			name = "Ollama"
@@ -45,7 +45,7 @@ func TestProvidersRejectUnsupportedInputAndOutput(t *testing.T) {
 			expected{"", 1}})
 		outputErr := fmt.Sprintf("%s does not support output modality %q", provider, "audio")
 		switch provider {
-		case "openai", "xai", "gemini":
+		case "openai", "xai", "gemini", "vertexai":
 			outputErr = fmt.Sprintf("unsupported %s output modality %q", name, "audio")
 		case "openrouter":
 			outputErr = `OpenRouter model does not support "audio" output`
@@ -115,7 +115,7 @@ func TestProvidersMapOwnedImageInput(t *testing.T) {
 			want = expected{"messages", `[{"role":"user","content":[{"type":"text","text":"Before."},
 {"type":"image","source":{"type":"base64","media_type":"image/png","data":"AQID"}},
 {"type":"text","text":"After."}]}]`}
-		case "gemini":
+		case "gemini", "vertexai":
 			want = expected{"contents", `[{"role":"user","parts":[{"text":"Before."},
 {"inlineData":{"mimeType":"image/png","data":"AQID"}},{"text":"After."}]}]`}
 		case "deepseek":
@@ -168,7 +168,7 @@ func TestProvidersMapOwnedImageInput(t *testing.T) {
 			switch test.input.provider {
 			case "anthropic":
 				assert.JSONEq(t, `[{"type":"text","text":"Keep my instruction."}]`, string(body["system"]))
-			case "gemini":
+			case "gemini", "vertexai":
 				assert.JSONEq(t, `{"parts":[{"text":"Keep my instruction."}]}`,
 					string(body["systemInstruction"]))
 			}

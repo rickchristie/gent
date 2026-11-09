@@ -144,7 +144,7 @@ func TestLiveProviderToolJSON(t *testing.T) {
 				t.Run(test.name, func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 					defer cancel()
-					checkProviderToolJSON(t, ctx, newLiveModel(provider, &config),
+					checkProviderToolJSON(t, ctx, newLiveModel(t, provider, &config),
 						"record-"+rand.Text(), test.input.choice)
 				})
 			}

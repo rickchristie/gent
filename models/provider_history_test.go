@@ -44,7 +44,7 @@ func TestProvidersAssistantHistory(t *testing.T) {
 {"role":"assistant","content":[{"type":"text","text":"Area: "},
 {"type":"text","text":"{\"area\":\"Tebet\"}"},{"type":"text","text":"."}]},
 {"role":"user","content":[{"type":"text","text":"Which area?"}]}]`
-		case "gemini":
+		case "gemini", "vertexai":
 			want.field = "contents"
 			want.messages = `[{"role":"user","parts":[{"text":"Keep the area."}]},
 {"role":"model","parts":[{"text":"Area: "},{"text":"{\"area\":\"Tebet\"}"},{"text":"."}]},
@@ -91,7 +91,7 @@ func TestProvidersAssistantHistory(t *testing.T) {
 			if test.input.provider == "anthropic" {
 				assert.JSONEq(t, `[{"type":"text","text":"Read history."}]`, string(body["system"]))
 			}
-			if test.input.provider == "gemini" {
+			if test.input.provider == "gemini" || test.input.provider == "vertexai" {
 				assert.JSONEq(t, `{"parts":[{"text":"Read history."}]}`, string(body["systemInstruction"]))
 			}
 		})

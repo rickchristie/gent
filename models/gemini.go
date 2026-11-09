@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -13,20 +14,30 @@ import (
 )
 
 // Gemini uses streamGenerateContent. Native parts retain thought signatures across tool turns.
-type Gemini struct{ config Config }
+type Gemini struct{ generateContentModel }
 
-func NewGemini(config *Config) *Gemini {
-	return &Gemini{config: providerConfig(config, "https://generativelanguage.googleapis.com/v1beta")}
+// Both Google endpoints use the same native parts. Keep the provider identity separate so saved
+// signed content cannot cross between AI Studio and Vertex projects during recovery.
+type generateContentModel struct {
+	config    Config
+	provider  string
+	authorize func(context.Context, http.Header) error
 }
 
-func (m *Gemini) ModelName() string { return m.config.Model }
-func (m *Gemini) Provider() string  { return "gemini" }
-func (m *Gemini) RecoveryConfig() any {
+func NewGemini(config *Config) *Gemini {
+	return &Gemini{generateContentModel: generateContentModel{
+		config:   providerConfig(config, "https://generativelanguage.googleapis.com/v1beta"),
+		provider: "gemini"}}
+}
+
+func (m *generateContentModel) ModelName() string { return m.config.Model }
+func (m *generateContentModel) Provider() string  { return m.provider }
+func (m *generateContentModel) RecoveryConfig() any {
 	return map[string]any{"api": "generateContent", "provider": m.Provider(),
 		"baseURL": m.config.BaseURL, "model": m.config.Model}
 }
 
-func (m *Gemini) GenerateContentStream(ctx context.Context,
+func (m *generateContentModel) GenerateContentStream(ctx context.Context,
 	request *gent.ModelCallRequest,
 ) (gent.Stream, error) {
 	request, err := prepareMedia(ctx, m.config.HTTPClient, request, "gemini")
@@ -43,7 +54,14 @@ func (m *Gemini) GenerateContentStream(ctx context.Context,
 	}
 	endpoint := m.config.BaseURL + "/models/" + url.PathEscape(strings.TrimPrefix(model, "models/")) +
 		":streamGenerateContent?alt=sse"
-	headers := http.Header{"X-Goog-Api-Key": {m.config.APIKey}, "Accept": {"text/event-stream"}}
+	headers := http.Header{"Accept": {"text/event-stream"}}
+	if m.authorize != nil {
+		if err := m.authorize(ctx, headers); err != nil {
+			return nil, err
+		}
+	} else {
+		headers.Set("X-Goog-Api-Key", m.config.APIKey)
+	}
 	return startProviderStream(ctx, m.config.HTTPClient, endpoint, headers, body,
 		func(ctx context.Context, response *http.Response, stream *gent.StreamWithDuration) (
 			*gent.ModelCallResponse, error,
@@ -54,7 +72,7 @@ func (m *Gemini) GenerateContentStream(ctx context.Context,
 		})
 }
 
-func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
+func (m *generateContentModel) requestBody(request *gent.ModelCallRequest) (
 	map[string]any, *geminiContinuation, schemaEnforcement, error,
 ) {
 	o := &request.Options
@@ -64,7 +82,7 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 		return nil, nil, decision, errors.New("unsupported Gemini sampling option")
 	}
 	nativeMedia := geminiNativeToolMedia(o.Model, m.config.Model)
-	contents, system, prior, err := geminiMessages(request.Messages, nativeMedia)
+	contents, system, prior, err := geminiMessages(request.Messages, m.provider, nativeMedia)
 	if err != nil {
 		return nil, nil, decision, err
 	}
@@ -124,19 +142,26 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 	if err := geminiMetadata(body, config, o.Metadata); err != nil {
 		return nil, nil, decision, err
 	}
-	// GenerateContent models can accept responseFormat without enforcing its text schema.
-	// Use the established JSON fields, verified by the live output-correction tests.
+	// JSON fields differ between Google's endpoints. Use the format verified for each endpoint.
 	if o.ResponseMIMEType != "" && o.ResponseMIMEType != "text/plain" &&
 		o.ResponseMIMEType != "application/json" {
 		return nil, nil, decision, fmt.Errorf("unsupported Gemini output type %q", o.ResponseMIMEType)
 	}
 	if jsonUnavailable == "" {
 		if decision.Native {
-			config["responseMimeType"] = "application/json"
-			config["responseJsonSchema"] = o.ResponseSchema
+			m.textFormat(config, o.ResponseSchema)
 		} else if o.JSONMode || o.ResponseMIMEType == "application/json" {
-			config["responseMimeType"] = "application/json"
+			m.textFormat(config, nil)
 		}
+	}
+	if m.provider == "vertexai" && len(o.Tools) > 0 &&
+		(o.ToolChoice == nil || o.ToolChoice == "auto") &&
+		config["responseFormat"] != nil {
+		// Live Vertex calls require responseFormat plus VALIDATED for schema output with tools.
+		// The legacy schema fields repeated completed tools. VALIDATED permits calls and answers,
+		// so both the tool choice and the answer schema remain active throughout the loop.
+		body["toolConfig"] = map[string]any{
+			"functionCallingConfig": map[string]any{"mode": "VALIDATED"}}
 	}
 	var modalities []string
 	for _, modality := range o.ResponseModalities {
@@ -149,16 +174,79 @@ func (m *Gemini) requestBody(request *gent.ModelCallRequest) (
 		config["responseModalities"] = modalities
 	}
 	if slices.Contains(o.ResponseModalities, "image") {
-		image := map[string]any{"delivery": "INLINE"}
-		if slices.Contains(o.ImageMIMETypes, "image/jpeg") {
-			image["mimeType"] = "IMAGE_JPEG"
+		if err := m.imageFormat(config, o.ImageMIMETypes); err != nil {
+			return nil, nil, decision, err
 		}
-		config["responseFormat"] = map[string]any{"image": image}
 	}
 	if len(config) > 0 {
 		body["generationConfig"] = config
 	}
 	return body, prior, decision, nil
+}
+
+func (m *generateContentModel) textFormat(config map[string]any, schema map[string]any) {
+	if m.provider == "vertexai" {
+		text := map[string]any{"mimeType": "APPLICATION_JSON"}
+		if schema != nil {
+			text["schema"] = schema
+		}
+		config["responseFormat"] = []any{map[string]any{"text": text}}
+		return
+	}
+	// AI Studio's Gemini 2.5 accepted responseFormat without enforcing the answer schema.
+	// Its established JSON fields pass the native output and correction checks.
+	config["responseMimeType"] = "application/json"
+	if schema != nil {
+		config["responseJsonSchema"] = schema
+	}
+}
+
+func (m *generateContentModel) imageFormat(config map[string]any, mimeTypes []string) error {
+	if m.provider == "vertexai" {
+		// Vertex returns inline bytes by default. Copy metadata before adding the format because
+		// the caller owns its imageConfig map and can reuse it for concurrent calls.
+		image, err := vertexImageOptions(config, "imageConfig")
+		if err != nil {
+			return err
+		}
+		mimeType := ""
+		if slices.Contains(mimeTypes, "image/jpeg") {
+			mimeType = "image/jpeg"
+		} else if slices.Contains(mimeTypes, "image/png") {
+			mimeType = "image/png"
+		}
+		if mimeType != "" {
+			format, err := vertexImageOptions(image, "imageOutputOptions")
+			if err != nil {
+				return err
+			}
+			// The output contract must override metadata on every attempt, including PNG output.
+			format["mimeType"] = mimeType
+			image["imageOutputOptions"] = format
+		}
+		if len(image) > 0 {
+			config["imageConfig"] = image
+		}
+		return nil
+	}
+	image := map[string]any{"delivery": "INLINE"}
+	if slices.Contains(mimeTypes, "image/jpeg") {
+		image["mimeType"] = "IMAGE_JPEG"
+	}
+	config["responseFormat"] = map[string]any{"image": image}
+	return nil
+}
+
+func vertexImageOptions(parent map[string]any, key string) (map[string]any, error) {
+	result := make(map[string]any)
+	if value, exists := parent[key]; exists {
+		supplied, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("Vertex AI %s must be an object", key)
+		}
+		maps.Copy(result, supplied)
+	}
+	return result, nil
 }
 
 // GenerateContent documents combined function calling and structured output for Gemini 3 and 4.

@@ -455,7 +455,7 @@ set it before the original run when callback or tool behavior needs a stable rec
 - `agents/react/`: default ReAct agent.
 - `toolchain/`: native registry, search, and JavaScript toolchains.
 - `output/`: text, image, and typed JSON output processing.
-- `models/`: ten native provider and local runtime adapters.
+- `models/`: eleven native provider and local runtime adapters.
 - `search/`: ONNX embeddings, vector search, BM25, fusion, and chunking.
 - `cmd/gent/`: setup and model download CLI.
 

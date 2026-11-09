@@ -135,7 +135,7 @@ func TestNativeLive(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			config := liveConfig(t, test.input.provider, false)
 			t.Parallel()
-			model := newLiveModel(test.input.provider, &config)
+			model := newLiveModel(t, test.input.provider, &config)
 			var calls []string
 			program, err := liveToolChain(&calls, test.input.search)
 			if !assert.NoError(t, err) {

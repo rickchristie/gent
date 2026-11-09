@@ -36,7 +36,7 @@ type geminiEnvelope struct {
 	} `json:"error"`
 }
 
-func (m *Gemini) readResponse(ctx context.Context, response *http.Response,
+func (m *generateContentModel) readResponse(ctx context.Context, response *http.Response,
 	stream *gent.StreamWithDuration, options *gent.CallOptions, request map[string]any,
 	prior *geminiContinuation,
 ) (*gent.ModelCallResponse, error) {
@@ -107,7 +107,7 @@ func (m *Gemini) readResponse(ctx context.Context, response *http.Response,
 	return m.convertResponse(ctx, &envelope, options, request, prior)
 }
 
-func (m *Gemini) convertResponse(ctx context.Context, response *geminiEnvelope,
+func (m *generateContentModel) convertResponse(ctx context.Context, response *geminiEnvelope,
 	options *gent.CallOptions, request map[string]any, prior *geminiContinuation,
 ) (*gent.ModelCallResponse, error) {
 	if response.Error != nil {
@@ -169,7 +169,8 @@ func (m *Gemini) convertResponse(ctx context.Context, response *geminiEnvelope,
 	if err != nil {
 		return nil, err
 	}
-	choice.Continuation = &gent.ProviderContinuation{Provider: "gemini", Items: []json.RawMessage{raw}}
+	choice.Continuation = &gent.ProviderContinuation{
+		Provider: m.provider, Items: []json.RawMessage{raw}}
 	for index, raw := range candidate.Content.Parts {
 		if err := m.convertPart(ctx, choice, index, raw); err != nil {
 			return nil, err
@@ -184,7 +185,7 @@ func (m *Gemini) convertResponse(ctx context.Context, response *geminiEnvelope,
 	return geminiResult(choice, response), nil
 }
 
-func (m *Gemini) convertPart(ctx context.Context, choice *gent.ContentChoice,
+func (m *generateContentModel) convertPart(ctx context.Context, choice *gent.ContentChoice,
 	index int, raw json.RawMessage,
 ) error {
 	var part struct {

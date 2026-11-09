@@ -37,7 +37,7 @@ func TestLiveProviderConcurrentCalls(t *testing.T) {
 		t.Run(provider.name, func(t *testing.T) {
 			config := liveConfig(t, provider, false)
 			t.Parallel()
-			model := newLiveModel(provider, &config)
+			model := newLiveModel(t, provider, &config)
 			for _, test := range cases {
 				t.Run(test.name, func(t *testing.T) {
 					t.Parallel()
@@ -79,7 +79,7 @@ func TestLiveProviderImageInput(t *testing.T) {
 	}
 	for _, provider := range liveProviders() {
 		if provider.prefix != "OPENAI" && provider.prefix != "ANTHROPIC" &&
-			provider.prefix != "GEMINI" && provider.prefix != "XAI" {
+			provider.prefix != "GEMINI" && provider.prefix != "VERTEXAI" && provider.prefix != "XAI" {
 			continue
 		}
 		t.Run(provider.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestLiveProviderImageInput(t *testing.T) {
 					gent.BytesPart("image/png", buffer.Bytes()),
 				}},
 			}, gent.WithMaxTokens(2048))
-			stream, err := newLiveModel(provider, &config).GenerateContentStream(ctx, request)
+			stream, err := newLiveModel(t, provider, &config).GenerateContentStream(ctx, request)
 			if !assert.NoError(t, err) {
 				return
 			}

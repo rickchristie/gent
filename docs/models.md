@@ -21,6 +21,69 @@ and SGLang take the same config. Use `NewResponses(&ResponsesConfig{...})` to ch
 xAI endpoint or client. Keep its `Provider` identity stable: saved continuation from another
 provider is rejected. Credentials and clients are supplied again on restore, not saved in history.
 
+## Vertex AI authentication and endpoints
+
+Use `NewVertexAI` for Gemini publisher models on Google Cloud. Supply the model project explicitly;
+it can differ from the project that owns the service account. The constructor returns an error if
+credential loading fails. It does not call the model or request an access token.
+
+```go
+vertex, err := models.NewVertexAI(&models.VertexAIConfig{
+    Project: "your-project",
+    Location: "global",
+    Model: "gemini-3.8-flash",
+    CredentialsFile: "/absolute/private/path/vertex-ai.json",
+})
+if err != nil {
+    return err
+}
+```
+
+Choose one credential source: `CredentialsFile`, `CredentialsJSON`, or an `auth.TokenProvider`.
+Explicit file and JSON sources must be service account credentials from a trusted source. With no
+explicit source, Google Application Default Credentials (ADC) supports
+`GOOGLE_APPLICATION_CREDENTIALS`, local user credentials, an attached service account, and workload
+identity. Use workload identity or an attached service account when deployed so the application
+does not need a long-lived key.
+A supplied token provider must be uncached, honor its context, and start no refresh workers.
+The constructor rejects Google token caches, including caches inside `auth.Credentials`, because
+their refresh mode cannot be changed. Use file, JSON, or ADC input for Google's cached credentials;
+Gent creates its own cache and completes token I/O within the model call.
+
+For local file tests, keep the JSON in the ignored `.secrets/vertex-ai.json` file, with directory
+mode `700` and file mode `600`. Put its absolute path in `.env`, which Git also ignores. Never place
+key data in source files or `.env.example`. The adapter obtains and caches short-lived OAuth tokens;
+refresh and waiting callers honor cancellation. Recovery configuration records the project,
+location, endpoint, and model. It excludes key data, credential paths, and access tokens.
+
+`Location` defaults to `global`, which uses `https://aiplatform.googleapis.com/v1`. Other locations
+use `https://LOCATION-aiplatform.googleapis.com/v1`. `BaseURL` overrides this service root; it must
+include the API version and must be trusted because it receives bearer tokens. Gent appends
+`/projects/PROJECT/locations/LOCATION/publishers/google/models/MODEL:streamGenerateContent`.
+This adapter targets Google's Gemini publisher models. Partner-model APIs, custom deployed models,
+and Imagen prediction endpoints need their own protocol adapters.
+
+Vertex shares the Gemini content, tool, schema, thinking, and media rules below. Use the `gemini`
+metadata namespace for GenerateContent controls. Saved native state has provider `vertexai`, so it
+cannot be replayed through the AI Studio adapter. Vertex selects an allowed PNG or JPEG format with
+`generationConfig.imageConfig.imageOutputOptions.mimeType`; the output contract overrides conflicting
+metadata. AI Studio uses `responseFormat.image`.
+Vertex uses `responseFormat[].text` for JSON output. With automatic tools, it also selects
+`VALIDATED`, which permits both tools and answers. Captured Gemini 3.8 Flash calls with the legacy
+schema fields or `AUTO` repeatedly requested a completed tool. The current response format plus
+`VALIDATED` returned the required JSON answer in the controlled request check. Forced
+and disabled tool choices retain their explicit modes. Fixture tests check this mapping, and live
+tests check tools, JSON correction, and unfinished resume together.
+
+Google may restrict models by project, location, or lifecycle. See the [Vertex API][vertex-api],
+[authentication guide][vertex-auth], and [model lifecycle][vertex-models].
+
+[vertex-api]:
+  https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference
+[vertex-auth]: https://docs.cloud.google.com/docs/authentication/application-default-credentials
+[vertex-models]:
+  https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions
+
 ## Protocols and output controls
 
 | Constructor | Native endpoint | Answer schema control | Image output |
@@ -29,6 +92,7 @@ provider is rejected. Credentials and clients are supplied again on restore, not
 | `NewXAI` | `/v1/responses` | `text.format` with strict JSON schema | Native image tool, JPEG |
 | `NewAnthropic` | `/v1/messages` | `output_config.format` | Unsupported |
 | `NewGemini` | `:streamGenerateContent` | `responseMimeType` + `responseJsonSchema` | Image parts |
+| `NewVertexAI` | Project `:streamGenerateContent` | `responseFormat[].text` | Image parts |
 | `NewDeepSeek` | `/v1/chat/completions` | JSON object mode; full schema stays local | Unsupported |
 | `NewVLLM` | `/v1/chat/completions` | JSON schema response format | Unsupported |
 | `NewSGLang` | `/v1/chat/completions` | JSON schema response format | Unsupported |
@@ -210,11 +274,10 @@ for a streaming call, or cancel it with `Close()` when the consumer stops.
 
 ## Media results
 
-OpenAI and xAI use the native `image_generation` tool. Gemini decodes inline images and supported
-file
-references. OpenRouter accepts base64 image data URLs and HTTP(S) image references. References
-become owned bytes before validation. Gent does not send model authorization headers to the image
-host. Configure an HTTP client whose transport also respects that boundary.
+OpenAI and xAI use the native `image_generation` tool. Gemini and Vertex decode inline images and
+supported HTTP(S) file references. OpenRouter accepts base64 image data URLs and HTTP(S) image
+references. References become owned bytes before validation. Gent does not send model authorization
+headers to the image host. Configure an HTTP client whose transport also respects that boundary.
 
 Image output keeps every candidate part, including unexpected text. `ImageOutput` decides whether
 the complete batch meets its contract. Native MIME controls are requested where available; hard
@@ -228,14 +291,14 @@ and must pass the output contract. A text caption cannot bypass an image-only co
 
 ## Verification
 
-Deterministic HTTP fixtures cover all ten adapters: request fields, streaming, native tool replay,
-local and custom correction, cancellation, unsupported content, and incomplete output. Tests also
-cover native refusal where exposed, signed continuation, OpenRouter routing, image validation, and
-terminal restore after output URLs become unavailable. The local fixture servers run in the provider
-suite; no credentials are needed.
+Deterministic HTTP fixtures cover all eleven adapters: request fields, streaming, native tool
+replay, local and custom correction, cancellation, unsupported content, and incomplete output. Tests
+also cover native refusal where exposed, signed continuation, OpenRouter routing, image validation,
+and terminal restore after output URLs become unavailable. The provider suite runs local fixture
+servers; no credentials are needed.
 
-Live tests cover all ten adapters with real streaming, native tools, typed JSON, and validation
-correction. Four adapters have image generation tests. Configure the variables in `.env.example`;
+Live tests cover all eleven adapters with real streaming, native tools, typed JSON, and validation
+correction. Five adapters have image generation tests. Configure the variables in `.env.example`;
 configured providers run in ordinary test runs. See [live test setup](models-live.md) for billing,
 model selection, and the mode that requires the complete matrix. Fixture success alone does not
 establish that a live deployment, model version, or account accepted a request.

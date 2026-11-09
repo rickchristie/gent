@@ -24,8 +24,8 @@ func (m *Anthropic) PrepareRequest(ctx *gent.ExecutionContext, request *gent.Mod
 }
 
 // PrepareRequest resolves SharedLocalSearch and native definitions for this request.
-func (m *Gemini) PrepareRequest(ctx *gent.ExecutionContext, request *gent.ModelCallRequest,
-	chain gent.ToolChain,
+func (m *generateContentModel) PrepareRequest(ctx *gent.ExecutionContext,
+	request *gent.ModelCallRequest, chain gent.ToolChain,
 ) (*gent.ModelCallRequest, error) {
 	return gent.PrepareModelRequest(ctx, request, chain)
 }

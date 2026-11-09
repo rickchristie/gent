@@ -23,11 +23,11 @@ type geminiContinuation struct {
 	RequestContents json.RawMessage `json:"requestContents,omitempty"`
 }
 
-func geminiMessages(messages []*gent.ModelMessage, nativeMedia ...bool) (
+func geminiMessages(messages []*gent.ModelMessage, provider string, nativeMedia bool) (
 	[]any, []any, *geminiContinuation, error,
 ) {
 	move := func(part gent.ContentPart) bool {
-		if len(nativeMedia) > 0 && !nativeMedia[0] {
+		if !nativeMedia {
 			return true
 		}
 		if binary, ok := partValue(part).(gent.BinaryContent); ok {
@@ -45,7 +45,7 @@ func geminiMessages(messages []*gent.ModelMessage, nativeMedia ...bool) (
 	callIDs := make(map[string]bool)
 	for _, message := range messages {
 		if saved := message.Continuation; saved != nil {
-			if err := checkContinuation(saved, "gemini"); err != nil {
+			if err := checkContinuation(saved, provider); err != nil {
 				return nil, nil, nil, err
 			}
 			for _, raw := range saved.Items {

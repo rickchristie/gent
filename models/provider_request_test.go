@@ -49,6 +49,13 @@ func TestProvidersNativeOutputRequest(t *testing.T) {
 "systemInstruction":{"parts":[{"text":"Keep my words."}]},"generationConfig":{
 "maxOutputTokens":64,"thinkingConfig":{"includeThoughts":true},
 "responseMimeType":"application/json","responseJsonSchema":SCHEMA}}`}},
+		{"VertexAI", input{"vertexai"}, expected{
+			"/v1/projects/test-project/locations/global/publishers/google/models/" +
+				"fixture%2Fmodel:streamGenerateContent?alt=sse", "Authorization", "Bearer fixture-key",
+			`{"contents":[{"role":"user","parts":[{"text":"Return JSON."}]}],
+"systemInstruction":{"parts":[{"text":"Keep my words."}]},"generationConfig":{
+"maxOutputTokens":64,"thinkingConfig":{"includeThoughts":true},
+"responseFormat":[{"text":{"mimeType":"APPLICATION_JSON","schema":SCHEMA}}]}}`}},
 		{"DeepSeek", input{"deepseek"}, expected{"/v1/chat/completions", "Authorization",
 			"Bearer fixture-key", strings.ReplaceAll(chat, "FORMAT",
 				`"response_format":{"type":"json_object"}`)}},
@@ -127,41 +134,49 @@ func TestGeminiJSONModeRequest(t *testing.T) {
 	plain := map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true}}
 	jsonConfig := map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true},
 		"responseMimeType": "application/json"}
+	vertexJSON := map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true},
+		"responseFormat": []any{map[string]any{"text": map[string]any{"mimeType": "APPLICATION_JSON"}}}}
 	cases := []testCase{
 		{"default text", input{}, expected{plain, nil}},
 		{"explicit text", input{mimeType: "text/plain"}, expected{plain, nil}},
 		{"JSON mode", input{jsonMode: true}, expected{jsonConfig, nil}},
 		{"JSON MIME type", input{mimeType: "application/json"}, expected{jsonConfig, nil}},
 	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			actual := expected{}
-			client := &http.Client{Transport: responseTransport(func(request *http.Request) (
-				*http.Response, error,
-			) {
-				var body map[string]any
-				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-					return nil, err
+	for _, provider := range []string{"gemini", "vertexai"} {
+		for _, test := range cases {
+			t.Run(provider+"/"+test.name, func(t *testing.T) {
+				want := test.expected
+				if provider == "vertexai" && want.config["responseMimeType"] == "application/json" {
+					want.config = vertexJSON
 				}
-				actual.config = body["generationConfig"].(map[string]any)
-				return fixtureHTTP(providerResponse("gemini", 3), "application/json"), nil
-			})}
-			request := gent.NewModelCallRequest([]*gent.ModelMessage{
-				gent.TextParts(gent.ChatMessageTypeHuman, "Return the requested value."),
+				actual := expected{}
+				client := &http.Client{Transport: responseTransport(func(request *http.Request) (
+					*http.Response, error,
+				) {
+					var body map[string]any
+					if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+						return nil, err
+					}
+					actual.config = body["generationConfig"].(map[string]any)
+					return fixtureHTTP(providerResponse("gemini", 3), "application/json"), nil
+				})}
+				request := gent.NewModelCallRequest([]*gent.ModelMessage{
+					gent.TextParts(gent.ChatMessageTypeHuman, "Return the requested value."),
+				})
+				request.Options.JSONMode = test.input.jsonMode
+				request.Options.ResponseMIMEType = test.input.mimeType
+				stream, err := fixtureModel(provider, client).GenerateContentStream(
+					context.Background(), request)
+				if !assert.NoError(t, err) {
+					return
+				}
+				defer stream.Close()
+				for range stream.Chunks() {
+				}
+				_, actual.err = stream.Response()
+				assert.Equal(t, want, actual)
 			})
-			request.Options.JSONMode = test.input.jsonMode
-			request.Options.ResponseMIMEType = test.input.mimeType
-			stream, err := fixtureModel("gemini", client).GenerateContentStream(
-				context.Background(), request)
-			if !assert.NoError(t, err) {
-				return
-			}
-			defer stream.Close()
-			for range stream.Chunks() {
-			}
-			_, actual.err = stream.Response()
-			assert.Equal(t, test.expected, actual)
-		})
+		}
 	}
 }
 

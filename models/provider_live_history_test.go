@@ -16,7 +16,7 @@ func TestLiveProviderHistory(t *testing.T) {
 		t.Run(provider.name, func(t *testing.T) {
 			config := liveConfig(t, provider, false)
 			t.Parallel()
-			model := newLiveModel(provider, &config)
+			model := newLiveModel(t, provider, &config)
 			t.Run("AssistantHistory", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 				defer cancel()

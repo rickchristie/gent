@@ -12,13 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var testProviders = []string{"openai", "anthropic", "gemini", "xai", "deepseek",
+var testProviders = []string{"openai", "anthropic", "gemini", "vertexai", "xai", "deepseek",
 	"vllm", "ollama", "openrouter", "llamacpp", "sglang"}
 
 func streamFixture(t *testing.T, provider, turn string) (string, string) {
 	t.Helper()
 	protocol, extension, mime := provider, "sse", "text/event-stream"
 	switch provider {
+	case "vertexai":
+		protocol = "gemini"
 	case "openai", "xai":
 		protocol = "responses"
 	case "deepseek", "vllm", "openrouter", "llamacpp", "sglang":
@@ -72,7 +74,7 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 "signature":"sealed"},{"type":"tool_use","id":"call-7","name":"lookup","input":{"id":7}}]},
 {"role":"user","content":[{"type":"tool_result","tool_use_id":"call-7",
 "content":[{"type":"text","text":"record-seven"}]}]}]`, 0, "call-7"}
-		case "gemini":
+		case "gemini", "vertexai":
 			want = expected{"part:0", "part:0", "STOP", `[
 {"role":"user","parts":[{"text":"Read."}]},
 {"role":"model","parts":[{"text":"Read ","thought":true},
@@ -138,7 +140,7 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 				{Type: gent.MetaContentReasoning, MessageId: test.expected.reasoningID,
 					Content: []gent.ContentPart{gent.TextContent{Text: "the record."}}},
 			}
-			if test.input.provider == "gemini" {
+			if test.input.provider == "gemini" || test.input.provider == "vertexai" {
 				wantMeta[1].MessageId = "part:1"
 			}
 			assert.Equal(t, wantMeta, meta)
@@ -171,7 +173,7 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 					Content: []gent.ContentPart{gent.TextContent{Text: "</answer>"}}},
 			}
 			parts := []gent.ContentPart{gent.TextContent{Text: "<answer>Done.</answer>"}}
-			if test.input.provider == "gemini" {
+			if test.input.provider == "gemini" || test.input.provider == "vertexai" {
 				wantMeta[1].MessageId = "part:1"
 				parts = []gent.ContentPart{gent.TextContent{Text: "<answer>Done."},
 					gent.TextContent{Text: "</answer>"}}
@@ -193,7 +195,7 @@ func TestProvidersStreamingAndContinuation(t *testing.T) {
 			switch test.input.provider {
 			case "openai", "xai":
 				field = "input"
-			case "gemini":
+			case "gemini", "vertexai":
 				field = "contents"
 			}
 			assert.JSONEq(t, test.expected.nativeMessages, string(requests[1][field]))

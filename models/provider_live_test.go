@@ -26,7 +26,7 @@ func TestLiveProviders(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			model := newLiveModel(provider, &config)
+			model := newLiveModel(t, provider, &config)
 			t.Run("TextStream", func(t *testing.T) { checkLiveText(t, ctx, model) })
 			t.Run("NativeTools", func(t *testing.T) { checkLiveTools(t, ctx, model) })
 			checkLiveOutputs(t, ctx, model, provider.prefix != "DEEPSEEK")
@@ -286,7 +286,7 @@ func TestLiveImages(t *testing.T) {
 The image_generation tool output is the complete answer. Do not send any assistant text,
 including a caption, a link, a description, or a completion message.`)
 			defer logLiveImageFailure(t, execCtx)
-			agent := react.NewWithOutput(newLiveModel(provider, &config), out).
+			agent := react.NewWithOutput(newLiveModel(t, provider, &config), out).
 				WithCallOptions(gent.WithMaxTokens(2048))
 			values, result, err := executor.NewRunner(agent, executor.DefaultConfig()).Execute(execCtx)
 			if !assert.NoError(t, err) || !assert.Len(t, values, 1) {

@@ -37,6 +37,12 @@ func TestGeminiToolChoiceWithJSONOutput(t *testing.T) {
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{"value": map[string]any{"type": "integer"}},
 			"required":   []any{"value"}}}
+	vertexStructured := map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true},
+		"responseFormat": []any{map[string]any{"text": map[string]any{
+			"mimeType": "APPLICATION_JSON", "schema": map[string]any{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]any{"value": map[string]any{"type": "integer"}},
+				"required":   []any{"value"}}}}}}
 	forced := map[string]any{"native": false, "profile": "gemini",
 		"reason": "forced tool choice has no answer candidate"}
 	unsupported := map[string]any{"native": false, "profile": "gemini",
@@ -74,6 +80,9 @@ func TestGeminiToolChoiceWithJSONOutput(t *testing.T) {
 		{"no tools", input{schema: true, noTools: true}, expected{structured, nil, native, nil}},
 		{"Gemini 3", input{schema: true, model: "gemini-3.8-flash"},
 			expected{structured, nil, native, nil}},
+		{"Gemini 3 automatic schema", input{choice: "auto", schema: true, model: "gemini-3.8-flash"},
+			expected{structured, map[string]any{"functionCallingConfig": map[string]any{"mode": "AUTO"}},
+				native, nil}},
 		{"Gemini 4", input{schema: true, model: "gemini-4-argon"},
 			expected{structured, nil, native, nil}},
 		{"request selects Gemini 3", input{schema: true, selected: "models/gemini-3.8-flash"},
@@ -83,60 +92,77 @@ func TestGeminiToolChoiceWithJSONOutput(t *testing.T) {
 		{"unknown alias", input{schema: true, model: "application-model"},
 			expected{plain, nil, unsupported, nil}},
 	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			actual := expected{}
-			client := &http.Client{Transport: responseTransport(func(request *http.Request) (
-				*http.Response, error,
-			) {
-				var body map[string]any
-				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-					return nil, err
+	for _, provider := range []string{"gemini", "vertexai"} {
+		for _, test := range cases {
+			t.Run(provider+"/"+test.name, func(t *testing.T) {
+				want := test.expected
+				if provider == "vertexai" && !test.input.noTools &&
+					(test.input.choice == nil || test.input.choice == "auto") &&
+					want.config["responseMimeType"] == "application/json" {
+					want.choice = map[string]any{"functionCallingConfig": map[string]any{"mode": "VALIDATED"}}
 				}
-				actual.config, _ = body["generationConfig"].(map[string]any)
-				actual.choice, _ = body["toolConfig"].(map[string]any)
-				return fixtureHTTP(providerResponse("gemini", 0), "application/json"), nil
-			})}
-			request := gent.NewModelCallRequest([]*gent.ModelMessage{
-				gent.TextParts(gent.ChatMessageTypeHuman, "Read the record."),
+				if provider == "vertexai" && want.config["responseJsonSchema"] != nil {
+					want.config = vertexStructured
+				}
+				actual := expected{}
+				client := &http.Client{Transport: responseTransport(func(request *http.Request) (
+					*http.Response, error,
+				) {
+					var body map[string]any
+					if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+						return nil, err
+					}
+					actual.config, _ = body["generationConfig"].(map[string]any)
+					actual.choice, _ = body["toolConfig"].(map[string]any)
+					return fixtureHTTP(providerResponse("gemini", 0), "application/json"), nil
+				})}
+				request := gent.NewModelCallRequest([]*gent.ModelMessage{
+					gent.TextParts(gent.ChatMessageTypeHuman, "Read the record."),
+				})
+				request.Options.Tools = []*gent.ToolDefinition{{Type: "function",
+					Function: &gent.FunctionDefinition{Name: "lookup", Parameters: responseInputSchema()}}}
+				if test.input.noTools {
+					request.Options.Tools = nil
+				}
+				request.Options.Model = test.input.selected
+				request.Options.ToolChoice = test.input.choice
+				request.Options.JSONMode = test.input.jsonMode
+				request.Options.ResponseMIMEType = test.input.mime
+				if test.input.schema {
+					request.Options.ResponseSchema = providerOutputSchema()
+				}
+				before, err := json.Marshal(request.Options)
+				if !assert.NoError(t, err) {
+					return
+				}
+				model := test.input.model
+				if model == "" {
+					model = "gemini-2.5-flash"
+				}
+				config := &Config{Model: model, HTTPClient: client}
+				var adapter gent.Model = NewGemini(config)
+				if provider == "vertexai" {
+					adapter = fixtureVertex(config)
+				}
+				stream, err := adapter.GenerateContentStream(
+					context.Background(), request)
+				if !assert.NoError(t, err) {
+					return
+				}
+				defer stream.Close()
+				for range stream.Chunks() {
+				}
+				response, err := stream.Response()
+				actual.err = err
+				if !assert.NoError(t, err) {
+					return
+				}
+				actual.decision = response.Info.RawGenerationInfo["output_schema"].(map[string]any)
+				assert.Equal(t, want, actual)
+				after, err := json.Marshal(request.Options)
+				assert.NoError(t, err)
+				assert.Equal(t, string(before), string(after), "the next answer still needs its schema")
 			})
-			request.Options.Tools = []*gent.ToolDefinition{{Type: "function",
-				Function: &gent.FunctionDefinition{Name: "lookup", Parameters: responseInputSchema()}}}
-			if test.input.noTools {
-				request.Options.Tools = nil
-			}
-			request.Options.Model = test.input.selected
-			request.Options.ToolChoice = test.input.choice
-			request.Options.JSONMode, request.Options.ResponseMIMEType = test.input.jsonMode, test.input.mime
-			if test.input.schema {
-				request.Options.ResponseSchema = providerOutputSchema()
-			}
-			before, err := json.Marshal(request.Options)
-			if !assert.NoError(t, err) {
-				return
-			}
-			model := test.input.model
-			if model == "" {
-				model = "gemini-2.5-flash"
-			}
-			stream, err := NewGemini(&Config{Model: model, HTTPClient: client}).GenerateContentStream(
-				context.Background(), request)
-			if !assert.NoError(t, err) {
-				return
-			}
-			defer stream.Close()
-			for range stream.Chunks() {
-			}
-			response, err := stream.Response()
-			actual.err = err
-			if !assert.NoError(t, err) {
-				return
-			}
-			actual.decision = response.Info.RawGenerationInfo["output_schema"].(map[string]any)
-			assert.Equal(t, test.expected, actual)
-			after, err := json.Marshal(request.Options)
-			assert.NoError(t, err)
-			assert.Equal(t, string(before), string(after), "the next answer still needs its schema")
-		})
+		}
 	}
 }

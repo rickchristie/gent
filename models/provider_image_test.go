@@ -40,7 +40,7 @@ func imageResponse(provider string, images []gent.BinaryContent, reference, extr
 		case "openai", "xai":
 			parts = append(parts, map[string]any{"type": "message", "role": "assistant",
 				"content": []any{map[string]any{"type": "output_text", "text": "Here are the images."}}})
-		case "gemini":
+		case "gemini", "vertexai":
 			parts = append(parts, map[string]any{"text": "Here are the images."})
 		}
 	}
@@ -54,7 +54,7 @@ func imageResponse(provider string, images []gent.BinaryContent, reference, extr
 		case "openai", "xai":
 			parts = append(parts, map[string]any{"type": "image_generation_call", "status": "completed",
 				"output_format": "jpeg", "result": encoded})
-		case "gemini":
+		case "gemini", "vertexai":
 			part := map[string]any{"inlineData": map[string]any{"mimeType": part.MIMEType,
 				"data": encoded}}
 			if reference {
@@ -71,7 +71,7 @@ func imageResponse(provider string, images []gent.BinaryContent, reference, extr
 	case "openai", "xai":
 		value = map[string]any{"type": "response.completed", "response": map[string]any{
 			"status": "completed", "output": parts}}
-	case "gemini":
+	case "gemini", "vertexai":
 		value = map[string]any{"candidates": []any{map[string]any{"finishReason": "STOP",
 			"content": map[string]any{"role": "model", "parts": parts}}}}
 	case "openrouter":
@@ -113,6 +113,8 @@ func TestProvidersImageCorrectionAndOfflineRestore(t *testing.T) {
 		{"xAI", input{"xai", false}, expected{2, 0, 1, 1}},
 		{"Gemini inline", input{"gemini", false}, expected{2, 0, 1, 1}},
 		{"Gemini reference", input{"gemini", true}, expected{2, 4, 1, 1}},
+		{"Vertex inline", input{"vertexai", false}, expected{2, 0, 1, 1}},
+		{"Vertex reference", input{"vertexai", true}, expected{2, 4, 1, 1}},
 		{"OpenRouter inline", input{"openrouter", false}, expected{2, 0, 1, 1}},
 		{"OpenRouter reference", input{"openrouter", true}, expected{2, 4, 1, 1}},
 	}
@@ -231,6 +233,12 @@ func assertImageRequest(t *testing.T, provider string, body map[string]any) {
 		}
 		assert.Equal(t, []any{image}, body["tools"])
 		assert.Equal(t, choice, body["tool_choice"])
+	case "vertexai":
+		config := body["generationConfig"].(map[string]any)
+		assert.Equal(t, []any{"IMAGE"}, config["responseModalities"])
+		assert.Equal(t, map[string]any{"imageOutputOptions": map[string]any{"mimeType": "image/jpeg"}},
+			config["imageConfig"])
+		assert.Nil(t, config["responseFormat"])
 	case "gemini":
 		config := body["generationConfig"].(map[string]any)
 		assert.Equal(t, []any{"IMAGE"}, config["responseModalities"])

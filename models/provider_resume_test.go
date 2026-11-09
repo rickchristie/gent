@@ -194,7 +194,7 @@ func providerResumeResponse(t *testing.T, provider, text string, tool bool) stri
 		body["usage"] = map[string]any{"input_tokens": 12, "output_tokens": 8, "total_tokens": 20}
 	case "anthropic":
 		body["usage"] = map[string]any{"input_tokens": 12, "output_tokens": 8}
-	case "gemini":
+	case "gemini", "vertexai":
 		body["usageMetadata"] = map[string]any{"promptTokenCount": 12, "candidatesTokenCount": 8,
 			"totalTokenCount": 20}
 	case "ollama":
@@ -302,7 +302,7 @@ func TestLiveProviderUnfinishedResume(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			build := func() gent.Model { return newLiveModel(provider, &config) }
+			build := func() gent.Model { return newLiveModel(t, provider, &config) }
 			checkProviderResume(t, ctx, build, "record-"+rand.Text(), false,
 				providerResumeBoundary("tool result"))
 		})

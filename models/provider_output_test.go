@@ -41,6 +41,8 @@ func fixtureModel(provider string, client *http.Client) gent.Model {
 		return NewAnthropic(config)
 	case "gemini":
 		return NewGemini(config)
+	case "vertexai":
+		return fixtureVertex(config)
 	case "deepseek":
 		return NewDeepSeek(config)
 	case "vllm":
@@ -87,13 +89,12 @@ func TestProvidersTypedOutputCorrection(t *testing.T) {
 		expected expected
 	}
 	var cases []testCase
-	for _, provider := range []string{"openai", "anthropic", "gemini", "xai", "deepseek",
-		"vllm", "ollama", "openrouter", "llamacpp", "sglang"} {
+	for _, provider := range testProviders {
 		cases = append(cases, testCase{provider, input{provider}, expected{
 			value: providerOutputValue{3}, calls: []providerLookupInput{{7}},
 			validations: []providerOutputValue{{2}, {3}}, requests: 4, local: 1, custom: 1,
 			rejected: 2, reason: gent.TerminationSuccess,
-			native: provider != "deepseek" && provider != "gemini",
+			native: provider != "deepseek" && provider != "gemini" && provider != "vertexai",
 		}})
 	}
 	for _, test := range cases {
@@ -207,7 +208,7 @@ func providerResponse(provider string, turn int) string {
 		}
 		return `{"id":"msg-8","stop_reason":"end_turn","content":[{"type":"text","text":` +
 			string(text) + `}]}`
-	case "gemini":
+	case "gemini", "vertexai":
 		if turn == 0 {
 			return `{"candidates":[{"content":{"role":"model","parts":[
 {"text":"Read the record.","thought":true},

@@ -24,7 +24,7 @@ GENT_LIVE_REQUIRE_ALL=1 go test ./models \
   -run '^Test(Live|NativeLive$)' -count=1 -timeout 300s
 ```
 
-This mode fails when any of the ten providers or four image models is not configured. It cannot
+This mode fails when any of the eleven providers or five image models is not configured. It cannot
 report a complete pass by skipping providers. To check only the text, tools, and JSON matrix,
 select `'^TestLiveProviders$'` instead. To run one provider, select
 `'^TestLiveProviders$/^xAI$'`, for example.
@@ -66,6 +66,7 @@ empty to test the official service. `GENT_TEST_<PROVIDER>_MODEL` selects the tex
 | `OPENAI` | `gpt-5.4-mini` | `GENT_TEST_OPENAI_IMAGE_MODEL` |
 | `ANTHROPIC` | `claude-sonnet-4-6` | Not supported |
 | `GEMINI` | `gemini-2.5-flash` | `GENT_TEST_GEMINI_IMAGE_MODEL` |
+| `VERTEXAI` | `gemini-3.8-flash` | `GENT_TEST_VERTEXAI_IMAGE_MODEL` |
 | `XAI` | `grok-4.3` | `GENT_TEST_XAI_IMAGE_MODEL` |
 | `DEEPSEEK` | `deepseek-flash` | Not supported |
 | `OPENROUTER` | Required; no default | `GENT_TEST_OPENROUTER_IMAGE_MODEL` |
@@ -78,6 +79,31 @@ Image variables select the model passed to the adapter. OpenAI and xAI need a Re
 can invoke the native `image_generation` tool, not a model for a separate image endpoint. Gemini and
 OpenRouter need models with native image output. Images run only when `_IMAGE_MODEL` is set, unless
 require-all mode is active, in which case each image model is required. The test requests JPEG.
+
+## Vertex AI
+
+Vertex uses ADC instead of an API key. Set `GOOGLE_CLOUD_PROJECT` and, if required,
+`GOOGLE_CLOUD_LOCATION` (default `global`). For local service account tests, set
+`GOOGLE_APPLICATION_CREDENTIALS` to the absolute path of the ignored JSON file. The service account
+needs `roles/aiplatform.user`, and the project needs billing and the Vertex AI API enabled.
+No JSON file is needed when ADC uses workload identity or an attached service account.
+
+`GENT_TEST_VERTEXAI_MODEL` overrides the text model. `GENT_TEST_VERTEXAI_IMAGE_MODEL` enables image
+checks; it must name a Gemini model with image output. `GENT_TEST_VERTEXAI_URL` is an optional
+trusted service root, including its API version. It receives OAuth tokens. The tests do not use
+Gemini AI Studio API keys for Vertex. Partial Vertex settings fail. Missing ADC fails when the
+adapter loads credentials.
+
+To run only Vertex after exporting these settings:
+
+```sh
+go test ./models -run '^Test(Live|NativeLive$)/^VertexAI$' -count=1 -timeout 300s
+```
+
+Use this selection to avoid spending credits on other configured providers. The tests use request
+and iteration limits; they do not implement a monthly billing cap. Use the project's Google Cloud
+spending controls separately. Token tests use generated local keys and mock OAuth exchanges to
+verify signatures, refresh, cancellation, and concurrent callers without spending credits.
 
 ## Local runtime servers
 
@@ -123,7 +149,8 @@ The other live tests check paths that a single successful answer does not cover:
   answer twice.
 - `TestLiveProviderConcurrentCalls` uses one adapter for three concurrent conversations with
   distinct exact answers.
-- `TestLiveProviderImageInput` reads owned PNG bytes with OpenAI, Anthropic, Gemini, and xAI.
+- `TestLiveProviderImageInput` reads owned PNG bytes with OpenAI, Anthropic, Gemini, Vertex AI,
+  and xAI.
 - `TestLiveProviderToolJSON` uses default and explicit `auto` tool choice with `JsonOutput`. A
   random record is available only through the tool. The test rejects the first typed answer,
   requires the corrected value, and checks that the completed tool runs exactly once.
@@ -143,7 +170,7 @@ output contract enforces the final format. Native tool choice requires the two t
 the answer where supported; Ollama has no tool-choice control. The test checks the exact two calls
 and result; it does not increase the iteration limit to accept repeated work or premature answers.
 
-Fixture tests cover the same compaction path for all ten adapters. They also check the complete
+Fixture tests cover the same compaction path for all eleven adapters. They also check the complete
 native encoding of assistant text and data, role-specific media steering, unused media on native
 continuation, empty image text, and OpenAI image replay without server storage. Existing fixtures
 cover truncated streams, HTTP errors, cancellation, cleanup, refusal, schema limits, and routing.
@@ -175,6 +202,37 @@ or timeout fails the test. There is no mock fallback or retry that conceals a se
 live results separate from fixture results; unconfigured services remain unverified.
 
 ## Recorded live checks
+
+### 2026-11-09 Vertex AI
+
+All 17 Vertex live cases passed with the race detector, using service account ADC, the global
+endpoint, `gemini-3.8-flash` for text, and `gemini-3.1-flash-lite-image` for images. The matrix
+covered streaming, native tools, JSON and schema correction, concurrent calls, image input and JPEG
+output, assistant history, repeated compaction, cancellation, program tools, search, and unfinished
+resume. The combined race run passed 16 cases. Its assistant-history request reached the 60-second
+deadline before response headers arrived. The same case passed on a separate retry with unchanged
+settings and assertions. The cause of the delay is not established.
+
+Live testing found two required Vertex mappings: JPEG uses
+`imageConfig.imageOutputOptions.mimeType`, and automatic tools with a schema need
+`responseFormat[].text` plus `VALIDATED` mode. Captured requests contained the correct native tool
+IDs, signatures, and results. Legacy schema fields repeated the completed call; changing the output
+format and tool mode fixed the full correction and resume flows. No iteration limit or output
+assertion was relaxed.
+
+The first text attempt used `gemini-2.5-flash` and returned HTTP 404. Google's Vertex model
+lifecycle lists that text model as retired on October 20, 2026. The default Vertex test model is
+therefore `gemini-3.8-flash`. Other provider defaults and prior live records are unchanged.
+
+```sh
+go test -race ./models -run '^Test(Live|NativeLive$)/^VertexAI$' -count=1 -timeout 300s
+go test -race ./models \
+  -run '^TestLiveProviderHistory$/^VertexAI$/^AssistantHistory$' -count=1 -timeout 300s
+```
+
+The full native, CGO-disabled, and race suites passed over `./...` with a 300-second timeout. Only
+Vertex credentials were exported for the live checks. Other providers were tested with fixtures in
+the full repository suites; their paid APIs were not called for this adapter change.
 
 ### 2026-11-06 review follow-up
 

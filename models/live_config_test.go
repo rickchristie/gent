@@ -20,6 +20,7 @@ func liveProviders() []liveProvider {
 		{"OpenAI", "OPENAI", gent.ModelOpenAIGPT54Mini, false, true},
 		{"Anthropic", "ANTHROPIC", gent.ModelAnthropicClaude46Sonnet, false, false},
 		{"Gemini", "GEMINI", gent.ModelGoogleGemini25Flash, false, true},
+		{"VertexAI", "VERTEXAI", "gemini-3.8-flash", false, true},
 		{"xAI", "XAI", gent.ModelXAIGrok43, false, true},
 		{"DeepSeek", "DEEPSEEK", "deepseek-flash", false, false},
 		{"OpenRouter", "OPENROUTER", "", false, true},
@@ -68,9 +69,23 @@ func readLiveConfig(provider liveProvider, getenv func(string) string, image boo
 	return config, true, nil
 }
 
-func liveConfig(t *testing.T, provider liveProvider, image bool) Config {
+type liveSettings struct {
+	Config
+	vertex *VertexAIConfig
+}
+
+func liveConfig(t *testing.T, provider liveProvider, image bool) liveSettings {
 	t.Helper()
-	config, enabled, err := readLiveConfig(provider, os.Getenv, image)
+	var config liveSettings
+	var enabled bool
+	var err error
+	if provider.prefix == "VERTEXAI" {
+		var vertex VertexAIConfig
+		vertex, enabled, err = readLiveVertexConfig(provider, os.Getenv, image)
+		config = liveSettings{Config: Config{Model: vertex.Model}, vertex: &vertex}
+	} else {
+		config.Config, enabled, err = readLiveConfig(provider, os.Getenv, image)
+	}
 	if !assert.NoError(t, err) {
 		t.FailNow()
 	}
@@ -80,7 +95,9 @@ func liveConfig(t *testing.T, provider liveProvider, image bool) Config {
 	return config
 }
 
-func newLiveModel(provider liveProvider, config *Config) gent.Model {
+func newLiveModel(t *testing.T, provider liveProvider, settings *liveSettings) gent.Model {
+	t.Helper()
+	config := &settings.Config
 	switch provider.prefix {
 	case "OPENAI", "XAI":
 		name, endpoint := "openai", "https://api.openai.com/v1"
@@ -94,6 +111,14 @@ func newLiveModel(provider liveProvider, config *Config) gent.Model {
 		return NewAnthropic(config)
 	case "GEMINI":
 		return NewGemini(config)
+	case "VERTEXAI":
+		vertex := *settings.vertex
+		vertex.HTTPClient = config.HTTPClient
+		model, err := NewVertexAI(&vertex)
+		if !assert.NoError(t, err) {
+			t.FailNow()
+		}
+		return model
 	case "DEEPSEEK":
 		return NewDeepSeek(config)
 	case "OPENROUTER":

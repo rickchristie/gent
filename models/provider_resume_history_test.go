@@ -30,7 +30,7 @@ func assertProviderResumeNativeHistory(t *testing.T, provider string, body map[s
 {"type":"tool_use","id":"call-7","name":"lookup","input":{"id":7}}]},
 {"role":"user","content":[{"type":"tool_result","tool_use_id":"call-7",
 "content":[{"type":"text","text":"record-seven"}]}]}]`
-	case "gemini":
+	case "gemini", "vertexai":
 		field, start = "contents", 1
 		want = `[{"role":"model","parts":[{"text":"Read the record.","thought":true},
 {"functionCall":{"id":"call-7","name":"lookup","args":{"id":7}},"thoughtSignature":"sealed"}]},

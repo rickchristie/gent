@@ -129,7 +129,7 @@ func TestLiveProviderCancellation(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			err := runStreamingCancellation(ctx, io.Discard, TestOutputConfig(),
-				newLiveModel(provider, &config))
+				newLiveModel(t, provider, &config))
 			assert.NoError(t, err)
 			assert.Positive(t, tr.opened.Load())
 			assert.Equal(t, tr.opened.Load(), tr.closed.Load(), "all HTTP bodies must be closed")

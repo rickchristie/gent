@@ -34,7 +34,7 @@ func incompleteFixture(t *testing.T, provider string, tools, unnamed bool) strin
 		if unnamed {
 			delete(value["content"].([]any)[1].(map[string]any), "name")
 		}
-	case "gemini":
+	case "gemini", "vertexai":
 		candidate := value["candidates"].([]any)[0].(map[string]any)
 		candidate["finishReason"] = "MAX_TOKENS"
 		if unnamed {
@@ -165,7 +165,7 @@ func TestProvidersNativeRefusal(t *testing.T) {
 			refusal = &gent.ModelRefusal{Content: blocked}
 		case "anthropic":
 			payload = `{"stop_reason":"refusal","content":[{"type":"text","text":"blocked"}]}`
-		case "gemini":
+		case "gemini", "vertexai":
 			payload = `{"promptFeedback":{"blockReason":"SAFETY"}}`
 			refusal = &gent.ModelRefusal{Code: "SAFETY"}
 		case "ollama":
