@@ -7,8 +7,11 @@ Bleve, and hybrid fused search.
 
 ### 1. Install the CLI
 
+Run these commands from the Gent checkout or a Go module that uses Gent. Go selects the CLI and
+the library from the same Gent version, so both use the same model catalog.
+
 ```bash
-go install github.com/rickchristie/gent/cmd/gent@v0.1.0
+go install github.com/rickchristie/gent/cmd/gent
 printf '\nexport PATH="%s:$PATH"\n' "$(go env GOPATH)/bin" >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -41,9 +44,8 @@ gent model list
 gent model download multilingual-e5-small
 ```
 
-`gent model list` shows 10 downloadable physical model files and 11 runtime configurations. One
-downloaded model may have multiple configurations, for example full-size and Matryoshka-truncated
-variants.
+`gent model list` shows the downloadable models and their runtime configurations. A model can
+support several configurations, such as full-size and Matryoshka-truncated vectors.
 
 ## Usage
 
@@ -110,10 +112,17 @@ CGO_ENABLED=0 go test ./... -count=1 -timeout 300s
 go test -race ./... -count=1 -timeout 300s
 ```
 
-Native integration tests use real ONNX models. Test setup downloads all 10 registered physical
-models to `~/.gent/models/` on first run. Install ONNX Runtime with `go run ./cmd/gent setup onnx`
-before testing; otherwise these tests skip. The CGO-disabled suite covers the portable code and
-the unavailable-embedder behavior. It cannot verify native inference.
+Native integration tests use the models installed in `~/.gent/models/`. Install ONNX Runtime with
+`go run ./cmd/gent setup onnx`, then download each model you want to test. These commands verify
+the Bekko configuration with real embeddings.
+
+```bash
+go run ./cmd/gent model download bekko-embedding-v1-a8m
+go test ./search -run '^TestOnnxEmbedder_AllModels$/^bekko-embedding-v1-a8m$' -count=1 -timeout 300s
+```
+
+A native test skips a model if its files or ONNX Runtime are missing. The CGO-disabled suite covers
+the portable code and the result for an unavailable embedder.
 
 ### Quantized inference on CPUs without VNNI
 

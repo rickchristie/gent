@@ -155,6 +155,15 @@ func init() {
 			OutputName:      "last_hidden_state",
 			ModelOverheadMB: 66, BestFor: "Absolute smallest", // measured
 		},
+		// --- bekko-embedding-v1-a8m ---
+		{
+			Model: model("bekko-embedding-v1-a8m"), ConfigName: "bekko-embedding-v1-a8m",
+			Description: "Compact multilingual retrieval with 8K context and prefix-free encoding.",
+			Dimensions:  384, Pooling: PoolingMean, OptimalChunkTokens: 384,
+			InputNames:      []string{"input_ids", "attention_mask"},
+			OutputName:      "last_hidden_state",
+			ModelOverheadMB: 435, BestFor: "Compact multilingual retrieval", // estimated
+		},
 	}
 }
 

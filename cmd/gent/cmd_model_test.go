@@ -177,7 +177,8 @@ func expectedModelListOutput() string {
 			fmt.Sprintf("%d MB", mem10), fmt.Sprintf("%d MB", mem100), c.BestFor)
 	}
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "Install CLI: go install github.com/rickchristie/gent/cmd/gent@v0.1.0")
+	fmt.Fprintln(&b, "Install from your Gent project with",
+		"go install github.com/rickchristie/gent/cmd/gent")
 	fmt.Fprintln(&b, "Download: gent model download <model-name>")
 	return b.String()
 }

@@ -44,7 +44,9 @@ func printModelList(w io.Writer) {
 			fmt.Sprintf("%d MB", mem10), fmt.Sprintf("%d MB", mem100), c.BestFor)
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Install CLI: go install github.com/rickchristie/gent/cmd/gent@v0.1.0")
+	// The project's selected Gent version supplies the matching CLI model catalog.
+	fmt.Fprintln(w, "Install from your Gent project with",
+		"go install github.com/rickchristie/gent/cmd/gent")
 	fmt.Fprintln(w, "Download: gent model download <model-name>")
 }
 

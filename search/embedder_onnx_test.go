@@ -52,15 +52,16 @@ func TestOnnxEmbedder_AllModels(t *testing.T) {
 			})
 
 			t.Run("query_vs_document_prefixes", func(t *testing.T) {
-				if cfg.QueryPrefix == "" && cfg.PassagePrefix == "" {
-					t.Skip("model has no prefixes")
-				}
 				ctx := context.Background()
 				qVec, err := embedder.EmbedQuery(ctx, "check outstanding payments")
 				require.NoError(t, err)
 				dVec, err := embedder.EmbedText(ctx, "check outstanding payments")
 				require.NoError(t, err)
 
+				if cfg.QueryPrefix == cfg.PassagePrefix {
+					assert.Equal(t, qVec, dVec)
+					return
+				}
 				sim := dotProduct(qVec, dVec)
 				assert.Greater(t, sim, 0.3,
 					"same text with different prefix should be positively similar (%.3f)", sim)
